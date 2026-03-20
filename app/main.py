@@ -1,0 +1,200 @@
+"""
+Точка входа FastAPI приложения RestoMind.
+Lifespan управляет жизненным циклом подключений к БД и Redis.
+"""
+
+import asyncio
+import logging
+import logging.handlers
+from contextlib import asynccontextmanager
+from collections.abc import AsyncGenerator
+from pathlib import Path
+
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
+from sqlalchemy import text
+from starlette.middleware.sessions import SessionMiddleware
+
+from app.api.admin import auth_router as admin_auth_router
+from app.api.admin import router as admin_router
+from app.api.admin import ws_router as admin_ws_router
+from app.api.webhooks import router as webhooks_router
+from app.core.config import settings
+from app.db.models import Base
+from app.db.session import async_engine, async_session_factory, redis_client
+from app.services.menu_bootstrap import ensure_default_menu_if_empty
+
+TEMPLATES_DIR = Path(__file__).parent / "templates"
+templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+
+LOG_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
+LOG_DIR = Path("logs")
+
+
+def _setup_logging() -> None:
+    """Настройка логирования: stdout + ротация файлов + Sentry (опционально)."""
+    level = logging.DEBUG if settings.app_debug else logging.INFO
+    root = logging.getLogger()
+    root.setLevel(level)
+
+    console = logging.StreamHandler()
+    console.setFormatter(logging.Formatter(LOG_FORMAT))
+    root.addHandler(console)
+
+    LOG_DIR.mkdir(exist_ok=True)
+    file_handler = logging.handlers.RotatingFileHandler(
+        LOG_DIR / "restomind.log",
+        maxBytes=10 * 1024 * 1024,  # 10 MB
+        backupCount=5,
+        encoding="utf-8",
+    )
+    file_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    root.addHandler(file_handler)
+
+    error_handler = logging.handlers.RotatingFileHandler(
+        LOG_DIR / "errors.log",
+        maxBytes=5 * 1024 * 1024,
+        backupCount=3,
+        encoding="utf-8",
+    )
+    error_handler.setLevel(logging.ERROR)
+    error_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    root.addHandler(error_handler)
+
+    if settings.sentry_dsn:
+        try:
+            import sentry_sdk
+            sentry_sdk.init(
+                dsn=settings.sentry_dsn,
+                traces_sample_rate=0.1,
+                environment="production" if not settings.app_debug else "development",
+            )
+            logging.getLogger(__name__).info("Sentry подключён")
+        except ImportError:
+            logging.getLogger(__name__).warning("sentry-sdk не установлен — Sentry отключён")
+
+
+_setup_logging()
+logger = logging.getLogger(__name__)
+
+
+STOP_LIST_SYNC_INTERVAL = 900  # 15 минут
+
+
+async def _stop_list_sync_loop() -> None:
+    """Фоновая задача: синхронизирует стоп-листы из iiko каждые 15 минут."""
+    from app.services.menu_sync import sync_stop_lists
+
+    if not settings.iiko_api_login or not settings.iiko_organization_id:
+        logger.info("iiko не настроен — синхронизация стоп-листов отключена")
+        return
+
+    while True:
+        try:
+            await asyncio.sleep(STOP_LIST_SYNC_INTERVAL)
+            async with async_session_factory() as db:
+                stats = await sync_stop_lists(
+                    db, settings.iiko_api_login, settings.iiko_organization_id,
+                )
+                await db.commit()
+            logger.info("Стоп-листы синхронизированы: %s", stats)
+        except asyncio.CancelledError:
+            break
+        except Exception as exc:
+            logger.error("Ошибка синхронизации стоп-листов: %s", exc, exc_info=True)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """
+    Жизненный цикл приложения:
+    - При старте: создаём таблицы (если SQLite), проверяем подключения, запускаем фоновые задачи.
+    - При остановке: корректно закрываем все соединения.
+    """
+    logger.info("Запуск %s...", settings.app_name)
+    logger.info("Режим БД: %s", settings.db_mode)
+
+    try:
+        async with async_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("Таблицы БД готовы (%s)", settings.db_mode)
+    except Exception as exc:
+        logger.warning("Не удалось создать таблицы: %s", exc)
+
+    # Колонка operator_note у users (create_all не добавляет поля в существующие таблицы)
+    try:
+        async with async_engine.begin() as conn:
+            if settings.db_mode == "sqlite":
+                await conn.execute(text("ALTER TABLE users ADD COLUMN operator_note TEXT DEFAULT ''"))
+            else:
+                await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS operator_note TEXT DEFAULT ''"))
+    except Exception:
+        pass  # колонка уже есть или другой диалект
+
+    # Пустое меню → встроенный каталог (один раз; дальше правки через админку / iiko)
+    try:
+        async with async_session_factory() as db:
+            added = await ensure_default_menu_if_empty(db)
+            await db.commit()
+            if added:
+                logger.info("Меню: автоматически добавлено %s позиций (встроенный каталог)", added)
+    except Exception as exc:
+        logger.warning("Автозагрузка меню не выполнена: %s", exc)
+
+    try:
+        await redis_client.ping()
+        logger.info("Redis подключён")
+    except Exception:
+        logger.info("Redis не используется — in-memory режим")
+
+    stop_list_task = asyncio.create_task(_stop_list_sync_loop())
+
+    yield
+
+    stop_list_task.cancel()
+    try:
+        await stop_list_task
+    except asyncio.CancelledError:
+        pass
+
+    await redis_client.aclose()
+    await async_engine.dispose()
+    logger.info("%s остановлен.", settings.app_name)
+
+
+app = FastAPI(
+    title=settings.app_name,
+    description="AI-оператор для ресторана: заказы, бронирование, FAQ через WhatsApp",
+    version="0.1.0",
+    lifespan=lifespan,
+)
+
+# Сессия для формы входа в админку (cookie)
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=settings.session_secret_key,
+    session_cookie="restomind_admin",
+    max_age=14 * 24 * 3600,
+    same_site="lax",
+    https_only=not settings.app_debug,
+)
+
+# --- Подключение роутеров ---
+app.include_router(webhooks_router, prefix="/api")
+app.include_router(admin_auth_router, prefix="/api")
+app.include_router(admin_router, prefix="/api")
+app.include_router(admin_ws_router, prefix="/api")
+
+
+@app.get("/health", tags=["System"])
+async def health_check() -> dict:
+    """Проверка работоспособности сервиса."""
+    return {"status": "ok", "service": settings.app_name}
+
+
+@app.get("/", response_class=HTMLResponse, tags=["Admin Panel"])
+@app.get("/admin", response_class=HTMLResponse, tags=["Admin Panel"])
+async def admin_page(request: Request) -> HTMLResponse:
+    """Главная страница — админ-панель."""
+    return templates.TemplateResponse("admin.html", {"request": request})

@@ -1,0 +1,80 @@
+services:
+  # ─── Traefik (Reverse Proxy + Auto-SSL) ──────────────
+  traefik:
+    image: traefik:v3.1
+    command:
+      - "--api.dashboard=false"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedByDefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      # HTTP → HTTPS редирект
+      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
+      # Let's Encrypt
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "letsencrypt:/letsencrypt"
+    restart: unless-stopped
+
+  # ─── FastAPI Application ─────────────────────────────
+  app:
+    build: .
+    env_file: .env
+    environment:
+      APP_DEBUG: "false"
+      DB_MODE: postgres
+      POSTGRES_HOST: db
+      REDIS_ENABLED: "true"
+      REDIS_HOST: redis
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      # HTTPS роутинг
+      - "traefik.http.routers.restomind.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.restomind.entrypoints=websecure"
+      - "traefik.http.routers.restomind.tls.certresolver=letsencrypt"
+      # Порт контейнера
+      - "traefik.http.services.restomind.loadbalancer.server.port=8000"
+    restart: unless-stopped
+
+  # ─── PostgreSQL ──────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-restomind}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-restomind_db}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-restomind} -d ${POSTGRES_DB:-restomind_db}"]
+      interval: 10s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # ─── Redis ───────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  letsencrypt:

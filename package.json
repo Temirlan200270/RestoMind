@@ -1,0 +1,13 @@
+{
+  "name": "restomind",
+  "private": true,
+  "description": "Корневой package.json для Stagewise CLI (прокси + тулбар к dev-серверу).",
+  "scripts": {
+    "stagewise": "stagewise",
+    "stagewise:bridge": "stagewise -b",
+    "dev:stagewise": "stagewise -- python -m uvicorn app.main:app --reload"
+  },
+  "devDependencies": {
+    "stagewise": "0.11.1"
+  }
+}

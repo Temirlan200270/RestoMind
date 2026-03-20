@@ -1,0 +1,2651 @@
+<!DOCTYPE html>
+<html lang="ru" x-data="adminApp()" x-init="init()">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RestoMind — Панель управления</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'] },
+                    colors: {
+                        brand: {
+                            50: '#f0f7ff', 100: '#e0effe', 200: '#bae0fd',
+                            400: '#5bb8f9', 500: '#3b9ef5', 600: '#2563eb',
+                            700: '#1d4ed8', 800: '#1e40af', 900: '#1a2e5e',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        [x-cloak] { display: none !important; }
+        .fade-in { animation: fadeIn 0.3s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes slideIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+        @keyframes pulseAlert { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+        .glass { background: rgba(255,255,255,0.7); backdrop-filter: blur(12px); }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        .change-up { color: #10b981; }
+        .change-down { color: #ef4444; }
+        .kanban-card { animation: slideIn 0.3s ease-out; transition: all 0.3s ease; }
+        .kanban-card:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(0,0,0,0.1); }
+        .alert-banner { animation: pulseAlert 2s infinite; }
+        .ws-dot { transition: background-color 0.3s; }
+        .msg-new { animation: slideIn 0.25s ease-out; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen font-sans text-gray-800">
+
+<!-- ========== ЭКРАН ВХОДА ========== -->
+<div x-show="!authenticated" x-cloak
+    class="fixed inset-0 z-[100] flex items-center justify-center bg-gradient-to-br from-brand-900 via-brand-800 to-slate-900 p-4">
+    <div class="w-full max-w-md rounded-3xl bg-white shadow-2xl border border-white/10 overflow-hidden fade-in">
+        <div class="bg-gradient-to-r from-brand-600 to-brand-700 px-8 py-10 text-center text-white">
+            <div class="w-16 h-16 mx-auto rounded-2xl bg-white/20 flex items-center justify-center text-3xl font-bold mb-4">R</div>
+            <h1 class="text-2xl font-bold">RestoMind</h1>
+            <p class="text-brand-100 text-sm mt-1">Панель управления рестораном</p>
+        </div>
+        <form class="px-8 py-8 space-y-5" @submit.prevent="submitLogin()">
+            <div x-show="loginError" x-cloak class="text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-3" x-text="loginError"></div>
+            <div>
+                <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Логин</label>
+                <input type="text" x-model="loginUsername" autocomplete="username"
+                    class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    placeholder="admin" required>
+            </div>
+            <div>
+                <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Пароль</label>
+                <input type="password" x-model="loginPassword" autocomplete="current-password"
+                    class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    placeholder="••••••••" required>
+            </div>
+            <button type="submit" :disabled="loginLoading"
+                class="w-full py-3.5 rounded-xl bg-brand-600 text-white font-semibold text-sm hover:bg-brand-700 transition disabled:opacity-50 shadow-lg shadow-brand-600/25">
+                <span x-show="!loginLoading">Войти</span>
+                <span x-show="loginLoading" x-cloak>Вход...</span>
+            </button>
+        </form>
+    </div>
+</div>
+
+<!-- ========== ПРИЛОЖЕНИЕ (после входа): вся высота — 100dvh, без calc; алерт в потоке — чат сжимается ========== -->
+<div x-show="authenticated" x-cloak class="flex h-[100dvh] min-h-0 w-full overflow-hidden bg-gray-50">
+
+<!-- Боковое меню -->
+    <aside class="w-64 bg-brand-900 text-white flex flex-col shrink-0 h-[100dvh] min-h-0 overflow-hidden border-r border-white/10">
+        <div class="px-6 py-5 border-b border-white/10">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-brand-500 flex items-center justify-center text-xl font-bold">R</div>
+                <div>
+                    <div class="font-bold text-lg leading-tight">RestoMind</div>
+                    <div class="text-xs text-blue-300 opacity-80">AI-оператор ресторана</div>
+                </div>
+            </div>
+        </div>
+
+        <nav class="flex-1 min-h-0 overflow-y-auto px-3 py-4 space-y-1">
+            <template x-for="item in navItems" :key="item.id">
+                <button
+                    @click="currentTab = item.id; loadTabData()"
+                    :class="currentTab === item.id
+                        ? 'bg-white/15 text-white shadow-lg'
+                        : 'text-blue-200 hover:bg-white/10 hover:text-white'"
+                    class="w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 text-left relative"
+                >
+                    <span x-html="item.icon" class="w-6 flex items-center justify-center flex-shrink-0 opacity-95"></span>
+                    <span x-text="item.label" class="font-medium text-sm"></span>
+                    <span x-show="item.id === 'chats' && unreadChats > 0"
+                        class="absolute right-3 top-2 w-5 h-5 bg-red-500 rounded-full text-[10px] font-bold flex items-center justify-center"
+                        x-text="unreadChats"></span>
+                </button>
+            </template>
+        </nav>
+
+        <div class="px-4 py-4 border-t border-white/10">
+            <div class="flex items-center gap-2 text-xs text-blue-300">
+                <span class="w-2 h-2 rounded-full ws-dot" :class="wsConnected ? 'bg-green-400 animate-pulse' : 'bg-red-400'"></span>
+                <span x-text="wsConnected ? 'Live-соединение активно' : 'Переподключение...'"></span>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Правая колонка: шапка + алерт (shrink-0) + область контента (flex-1 min-h-0) -->
+    <main class="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
+        <header class="shrink-0 glass border-b border-gray-200 px-6 md:px-8 py-4 z-10">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                    <h1 class="text-2xl font-bold text-gray-900" x-text="navItems.find(i => i.id === currentTab)?.label"></h1>
+                    <p class="text-sm text-gray-500 mt-0.5" x-text="navItems.find(i => i.id === currentTab)?.desc"></p>
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
+                    <button type="button" @click="seedDemoData()" :disabled="demoActionLoading || hasDemoData"
+                        class="px-4 py-2 rounded-xl text-sm font-medium border transition shadow-sm disabled:opacity-40 disabled:cursor-not-allowed bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100">
+                        Демо-данные
+                    </button>
+                    <button type="button" x-show="hasDemoData" @click="openDemoDeleteModal()"
+                        class="px-4 py-2 rounded-xl text-sm font-medium border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 transition shadow-sm flex items-center gap-2">
+                        <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                        Удалить демо
+                    </button>
+                    <button type="button" @click="logoutAdmin()"
+                        class="px-4 py-2 rounded-xl text-sm font-medium border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 transition shadow-sm">
+                        Выйти
+                    </button>
+                <button
+                    @click="loadTabData()"
+                    class="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition shadow-sm text-sm"
+                >
+                    <span :class="loading ? 'animate-spin' : ''">&#x21bb;</span>
+                    Обновить
+                </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Алерт в потоке: при появлении чат получает меньше высоты, поле ввода остаётся в viewport -->
+        <div x-show="alertQueue.length > 0" x-cloak
+            class="shrink-0 bg-red-600 text-white px-6 md:px-8 py-3 shadow-md border-b border-red-800/30 z-20">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+                <div class="flex items-center gap-3 min-w-0">
+                    <span class="text-2xl shrink-0">&#x1F6A8;</span>
+                    <div class="min-w-0">
+                        <div class="font-bold text-sm">Бот просит помощи!</div>
+                        <div class="text-xs text-red-100 truncate" x-text="alertQueue[0]?.message || ''"></div>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                    <button type="button" @click="openAlertChat(alertQueue[0]?.phone)"
+                        class="px-4 py-1.5 bg-white text-red-600 rounded-lg text-sm font-semibold hover:bg-red-50 transition">
+                        Перехватить
+                    </button>
+                    <button type="button" @click="dismissAlert()" class="text-white/80 hover:text-white text-2xl leading-none px-1" aria-label="Закрыть">&times;</button>
+                </div>
+            </div>
+        </div>
+
+        <div
+            id="admin-content-scroll"
+            class="flex-1 min-h-0"
+            :class="currentTab === 'chats' ? 'flex flex-col overflow-hidden px-4 md:px-6 pb-4 md:pb-6' : 'overflow-y-auto px-8 py-6'"
+        >
+            <!-- ========== ДАШБОРД ========== -->
+            <div x-show="currentTab === 'dashboard'" x-cloak class="fade-in">
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
+                    <!-- Выручка сегодня -->
+                    <div class="bg-white rounded-2xl p-6 border border-gray-100 shadow-[0_2px_10px_-3px_rgba(37,99,235,0.12)] transition-all duration-200 hover:shadow-md hover:-translate-y-0.5">
+                        <div class="flex justify-between items-start">
+                            <div>
+                                <p class="text-sm font-medium text-gray-500 mb-1">Выручка за сегодня</p>
+                                <h3 class="text-3xl font-bold text-gray-900" x-text="Number(dashStats.today_revenue || 0).toLocaleString('ru-RU') + ' ₸'"></h3>
+                        </div>
+                            <div class="p-2 bg-brand-50 rounded-lg text-brand-600">
+                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 12a2.25 2.25 0 00-2.25-2.25H15a3 3 0 11-6 0H5.25A2.25 2.25 0 003 12m18 0v6a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 18v-6m18 0V9M3 12V9m18 0a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 9m18 0V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v3"/></svg>
+                    </div>
+                        </div>
+                        <div class="mt-4 flex items-center text-sm flex-wrap gap-2">
+                            <template x-if="dashStats.revenue_change_pct != null">
+                                <span class="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium"
+                                    :class="dashStats.revenue_change_pct >= 0 ? 'text-emerald-700 bg-emerald-50' : 'text-red-700 bg-red-50'">
+                                    <svg class="w-3.5 h-3.5 mr-1 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            :d="dashStats.revenue_change_pct >= 0 ? 'M13 7h8m0 0v8m0-8l-8 8-4-4-6 6' : 'M13 17h8m0 0V9m0 8l-8-8-4 4-6-6'"/>
+                                    </svg>
+                                    <span x-text="formatTrendPct(dashStats.revenue_change_pct)"></span>
+                                </span>
+                            </template>
+                            <span x-show="Array.isArray(dashStats.daily_series) && dashStats.revenue_change_pct == null" class="text-xs text-gray-400 bg-gray-50 px-2 py-1 rounded-md">Нет данных за вчера</span>
+                            <span class="text-gray-400">к вчерашнему дню</span>
+                        </div>
+                    </div>
+                    <!-- Заказы -->
+                    <div class="bg-white rounded-2xl p-6 border border-gray-100 shadow-[0_2px_10px_-3px_rgba(37,99,235,0.12)] transition-all duration-200 hover:shadow-md hover:-translate-y-0.5">
+                        <div class="flex justify-between items-start">
+                            <div>
+                                <p class="text-sm font-medium text-gray-500 mb-1">Заказы сегодня</p>
+                                <h3 class="text-3xl font-bold text-gray-900">
+                            <span x-text="dashStats.today_orders || 0"></span>
+                                    <span class="text-lg font-semibold text-gray-400" x-text="' / ' + (dashStats.total_orders || 0)"></span>
+                                </h3>
+                        </div>
+                            <div class="p-2 bg-blue-50 rounded-lg text-blue-600">
+                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z"/></svg>
+                    </div>
+                        </div>
+                        <div class="mt-4 flex items-center text-sm flex-wrap gap-2">
+                            <template x-if="dashStats.orders_change_pct != null">
+                                <span class="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium"
+                                    :class="dashStats.orders_change_pct >= 0 ? 'text-emerald-700 bg-emerald-50' : 'text-red-700 bg-red-50'">
+                                    <svg class="w-3.5 h-3.5 mr-1 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            :d="dashStats.orders_change_pct >= 0 ? 'M13 7h8m0 0v8m0-8l-8 8-4-4-6 6' : 'M13 17h8m0 0V9m0 8l-8-8-4 4-6-6'"/>
+                                    </svg>
+                                    <span x-text="formatTrendPct(dashStats.orders_change_pct)"></span>
+                                </span>
+                            </template>
+                            <span x-show="Array.isArray(dashStats.daily_series) && dashStats.orders_change_pct == null" class="text-xs text-gray-400 bg-gray-50 px-2 py-1 rounded-md">Нет данных за вчера</span>
+                            <span class="text-gray-400">к вчерашнему дню</span>
+                    </div>
+                        </div>
+                    <!-- Брони -->
+                    <div class="bg-white rounded-2xl p-6 border border-gray-100 shadow-[0_2px_10px_-3px_rgba(245,158,11,0.12)] transition-all duration-200 hover:shadow-md hover:-translate-y-0.5">
+                        <div class="flex justify-between items-start">
+                            <div>
+                                <p class="text-sm font-medium text-gray-500 mb-1">Бронирования</p>
+                                <h3 class="text-3xl font-bold text-gray-900" x-text="dashStats.bookings || 0"></h3>
+                            </div>
+                            <div class="p-2 bg-amber-50 rounded-lg text-amber-600">
+                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/></svg>
+                            </div>
+                        </div>
+                        <p class="mt-4 text-sm text-gray-400">Активные записи в системе</p>
+                    </div>
+                    <!-- Меню -->
+                    <div class="bg-white rounded-2xl p-6 border border-gray-100 shadow-[0_2px_10px_-3px_rgba(139,92,246,0.12)] transition-all duration-200 hover:shadow-md hover:-translate-y-0.5">
+                        <div class="flex justify-between items-start">
+                            <div>
+                                <p class="text-sm font-medium text-gray-500 mb-1">Позиций в меню</p>
+                                <h3 class="text-3xl font-bold text-gray-900" x-text="dashStats.menu_items || 0"></h3>
+                            </div>
+                            <div class="p-2 bg-violet-50 rounded-lg text-violet-600">
+                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8.25v-1.5m0 1.5c-1.355 0-2.697.056-4.024.166C6.845 8.51 6 9.473 6 10.608v2.513m6-4.871c1.355 0 2.697.055 4.024.165C17.155 8.51 18 9.473 18 10.608v2.513m-3 4.73v-1.59c0-.532-.21-1.042-.586-1.418L12 13.5m-3 4.73c.55.47 1.27.73 2 .73h6c.73 0 1.45-.26 2-.73m-8-4.73V10.6c0-1.12.856-2.08 2.09-2.19.64-.09 1.29-.14 1.91-.14m5 6.37v1.59c0 1.632-.875 3.11-2.25 3.89"/></svg>
+                            </div>
+                        </div>
+                        <p class="mt-4 text-sm text-gray-400">Каталог для ИИ и гостей</p>
+                    </div>
+                </div>
+
+                <!-- Динамика (мини-график, отдельный canvas от Аналитики) -->
+                <div class="mb-8 bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
+                    <div class="flex flex-wrap justify-between items-center gap-3 mb-4">
+                        <div>
+                            <h3 class="text-lg font-semibold text-gray-900">Динамика заказов</h3>
+                            <p class="text-xs text-gray-400 mt-0.5">Последние 7 дней (UTC)</p>
+                        </div>
+                        <select x-model="dashMiniMetric" @change="scheduleDashboardChartRender()"
+                            class="bg-gray-50 border border-gray-200 text-gray-700 text-sm rounded-lg focus:ring-brand-500 focus:border-brand-500 block p-2 min-w-[140px]">
+                            <option value="revenue">Выручка</option>
+                            <option value="orders">Кол-во заказов</option>
+                        </select>
+                    </div>
+                    <div class="h-64 w-full relative">
+                        <canvas id="dashboardMiniChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Последние заказы на дашборде -->
+                <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                    <h3 class="font-semibold text-lg mb-4">Последние заказы</h3>
+                    <div class="overflow-x-auto" x-show="orders.length > 0" x-cloak>
+                        <table class="w-full text-sm">
+                            <thead>
+                                <tr class="text-left text-gray-500 border-b border-gray-100">
+                                    <th class="pb-3 font-medium">ID</th>
+                                    <th class="pb-3 font-medium">Статус</th>
+                                    <th class="pb-3 font-medium">Сумма</th>
+                                    <th class="pb-3 font-medium">Дата</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="order in orders.slice(0, 5)" :key="order.id">
+                                    <tr class="border-b border-gray-50 hover:bg-blue-50/30 cursor-pointer transition" @click="selectedOrder = order; showOrderModal = true">
+                                        <td class="py-3 font-medium text-brand-600" x-text="'#' + order.id"></td>
+                                        <td class="py-3"><span :class="statusClass(order.status)" x-text="statusLabel(order.status)" class="px-2.5 py-1 rounded-full text-xs font-medium"></span></td>
+                                        <td class="py-3 font-semibold" x-text="Number(order.total_price).toLocaleString('ru-RU') + ' &#8376;'"></td>
+                                        <td class="py-3 text-gray-500" x-text="formatDate(order.created_at)"></td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div x-show="orders.length === 0" class="flex flex-col items-center justify-center py-14 px-4 bg-gray-50/50 rounded-2xl border-2 border-dashed border-gray-200">
+                        <div class="bg-white p-4 rounded-full shadow-sm border border-gray-100 mb-4">
+                            <svg class="w-10 h-10 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
+                        </div>
+                        <h3 class="text-lg font-semibold text-gray-900 mb-1">Пока здесь тихо</h3>
+                        <p class="text-gray-500 text-sm text-center max-w-sm mb-6">ИИ-агент готов к работе. Как только клиенты начнут писать в WhatsApp, заказы появятся здесь в реальном времени.</p>
+                        <button type="button" @click="currentTab = 'test'; loadTabData()"
+                            class="inline-flex items-center px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium rounded-lg transition-colors shadow-sm shadow-brand-600/20">
+                            <svg class="w-4 h-4 mr-2 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+                            Создать тестовый заказ
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ========== АНАЛИТИКА ========== -->
+            <div x-show="currentTab === 'analytics'" x-cloak class="fade-in">
+                <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 mb-6">
+                    <div class="flex flex-wrap items-center gap-3">
+                        <span class="text-sm font-medium text-gray-600 mr-2">Период:</span>
+                        <template x-for="p in [{id:'day', label:'Сегодня'}, {id:'week', label:'Неделя'}, {id:'month', label:'Месяц'}]" :key="p.id">
+                            <button
+                                @click="analyticsPeriod = p.id; analyticsCustom = false; loadAnalytics()"
+                                :class="analyticsPeriod === p.id && !analyticsCustom
+                                    ? 'bg-brand-600 text-white shadow-md'
+                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'"
+                                class="px-4 py-2 rounded-xl text-sm font-medium transition"
+                                x-text="p.label"
+                            ></button>
+                        </template>
+                        <div class="flex items-center gap-2 ml-4">
+                            <input type="date" x-model="analyticsFrom" class="border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50">
+                            <span class="text-gray-400">—</span>
+                            <input type="date" x-model="analyticsTo" class="border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50">
+                            <button
+                                @click="analyticsPeriod = 'custom'; analyticsCustom = true; loadAnalytics()"
+                                class="px-4 py-2 bg-brand-600 text-white rounded-xl text-sm font-medium hover:bg-brand-700 transition"
+                            >Применить</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-5 mb-6">
+                    <div class="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+                        <div class="flex items-center justify-between mb-1">
+                            <span class="text-sm text-gray-500">Выручка</span>
+                            <span x-show="analyticsData.changes?.revenue !== null"
+                                :class="analyticsData.changes?.revenue >= 0 ? 'change-up' : 'change-down'"
+                                class="text-xs font-semibold"
+                                x-text="(analyticsData.changes?.revenue >= 0 ? '+' : '') + analyticsData.changes?.revenue + '%'"></span>
+                        </div>
+                        <div class="text-3xl font-extrabold text-gray-900" x-text="Number(analyticsData.current?.revenue || 0).toLocaleString('ru-RU') + ' &#8376;'"></div>
+                        <div class="text-xs text-gray-400 mt-1" x-text="'Пред. период: ' + Number(analyticsData.previous?.revenue || 0).toLocaleString('ru-RU') + ' &#8376;'"></div>
+                    </div>
+                    <div class="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+                        <div class="flex items-center justify-between mb-1">
+                            <span class="text-sm text-gray-500">Заказов</span>
+                            <span x-show="analyticsData.changes?.orders !== null"
+                                :class="analyticsData.changes?.orders >= 0 ? 'change-up' : 'change-down'"
+                                class="text-xs font-semibold"
+                                x-text="(analyticsData.changes?.orders >= 0 ? '+' : '') + analyticsData.changes?.orders + '%'"></span>
+                        </div>
+                        <div class="text-3xl font-extrabold text-gray-900" x-text="analyticsData.current?.orders || 0"></div>
+                        <div class="text-xs text-gray-400 mt-1" x-text="'Пред. период: ' + (analyticsData.previous?.orders || 0)"></div>
+                    </div>
+                    <div class="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+                        <div class="flex items-center justify-between mb-1">
+                            <span class="text-sm text-gray-500">Средний чек</span>
+                            <span x-show="analyticsData.changes?.avg_check !== null"
+                                :class="analyticsData.changes?.avg_check >= 0 ? 'change-up' : 'change-down'"
+                                class="text-xs font-semibold"
+                                x-text="(analyticsData.changes?.avg_check >= 0 ? '+' : '') + analyticsData.changes?.avg_check + '%'"></span>
+                        </div>
+                        <div class="text-3xl font-extrabold text-gray-900" x-text="Number(analyticsData.current?.avg_check || 0).toLocaleString('ru-RU') + ' &#8376;'"></div>
+                        <div class="text-xs text-gray-400 mt-1" x-text="'Пред. период: ' + Number(analyticsData.previous?.avg_check || 0).toLocaleString('ru-RU') + ' &#8376;'"></div>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
+                    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+                        <h3 class="font-semibold text-lg">Выручка по дням</h3>
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs text-gray-500 hidden sm:inline">График:</span>
+                            <select x-model="analyticsChartMetric" @change="renderChart()"
+                                class="text-sm border border-gray-200 rounded-xl px-3 py-2 bg-gray-50 focus:ring-2 focus:ring-brand-500 min-w-[200px]">
+                                <option value="both">Выручка и заказы</option>
+                                <option value="revenue">Только выручка</option>
+                                <option value="orders">Только число заказов</option>
+                            </select>
+                        </div>
+                    </div>
+                    <p class="text-xs text-gray-400 mb-2">Период и дни — в UTC (как на дашборде).</p>
+                    <div class="relative w-full min-h-[280px]" style="height: 320px;">
+                        <canvas id="revenueChart" class="w-full h-full"></canvas>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                        <h3 class="font-semibold text-lg mb-4">Топ-10 блюд</h3>
+                        <div class="space-y-3">
+                            <template x-for="(item, idx) in (analyticsData.top_items || [])" :key="idx">
+                                <div class="flex items-center gap-3">
+                                    <div class="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold"
+                                        :class="idx < 3 ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-500'"
+                                        x-text="idx + 1"></div>
+                                    <div class="flex-1 min-w-0">
+                                        <div class="text-sm font-medium truncate" x-text="item.name"></div>
+                                        <div class="flex items-center gap-2">
+                                            <div class="flex-1 bg-gray-100 rounded-full h-1.5">
+                                                <div class="bg-brand-500 rounded-full h-1.5 transition-all" :style="'width:' + (analyticsData.top_items?.length ? (item.revenue / analyticsData.top_items[0].revenue * 100) : 0) + '%'"></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="text-right flex-shrink-0">
+                                        <div class="text-sm font-semibold" x-text="Number(item.revenue).toLocaleString('ru-RU') + ' &#8376;'"></div>
+                                        <div class="text-xs text-gray-400" x-text="item.quantity + ' шт.'"></div>
+                                    </div>
+                                </div>
+                            </template>
+                            <div x-show="!analyticsData.top_items?.length" class="text-center py-8 text-gray-400 text-sm">
+                                Нет данных за период
+                            </div>
+                        </div>
+                    </div>
+                    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                        <h3 class="font-semibold text-lg mb-4">Разбивка по дням</h3>
+                        <div class="overflow-y-auto max-h-[380px]">
+                            <table class="w-full text-sm">
+                                <thead class="sticky top-0 bg-white">
+                                    <tr class="text-left text-gray-500 border-b border-gray-100">
+                                        <th class="pb-3 font-medium">Дата</th>
+                                        <th class="pb-3 font-medium text-right">Заказов</th>
+                                        <th class="pb-3 font-medium text-right">Выручка</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <template x-for="day in (analyticsData.daily || []).slice().reverse()" :key="day.date">
+                                        <tr class="border-b border-gray-50">
+                                            <td class="py-2.5" x-text="formatDate(day.date)"></td>
+                                            <td class="py-2.5 text-right" x-text="day.orders"></td>
+                                            <td class="py-2.5 text-right font-medium" x-text="Number(day.revenue).toLocaleString('ru-RU') + ' &#8376;'"></td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ========== ЗАКАЗЫ (по этапам + таблица) ========== -->
+            <div x-show="currentTab === 'orders'" x-cloak class="fade-in">
+                <!-- Переключатель вида -->
+                <div class="flex items-center justify-between mb-5">
+                    <div class="flex items-center gap-2 bg-white border border-gray-200 rounded-xl p-1">
+                        <button @click="ordersView = 'kanban'"
+                            :class="ordersView === 'kanban' ? 'bg-brand-600 text-white shadow' : 'text-gray-600 hover:bg-gray-100'"
+                            class="px-4 py-2 rounded-lg text-sm font-medium transition"
+                            title="Черновик → Подтверждён → На кухне">
+                            &#x1F4E6; По этапам
+                        </button>
+                        <button @click="ordersView = 'table'"
+                            :class="ordersView === 'table' ? 'bg-brand-600 text-white shadow' : 'text-gray-600 hover:bg-gray-100'"
+                            class="px-4 py-2 rounded-lg text-sm font-medium transition"
+                            title="Все заказы списком с фильтром по статусу">
+                            &#x1F4CA; Список
+                        </button>
+                    </div>
+                    <select x-show="ordersView === 'table'" x-model="orderFilter" @change="loadOrders()"
+                        class="text-sm border border-gray-200 rounded-xl px-3 py-2 bg-gray-50">
+                            <option value="">Все статусы</option>
+                            <option value="draft">Черновик</option>
+                            <option value="confirmed">Подтверждён</option>
+                        <option value="sent_to_iiko">В iiko</option>
+                            <option value="completed">Завершён</option>
+                            <option value="cancelled">Отменён</option>
+                        </select>
+                    </div>
+
+                <!-- Доска по этапам (статусы заказа) -->
+                <div x-show="ordersView === 'kanban'" class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+                    <!-- DRAFT -->
+                    <div class="bg-gray-100/50 rounded-2xl p-4">
+                        <div class="flex items-center gap-2 mb-4">
+                            <div class="w-3 h-3 rounded-full bg-gray-400"></div>
+                            <h3 class="font-semibold text-gray-700 text-sm">Черновики</h3>
+                            <span class="ml-auto text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full font-medium"
+                                x-text="kanbanDraft.length"></span>
+                        </div>
+                        <div class="space-y-3 min-h-[100px]">
+                            <template x-for="order in kanbanDraft" :key="order.id">
+                                <div class="kanban-card bg-white rounded-xl p-4 shadow-sm border border-gray-100 cursor-pointer"
+                                    @click="selectedOrder = order; showOrderModal = true">
+                                    <div class="flex items-center justify-between mb-2">
+                                        <span class="font-bold text-brand-600 text-sm" x-text="'#' + order.id"></span>
+                                        <span class="text-[10px] text-gray-400" x-text="formatTime(order.created_at)"></span>
+                                    </div>
+                                    <div class="text-xs text-gray-500 mb-2" x-text="(order.items?.items?.length || 0) + ' позиций'"></div>
+                                    <div class="text-sm font-bold text-gray-900" x-text="Number(order.total_price).toLocaleString('ru-RU') + ' &#8376;'"></div>
+                                </div>
+                            </template>
+                            <div x-show="kanbanDraft.length === 0" class="text-center py-8 text-gray-400 text-xs">Пусто</div>
+                        </div>
+                    </div>
+
+                    <!-- CONFIRMED -->
+                    <div class="bg-blue-50/50 rounded-2xl p-4">
+                        <div class="flex items-center gap-2 mb-4">
+                            <div class="w-3 h-3 rounded-full bg-blue-500"></div>
+                            <h3 class="font-semibold text-blue-700 text-sm">Подтверждены</h3>
+                            <span class="ml-auto text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full font-medium"
+                                x-text="kanbanConfirmed.length"></span>
+                        </div>
+                        <div class="space-y-3 min-h-[100px]">
+                            <template x-for="order in kanbanConfirmed" :key="order.id">
+                                <div class="kanban-card bg-white rounded-xl p-4 shadow-sm border border-blue-100 cursor-pointer"
+                                    @click="selectedOrder = order; showOrderModal = true">
+                                    <div class="flex items-center justify-between mb-2">
+                                        <span class="font-bold text-brand-600 text-sm" x-text="'#' + order.id"></span>
+                                        <span class="text-[10px] text-gray-400" x-text="formatTime(order.created_at)"></span>
+                                    </div>
+                                    <div class="text-xs text-gray-500 mb-2" x-text="(order.items?.items?.length || 0) + ' позиций'"></div>
+                                    <div class="text-sm font-bold text-gray-900" x-text="Number(order.total_price).toLocaleString('ru-RU') + ' &#8376;'"></div>
+                                </div>
+                            </template>
+                            <div x-show="kanbanConfirmed.length === 0" class="text-center py-8 text-gray-400 text-xs">Пусто</div>
+                        </div>
+                    </div>
+
+                    <!-- SENT_TO_IIKO -->
+                    <div class="bg-emerald-50/50 rounded-2xl p-4">
+                        <div class="flex items-center gap-2 mb-4">
+                            <div class="w-3 h-3 rounded-full bg-emerald-500"></div>
+                            <h3 class="font-semibold text-emerald-700 text-sm">На кухне</h3>
+                            <span class="ml-auto text-xs bg-emerald-100 text-emerald-600 px-2 py-0.5 rounded-full font-medium"
+                                x-text="kanbanSent.length"></span>
+                        </div>
+                        <div class="space-y-3 min-h-[100px]">
+                            <template x-for="order in kanbanSent" :key="order.id">
+                                <div class="kanban-card bg-white rounded-xl p-4 shadow-sm border border-emerald-100 cursor-pointer"
+                                    @click="selectedOrder = order; showOrderModal = true">
+                                    <div class="flex items-center justify-between mb-2">
+                                        <span class="font-bold text-brand-600 text-sm" x-text="'#' + order.id"></span>
+                                        <span class="text-[10px] text-gray-400" x-text="formatTime(order.created_at)"></span>
+                                    </div>
+                                    <div class="text-xs text-gray-500 mb-2" x-text="(order.items?.items?.length || 0) + ' позиций'"></div>
+                                    <div class="text-sm font-bold text-gray-900" x-text="Number(order.total_price).toLocaleString('ru-RU') + ' &#8376;'"></div>
+                                </div>
+                            </template>
+                            <div x-show="kanbanSent.length === 0" class="text-center py-8 text-gray-400 text-xs">Пусто</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Таблица заказов -->
+                <div x-show="ordersView === 'table'" class="bg-white rounded-2xl shadow-sm border border-gray-100">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead>
+                                <tr class="text-left text-gray-500 border-b border-gray-100">
+                                    <th class="px-5 pb-3 pt-4 font-medium">ID</th>
+                                    <th class="px-5 pb-3 pt-4 font-medium">Клиент</th>
+                                    <th class="px-5 pb-3 pt-4 font-medium">Позиции</th>
+                                    <th class="px-5 pb-3 pt-4 font-medium">Сумма</th>
+                                    <th class="px-5 pb-3 pt-4 font-medium">Статус</th>
+                                    <th class="px-5 pb-3 pt-4 font-medium">Дата</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="order in orders" :key="order.id">
+                                    <tr class="border-b border-gray-50 hover:bg-blue-50/30 cursor-pointer transition" @click="selectedOrder = order; showOrderModal = true">
+                                        <td class="px-5 py-4 font-semibold text-brand-600" x-text="'#' + order.id"></td>
+                                        <td class="px-5 py-4 text-gray-600" x-text="'ID: ' + order.user_id"></td>
+                                        <td class="px-5 py-4">
+                                            <span x-text="order.items?.items?.length || 0" class="text-gray-600"></span>
+                                            <span class="text-gray-400">поз.</span>
+                                        </td>
+                                        <td class="px-5 py-4 font-semibold" x-text="Number(order.total_price).toLocaleString('ru-RU') + ' &#8376;'"></td>
+                                        <td class="px-5 py-4"><span :class="statusClass(order.status)" x-text="statusLabel(order.status)" class="px-2.5 py-1 rounded-full text-xs font-medium"></span></td>
+                                        <td class="px-5 py-4 text-gray-500" x-text="formatDate(order.created_at)"></td>
+                                    </tr>
+                                </template>
+                                <tr x-show="orders.length === 0">
+                                    <td colspan="6" class="py-12 text-center text-gray-400">
+                                        <div class="text-4xl mb-2">&#x1F4E6;</div>
+                                        Заказов пока нет
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ========== БРОНИРОВАНИЯ ========== -->
+            <div x-show="currentTab === 'bookings'" x-cloak class="fade-in">
+                <div class="grid gap-4">
+                    <template x-for="b in bookings" :key="b.id">
+                        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition">
+                            <div class="flex items-start justify-between">
+                                <div class="flex items-center gap-4">
+                                    <div class="w-12 h-12 rounded-xl bg-emerald-50 flex items-center justify-center text-2xl">&#x1F37D;</div>
+                                    <div>
+                                        <div class="font-semibold text-gray-900" x-text="formatBookingDate(b.date) + ' в ' + b.time?.slice(0,5)"></div>
+                                        <div class="text-sm text-gray-500 mt-0.5">
+                                            <span x-text="b.guests"></span> гост.
+                                            <span x-show="b.comment" class="ml-2 text-gray-400" x-text="'— ' + b.comment"></span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <span :class="statusClass(b.status)" x-text="statusLabel(b.status)" class="px-3 py-1 rounded-full text-xs font-medium"></span>
+                            </div>
+                        </div>
+                    </template>
+                    <div x-show="bookings.length === 0" class="text-center py-16 text-gray-400">
+                        <div class="text-5xl mb-3">&#x1F4C5;</div>
+                        <div class="text-lg">Бронирований пока нет</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ========== ЖИВЫЕ ДИАЛОГИ: flex-1 min-h-0 внутри #admin-content-scroll — без calc, алерт сжимает область ========== -->
+            <div x-show="currentTab === 'chats'" x-cloak class="fade-in flex flex-1 min-h-0 flex-col overflow-hidden">
+                <div class="flex flex-1 min-h-0 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                    <!-- ЛЕВАЯ ПАНЕЛЬ: список (только этот блок скроллится) -->
+                    <div class="w-full max-w-sm md:w-[340px] lg:w-[360px] flex-shrink-0 border-r border-gray-100 flex flex-col min-h-0 bg-white">
+                        <div class="p-4 border-b border-gray-50 shrink-0">
+                            <h2 class="text-lg font-semibold text-gray-900 mb-3">Диалоги</h2>
+                            <div class="relative">
+                                <input type="text" x-model="chatSearch" placeholder="Поиск по номеру..."
+                                    class="w-full bg-gray-50 border border-gray-200 text-sm rounded-lg pl-10 pr-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                                <svg class="w-5 h-5 text-gray-400 absolute left-3 top-2.5 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                                </svg>
+                            </div>
+                        </div>
+                        <div class="flex-1 min-h-0 overflow-y-auto">
+                            <template x-for="chat in filteredChatList" :key="chat.phone">
+                                <button type="button" @click="selectChat(chat.phone)"
+                                    class="w-full text-left p-4 border-b border-gray-50 hover:bg-gray-50 transition-colors flex items-start gap-3"
+                                    :class="activeChatPhone === chat.phone ? 'bg-brand-50/90 hover:bg-brand-50/90 ring-1 ring-inset ring-brand-200/60' : ''">
+                                    <div class="w-10 h-10 rounded-full bg-brand-100 flex items-center justify-center text-brand-700 font-bold text-sm shrink-0"
+                                        x-text="chatInitials(chat)"></div>
+                                    <div class="flex-1 min-w-0">
+                                        <div class="flex justify-between items-center gap-2 mb-0.5">
+                                            <h4 class="text-sm font-semibold text-gray-900 truncate" x-text="chat.userName || chat.phone"></h4>
+                                            <span class="text-xs text-gray-400 shrink-0 tabular-nums" x-text="formatChatPreviewTime(chat.lastAt)"></span>
+                                        </div>
+                                        <p class="text-xs text-gray-500 font-mono truncate opacity-80" x-text="chat.phone"></p>
+                                        <p class="text-xs text-gray-500 truncate mt-0.5" x-text="chat.lastMessage || 'Нет сообщений'"></p>
+                                        <div class="flex items-center gap-2 mt-1.5">
+                                            <span class="text-[10px] px-2 py-0.5 rounded-md font-medium"
+                                                :class="chat.state === 'human_mode' ? 'bg-orange-100 text-orange-700' : chat.state === 'confirming_order' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-50 text-emerald-700'"
+                                                x-text="chat.state === 'human_mode' ? 'Оператор' : chat.state === 'confirming_order' ? 'Подтверждение' : 'ИИ'"></span>
+                                        </div>
+                                    </div>
+                                    <div x-show="chat.unread" class="w-2 h-2 bg-brand-500 rounded-full mt-2 shrink-0" title="Непрочитано"></div>
+                    </button>
+                            </template>
+                            <div x-show="filteredChatList.length === 0" class="text-center py-14 px-4 text-gray-400 text-sm">
+                                Нет диалогов в списке
+                            </div>
+                        </div>
+                        <div class="p-3 border-t border-gray-100 shrink-0 bg-gray-50/50">
+                            <div class="flex gap-2">
+                                <input x-model="chatPhone" type="text" placeholder="Номер E.164…"
+                                    class="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+                                    @keydown.enter="selectChat(chatPhone)">
+                                <button type="button" @click="selectChat(chatPhone)"
+                                    class="px-3 py-2 bg-brand-600 text-white rounded-lg text-xs font-semibold hover:bg-brand-700 shrink-0">
+                                    Открыть
+                                </button>
+                            </div>
+                        </div>
+                </div>
+
+                    <!-- Центр: переписка + кабина оператора (справа на lg+) -->
+                    <div class="flex-1 flex flex-row min-h-0 min-w-0 bg-slate-50/40">
+                    <div class="flex-1 flex flex-col min-h-0 min-w-0">
+                        <div x-show="!activeChatPhone" class="flex-1 flex flex-col items-center justify-center text-gray-400 p-8 min-h-0">
+                            <svg class="w-16 h-16 mb-4 text-gray-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+                            </svg>
+                            <p class="text-sm font-medium text-gray-500">Выберите диалог слева</p>
+                            <p class="text-xs text-gray-400 mt-1 text-center max-w-xs">Или введите номер внизу списка — откроется история из БД</p>
+                        </div>
+
+                        <template x-if="activeChatPhone">
+                            <div class="flex flex-col flex-1 min-h-0 h-full">
+                                <div class="h-16 border-b border-gray-100 bg-white flex items-center justify-between px-4 md:px-6 shrink-0 gap-3">
+                                    <div class="flex items-center gap-3 min-w-0">
+                                        <div class="w-10 h-10 rounded-full bg-brand-100 flex items-center justify-center text-brand-700 font-bold text-sm shrink-0"
+                                            x-text="activeChatInitials()"></div>
+                                        <div class="min-w-0">
+                                            <h3 class="font-semibold text-gray-900 truncate text-sm md:text-base" x-text="activeChatTitle()"></h3>
+                                            <p class="text-xs text-gray-400 font-mono truncate" x-text="activeChatPhone"></p>
+                    </div>
+                                        <span x-show="activeChatState !== 'human_mode' && activeChatState !== 'confirming_order'"
+                                            class="hidden sm:inline-flex px-2 py-1 bg-emerald-50 text-emerald-700 text-xs font-medium rounded-md items-center gap-1 shrink-0">
+                                            ИИ отвечает
+                                        </span>
+                                        <span x-show="activeChatState === 'confirming_order'"
+                                            class="hidden sm:inline-flex px-2 py-1 bg-amber-50 text-amber-800 text-xs font-medium rounded-md shrink-0">
+                                            Подтверждение заказа
+                                        </span>
+                                        <span x-show="activeChatState === 'human_mode'"
+                                            class="hidden sm:inline-flex px-2 py-1 bg-orange-50 text-orange-700 text-xs font-medium rounded-md shrink-0">
+                                            Вы ведёте диалог
+                                        </span>
+                                    </div>
+                                    <button type="button" @click="toggleTakeover()"
+                                        class="px-3 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-colors shrink-0 shadow-sm"
+                                        :class="chatIsBotActive() ? 'bg-orange-50 text-orange-700 hover:bg-orange-100 border border-orange-200' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200'"
+                                        x-text="chatIsBotActive() ? 'Остановить ИИ' : 'Вернуть ИИ'"></button>
+                                </div>
+
+                                <div class="flex-1 min-h-0 overflow-y-auto p-4 md:p-6 space-y-4" id="admin-chat-messages">
+                                    <template x-for="(msg, idx) in chatMessages" :key="msg.id != null ? 'm-' + msg.id : 'i-' + idx">
+                                        <div class="flex w-full msg-new"
+                                            :class="msg.role === 'user' ? 'justify-start' : 'justify-end'">
+                                            <!-- Клиент: слева -->
+                                            <div x-show="msg.role === 'user'"
+                                                class="bg-white border border-gray-100 text-gray-800 px-4 py-3 rounded-2xl rounded-tl-md max-w-[85%] sm:max-w-[70%] shadow-sm">
+                                                <p class="text-sm whitespace-pre-line" x-text="msg.content"></p>
+                                                <span class="text-[10px] text-gray-400 mt-1 block tabular-nums" x-text="formatTime(msg.created_at)"></span>
+                                            </div>
+                                            <!-- Ассистент / оператор / система: справа -->
+                                            <div x-show="msg.role !== 'user'"
+                                                class="px-4 py-3 rounded-2xl rounded-tr-md max-w-[85%] sm:max-w-[70%] shadow-md"
+                                                :class="msg.role === 'operator' ? 'bg-amber-500 text-white shadow-amber-500/25' : 'bg-brand-600 text-white shadow-brand-600/25'">
+                                                <div class="flex items-center gap-1.5 mb-1">
+                                                    <span class="text-[10px] font-bold uppercase tracking-wide opacity-90"
+                                                        x-text="msg.role === 'operator' ? 'Менеджер' : (msg.role === 'assistant' ? 'ИИ-агент' : 'Система')"></span>
+                                                </div>
+                                                <p class="text-sm whitespace-pre-line" x-text="msg.content"></p>
+                                                <div class="flex justify-end mt-1">
+                                                    <span class="text-[10px] opacity-80 tabular-nums" x-text="formatTime(msg.created_at)"></span>
+                                                </div>
+                                </div>
+                            </div>
+                        </template>
+                                    <div x-show="chatMessages.length === 0" class="flex flex-col items-center justify-center py-16 text-gray-400">
+                                        <p class="text-sm">Сообщений пока нет</p>
+                    </div>
+                </div>
+
+                                <div class="p-4 bg-white border-t border-gray-100 shrink-0">
+                                    <div class="relative">
+                                        <textarea x-model="operatorInput"
+                                            @keydown.enter="handleOperatorEnter($event)"
+                                            :disabled="chatIsBotActive()"
+                                            :placeholder="chatIsBotActive() ? 'Нажмите «Остановить ИИ», чтобы ответить клиенту…' : 'Сообщение клиенту (Enter — отправить, Shift+Enter — новая строка)…'"
+                                            class="w-full bg-gray-50 border border-gray-200 rounded-xl pl-4 pr-14 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 resize-none min-h-[5.5rem] max-h-40 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
+                                            rows="2"></textarea>
+                                        <button type="button" @click="sendOperatorMessage()"
+                                            :disabled="chatIsBotActive() || !operatorInput.trim()"
+                                            class="absolute right-3 bottom-3 p-2.5 bg-brand-600 text-white rounded-xl hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-sm shadow-brand-600/20">
+                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path>
+                                            </svg>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+
+                    <!-- Кабина оператора: контекст клиента, быстрые ответы, заметка -->
+                    <div x-show="activeChatPhone" x-cloak
+                        class="hidden lg:flex w-72 xl:w-80 shrink-0 border-l border-gray-200 bg-gradient-to-b from-gray-50/95 to-slate-50/90 flex-col min-h-0 overflow-y-auto">
+                        <div class="p-4 border-b border-gray-100/80 shrink-0">
+                            <h3 class="text-[11px] font-bold text-gray-400 uppercase tracking-wider">О клиенте</h3>
+                            <div x-show="customerSummaryLoading" class="mt-3 text-xs text-gray-400">Загрузка…</div>
+                            <div x-show="!customerSummaryLoading && customerSummary.is_blocked" class="mt-2 text-xs font-semibold text-red-700 bg-red-50 border border-red-100 rounded-lg px-2 py-1.5">
+                                В «стоп-листе» (аккаунт деактивирован)
+                            </div>
+                            <div x-show="!customerSummaryLoading && !customerSummary.user_exists" class="mt-3 text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-2 py-2">
+                                Пользователь ещё не в БД — после первого сообщения в WhatsApp появится статистика и заметка.
+                            </div>
+                            <div class="mt-3 space-y-2.5">
+                                <div class="bg-white p-3 rounded-xl border border-gray-100 shadow-sm">
+                                    <p class="text-xs text-gray-500">Заказов (не отмена)</p>
+                                    <p class="text-lg font-bold text-gray-900 tabular-nums" x-text="customerSummary.total_orders ?? 0"></p>
+                                </div>
+                                <div class="bg-white p-3 rounded-xl border border-gray-100 shadow-sm">
+                                    <p class="text-xs text-gray-500">Выручка (подтв. / кухня / завершён)</p>
+                                    <p class="text-lg font-bold text-brand-600 tabular-nums" x-text="formatCustomerMoney(customerSummary.total_spent)"></p>
+                                    <p class="text-[10px] text-gray-400 mt-1" x-show="(customerSummary.revenue_orders ?? 0) > 0">
+                                        Средний чек: <span x-text="formatCustomerMoney(customerSummary.avg_check)"></span>
+                                        · <span x-text="customerSummary.revenue_orders"></span> закр.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="p-4 border-b border-gray-100/80 shrink-0">
+                            <h3 class="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-2.5">Быстрые ответы</h3>
+                            <p class="text-[10px] text-gray-400 mb-2">Вставляют текст в поле сообщения (отправьте после правки).</p>
+                            <div class="flex flex-wrap gap-2">
+                                <template x-for="(cr, idx) in cannedResponses" :key="idx">
+                                    <button type="button" @click="applyCannedResponse(cr.text)"
+                                        class="text-xs bg-white border border-gray-200 hover:border-brand-400 hover:bg-brand-50/50 px-2.5 py-1.5 rounded-lg text-gray-700 transition-colors text-left">
+                                        <span x-text="cr.label"></span>
+                                    </button>
+                                </template>
+                            </div>
+                        </div>
+                        <div class="p-4 flex-1 min-h-0 flex flex-col">
+                            <h3 class="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-2">Заметка для коллег</h3>
+                            <textarea x-model="customerSummary.operator_note"
+                                @blur="saveCustomerNote()"
+                                :disabled="!customerSummary.user_exists"
+                                class="w-full flex-1 min-h-[100px] text-xs p-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 disabled:bg-gray-100 disabled:text-gray-400 resize-y"
+                                placeholder="Например: аллергия на арахис, предпочитает без лука…"></textarea>
+                            <p class="text-[10px] text-gray-400 mt-2">Сохраняется при уходе с поля</p>
+                        </div>
+                    </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ========== МЕНЮ ========== -->
+            <div x-show="currentTab === 'menu'" x-cloak class="fade-in pb-24">
+                <div x-show="menuLoadError" x-cloak class="mb-4 text-sm text-red-800 bg-red-50 border border-red-100 rounded-xl px-4 py-3 flex items-start gap-2">
+                    <span class="shrink-0 mt-0.5" aria-hidden="true">&#x26A0;&#xFE0F;</span>
+                    <span x-text="menuLoadError"></span>
+                </div>
+                <div class="sticky top-0 z-10 -mx-8 px-8 pt-2 pb-4 mb-6 bg-gray-50/90 backdrop-blur-md border-b border-gray-200/80 shadow-sm">
+                    <div class="flex flex-col xl:flex-row gap-4 xl:items-center xl:justify-between">
+                        <div class="relative flex-1 max-w-2xl">
+                            <span class="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 text-lg pointer-events-none">&#x1F50D;</span>
+                            <input type="search" x-model.debounce.300ms="menuSearchQuery" placeholder="Поиск по названию, описанию или разделу..."
+                                class="w-full pl-11 pr-4 py-3 rounded-2xl border border-gray-200 bg-white text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+                        </div>
+                        <div class="flex flex-wrap items-center gap-3">
+                            <button type="button" @click="openMenuCreate()"
+                                class="text-sm font-semibold px-4 py-2.5 rounded-xl bg-brand-600 text-white hover:bg-brand-700 shadow-sm shadow-brand-600/20 transition">
+                                + Добавить позицию
+                            </button>
+                            <button type="button" @click="toggleMenuBulkMode()"
+                                :class="menuBulkMode ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-gray-600 border-gray-200 hover:border-brand-300'"
+                                class="text-sm font-semibold px-4 py-2.5 rounded-xl border shadow-sm transition">
+                                <span x-text="menuBulkMode ? 'Отменить выбор' : 'Выбрать'"></span>
+                            </button>
+                            <button type="button" x-show="menuBulkMode && menuFilteredItems.length > 0" @click="menuBulkSelectFiltered()"
+                                class="text-xs font-semibold px-3 py-2 rounded-xl border border-brand-200 bg-brand-50 text-brand-800 hover:bg-brand-100 transition">
+                                Все на экране
+                            </button>
+                            <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500">
+                                <span class="tabular-nums"><span x-text="menuFilteredItems.length"></span> поз.</span>
+                                <button type="button" x-show="menuStopCount > 0" @click="menuStockFilter = 'out'; menuCategoryFilter = ''"
+                                    class="text-xs font-bold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-100 rounded-full px-3 py-1 transition tabular-nums"
+                                    title="Показать только позиции в стопе">
+                                    <span x-text="menuStopCount"></span> в стопе
+                                </button>
+                            </div>
+                            <select x-model="menuStockFilter"
+                                class="text-sm border border-gray-200 rounded-xl px-3 py-2.5 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+                                <option value="all">Все статусы</option>
+                                <option value="in">Только в наличии</option>
+                                <option value="out">Нет в наличии</option>
+                            </select>
+                        </div>
+                    </div>
+                    <!-- Категории: многострочно (без горизонтального скролла); при >20 — группы «Кухня» / «Бар» -->
+                    <div class="mt-4 space-y-3">
+                        <template x-if="menuCategories.length > 20">
+                            <div class="space-y-3">
+                                <div class="flex flex-wrap gap-2">
+                                    <button type="button" @click="menuCategoryFilter = ''"
+                                        :class="menuCategoryFilter === '' ? 'bg-brand-600 text-white shadow-md border-brand-600' : 'bg-white text-gray-600 border-gray-200 hover:border-brand-300'"
+                                        class="px-4 py-2 rounded-full border text-xs font-semibold transition">
+                                        Все разделы
+                                    </button>
+                                </div>
+                                <div>
+                                    <p class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">Кухня</p>
+                                    <div class="flex flex-wrap gap-2">
+                                        <template x-for="cat in menuCategoriesKitchenList" :key="'mk-' + cat">
+                                            <button type="button" @click="menuCategoryFilter = cat"
+                                                :class="menuCategoryFilter === cat ? 'bg-brand-600 text-white shadow-md border-brand-600' : 'bg-white text-gray-600 border-gray-200 hover:border-brand-300'"
+                                                class="px-4 py-2 rounded-full border text-xs font-semibold transition inline-flex items-center">
+                                                <span x-text="cat"></span>
+                                                <span class="ml-1.5 opacity-50 tabular-nums text-[10px]" x-text="getMenuCategoryCount(cat)"></span>
+                                            </button>
+                                        </template>
+                                    </div>
+                                </div>
+                                <div x-show="menuCategoriesBarList.length > 0">
+                                    <p class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">Бар и напитки</p>
+                                    <div class="flex flex-wrap gap-2">
+                                        <template x-for="cat in menuCategoriesBarList" :key="'mb-' + cat">
+                                            <button type="button" @click="menuCategoryFilter = cat"
+                                                :class="menuCategoryFilter === cat ? 'bg-brand-600 text-white shadow-md border-brand-600' : 'bg-white text-gray-600 border-gray-200 hover:border-brand-300'"
+                                                class="px-4 py-2 rounded-full border text-xs font-semibold transition inline-flex items-center">
+                                                <span x-text="cat"></span>
+                                                <span class="ml-1.5 opacity-50 tabular-nums text-[10px]" x-text="getMenuCategoryCount(cat)"></span>
+                                            </button>
+                                        </template>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+                        <template x-if="menuCategories.length > 0 && menuCategories.length <= 20">
+                            <div class="flex flex-wrap gap-2">
+                                <button type="button" @click="menuCategoryFilter = ''"
+                                    :class="menuCategoryFilter === '' ? 'bg-brand-600 text-white shadow-md border-brand-600' : 'bg-white text-gray-600 border-gray-200 hover:border-brand-300'"
+                                    class="px-4 py-2 rounded-full border text-xs font-semibold transition">
+                                    Все разделы
+                                </button>
+                                <template x-for="cat in menuCategories" :key="cat">
+                                    <button type="button" @click="menuCategoryFilter = cat"
+                                        :class="menuCategoryFilter === cat ? 'bg-brand-600 text-white shadow-md border-brand-600' : 'bg-white text-gray-600 border-gray-200 hover:border-brand-300'"
+                                        class="px-4 py-2 rounded-full border text-xs font-semibold transition inline-flex items-center">
+                                        <span x-text="cat"></span>
+                                        <span class="ml-1.5 opacity-50 tabular-nums text-[10px]" x-text="getMenuCategoryCount(cat)"></span>
+                                    </button>
+                                </template>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                <p class="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-4 py-2 mb-6">
+                    При <strong>первом запуске</strong> сервера пустая таблица меню заполняется встроенным каталогом автоматически.
+                    Позиции можно <strong>редактировать здесь</strong> («Изменить», стоп-лист одним кликом). Синхронизация <strong>iiko</strong> при настроенном API перезапишет номенклатуру из облака.
+                    Цены как в меню ресторана; обслуживание 10% — отдельно.
+                </p>
+
+                <div x-show="menuItems.length === 0" class="text-center py-20 text-gray-400">
+                    <div class="text-5xl mb-3">&#x1F372;</div>
+                    <div class="text-lg max-w-md mx-auto">Меню пусто. Нажмите <strong>«Добавить позицию»</strong> или перезапустите сервер — при пустой БД каталог подгрузится сам.</div>
+                                </div>
+
+                <div x-show="menuItems.length > 0 && menuFilteredItems.length === 0" class="text-center py-20 text-gray-400">
+                    <div class="text-4xl mb-3">&#x1F50D;</div>
+                    <div class="text-lg">Ничего не найдено</div>
+                    <button type="button" @click="menuSearchQuery = ''; menuCategoryFilter = ''; menuStockFilter = 'all'" class="mt-3 text-sm text-brand-600 font-medium hover:underline">Сбросить фильтры</button>
+                </div>
+
+                <template x-for="group in menuDisplayGroups" :key="group.title">
+                    <div class="mb-12 last:mb-4">
+                        <h3 class="text-base font-bold text-gray-900 mb-4 flex items-center gap-3" x-show="!menuCategoryFilter">
+                            <span class="w-1.5 h-9 bg-gradient-to-b from-brand-500 to-brand-700 rounded-full shrink-0"></span>
+                            <span x-text="group.title"></span>
+                            <span class="text-sm font-normal text-gray-400" x-text="'· ' + group.items.length + ' шт.'"></span>
+                        </h3>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                            <template x-for="item in group.items" :key="item.id">
+                                <div class="bg-white rounded-2xl border p-4 hover:border-brand-200 hover:shadow-md transition flex flex-col min-h-[120px] group"
+                                    :class="menuBulkIsSelected(item.id) ? 'ring-2 ring-brand-500 border-brand-200 shadow-md' : 'border-gray-100'">
+                                    <div class="flex justify-between items-start gap-2 mb-2">
+                                        <div class="flex items-center gap-2 min-w-0 flex-1">
+                                            <label x-show="menuBulkMode" class="shrink-0 cursor-pointer flex items-center pt-0.5" @click.stop>
+                                                <input type="checkbox" class="rounded border-gray-300 text-brand-600 focus:ring-brand-500 w-4 h-4"
+                                                    :checked="menuBulkIsSelected(item.id)"
+                                                    @change="menuBulkToggleId(item.id)">
+                                            </label>
+                                            <button type="button" @click="toggleMenuAvailability(item)"
+                                                title="Нажмите, чтобы переключить наличие (без открытия формы)"
+                                                class="text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-md transition shrink-0"
+                                                :class="item.is_available ? 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100' : 'text-red-700 bg-red-50 hover:bg-red-100'"
+                                                x-text="item.is_available ? 'В наличии' : 'Стоп'"></button>
+                                        </div>
+                                        <span class="text-lg font-extrabold text-brand-700 tabular-nums shrink-0" x-text="Number(item.price).toLocaleString('ru-RU') + ' &#8376;'"></span>
+                                    </div>
+                                    <div class="font-semibold text-gray-900 text-sm leading-snug group-hover:text-brand-800 transition flex-1" x-text="item.name"></div>
+                                    <div x-show="item.description" class="text-xs text-gray-500 mt-2 line-clamp-2 leading-relaxed" x-text="item.description"></div>
+                                    <div x-show="menuCategoryFilter" class="text-[10px] text-brand-500 font-medium mt-2 uppercase tracking-wide" x-text="item.category"></div>
+                                    <div class="mt-3 pt-3 border-t border-gray-100 flex gap-2">
+                                        <button type="button" @click="openMenuEdit(item)"
+                                            class="text-xs font-semibold text-brand-600 hover:text-brand-800">Изменить</button>
+                            </div>
+                        </div>
+                    </template>
+                        </div>
+                    </div>
+                </template>
+
+                <!-- Групповые действия: стоп / в продажу (фикс. панель над контентом main) -->
+                <div
+                    x-show="menuBulkSelectedIds.length > 0"
+                    x-cloak
+                    class="fixed bottom-0 left-64 right-0 z-[35] border-t border-white/10 bg-slate-900/95 text-white backdrop-blur-md px-6 md:px-8 py-3.5 flex flex-wrap items-center justify-between gap-3 shadow-[0_-8px_30px_rgba(0,0,0,0.15)]"
+                >
+                    <div class="text-sm font-medium">
+                        Выбрано: <span class="tabular-nums font-bold text-brand-300" x-text="menuBulkSelectedIds.length"></span>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <button type="button" @click="menuBulkApplyAvailability(false)" :disabled="menuBulkSaving"
+                            class="px-4 py-2 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-500 disabled:opacity-50 transition">В стоп</button>
+                        <button type="button" @click="menuBulkApplyAvailability(true)" :disabled="menuBulkSaving"
+                            class="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 transition">В продажу</button>
+                        <button type="button" @click="menuBulkClearSelection()" :disabled="menuBulkSaving"
+                            class="px-4 py-2 rounded-xl text-xs font-semibold bg-white/10 hover:bg-white/20 disabled:opacity-50">Снять выбор</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Модальное окно: редактирование / новая позиция меню -->
+            <div x-show="menuEditOpen" x-cloak x-transition.opacity class="fixed inset-0 z-[80] flex items-center justify-center p-4"
+                @keydown.escape.window="closeMenuEdit()">
+                <div class="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" @click="closeMenuEdit()"></div>
+                <div class="relative bg-white rounded-2xl shadow-xl border border-gray-100 w-full max-w-lg max-h-[90vh] overflow-y-auto p-6" @click.stop>
+                    <h3 class="text-lg font-bold text-gray-900 mb-1" x-text="menuEditForm.id != null ? 'Редактирование позиции' : 'Новая позиция'"></h3>
+                    <p class="text-xs text-gray-500 mb-4">Изменения сразу видны боту при следующем запросе меню.</p>
+                    <div class="space-y-3">
+                        <div>
+                            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Название</label>
+                            <input type="text" x-model="menuEditForm.name"
+                                class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500" placeholder="Например, Плов праздничный">
+                        </div>
+                        <div>
+                            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Раздел</label>
+                            <input type="text" x-model="menuEditForm.category" list="menu-category-suggestions"
+                                class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500" placeholder="Горячие блюда">
+                            <datalist id="menu-category-suggestions">
+                                <template x-for="cat in menuCategories" :key="cat">
+                                    <option :value="cat"></option>
+                                </template>
+                            </datalist>
+                        </div>
+                        <div>
+                            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Цена (&#8376;)</label>
+                            <input type="number" min="0" step="1" x-model.number="menuEditForm.price"
+                                class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                        </div>
+                        <div>
+                            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Описание</label>
+                            <textarea x-model="menuEditForm.description" rows="3"
+                                class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 resize-y" placeholder="Состав, порция…"></textarea>
+                        </div>
+                        <div>
+                            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Фото (URL, необязательно)</label>
+                            <input type="url" x-model="menuEditForm.image_url"
+                                class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500" placeholder="https://…">
+                        </div>
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" x-model="menuEditForm.is_available" class="rounded border-gray-300 text-brand-600 focus:ring-brand-500">
+                            <span class="text-sm text-gray-700">В наличии (не в стоп-листе)</span>
+                        </label>
+                    </div>
+                    <div class="mt-6 flex flex-wrap gap-2 justify-end">
+                        <button type="button" @click="closeMenuEdit()" :disabled="menuEditSaving"
+                            class="px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-xl disabled:opacity-50">Отмена</button>
+                        <button type="button" x-show="menuEditForm.id != null" @click="deleteMenuItemFromModal()"
+                            :disabled="menuEditSaving"
+                            class="px-4 py-2 text-sm font-semibold text-red-600 hover:bg-red-50 rounded-xl disabled:opacity-50">Удалить</button>
+                        <button type="button" @click="saveMenuItem()"
+                            :disabled="menuEditSaving || !String(menuEditForm.name || '').trim()"
+                            class="px-5 py-2 text-sm font-semibold bg-brand-600 text-white rounded-xl hover:bg-brand-700 disabled:opacity-40 shadow-sm">
+                            <span x-show="!menuEditSaving">Сохранить</span>
+                            <span x-show="menuEditSaving">Сохранение…</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ========== ТЕСТ БОТА ========== -->
+            <div x-show="currentTab === 'test'" x-cloak class="fade-in">
+                <div class="max-w-2xl mx-auto">
+                    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                        <div class="bg-emerald-600 px-5 py-3 flex items-center gap-3">
+                            <div class="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-white font-bold text-sm">R</div>
+                            <div class="text-white">
+                                <div class="font-medium text-sm">RestoMind Bot</div>
+                                <div class="text-xs text-emerald-200">Тестовый режим</div>
+                            </div>
+                        </div>
+
+                        <div class="p-5 max-h-[400px] overflow-y-auto space-y-3" id="testChatArea">
+                            <template x-for="(msg, idx) in testMessages" :key="idx">
+                                <div :class="msg.role === 'user' ? 'justify-end' : 'justify-start'" class="flex">
+                                    <div :class="msg.role === 'user'
+                                        ? 'bg-emerald-500 text-white rounded-2xl rounded-br-md'
+                                        : 'bg-gray-100 text-gray-800 rounded-2xl rounded-bl-md'"
+                                        class="max-w-[75%] px-4 py-2.5 text-sm whitespace-pre-line"
+                                    >
+                                        <div x-text="msg.text"></div>
+                                    </div>
+                                </div>
+                            </template>
+                            <div x-show="testLoading" class="flex justify-start">
+                                <div class="bg-gray-100 rounded-2xl rounded-bl-md px-4 py-3">
+                                    <div class="flex gap-1">
+                                        <span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></span>
+                                        <span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0.1s"></span>
+                                        <span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0.2s"></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="border-t border-gray-100 px-4 py-3 flex gap-3">
+                            <input
+                                x-model="testInput"
+                                type="text"
+                                placeholder="Напишите сообщение..."
+                                class="flex-1 border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                                @keydown.enter="sendTestMessage()"
+                                :disabled="testLoading"
+                            >
+                            <button
+                                @click="sendTestMessage()"
+                                :disabled="testLoading || !testInput.trim()"
+                                class="px-5 py-2.5 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 transition font-medium text-sm disabled:opacity-50"
+                            >
+                                &#x27A4;
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="mt-4 bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-700">
+                        <strong>Как это работает:</strong> Сообщения отправляются напрямую в Gemini AI через ваш бэкенд.
+                        Бот определит намерение (заказ, бронь, вопрос) и ответит структурированно.
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Модалка деталей заказа -->
+        <!-- Модалка: безопасное удаление демо-данных -->
+        <div x-show="showDemoDeleteModal" x-cloak x-transition.opacity
+            class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
+            @click.self="closeDemoDeleteModal()">
+            <div class="bg-white rounded-2xl shadow-2xl border border-gray-100 w-full max-w-md overflow-hidden fade-in" @click.stop role="dialog" aria-modal="true" aria-labelledby="demo-delete-title">
+                <div class="h-1.5 bg-gradient-to-r from-red-500 via-rose-500 to-orange-400"></div>
+                <div class="p-6 md:p-8">
+                    <div class="flex items-start gap-4 mb-5">
+                        <div class="w-12 h-12 rounded-2xl bg-red-50 border border-red-100 flex items-center justify-center shrink-0">
+                            <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                        </div>
+                        <div class="min-w-0">
+                            <h2 id="demo-delete-title" class="text-lg font-bold text-gray-900">Удалить демо-данные?</h2>
+                            <p class="text-sm text-gray-500 mt-1">Будут безвозвратно удалены только записи с префиксом телефона <span class="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded">demo7700…</span></p>
+                        </div>
+                    </div>
+                    <ul class="text-sm text-gray-600 space-y-2 mb-6 pl-1 border-l-2 border-gray-200 ml-1">
+                        <li class="pl-3">Демо-пользователи и их заказы</li>
+                        <li class="pl-3">Бронирования и переписки в БД</li>
+                        <li class="pl-3">Кэш диалогов в Redis / памяти для этих номеров</li>
+                    </ul>
+                    <p class="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 mb-5">
+                        Меню ресторана и реальные клиенты <strong>не затрагиваются</strong>.
+                    </p>
+                    <label class="flex items-start gap-3 cursor-pointer group mb-2">
+                        <input type="checkbox" x-model="demoDeleteAck" class="mt-1 rounded border-gray-300 text-red-600 focus:ring-red-500">
+                        <span class="text-sm text-gray-700 group-hover:text-gray-900">Я понимаю, что эти данные нельзя восстановить</span>
+                    </label>
+                    <p x-show="demoDeleteError" x-cloak class="text-sm text-red-600 mt-3" x-text="demoDeleteError"></p>
+                    <div class="flex flex-col-reverse sm:flex-row gap-3 mt-8">
+                        <button type="button" @click="closeDemoDeleteModal()" :disabled="demoActionLoading"
+                            class="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 font-semibold text-sm hover:bg-gray-50 transition disabled:opacity-50">
+                            Отмена
+                        </button>
+                        <button type="button" @click="confirmDemoDelete()"
+                            :disabled="demoActionLoading || !demoDeleteAck"
+                            class="flex-1 py-3 rounded-xl bg-red-600 text-white font-semibold text-sm hover:bg-red-700 shadow-lg shadow-red-600/25 transition disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+                            <span x-show="!demoActionLoading">Удалить навсегда</span>
+                            <span x-show="demoActionLoading" x-cloak class="flex items-center gap-2">
+                                <span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                                Удаляем…
+                            </span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Тост после удаления демо -->
+        <div x-show="demoToastMessage" x-cloak x-transition
+            class="fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] px-5 py-3 rounded-xl bg-slate-900 text-white text-sm font-medium shadow-xl shadow-slate-900/20 max-w-[90vw] text-center"
+            x-text="demoToastMessage"></div>
+
+        <div x-show="showOrderModal" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/40" @click.self="showOrderModal = false">
+            <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 fade-in" @click.stop>
+                <div class="flex items-center justify-between mb-5">
+                    <h3 class="text-lg font-bold" x-text="'Заказ #' + selectedOrder?.id"></h3>
+                    <button @click="showOrderModal = false" class="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+                </div>
+                <template x-if="selectedOrder?.items?.items">
+                    <div class="space-y-3">
+                        <template x-for="(item, idx) in selectedOrder.items.items" :key="idx">
+                            <div class="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3">
+                                <div>
+                                    <div class="font-medium" x-text="item.name"></div>
+                                    <div x-show="item.exclude_ingredients?.length" class="text-xs text-red-500 mt-0.5" x-text="'Без: ' + (item.exclude_ingredients || []).join(', ')"></div>
+                                </div>
+                                <div class="text-right">
+                                    <div class="font-semibold" x-text="Number(item.item_total).toLocaleString('ru-RU') + ' &#8376;'"></div>
+                                    <div class="text-xs text-gray-400" x-text="item.quantity + ' x ' + Number(item.price_per_unit).toLocaleString('ru-RU') + ' &#8376;'"></div>
+                                </div>
+                            </div>
+                        </template>
+                        <div class="flex justify-between items-center pt-3 border-t border-gray-200">
+                            <span class="font-semibold text-gray-600">Итого:</span>
+                            <span class="text-xl font-bold text-brand-600" x-text="Number(selectedOrder.total_price).toLocaleString('ru-RU') + ' &#8376;'"></span>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </div>
+    </main>
+
+</div><!-- /authenticated -->
+
+<script>
+function adminApp() {
+    return {
+        // Авторизация
+        authenticated: false,
+        loginUsername: '',
+        loginPassword: '',
+        loginError: '',
+        loginLoading: false,
+        wsToken: '',
+        hasDemoData: false,
+        demoActionLoading: false,
+        showDemoDeleteModal: false,
+        demoDeleteAck: false,
+        demoDeleteError: '',
+        demoToastMessage: '',
+
+        currentTab: 'dashboard',
+        loading: false,
+        navItems: [
+            { id: 'dashboard', label: 'Дашборд', desc: 'Общая статистика и последние заказы',
+              icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25A2.25 2.25 0 018.25 10.5H6A2.25 2.25 0 013.75 8.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z"/></svg>' },
+            { id: 'analytics', label: 'Аналитика', desc: 'Выручка, средний чек, динамика продаж',
+              icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/></svg>' },
+            { id: 'orders', label: 'Заказы', desc: 'По этапам (черновик → подтверждён → кухня) или общий список',
+              icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z"/></svg>' },
+            { id: 'bookings', label: 'Бронирования', desc: 'Столики и резервации',
+              icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/></svg>' },
+            { id: 'chats', label: 'Диалоги', desc: 'Live-чаты с клиентами',
+              icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 01-.825-.242m9.345-8.334a21.05 21.05 0 00-1.889-2.403 19.7 19.7 0 00-1.6-1.562c-.642-.522-1.397-.957-2.23-1.25C16.247 1.872 14.747 1.5 12 1.5c-2.747 0-4.247.372-5.63.99-.833.293-1.588.728-2.23 1.25-.563.459-1.082 1-1.6 1.562A21.05 21.05 0 003.75 8.511"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5.25 8.511c-.884.284-1.5 1.128-1.5 2.097v4.286c0 1.136.847 2.1 1.98 2.193.34.027.68.052 1.02.072v3.091l3-3a11.63 11.63 0 014.02-.163 2.115 2.115 0 001.825-.242M9.378 5.378A21.05 21.05 0 0018.72 3.728"/></svg>' },
+            { id: 'menu', label: 'Меню', desc: 'Позиции меню ресторана',
+              icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8.25v-1.5m0 1.5c-1.355 0-2.697.056-4.024.166C6.845 8.51 6 9.473 6 10.608v2.513m6-4.871c1.355 0 2.697.055 4.024.165C17.155 8.51 18 9.473 18 10.608v2.513m-3 4.73v-1.59c0-.532-.21-1.042-.586-1.418L12 13.5m-3 4.73c.55.47 1.27.73 2 .73h6c.73 0 1.45-.26 2-.73m-8-4.73V10.6c0-1.12.856-2.08 2.09-2.19.64-.09 1.29-.14 1.91-.14m5 6.37v1.59c0 1.632-.875 3.11-2.25 3.89"/></svg>' },
+            { id: 'test', label: 'Тест бота', desc: 'Протестируйте AI-оператора вживую',
+              icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25zm.75-12h9v9h-9v-9z"/></svg>' },
+        ],
+
+        // WebSocket
+        ws: null,
+        wsConnected: false,
+        wsReconnectDelay: 1000,
+
+        // Алерты
+        alertQueue: [],
+
+        // Дашборд
+        dashStats: {},
+        orders: [],
+        bookings: [],
+        menuItems: [],
+
+        // Заказы
+        ordersView: 'kanban',
+        orderFilter: '',
+        showOrderModal: false,
+        selectedOrder: null,
+
+        // Аналитика
+        analyticsPeriod: 'week',
+        analyticsCustom: false,
+        analyticsFrom: '',
+        analyticsTo: '',
+        /** График на вкладке Аналитика: обе метрики / только выручка / только заказы */
+        analyticsChartMetric: 'both',
+        analyticsData: {},
+        revenueChart: null,
+        /** Мини-график на дашборде (не путать с canvas Аналитики #revenueChart) */
+        dashboardMiniChart: null,
+        dashMiniMetric: 'revenue',
+
+        // Живые чаты
+        chatList: [],
+        chatSearch: '',
+        chatPhone: '',
+        activeChatPhone: '',
+        activeChatState: 'chatting',
+        chatMessages: [],
+        operatorInput: '',
+        unreadChats: 0,
+        /** Кабина оператора: сводка по клиенту */
+        customerSummaryLoading: false,
+        customerSummary: {
+            user_exists: false,
+            phone: '',
+            name: null,
+            total_orders: 0,
+            revenue_orders: 0,
+            total_spent: 0,
+            avg_check: 0,
+            is_blocked: false,
+            operator_note: '',
+        },
+        cannedResponses: [
+            { label: 'Адрес', text: 'Подскажите, пожалуйста: забор самовывозом или доставка? Адрес ресторана: [уточните].' },
+            { label: 'Задержка', text: 'Приносим извинения — сейчас высокая загрузка. Время ожидания может увеличиться на 15–20 минут. Спасибо за понимание!' },
+            { label: 'Меню', text: 'Сейчас пришлю актуальное меню. Позиции из стоп-листа сразу отмечу.' },
+            { label: 'Оплата', text: 'Оплата при получении — картой или наличными, как вам удобнее.' },
+            { label: 'Менеджер', text: 'Подключаю менеджера — ответит в ближайшие минуты.' },
+        ],
+
+        // Меню
+        menuCategoryFilter: '',
+        menuCategories: [],
+        menuSearchQuery: '',
+        menuStockFilter: 'all',
+        /** Разделы «бар / напитки» для группировки чипов при >20 категорий */
+        menuBarCategoryNames: [
+            'Чайханчики', 'Напитки', 'Лимонады', 'Кофе', 'Смузи', 'Фреши', 'Добавки', 'Молочные коктейли',
+        ],
+        menuBulkMode: false,
+        menuBulkSelectedIds: [],
+        menuBulkSaving: false,
+        /** Ошибка загрузки GET /api/admin/menu (401, сеть и т.д.) */
+        menuLoadError: '',
+        menuEditOpen: false,
+        menuEditSaving: false,
+        menuEditForm: {
+            id: null,
+            name: '',
+            category: '',
+            description: '',
+            price: 0,
+            is_available: true,
+            image_url: '',
+        },
+        /** Порядок разделов как в бумажном меню */
+        menuCategoryOrder: [
+            'Салаты', 'Выпечка', 'Соусы', 'Блюда на компанию', 'Традиционная кухня', 'Первые блюда',
+            'Пицца', 'Паста', 'Горячие блюда', 'Лагман', 'Шашлык', 'Гарнир',
+            'Чайханчики', 'Напитки', 'Лимонады', 'Кофе', 'Смузи', 'Фреши', 'Добавки', 'Молочные коктейли',
+        ],
+
+        // Тест бота
+        testMessages: [],
+        testInput: '',
+        testLoading: false,
+
+        get menuFilteredItems() {
+            let list = this.menuItems;
+            if (this.menuCategoryFilter) {
+                list = list.filter(i => i.category === this.menuCategoryFilter);
+            }
+            const q = (this.menuSearchQuery || '').trim().toLowerCase();
+            if (q) {
+                list = list.filter(i =>
+                    (i.name && i.name.toLowerCase().includes(q)) ||
+                    (i.description && String(i.description).toLowerCase().includes(q)) ||
+                    (i.category && i.category.toLowerCase().includes(q)),
+                );
+            }
+            if (this.menuStockFilter === 'in') list = list.filter(i => i.is_available);
+            if (this.menuStockFilter === 'out') list = list.filter(i => !i.is_available);
+            return list;
+        },
+
+        get menuDisplayGroups() {
+            const items = this.menuFilteredItems;
+            if (this.menuCategoryFilter) {
+                return [{ title: this.menuCategoryFilter, items }];
+            }
+            const byCat = {};
+            for (const i of items) {
+                const c = (i.category && String(i.category).trim()) ? String(i.category).trim() : 'Прочее';
+                if (!byCat[c]) byCat[c] = [];
+                byCat[c].push(i);
+            }
+            const keysWithItems = Object.keys(byCat).filter((c) => byCat[c].length);
+            if (keysWithItems.length === 0) return [];
+            /** Сначала порядок из меню, затем остальные ключи (в т.ч. «Прочее») — иначе позиции без category пропадали с экрана */
+            const ordered = [];
+            const seen = new Set();
+            for (const c of this.menuCategories) {
+                if (byCat[c]?.length && !seen.has(c)) {
+                    ordered.push(c);
+                    seen.add(c);
+                }
+            }
+            for (const c of keysWithItems.sort((a, b) => a.localeCompare(b, 'ru'))) {
+                if (!seen.has(c)) {
+                    ordered.push(c);
+                    seen.add(c);
+                }
+            }
+            return ordered.map((c) => ({ title: c, items: byCat[c] }));
+        },
+
+        get menuStopCount() {
+            return this.menuItems.filter((i) => !i.is_available).length;
+        },
+
+        get menuCategoriesKitchenList() {
+            const bar = this.menuBarCategoryNames;
+            return this.menuCategories.filter((c) => !bar.includes(c));
+        },
+
+        get menuCategoriesBarList() {
+            const bar = this.menuBarCategoryNames;
+            return this.menuCategories.filter((c) => bar.includes(c));
+        },
+
+        get filteredChatList() {
+            if (!this.chatSearch.trim()) return this.chatList;
+            const q = this.chatSearch.trim().toLowerCase();
+            return this.chatList.filter(c => c.phone.toLowerCase().includes(q));
+        },
+
+        get kanbanDraft() {
+            return this.orders.filter(o => o.status === 'draft');
+        },
+        get kanbanConfirmed() {
+            return this.orders.filter(o => o.status === 'confirmed');
+        },
+        get kanbanSent() {
+            return this.orders.filter(o => o.status === 'sent_to_iiko');
+        },
+
+        async init() {
+            const today = new Date();
+            const weekAgo = new Date(today);
+            weekAgo.setDate(weekAgo.getDate() - 7);
+            this.analyticsTo = today.toISOString().slice(0, 10);
+            this.analyticsFrom = weekAgo.toISOString().slice(0, 10);
+
+            await this.checkSession();
+        },
+
+        /**
+         * Chart.js: при x-show вкладка была display:none — canvas 0×0. После показа вызываем resize().
+         * См. документацию: контейнер должен иметь ненулевой размер, иначе нужен ручной resize().
+         */
+        _resizeVisibleCharts(tab) {
+            try {
+                if (tab === 'dashboard' && this.dashboardMiniChart) {
+                    this.dashboardMiniChart.resize();
+                    this.dashboardMiniChart.update('none');
+                }
+                if (tab === 'analytics' && this.revenueChart) {
+                    this.revenueChart.resize();
+                    this.revenueChart.update('none');
+                }
+            } catch (e) {
+                console.warn('Chart resize', e);
+            }
+        },
+
+        _attachChartLayoutFix(chart, parentEl) {
+            if (!chart || !parentEl) return;
+            const fix = () => {
+                try {
+                    chart.resize();
+                    chart.update('none');
+                } catch (e) { /* ignore */ }
+            };
+            fix();
+            [40, 120, 400].forEach((ms) => setTimeout(fix, ms));
+            if (typeof ResizeObserver !== 'undefined') {
+                const ro = new ResizeObserver(() => {
+                    const r = parentEl.getBoundingClientRect();
+                    if (r.width > 2 && r.height > 2) fix();
+                });
+                ro.observe(parentEl);
+                setTimeout(() => {
+                    try { ro.disconnect(); } catch (e) { /* ignore */ }
+                    fix();
+                }, 1500);
+            }
+        },
+
+        async apiFetch(url, options = {}) {
+            return fetch(url, { credentials: 'include', ...options });
+        },
+
+        async checkSession() {
+            try {
+                const res = await this.apiFetch('/api/admin/auth/me');
+                if (res.ok) {
+                    const data = await res.json();
+                    this.authenticated = true;
+                    this.wsToken = data.ws_token || '';
+                    await this.refreshDemoStatus();
+                    this.connectWebSocket();
+            await this.loadTabData();
+                    await this.loadChatList();
+                } else {
+                    this.authenticated = false;
+                    this.wsToken = '';
+                }
+            } catch {
+                this.authenticated = false;
+                this.wsToken = '';
+            }
+        },
+
+        async submitLogin() {
+            this.loginError = '';
+            this.loginLoading = true;
+            try {
+                const res = await this.apiFetch('/api/admin/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        username: this.loginUsername.trim(),
+                        password: this.loginPassword,
+                    }),
+                });
+                let data = {};
+                try { data = await res.json(); } catch { /* empty */ }
+                if (!res.ok) {
+                    this.loginError = typeof data.detail === 'string' ? data.detail : 'Неверный логин или пароль';
+                    return;
+                }
+                this.authenticated = true;
+                this.wsToken = data.ws_token || '';
+                this.loginPassword = '';
+                await this.refreshDemoStatus();
+                this.connectWebSocket();
+                await this.loadTabData();
+                await this.loadChatList();
+            } catch {
+                this.loginError = 'Не удалось связаться с сервером';
+            } finally {
+                this.loginLoading = false;
+            }
+        },
+
+        async logoutAdmin() {
+            try {
+                if (this.ws) {
+                    this.ws.close();
+                    this.ws = null;
+                }
+                await this.apiFetch('/api/admin/auth/logout', { method: 'POST' });
+            } catch { /* ignore */ }
+            this.authenticated = false;
+            this.wsToken = '';
+            this.wsConnected = false;
+            this.hasDemoData = false;
+        },
+
+        async refreshDemoStatus() {
+            try {
+                const res = await this.apiFetch('/api/admin/demo/status');
+                if (res.ok) {
+                    const d = await res.json();
+                    this.hasDemoData = !!d.has_demo;
+                }
+            } catch { /* ignore */ }
+        },
+
+        async seedDemoData() {
+            this.demoActionLoading = true;
+            try {
+                const res = await this.apiFetch('/api/admin/demo/seed', { method: 'POST' });
+                const data = await res.json().catch(() => ({}));
+                if (res.ok) {
+                    if (data.partial && data.message) {
+                        this.demoToastMessage = data.message;
+                        setTimeout(() => { this.demoToastMessage = ''; }, 5000);
+                    } else {
+                        const m = data.menu_items_added ? `Меню: +${data.menu_items_added} поз.` : '';
+                        const u = data.users_created != null ? `Пользователей: ${data.users_created}. ` : '';
+                        const o = data.orders_added != null ? `Заказов: ${data.orders_added}. ` : '';
+                        this.demoToastMessage = (u + o + m).trim() || 'Демо-данные загружены';
+                        setTimeout(() => { this.demoToastMessage = ''; }, 5000);
+                    }
+                    await this.refreshDemoStatus();
+                    await this.loadTabData();
+                    await this.loadDashStats();
+                } else {
+                    const msg = typeof data.detail === 'string' ? data.detail : 'Не удалось загрузить демо';
+                    alert(msg);
+                }
+            } catch {
+                alert('Ошибка сети');
+            } finally {
+                this.demoActionLoading = false;
+            }
+        },
+
+        openDemoDeleteModal() {
+            this.demoDeleteAck = false;
+            this.demoDeleteError = '';
+            this.showDemoDeleteModal = true;
+        },
+
+        closeDemoDeleteModal() {
+            if (this.demoActionLoading) return;
+            this.showDemoDeleteModal = false;
+            this.demoDeleteError = '';
+        },
+
+        async confirmDemoDelete() {
+            if (!this.demoDeleteAck) return;
+            this.demoDeleteError = '';
+            this.demoActionLoading = true;
+            try {
+                const res = await this.apiFetch('/api/admin/demo', { method: 'DELETE' });
+                const data = await res.json().catch(() => ({}));
+                if (res.ok) {
+                    const u = data.users_deleted ?? 0;
+                    const parts = [];
+                    if (u) parts.push(`пользователей: ${u}`);
+                    if (data.orders_deleted) parts.push(`заказов: ${data.orders_deleted}`);
+                    if (data.bookings_deleted) parts.push(`броней: ${data.bookings_deleted}`);
+                    this.demoToastMessage = parts.length
+                        ? `Демо удалено (${parts.join(', ')})`
+                        : 'Демо-данные удалены';
+                    setTimeout(() => { this.demoToastMessage = ''; }, 4500);
+                    this.showDemoDeleteModal = false;
+                    await this.refreshDemoStatus();
+                    await this.loadTabData();
+                    if (this.currentTab === 'dashboard') {
+                        await this.loadDashStats();
+                    }
+                } else {
+                    this.demoDeleteError = typeof data.detail === 'string' ? data.detail : 'Не удалось удалить демо-данные';
+                }
+            } catch {
+                this.demoDeleteError = 'Ошибка сети. Проверьте соединение и попробуйте снова.';
+            } finally {
+                this.demoActionLoading = false;
+            }
+        },
+
+        // ─── WebSocket ────────────────────────────────
+        connectWebSocket() {
+            if (!this.authenticated || !this.wsToken) return;
+            const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+            const url = `${proto}://${location.host}/api/admin/ws?token=${encodeURIComponent(this.wsToken)}`;
+
+            try { this.ws = new WebSocket(url); } catch { return this.scheduleReconnect(); }
+
+            this.ws.onopen = () => {
+                this.wsConnected = true;
+                this.wsReconnectDelay = 1000;
+                console.log('[WS] Connected');
+            };
+
+            this.ws.onclose = () => {
+                this.wsConnected = false;
+                console.log('[WS] Disconnected');
+                this.scheduleReconnect();
+            };
+
+            this.ws.onerror = () => {
+                this.wsConnected = false;
+            };
+
+            this.ws.onmessage = (event) => {
+                try {
+                    const msg = JSON.parse(event.data);
+                    this.handleWsEvent(msg);
+                } catch (e) { console.error('[WS] Parse error:', e); }
+            };
+        },
+
+        scheduleReconnect() {
+            setTimeout(() => {
+                if (!this.authenticated) return;
+                this.wsReconnectDelay = Math.min(this.wsReconnectDelay * 1.5, 15000);
+                this.connectWebSocket();
+            }, this.wsReconnectDelay);
+        },
+
+        handleWsEvent(msg) {
+            const { type, data } = msg;
+
+            if (type === 'new_message') {
+                this.onNewMessage(data);
+            } else if (type === 'order_updated') {
+                this.onOrderUpdated(data);
+            } else if (type === 'human_needed') {
+                this.onHumanNeeded(data);
+            } else if (type === 'state_changed') {
+                this.onStateChanged(data);
+            }
+        },
+
+        // ─── Event Handlers ──────────────────────────
+        onNewMessage(data) {
+            const chatIdx = this.chatList.findIndex(c => c.phone === data.phone);
+            if (chatIdx >= 0) {
+                this.chatList[chatIdx].lastMessage = data.content?.slice(0, 60) || '';
+                this.chatList[chatIdx].lastAt = new Date().toISOString();
+                if (data.phone !== this.activeChatPhone) {
+                    this.chatList[chatIdx].unread = true;
+                    this.unreadChats = this.chatList.filter(c => c.unread).length;
+                }
+                const item = this.chatList.splice(chatIdx, 1)[0];
+                this.chatList.unshift(item);
+            } else {
+                this.chatList.unshift({
+                    phone: data.phone,
+                    lastMessage: data.content?.slice(0, 60) || '',
+                    state: 'chatting',
+                    unread: data.phone !== this.activeChatPhone,
+                    lastAt: new Date().toISOString(),
+                });
+                this.unreadChats = this.chatList.filter(c => c.unread).length;
+            }
+
+            if (data.phone === this.activeChatPhone) {
+                this.chatMessages.push({
+                    id: data.id,
+                    role: data.role,
+                    content: data.content,
+                    created_at: new Date().toISOString(),
+                });
+                this.scrollChatToBottom();
+            }
+
+            // Звук входящего от клиента (если смотрим другой чат или вкладка в фоне)
+            if (data.role === 'user' && (data.phone !== this.activeChatPhone || document.hidden)) {
+                this.playChatPing();
+            }
+        },
+
+        onOrderUpdated(data) {
+            const idx = this.orders.findIndex(o => o.id === data.order_id);
+            if (idx >= 0) {
+                this.orders[idx].status = data.status;
+                if (data.total_price !== undefined) this.orders[idx].total_price = data.total_price;
+            } else {
+                this.orders.unshift({
+                    id: data.order_id,
+                    status: data.status,
+                    total_price: data.total_price || 0,
+                    items: data.items ? { items: data.items } : {},
+                    created_at: new Date().toISOString(),
+                });
+                this.playOrderPing();
+            }
+        },
+
+        onHumanNeeded(data) {
+            this.alertQueue.push({
+                phone: data.phone,
+                message: `Чат ${data.phone}: ${data.reason?.slice(0, 80) || 'Бот не может ответить'}`,
+            });
+            this.playAlertSound();
+        },
+
+        onStateChanged(data) {
+            const chatIdx = this.chatList.findIndex(c => c.phone === data.phone);
+            if (chatIdx >= 0) {
+                this.chatList[chatIdx].state = data.state;
+            }
+            if (data.phone === this.activeChatPhone) {
+                this.activeChatState = data.state;
+            }
+        },
+
+        // ─── Alerts ──────────────────────────────────
+        playAlertSound() {
+            try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.frequency.setValueAtTime(880, ctx.currentTime);
+                osc.frequency.setValueAtTime(660, ctx.currentTime + 0.15);
+                osc.frequency.setValueAtTime(880, ctx.currentTime + 0.3);
+                gain.gain.setValueAtTime(0.3, ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5);
+                osc.start(ctx.currentTime);
+                osc.stop(ctx.currentTime + 0.5);
+            } catch {}
+        },
+
+        /** Короткий сигнал: новое сообщение клиента (мягче, чем «бот зовёт»). */
+        playChatPing() {
+            try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(520, ctx.currentTime);
+                gain.gain.setValueAtTime(0.12, ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.12);
+                osc.start(ctx.currentTime);
+                osc.stop(ctx.currentTime + 0.12);
+            } catch {}
+        },
+
+        /** Новый заказ в ленте канбана. */
+        playOrderPing() {
+            try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(392, ctx.currentTime);
+                osc.frequency.setValueAtTime(523, ctx.currentTime + 0.08);
+                gain.gain.setValueAtTime(0.14, ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.22);
+                osc.start(ctx.currentTime);
+                osc.stop(ctx.currentTime + 0.22);
+            } catch {}
+        },
+
+        dismissAlert() {
+            this.alertQueue.shift();
+        },
+
+        openAlertChat(phone) {
+            if (!phone) return;
+            this.currentTab = 'chats';
+            this.selectChat(phone);
+            this.dismissAlert();
+            this.takeoverChat();
+        },
+
+        // ─── Live Chat ───────────────────────────────
+        async loadChatList() {
+            try {
+                const res = await this.apiFetch('/api/admin/orders?limit=200');
+                const data = await res.json();
+                const phones = new Set();
+                for (const o of (data.orders || [])) {
+                    if (o.user_id) phones.add(String(o.user_id));
+                }
+            } catch {}
+        },
+
+        async selectChat(phone) {
+            if (!phone?.trim()) return;
+            phone = phone.trim();
+            this.activeChatPhone = phone;
+            this.customerSummaryLoading = true;
+            this.customerSummary = {
+                user_exists: false,
+                phone,
+                name: null,
+                total_orders: 0,
+                revenue_orders: 0,
+                total_spent: 0,
+                avg_check: 0,
+                is_blocked: false,
+                operator_note: '',
+            };
+
+            const chatIdx = this.chatList.findIndex(c => c.phone === phone);
+            if (chatIdx >= 0) {
+                this.chatList[chatIdx].unread = false;
+                this.unreadChats = this.chatList.filter(c => c.unread).length;
+            } else {
+                this.chatList.unshift({ phone, lastMessage: '', state: 'chatting', unread: false });
+            }
+
+            try {
+                const stateRes = await this.apiFetch(`/api/admin/chats/${phone}/state`);
+                if (stateRes.ok) {
+                    const stateData = await stateRes.json();
+                    this.activeChatState = stateData.state;
+                    if (chatIdx >= 0) this.chatList[chatIdx].state = stateData.state;
+                }
+            } catch {}
+
+            try {
+                const res = await this.apiFetch(`/api/admin/chats/${phone}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    this.chatMessages = data.messages || [];
+                    const uix = this.chatList.findIndex(c => c.phone === phone);
+                    if (uix >= 0 && data.user_name) {
+                        this.chatList[uix].userName = data.user_name;
+                    }
+                } else {
+                    this.chatMessages = [];
+                }
+            } catch {
+                this.chatMessages = [];
+            }
+
+            this.scrollChatToBottom();
+            await this.loadCustomerSummary(phone);
+        },
+
+        async loadCustomerSummary(phone) {
+            if (!phone?.trim()) {
+                this.customerSummaryLoading = false;
+                return;
+            }
+            const key = phone.trim();
+            const enc = encodeURIComponent(key);
+            this.customerSummaryLoading = true;
+            try {
+                const res = await this.apiFetch(`/api/admin/customers/${enc}/summary`);
+                if (this.activeChatPhone?.trim() !== key) return;
+                if (res.ok) {
+                    const data = await res.json();
+                    this.customerSummary = {
+                        user_exists: !!data.user_exists,
+                        phone: data.phone || key,
+                        name: data.name ?? null,
+                        total_orders: data.total_orders ?? 0,
+                        revenue_orders: data.revenue_orders ?? 0,
+                        total_spent: data.total_spent ?? 0,
+                        avg_check: data.avg_check ?? 0,
+                        is_blocked: !!data.is_blocked,
+                        operator_note: data.operator_note ?? '',
+                    };
+                }
+            } catch (e) {
+                console.error('loadCustomerSummary', e);
+            } finally {
+                if (this.activeChatPhone?.trim() === key) {
+                    this.customerSummaryLoading = false;
+                }
+            }
+        },
+
+        async saveCustomerNote() {
+            const p = this.activeChatPhone?.trim();
+            if (!p || !this.customerSummary.user_exists) return;
+            try {
+                await this.apiFetch(`/api/admin/customers/${encodeURIComponent(p)}/note`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ note: this.customerSummary.operator_note || '' }),
+                });
+            } catch (e) {
+                console.error('saveCustomerNote', e);
+            }
+        },
+
+        applyCannedResponse(text) {
+            if (!text || this.chatIsBotActive()) return;
+            const cur = this.operatorInput || '';
+            this.operatorInput = cur.trim() ? `${cur.trim()}\n${text}` : text;
+        },
+
+        formatCustomerMoney(amount) {
+            const n = Number(amount);
+            if (!Number.isFinite(n)) return '—';
+            return new Intl.NumberFormat('ru-RU', {
+                style: 'currency',
+                currency: 'RUB',
+                maximumFractionDigits: 0,
+            }).format(n);
+        },
+
+        scrollChatToBottom() {
+            this.$nextTick(() => {
+                const area = document.getElementById('admin-chat-messages');
+                if (area) area.scrollTop = area.scrollHeight;
+            });
+        },
+
+        /** true — бот/ИИ ведёт диалог, поле ввода заблокировано */
+        chatIsBotActive() {
+            return this.activeChatState !== 'human_mode';
+        },
+
+        async toggleTakeover() {
+            if (this.activeChatState === 'human_mode') {
+                await this.releaseChat();
+            } else {
+                await this.takeoverChat();
+            }
+        },
+
+        handleOperatorEnter(e) {
+            if (e.shiftKey) return;
+            e.preventDefault();
+            this.sendOperatorMessage();
+        },
+
+        chatInitials(chat) {
+            const n = (chat && chat.userName) ? String(chat.userName).trim() : '';
+            if (n.length) return n.charAt(0).toUpperCase();
+            const p = (chat && chat.phone) ? String(chat.phone).replace(/\D/g, '') : '';
+            if (p.length >= 2) return p.slice(-2);
+            return '#';
+        },
+
+        activeChatInitials() {
+            const c = this.chatList.find(x => x.phone === this.activeChatPhone);
+            return this.chatInitials(c || { phone: this.activeChatPhone });
+        },
+
+        activeChatTitle() {
+            const c = this.chatList.find(x => x.phone === this.activeChatPhone);
+            return (c && c.userName) ? c.userName : this.activeChatPhone;
+        },
+
+        formatChatPreviewTime(iso) {
+            if (!iso) return '';
+            const d = new Date(iso);
+            if (Number.isNaN(d.getTime())) return '';
+            return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+        },
+
+        async takeoverChat() {
+            if (!this.activeChatPhone) return;
+            try {
+                await this.apiFetch(`/api/admin/chats/${this.activeChatPhone}/takeover`, { method: 'POST' });
+                this.activeChatState = 'human_mode';
+                const idx = this.chatList.findIndex(c => c.phone === this.activeChatPhone);
+                if (idx >= 0) this.chatList[idx].state = 'human_mode';
+            } catch {}
+        },
+
+        async releaseChat() {
+            if (!this.activeChatPhone) return;
+            try {
+                await this.apiFetch(`/api/admin/chats/${this.activeChatPhone}/release`, { method: 'POST' });
+                this.activeChatState = 'chatting';
+                const idx = this.chatList.findIndex(c => c.phone === this.activeChatPhone);
+                if (idx >= 0) this.chatList[idx].state = 'chatting';
+            } catch {}
+        },
+
+        async sendOperatorMessage() {
+            const text = this.operatorInput.trim();
+            if (!text || !this.activeChatPhone || this.chatIsBotActive()) return;
+            this.operatorInput = '';
+
+            try {
+                await this.apiFetch(`/api/admin/chats/${this.activeChatPhone}/send_message`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text }),
+                });
+                this.scrollChatToBottom();
+            } catch {}
+        },
+
+        // ─── Data Loading ────────────────────────────
+        async loadTabData() {
+            if (this.currentTab !== 'menu') {
+                this.menuBulkMode = false;
+                this.menuBulkSelectedIds = [];
+            }
+            this.loading = true;
+            try {
+                if (this.currentTab === 'dashboard') {
+                    await Promise.all([this.loadDashStats(), this.loadOrders()]);
+                } else if (this.currentTab === 'analytics') {
+                    await this.loadAnalytics();
+                } else if (this.currentTab === 'orders') {
+                    await this.loadOrders();
+                } else if (this.currentTab === 'bookings') {
+                    await this.loadBookings();
+                } else if (this.currentTab === 'menu') {
+                    await this.loadMenu();
+                }
+            } catch (e) { console.error(e); }
+            if (this.currentTab !== 'dashboard' && this.dashboardMiniChart) {
+                this.dashboardMiniChart.destroy();
+                this.dashboardMiniChart = null;
+            }
+            this.loading = false;
+            // Вкладка только что стала видимой — у контейнера появился размер; Chart.js иначе оставляет canvas 0×0 (x-show / display:none).
+            await this.$nextTick();
+            setTimeout(() => this._resizeVisibleCharts(this.currentTab), 150);
+        },
+
+        async loadDashStats() {
+            const res = await this.apiFetch('/api/admin/stats');
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                this.dashStats = {
+                    daily_series: [],
+                    today_revenue: 0,
+                    today_orders: 0,
+                    menu_items: 0,
+                    bookings: 0,
+                };
+                console.warn('GET /api/admin/stats', res.status, data);
+                return;
+            }
+            this.dashStats = data;
+            await this.$nextTick();
+            this.scheduleDashboardChartRender();
+        },
+
+        /** Chart.js после x-show нужен layout; иначе canvas 0×0 — «пустой» график. */
+        scheduleDashboardChartRender() {
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    this.renderDashboardMiniChart();
+                    const canvas = document.getElementById('dashboardMiniChart');
+                    const parent = canvas?.parentElement;
+                    if (this.dashboardMiniChart && parent) {
+                        this._attachChartLayoutFix(this.dashboardMiniChart, parent);
+                    }
+                });
+            });
+        },
+
+        async loadOrders() {
+            const url = this.orderFilter ? `/api/admin/orders?status=${this.orderFilter}` : '/api/admin/orders?limit=200';
+            const res = await this.apiFetch(url);
+            const data = await res.json();
+            this.orders = data.orders || [];
+        },
+
+        async loadBookings() {
+            const res = await this.apiFetch('/api/admin/bookings');
+            const data = await res.json();
+            this.bookings = data.bookings || [];
+        },
+
+        async loadMenu() {
+            this.menuLoadError = '';
+            const res = await this.apiFetch('/api/admin/menu?available_only=false');
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                this.menuItems = [];
+                this.menuCategories = [];
+                this.menuLoadError = typeof data.detail === 'string'
+                    ? data.detail
+                    : (res.status === 401 ? 'Сессия истекла — войдите снова' : 'Не удалось загрузить меню');
+                console.error('Меню: ошибка API', res.status, data);
+                return;
+            }
+            this.menuItems = data.items || [];
+            const cats = [
+                ...new Set(
+                    this.menuItems.map((i) => {
+                        const c = i.category;
+                        return c && String(c).trim() ? String(c).trim() : 'Прочее';
+                    }),
+                ),
+            ];
+            const ord = this.menuCategoryOrder;
+            this.menuCategories = cats.sort((a, b) => {
+                const ia = ord.indexOf(a);
+                const ib = ord.indexOf(b);
+                if (ia === -1 && ib === -1) return a.localeCompare(b, 'ru');
+                if (ia === -1) return 1;
+                if (ib === -1) return -1;
+                return ia - ib;
+            });
+        },
+
+        openMenuCreate() {
+            this.menuEditForm = {
+                id: null,
+                name: '',
+                category: this.menuCategoryFilter || '',
+                description: '',
+                price: 0,
+                is_available: true,
+                image_url: '',
+            };
+            this.menuEditOpen = true;
+        },
+
+        openMenuEdit(item) {
+            if (!item || item.id == null) return;
+            this.menuEditForm = {
+                id: item.id,
+                name: item.name || '',
+                category: item.category || '',
+                description: item.description || '',
+                price: Number(item.price) || 0,
+                is_available: !!item.is_available,
+                image_url: item.image_url || '',
+            };
+            this.menuEditOpen = true;
+        },
+
+        closeMenuEdit() {
+            if (this.menuEditSaving) return;
+            this.menuEditOpen = false;
+        },
+
+        async saveMenuItem() {
+            const f = this.menuEditForm;
+            const name = String(f.name || '').trim();
+            if (!name) return;
+            this.menuEditSaving = true;
+            try {
+                const payload = {
+                    name,
+                    category: String(f.category || '').trim(),
+                    description: String(f.description || '').trim(),
+                    price: Math.max(0, Number(f.price) || 0),
+                    is_available: !!f.is_available,
+                    image_url: String(f.image_url || '').trim() || null,
+                };
+                let res;
+                if (f.id == null) {
+                    res = await this.apiFetch('/api/admin/menu', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload),
+                    });
+                } else {
+                    res = await this.apiFetch(`/api/admin/menu/${f.id}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload),
+                    });
+                }
+                const data = await res.json().catch(() => ({}));
+                if (res.ok) {
+                    this.menuEditOpen = false;
+                    await this.loadMenu();
+                    this.demoToastMessage = f.id == null ? 'Позиция добавлена' : 'Позиция сохранена';
+                    setTimeout(() => { this.demoToastMessage = ''; }, 3000);
+                } else {
+                    alert(typeof data.detail === 'string' ? data.detail : 'Не удалось сохранить');
+                }
+            } catch {
+                alert('Ошибка сети');
+            } finally {
+                this.menuEditSaving = false;
+            }
+        },
+
+        async deleteMenuItemFromModal() {
+            const id = this.menuEditForm.id;
+            if (id == null) return;
+            if (!confirm('Удалить эту позицию из меню? Старые заказы в истории не изменятся.')) return;
+            this.menuEditSaving = true;
+            try {
+                const res = await this.apiFetch(`/api/admin/menu/${id}`, { method: 'DELETE' });
+                if (res.ok) {
+                    this.menuEditOpen = false;
+                    await this.loadMenu();
+                    this.demoToastMessage = 'Позиция удалена';
+                    setTimeout(() => { this.demoToastMessage = ''; }, 3000);
+                } else {
+                    const data = await res.json().catch(() => ({}));
+                    alert(typeof data.detail === 'string' ? data.detail : 'Не удалось удалить');
+                }
+            } catch {
+                alert('Ошибка сети');
+            } finally {
+                this.menuEditSaving = false;
+            }
+        },
+
+        getMenuCategoryCount(cat) {
+            return this.menuItems.filter((i) => {
+                const c = i.category && String(i.category).trim() ? String(i.category).trim() : 'Прочее';
+                return c === cat;
+            }).length;
+        },
+
+        menuBulkIsSelected(id) {
+            return this.menuBulkSelectedIds.includes(id);
+        },
+
+        menuBulkToggleId(id) {
+            const i = this.menuBulkSelectedIds.indexOf(id);
+            if (i >= 0) {
+                this.menuBulkSelectedIds.splice(i, 1);
+            } else {
+                this.menuBulkSelectedIds.push(id);
+            }
+        },
+
+        toggleMenuBulkMode() {
+            this.menuBulkMode = !this.menuBulkMode;
+            if (!this.menuBulkMode) {
+                this.menuBulkSelectedIds = [];
+            }
+        },
+
+        menuBulkSelectFiltered() {
+            for (const row of this.menuFilteredItems) {
+                if (row.id != null && !this.menuBulkSelectedIds.includes(row.id)) {
+                    this.menuBulkSelectedIds.push(row.id);
+                }
+            }
+        },
+
+        menuBulkClearSelection() {
+            this.menuBulkSelectedIds = [];
+        },
+
+        async menuBulkApplyAvailability(available) {
+            const ids = [...this.menuBulkSelectedIds];
+            if (!ids.length || this.menuBulkSaving) return;
+            this.menuBulkSaving = true;
+            try {
+                const results = await Promise.all(
+                    ids.map(async (id) => {
+                        const res = await this.apiFetch(`/api/admin/menu/${id}`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ is_available: available }),
+                        });
+                        return res.ok;
+                    }),
+                );
+                await this.loadMenu();
+                this.menuBulkSelectedIds = [];
+                if (results.some((r) => !r)) {
+                    alert('Часть позиций не обновилась — проверьте сеть или обновите страницу');
+                } else {
+                    this.demoToastMessage = available ? 'Выбранные позиции в продаже' : 'Выбранные позиции в стопе';
+                    setTimeout(() => { this.demoToastMessage = ''; }, 2800);
+                }
+            } catch {
+                alert('Ошибка сети');
+            } finally {
+                this.menuBulkSaving = false;
+            }
+        },
+
+        async toggleMenuAvailability(item) {
+            if (!item || item.id == null) return;
+            try {
+                const res = await this.apiFetch(`/api/admin/menu/${item.id}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ is_available: !item.is_available }),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (res.ok && data.item) {
+                    Object.assign(item, data.item);
+                } else if (!res.ok) {
+                    alert(typeof data.detail === 'string' ? data.detail : 'Не удалось обновить');
+                }
+            } catch {
+                alert('Ошибка сети');
+            }
+        },
+
+        async loadAnalytics() {
+            let url = `/api/admin/analytics?period=${this.analyticsPeriod}`;
+            if (this.analyticsPeriod === 'custom' && this.analyticsFrom && this.analyticsTo) {
+                url += `&date_from=${this.analyticsFrom}&date_to=${this.analyticsTo}`;
+            }
+            const res = await this.apiFetch(url);
+            const raw = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                this.analyticsData = {
+                    daily: [],
+                    current: {},
+                    previous: {},
+                    top_items: [],
+                    changes: {},
+                };
+                console.warn('GET /api/admin/analytics', res.status, raw);
+                return;
+            }
+            this.analyticsData = raw;
+            await this.$nextTick();
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    this.renderChart();
+                    const canvas = document.getElementById('revenueChart');
+                    const parent = canvas?.parentElement;
+                    if (this.revenueChart && parent) {
+                        this._attachChartLayoutFix(this.revenueChart, parent);
+                    }
+                });
+            });
+        },
+
+        renderChart() {
+            const canvas = document.getElementById('revenueChart');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            if (this.revenueChart) {
+                this.revenueChart.destroy();
+                this.revenueChart = null;
+            }
+
+            const daily = this.analyticsData.daily || [];
+            const labels = daily.map((d) => {
+                const dt = new Date(d.date + 'T12:00:00Z');
+                return dt.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' });
+            });
+
+            const m = this.analyticsChartMetric || 'both';
+            const hideRev = m === 'orders';
+            const hideOrd = m === 'revenue';
+
+            try {
+            this.revenueChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [
+                        {
+                            label: 'Выручка (₸)',
+                            data: daily.map((d) => d.revenue),
+                            backgroundColor: 'rgba(37, 99, 235, 0.7)',
+                            borderRadius: 8,
+                            borderSkipped: false,
+                            yAxisID: 'y',
+                            order: 2,
+                            hidden: hideRev,
+                        },
+                        {
+                            label: 'Заказов',
+                            data: daily.map((d) => d.orders),
+                            type: 'line',
+                            borderColor: '#10b981',
+                            backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                            borderWidth: 2,
+                            pointRadius: 4,
+                            pointBackgroundColor: '#10b981',
+                            fill: true,
+                            tension: 0.3,
+                            yAxisID: 'y1',
+                            order: 1,
+                            hidden: hideOrd,
+                        },
+                    ],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { intersect: false, mode: 'index' },
+                    plugins: {
+                        legend: { position: 'top', labels: { usePointStyle: true, padding: 20 } },
+                        tooltip: {
+                            backgroundColor: '#1e293b',
+                            titleFont: { size: 13 },
+                            bodyFont: { size: 12 },
+                            padding: 12,
+                            cornerRadius: 10,
+                            callbacks: {
+                                label(ctx) {
+                                    if (ctx.dataset.yAxisID === 'y') {
+                                        return 'Выручка: ' + Number(ctx.raw).toLocaleString('ru-RU') + ' ₸';
+                                    }
+                                    return 'Заказов: ' + ctx.raw;
+                                },
+                            },
+                        },
+                    },
+                    scales: {
+                        y: {
+                            display: !hideRev,
+                            beginAtZero: true,
+                            position: 'left',
+                            ticks: {
+                                callback: (v) => Number(v).toLocaleString('ru-RU') + ' ₸',
+                                font: { size: 11 },
+                            },
+                            grid: { color: 'rgba(0,0,0,0.05)' },
+                        },
+                        y1: {
+                            display: !hideOrd,
+                            beginAtZero: true,
+                            position: 'right',
+                            ticks: { font: { size: 11 } },
+                            grid: { display: false },
+                        },
+                        x: { ticks: { font: { size: 11 } }, grid: { display: false } },
+                    },
+                },
+            });
+            } catch (e) {
+                console.error('Chart.js (аналитика):', e);
+            }
+        },
+
+        /** Плавная area-линия с градиентом под кривой (премиум-дашборд). */
+        renderDashboardMiniChart() {
+            if (this.currentTab !== 'dashboard') return;
+            const canvas = document.getElementById('dashboardMiniChart');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            if (this.dashboardMiniChart) {
+                this.dashboardMiniChart.destroy();
+                this.dashboardMiniChart = null;
+            }
+            const series = this.dashStats.daily_series || [];
+            if (series.length === 0) return;
+
+            const labels = series.map((d) => {
+                const dt = new Date(d.date + 'T00:00:00');
+                return dt.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' });
+            });
+            const isRev = this.dashMiniMetric === 'revenue';
+            const data = series.map((d) => (isRev ? d.revenue : d.orders));
+            const label = isRev ? 'Выручка (₸)' : 'Заказов';
+
+            const self = this;
+            /** Заливка через scriptable option: chartArea на первом кадре может быть пустым (документация Chart.js). */
+            try {
+            this.dashboardMiniChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels,
+                    datasets: [{
+                        label,
+                        data,
+                        borderColor: '#2563eb',
+                        borderWidth: 2,
+                        fill: true,
+                        backgroundColor: (context) => {
+                            const chart = context.chart;
+                            const { ctx: cctx, chartArea } = chart;
+                            if (!chartArea) {
+                                return 'rgba(37, 99, 235, 0.08)';
+                            }
+                            const g = cctx.createLinearGradient(0, chartArea.bottom, 0, chartArea.top);
+                            g.addColorStop(0, 'rgba(37, 99, 235, 0.32)');
+                            g.addColorStop(1, 'rgba(37, 99, 235, 0.02)');
+                            return g;
+                        },
+                        tension: 0.4,
+                        pointRadius: 3,
+                        pointHoverRadius: 5,
+                        pointBackgroundColor: '#2563eb',
+                        pointBorderColor: '#ffffff',
+                        pointBorderWidth: 2,
+                    }],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { intersect: false, mode: 'index' },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: '#1e293b',
+                            padding: 10,
+                            cornerRadius: 10,
+                            callbacks: {
+                                label(c) {
+                                    const raw = c.raw;
+                                    if (self.dashMiniMetric === 'revenue') {
+                                        return 'Выручка: ' + Number(raw).toLocaleString('ru-RU') + ' ₸';
+                                    }
+                                    return 'Заказов: ' + raw;
+                                },
+                            },
+                        },
+                    },
+                    scales: {
+                        x: {
+                            grid: { display: false },
+                            border: { display: false },
+                            ticks: { font: { size: 11 }, maxRotation: 0 },
+                        },
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: 'rgba(226, 232, 240, 0.9)' },
+                            border: { display: false },
+                            ticks: {
+                                font: { size: 11 },
+                                callback: (v) => (self.dashMiniMetric === 'revenue'
+                                    ? Number(v).toLocaleString('ru-RU')
+                                    : v),
+                            },
+                        },
+                    },
+                },
+            });
+            } catch (e) {
+                console.error('Chart.js (дашборд):', e);
+            }
+        },
+
+        async sendTestMessage() {
+            const text = this.testInput.trim();
+            if (!text || this.testLoading) return;
+            this.testMessages.push({ role: 'user', text });
+            this.testInput = '';
+            this.testLoading = true;
+
+            try {
+                const res = await this.apiFetch('/api/admin/test-bot', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text }),
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    this.testMessages.push({ role: 'assistant', text: data.reply });
+                } else {
+                    this.testMessages.push({ role: 'assistant', text: 'Ошибка: сервер вернул ' + res.status });
+                }
+            } catch (e) {
+                this.testMessages.push({ role: 'assistant', text: 'Ошибка: не удалось получить ответ.' });
+            }
+            this.testLoading = false;
+            this.$nextTick(() => {
+                const area = document.getElementById('testChatArea');
+                if (area) area.scrollTop = area.scrollHeight;
+            });
+        },
+
+        // ─── Helpers ─────────────────────────────────
+        formatTrendPct(pct) {
+            if (pct == null) return '';
+            const sign = pct > 0 ? '+' : '';
+            return sign + pct + '%';
+        },
+
+        statusLabel(status) {
+            const map = { draft: 'Черновик', confirmed: 'Подтверждён', sent_to_iiko: 'На кухне', completed: 'Завершён', cancelled: 'Отменён', pending: 'Ожидает' };
+            return map[status] || status;
+        },
+
+        statusClass(status) {
+            const map = {
+                draft: 'bg-gray-100 text-gray-600',
+                confirmed: 'bg-blue-50 text-blue-600',
+                sent_to_iiko: 'bg-emerald-50 text-emerald-600',
+                completed: 'bg-emerald-50 text-emerald-600',
+                cancelled: 'bg-red-50 text-red-500',
+                pending: 'bg-amber-50 text-amber-600',
+            };
+            return map[status] || 'bg-gray-100 text-gray-600';
+        },
+
+        formatDate(iso) {
+            if (!iso) return '—';
+            const d = new Date(iso);
+            return d.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short', year: 'numeric' });
+        },
+
+        formatBookingDate(dateStr) {
+            if (!dateStr) return '';
+            const d = new Date(dateStr + 'T00:00:00');
+            return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', weekday: 'short' });
+        },
+
+        formatTime(iso) {
+            if (!iso) return '';
+            const d = new Date(iso);
+            return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+        },
+    };
+}
+</script>
+
+</body>
+</html>

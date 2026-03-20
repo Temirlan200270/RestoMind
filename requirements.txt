@@ -1,0 +1,36 @@
+# === Web-фреймворк ===
+fastapi>=0.115.0
+uvicorn[standard]>=0.34.0
+itsdangerous>=2.2.0
+
+# === База данных (async) ===
+sqlalchemy[asyncio]>=2.0.36
+aiosqlite>=0.20.0
+asyncpg>=0.30.0
+alembic>=1.14.0
+
+# === Кэш и сессии (Redis, async — опционально) ===
+redis>=5.2.0
+
+# === AI / LLM (Gemini) ===
+google-genai>=1.0.0
+
+# === Валидация и конфигурация ===
+pydantic>=2.10.0
+pydantic-settings>=2.7.0
+
+# === HTTP-клиент (для интеграций WhatsApp, iiko) ===
+httpx>=0.28.0
+
+# === Шаблоны (админ-панель) ===
+jinja2>=3.1.0
+
+# === Утилиты ===
+python-dotenv>=1.0.1
+
+# === Тесты ===
+pytest>=8.0.0
+pytest-asyncio>=0.24.0
+
+# === Мониторинг (опционально) ===
+# sentry-sdk[fastapi]>=2.0.0

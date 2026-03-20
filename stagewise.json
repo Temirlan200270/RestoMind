@@ -1,0 +1,5 @@
+{
+  "port": 3100,
+  "appPort": 8000,
+  "autoPlugins": true
+}

@@ -1,0 +1,25 @@
+# Node (Stagewise CLI)
+node_modules/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Локальные секреты и БД
+.env
+*.db
+
+# Логи
+logs/
+
+# IDE / OS
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
