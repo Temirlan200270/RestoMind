@@ -5,6 +5,7 @@ AI Brain — ядро интеллекта бота.
 """
 
 import logging
+from typing import Any
 
 from google import genai
 from pydantic import ValidationError
@@ -15,7 +16,20 @@ from app.services.prompts import RESTAURANT_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
-_gemini_client = genai.Client(api_key=settings.gemini_api_key)
+# Ленивая инициализация: при импорте модуля ключа может не быть (CI, тесты).
+_gemini_client: Any = None
+
+
+def _ensure_gemini_client() -> Any:
+    """Возвращает клиент Gemini или None, если ключ не задан."""
+    global _gemini_client
+    if _gemini_client is not None:
+        return _gemini_client
+    key = settings.gemini_api_key.strip()
+    if not key:
+        return None
+    _gemini_client = genai.Client(api_key=key)
+    return _gemini_client
 
 DEFAULT_MODEL = "gemini-2.5-flash"
 MAX_RETRIES = 2
@@ -62,11 +76,16 @@ async def call_gemini(
         user_text[:100],
     )
 
+    client = _ensure_gemini_client()
+    if client is None:
+        logger.error("GEMINI_API_KEY не задан — ответ недоступен, используем fallback")
+        return _FALLBACK_RESPONSE
+
     last_error: Exception | None = None
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            response = await _gemini_client.aio.models.generate_content(
+            response = await client.aio.models.generate_content(
                 model=DEFAULT_MODEL,
                 contents=gemini_history,
                 config={
