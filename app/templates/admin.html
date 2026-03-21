@@ -2072,7 +2072,10 @@ function adminApp() {
             this.loading = false;
             // Вкладка только что стала видимой — у контейнера появился размер; Chart.js иначе оставляет canvas 0×0 (x-show / display:none).
             await this.$nextTick();
-            setTimeout(() => this._resizeVisibleCharts(this.currentTab), 150);
+            const tab = this.currentTab;
+            [150, 400, 800].forEach((ms) => {
+                setTimeout(() => this._resizeVisibleCharts(tab), ms);
+            });
         },
 
         async loadDashStats() {
@@ -2091,19 +2094,28 @@ function adminApp() {
             }
             this.dashStats = data;
             await this.$nextTick();
-            this.scheduleDashboardChartRender();
+            await this.scheduleDashboardChartRender();
         },
 
-        /** Chart.js после x-show нужен layout; иначе canvas 0×0 — «пустой» график. */
+        /**
+         * Chart.js после x-show — контейнер мог быть 0×0; ждём 2× rAF перед созданием.
+         * Возвращает Promise, чтобы loadDashStats дождался отрисовки (иначе resize в loadTabData иногда раньше графика).
+         */
         scheduleDashboardChartRender() {
-            requestAnimationFrame(() => {
+            return new Promise((resolve) => {
                 requestAnimationFrame(() => {
-                    this.renderDashboardMiniChart();
-                    const canvas = document.getElementById('dashboardMiniChart');
-                    const parent = canvas?.parentElement;
-                    if (this.dashboardMiniChart && parent) {
-                        this._attachChartLayoutFix(this.dashboardMiniChart, parent);
-                    }
+                    requestAnimationFrame(() => {
+                        try {
+                            this.renderDashboardMiniChart();
+                            const canvas = document.getElementById('dashboardMiniChart');
+                            const parent = canvas?.parentElement;
+                            if (this.dashboardMiniChart && parent) {
+                                this._attachChartLayoutFix(this.dashboardMiniChart, parent);
+                            }
+                        } finally {
+                            resolve();
+                        }
+                    });
                 });
             });
         },
@@ -2361,14 +2373,20 @@ function adminApp() {
             }
             this.analyticsData = raw;
             await this.$nextTick();
-            requestAnimationFrame(() => {
+            await new Promise((resolve) => {
                 requestAnimationFrame(() => {
-                    this.renderChart();
-                    const canvas = document.getElementById('revenueChart');
-                    const parent = canvas?.parentElement;
-                    if (this.revenueChart && parent) {
-                        this._attachChartLayoutFix(this.revenueChart, parent);
-                    }
+                    requestAnimationFrame(() => {
+                        try {
+                            this.renderChart();
+                            const canvas = document.getElementById('revenueChart');
+                            const parent = canvas?.parentElement;
+                            if (this.revenueChart && parent) {
+                                this._attachChartLayoutFix(this.revenueChart, parent);
+                            }
+                        } finally {
+                            resolve();
+                        }
+                    });
                 });
             });
         },
