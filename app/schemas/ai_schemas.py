@@ -43,6 +43,13 @@ class BookingDetails(BaseModel):
     guests: int = Field(
         default=2, ge=1, le=50, description="Количество гостей"
     )
+    hall: Literal["hall_1", "hall_2", "vip"] = Field(
+        default="hall_1",
+        description=(
+            "Зал: hall_1 — Зал 1, hall_2 — Зал 2, vip — VIP зал "
+            "(в ресторане один VIP-стол на слот; если занят — предложи другое время или другой зал)"
+        ),
+    )
     comment: str = Field(
         default="", description="Дополнительные пожелания клиента (у окна, детский стул и т.д.)"
     )

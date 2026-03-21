@@ -84,25 +84,38 @@ STOP_LIST_SYNC_INTERVAL = 900  # 15 минут
 
 async def _stop_list_sync_loop() -> None:
     """Фоновая задача: синхронизирует стоп-листы из iiko каждые 15 минут."""
+    from app.services.integration_health import record_stoplist_sync
     from app.services.menu_sync import sync_stop_lists
 
     if not settings.iiko_api_login or not settings.iiko_organization_id:
         logger.info("iiko не настроен — синхронизация стоп-листов отключена")
         return
 
+    first_cycle = True
     while True:
         try:
-            await asyncio.sleep(STOP_LIST_SYNC_INTERVAL)
-            async with async_session_factory() as db:
+            if not first_cycle:
+                await asyncio.sleep(STOP_LIST_SYNC_INTERVAL)
+            first_cycle = False
+        except asyncio.CancelledError:
+            break
+        async with async_session_factory() as db:
+            try:
                 stats = await sync_stop_lists(
                     db, settings.iiko_api_login, settings.iiko_organization_id,
                 )
+                await record_stoplist_sync(db, True, None)
                 await db.commit()
-            logger.info("Стоп-листы синхронизированы: %s", stats)
-        except asyncio.CancelledError:
-            break
-        except Exception as exc:
-            logger.error("Ошибка синхронизации стоп-листов: %s", exc, exc_info=True)
+                logger.info("Стоп-листы синхронизированы: %s", stats)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.error("Ошибка синхронизации стоп-листов: %s", exc, exc_info=True)
+                try:
+                    await record_stoplist_sync(db, False, str(exc))
+                    await db.commit()
+                except Exception as exc2:
+                    logger.error("Не удалось сохранить статус интеграции iiko: %s", exc2)
 
 
 @asynccontextmanager
@@ -131,6 +144,50 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS operator_note TEXT DEFAULT ''"))
     except Exception:
         pass  # колонка уже есть или другой диалект
+
+    try:
+        async with async_engine.begin() as conn:
+            if settings.db_mode == "sqlite":
+                await conn.execute(text("ALTER TABLE orders ADD COLUMN iiko_last_error VARCHAR(512)"))
+            else:
+                await conn.execute(
+                    text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS iiko_last_error VARCHAR(512)"),
+                )
+    except Exception:
+        pass
+
+    try:
+        async with async_engine.begin() as conn:
+            if settings.db_mode == "sqlite":
+                await conn.execute(text("ALTER TABLE users ADD COLUMN ai_paused BOOLEAN DEFAULT 0"))
+            else:
+                await conn.execute(
+                    text("ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_paused BOOLEAN DEFAULT FALSE"),
+                )
+    except Exception:
+        pass
+
+    try:
+        async with async_engine.begin() as conn:
+            if settings.db_mode == "sqlite":
+                await conn.execute(text("ALTER TABLE chat_logs ADD COLUMN meta_json TEXT"))
+            else:
+                await conn.execute(
+                    text("ALTER TABLE chat_logs ADD COLUMN IF NOT EXISTS meta_json JSONB"),
+                )
+    except Exception:
+        pass
+
+    try:
+        async with async_engine.begin() as conn:
+            if settings.db_mode == "sqlite":
+                await conn.execute(text("ALTER TABLE bookings ADD COLUMN hall VARCHAR(20) DEFAULT 'hall_1'"))
+            else:
+                await conn.execute(
+                    text("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS hall VARCHAR(20) DEFAULT 'hall_1'"),
+                )
+    except Exception:
+        pass
 
     # Пустое меню → встроенный каталог (один раз; дальше правки через админку / iiko)
     try:
@@ -187,10 +244,39 @@ app.include_router(admin_router, prefix="/api")
 app.include_router(admin_ws_router, prefix="/api")
 
 
+# --- Системные эндпоинты ---
+
+
 @app.get("/health", tags=["System"])
 async def health_check() -> dict:
-    """Проверка работоспособности сервиса."""
-    return {"status": "ok", "service": settings.app_name}
+    """
+    Максимально лёгкий эндпоинт для UptimeRobot / Render.
+    Только признак, что процесс жив — без запросов к БД.
+    """
+    return {"status": "ok"}
+
+
+@app.get("/health/deep", tags=["System"])
+async def deep_health_check() -> dict:
+    """
+    Глубокая проверка: доступность БД и Redis (для ручной диагностики).
+    """
+    health: dict = {"status": "ok", "db": "ok", "redis": "ok"}
+
+    try:
+        async with async_session_factory() as db:
+            await db.execute(text("SELECT 1"))
+    except Exception as exc:
+        health["db"] = f"error: {exc!s}"
+        health["status"] = "error"
+
+    try:
+        await redis_client.ping()
+    except Exception as exc:
+        health["redis"] = f"error: {exc!s}"
+        health["status"] = "error"
+
+    return health
 
 
 @app.get("/", response_class=HTMLResponse, tags=["Admin Panel"])

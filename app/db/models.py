@@ -74,6 +74,11 @@ class User(Base):
         Text, default="", server_default="", comment="Внутренняя заметка оператора (аллергии, VIP и т.д.)"
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, comment="Активен ли пользователь")
+    ai_paused: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        comment="ИИ отключён для этого клиента (персистентно; дублирует смысл HUMAN_MODE)",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -119,6 +124,12 @@ class Order(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+    iiko_last_error: Mapped[str | None] = mapped_column(
+        String(512),
+        nullable=True,
+        default=None,
+        comment="Текст ошибки при последней попытке отправить заказ в iiko (если не пусто — показать в админке)",
+    )
 
     # Связи
     user: Mapped["User"] = relationship(back_populates="orders")
@@ -141,6 +152,11 @@ class ChatLog(Base):
         comment="Роль отправителя: user / assistant / system"
     )
     content: Mapped[str] = mapped_column(Text, nullable=False, comment="Текст сообщения")
+    meta_json: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON,
+        nullable=True,
+        comment="Служебные данные для админки (интент, уверенность, internal monologue)",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -167,6 +183,12 @@ class Booking(Base):
     booking_date: Mapped[date] = mapped_column(Date, nullable=False, comment="Дата бронирования")
     booking_time: Mapped[time] = mapped_column(Time, nullable=False, comment="Время бронирования")
     guests: Mapped[int] = mapped_column(Integer, default=2, comment="Количество гостей")
+    hall: Mapped[str] = mapped_column(
+        String(20),
+        default="hall_1",
+        server_default="hall_1",
+        comment="Зал: hall_1 | hall_2 | vip (VIP — один стол на слот)",
+    )
     comment: Mapped[str] = mapped_column(
         Text, default="", comment="Пожелания клиента (у окна, детский стул и т.д.)"
     )
@@ -216,3 +238,57 @@ class MenuItem(Base):
 
     def __repr__(self) -> str:
         return f"<MenuItem id={self.id} name='{self.name}' price={self.price}>"
+
+
+class IntegrationEvent(Base):
+    """
+    Журнал последних событий синхронизации (меню, стоп-листы) для админки.
+    """
+
+    __tablename__ = "integration_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True,
+    )
+    kind: Mapped[str] = mapped_column(String(40), nullable=False, comment="menu_sync | stoplist_sync | …")
+    ok: Mapped[bool] = mapped_column(Boolean, default=False)
+    message: Mapped[str] = mapped_column(Text, default="", comment="Краткий итог или текст ошибки")
+
+
+class EscalationEvent(Base):
+    """
+    События эскалации на оператора (intent escalate → HUMAN_MODE).
+    Для аналитики «сколько раз бот звал на помощь».
+    """
+
+    __tablename__ = "escalation_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    phone: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    user_message: Mapped[str] = mapped_column(Text, default="", comment="Последнее сообщение клиента")
+    reason: Mapped[str] = mapped_column(Text, default="", comment="Текст ответа бота / контекст")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True,
+    )
+
+
+class IntegrationHealth(Base):
+    """
+    Одна строка (id=1): последние результаты фоновой/ручной синхронизации с iiko.
+    Для индикаторов в админке.
+    """
+
+    __tablename__ = "integration_health"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    last_stoplist_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    last_stoplist_ok: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_stoplist_error: Mapped[str] = mapped_column(Text, default="")
+    last_menu_sync_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    last_menu_sync_ok: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_menu_sync_error: Mapped[str] = mapped_column(Text, default="")

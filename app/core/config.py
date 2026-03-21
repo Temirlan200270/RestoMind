@@ -54,6 +54,16 @@ class Settings(BaseSettings):
     whatsapp_api_token: str = ""
     whatsapp_verify_token: str = ""
     whatsapp_phone_number_id: str = ""
+    # Публичный URL сайта (https://your-domain.com) — для подсказки URL вебхука в админке
+    public_base_url: str = Field(default="", validation_alias=AliasChoices("PUBLIC_BASE_URL", "public_base_url"))
+
+    # --- Telegram (оповещения при эскалации на оператора) ---
+    telegram_bot_token: str = Field(
+        default="", validation_alias=AliasChoices("TELEGRAM_BOT_TOKEN", "telegram_bot_token"),
+    )
+    telegram_admin_chat_id: str = Field(
+        default="", validation_alias=AliasChoices("TELEGRAM_ADMIN_CHAT_ID", "telegram_admin_chat_id"),
+    )
 
     # --- iiko Cloud API ---
     iiko_api_login: str = ""

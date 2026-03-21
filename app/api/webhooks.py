@@ -14,9 +14,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.rate_limiter import check_rate_limit
-from app.db.models import ChatLog, Order, OrderStatus
+from app.db.models import ChatLog, EscalationEvent, Order, OrderStatus, User
 from app.db.session import async_session_factory, redis_client
 from app.integrations.iiko_client import IikoClient
+from app.integrations.telegram import send_tg_fallback_alert
 from app.integrations.whatsapp import send_message, send_template
 from app.services.ai_brain import call_gemini
 from app.services.dialog_mgr import (
@@ -51,23 +52,41 @@ router = APIRouter(prefix="/whatsapp", tags=["WhatsApp Webhook"])
 
 
 async def _save_chat_log(
-    db: AsyncSession, phone: str, user_text: str, reply_text: str,
+    db: AsyncSession,
+    phone: str,
+    user_text: str,
+    reply_text: str,
+    assistant_meta: dict | None = None,
 ) -> None:
     """Сохраняет пару сообщений (user + assistant) в ChatLog."""
     user = await get_or_create_user(db, phone)
     db.add(ChatLog(user_id=user.id, role="user", content=user_text))
-    db.add(ChatLog(user_id=user.id, role="assistant", content=reply_text))
+    db.add(
+        ChatLog(
+            user_id=user.id,
+            role="assistant",
+            content=reply_text,
+            meta_json=assistant_meta,
+        ),
+    )
 
 
 async def _send_order_to_iiko(
     order_id: int,
     phone: str,
     items_json: dict[str, Any] | None,
-) -> bool:
-    """Попытка отправить подтверждённый заказ в iiko. Возвращает True при успехе."""
+) -> tuple[bool, str | None]:
+    """
+    Попытка отправить подтверждённый заказ в iiko.
+
+    Returns:
+        (True, None) — успех.
+        (False, None) — iiko не настроен в .env (ошибку в БД не пишем).
+        (False, msg) — настроен, но отправка не удалась (msg для админки).
+    """
     if not settings.iiko_api_login or not settings.iiko_organization_id:
         logger.info("iiko не настроен — заказ сохранён только в БД")
-        return False
+        return False, None
 
     try:
         items_data = items_json.get("items", []) if items_json else []
@@ -83,8 +102,9 @@ async def _send_order_to_iiko(
             })
 
         if not iiko_items:
-            logger.warning("Нет позиций с iiko_id — заказ не отправлен в iiko")
-            return False
+            msg = "Нет позиций с iiko_id — синхронизируйте меню из iiko"
+            logger.warning("Заказ #%d: %s", order_id, msg)
+            return False, msg
 
         async with IikoClient(api_login=settings.iiko_api_login) as client:
             await client.create_delivery_order(
@@ -95,10 +115,11 @@ async def _send_order_to_iiko(
                     "comment": f"Заказ #{order_id} через RestoMind",
                 },
             )
-        return True
+        return True, None
     except Exception as exc:
         logger.error("Ошибка отправки заказа #%d в iiko: %s", order_id, exc, exc_info=True)
-        return False
+        msg = str(exc).strip() or type(exc).__name__
+        return False, msg[:500]
 
 
 async def handle_confirmation(phone: str, message_text: str) -> str:
@@ -124,11 +145,14 @@ async def handle_confirmation(phone: str, message_text: str) -> str:
             return "Заказ не найден. Попробуйте оформить заново."
 
         await publish_event("order_updated", {
-            "order_id": order.id, "status": OrderStatus.CONFIRMED,
-            "phone": phone, "total_price": float(order.total_price),
+            "order_id": order.id,
+            "status": OrderStatus.CONFIRMED,
+            "phone": phone,
+            "total_price": float(order.total_price),
+            "iiko_last_error": None,
         })
 
-        sent_to_iiko = await _send_order_to_iiko(
+        sent_to_iiko, iiko_err = await _send_order_to_iiko(
             order_id=order.id,
             phone=phone,
             items_json=order.items_json,
@@ -142,10 +166,30 @@ async def handle_confirmation(phone: str, message_text: str) -> str:
                 o = order_upd.scalar_one_or_none()
                 if o:
                     o.status = OrderStatus.SENT_TO_IIKO
+                    o.iiko_last_error = None
                     await db.commit()
             await publish_event("order_updated", {
-                "order_id": order.id, "status": OrderStatus.SENT_TO_IIKO,
-                "phone": phone, "total_price": float(order.total_price),
+                "order_id": order.id,
+                "status": OrderStatus.SENT_TO_IIKO,
+                "phone": phone,
+                "total_price": float(order.total_price),
+                "iiko_last_error": None,
+            })
+        elif iiko_err:
+            async with async_session_factory() as db:
+                order_upd = await db.execute(
+                    select(Order).where(Order.id == order.id)
+                )
+                o = order_upd.scalar_one_or_none()
+                if o:
+                    o.iiko_last_error = iiko_err
+                    await db.commit()
+            await publish_event("order_updated", {
+                "order_id": order.id,
+                "status": OrderStatus.CONFIRMED,
+                "phone": phone,
+                "total_price": float(order.total_price),
+                "iiko_last_error": iiko_err,
             })
 
         await clear_pending_order(redis_client, phone)
@@ -190,8 +234,15 @@ async def handle_booking_confirmation(phone: str, message_text: str) -> str:
 
     if word in CONFIRM_WORDS:
         async with async_session_factory() as db:
-            booking = await confirm_booking(db, booking_id)
+            booking, err = await confirm_booking(db, booking_id)
             await db.commit()
+
+        if err == "vip_conflict":
+            await clear_pending_booking(redis_client, phone)
+            return (
+                "К сожалению, VIP-зал на это время только что заняли.\n"
+                "Напишите другую дату/время или выберите Зал 1 / Зал 2 — оформим бронь заново."
+            )
 
         if not booking:
             await clear_pending_booking(redis_client, phone)
@@ -236,12 +287,17 @@ async def process_message(phone: str, message_text: str) -> None:
 
         state = await get_user_state(redis_client, phone)
 
+        async with async_session_factory() as db_u:
+            u_row = await db_u.scalar(select(User).where(User.phone == phone))
+            ai_paused_db = bool(u_row and getattr(u_row, "ai_paused", False))
+
         await publish_event("new_message", {
             "phone": phone, "role": "user", "content": message_text,
         })
 
-        # ─── HUMAN_MODE: AI молчит, только логируем ─────────
-        if state == UserState.HUMAN_MODE:
+        # ─── HUMAN_MODE / ai_paused: AI молчит, только логируем ─────────
+        # Состояние в Redis: ключ user:state:{phone} (см. dialog_mgr.get_user_state), не вызываем Gemini.
+        if state == UserState.HUMAN_MODE or ai_paused_db:
             async with async_session_factory() as db:
                 await _save_chat_log(db, phone, message_text, "[HUMAN_MODE — AI отключён]")
                 await db.commit()
@@ -303,7 +359,24 @@ async def process_message(phone: str, message_text: str) -> None:
             if result.pending_booking_id:
                 await set_pending_booking(redis_client, phone, result.pending_booking_id)
 
-            await _save_chat_log(db, phone, message_text, result.reply_text)
+            assistant_meta = {
+                "intent": ai_response.intent,
+                "monologue": (
+                    f"Распознан интент: {ai_response.intent}. "
+                    "Ответ сформирован моделью (Gemini)."
+                ),
+            }
+            await _save_chat_log(
+                db, phone, message_text, result.reply_text, assistant_meta,
+            )
+            if result.new_state == UserState.HUMAN_MODE:
+                db.add(
+                    EscalationEvent(
+                        phone=phone,
+                        user_message=(message_text or "")[:2000],
+                        reason=(result.reply_text or "")[:2000],
+                    ),
+                )
             await db.commit()
 
         await append_to_history(redis_client, phone, "assistant", result.reply_text)
@@ -318,7 +391,13 @@ async def process_message(phone: str, message_text: str) -> None:
             await publish_event("human_needed", {
                 "phone": phone,
                 "reason": ai_response.reply_text,
+                "user_message": (message_text or "")[:500],
+                "intent": ai_response.intent,
             })
+            try:
+                await send_tg_fallback_alert(phone, message_text, result.reply_text)
+            except Exception as tg_exc:
+                logger.warning("Telegram fallback alert не отправлен: %s", tg_exc)
 
         logger.info(
             "Сообщение обработано: phone=%s, intent=%s, state=%s",

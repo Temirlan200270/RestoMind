@@ -14,6 +14,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Booking, MenuItem, Order, OrderStatus, User
+from app.services.booking_halls import (
+    BOOKING_HALL_VIP,
+    HALL_LABEL_RU,
+    normalize_hall_key,
+    vip_slot_occupied,
+)
 from app.schemas.ai_schemas import AIBrainResponse
 from app.services.dialog_mgr import UserState
 from app.services.events import publish_event
@@ -130,11 +136,22 @@ async def _handle_booking(
             reply_text=ai_response.reply_text + "\n\n⚠️ Не удалось определить дату или время. Уточните, пожалуйста."
         )
 
+    hall = normalize_hall_key(details.hall)
+    if hall == BOOKING_HALL_VIP and await vip_slot_occupied(db, booking_date, booking_time, None):
+        return RouteResult(
+            reply_text=(
+                f"{ai_response.reply_text}\n\n"
+                "⚠️ VIP-зал на это время уже занят (в ресторане один VIP-стол на слот). "
+                "Предложите другое время или Зал 1 / Зал 2."
+            ),
+        )
+
     booking = Booking(
         user_id=user.id,
         booking_date=booking_date,
         booking_time=booking_time,
         guests=details.guests,
+        hall=hall,
         comment=details.comment,
         status="draft",
     )
@@ -151,6 +168,7 @@ async def _handle_booking(
         f"📋 Ваша бронь:\n"
         f"  📅 Дата: {formatted_date}\n"
         f"  🕐 Время: {formatted_time}\n"
+        f"  🏛 Зал: {HALL_LABEL_RU.get(hall, hall)}\n"
         f"  👥 Гостей: {details.guests}\n"
     )
     if details.comment:
@@ -198,15 +216,27 @@ async def confirm_order(db: AsyncSession, order_id: int) -> Order | None:
     return order
 
 
-async def confirm_booking(db: AsyncSession, booking_id: int) -> Booking | None:
-    """Подтвердить бронирование — перевести из draft в pending (ожидает ресторан)."""
+async def confirm_booking(
+    db: AsyncSession, booking_id: int,
+) -> tuple[Booking | None, str | None]:
+    """
+    Подтвердить бронирование — перевести из draft в confirmed.
+    Возвращает (booking, None) при успехе; (None, код ошибки) при сбое.
+    """
     result = await db.execute(select(Booking).where(Booking.id == booking_id))
     booking = result.scalar_one_or_none()
-    if booking and booking.status == "draft":
-        booking.status = "confirmed"
-        await db.flush()
-        logger.info("Бронь #%d подтверждена клиентом", booking_id)
-    return booking
+    if not booking:
+        return None, "not_found"
+    if booking.status != "draft":
+        return None, "not_draft"
+    if booking.hall == BOOKING_HALL_VIP and await vip_slot_occupied(
+        db, booking.booking_date, booking.booking_time, booking.id,
+    ):
+        return None, "vip_conflict"
+    booking.status = "confirmed"
+    await db.flush()
+    logger.info("Бронь #%d подтверждена клиентом", booking_id)
+    return booking, None
 
 
 async def cancel_booking(db: AsyncSession, booking_id: int) -> Booking | None:
