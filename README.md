@@ -220,4 +220,5 @@ RestoMind/
 ## Разработка
 
 - **Тесты:** `pytest` из корня проекта.  
-- **CI:** `.github/workflows/ci.yml` — pytest и проверка импорта приложения.
+- **CI:** `.github/workflows/ci.yml` — pytest и проверка импорта приложения.  
+- **Deploy по SSH (VPS):** `.github/workflows/deploy.yml` — только если в репозитории задана переменная **`ENABLE_SSH_DEPLOY=true`** и секреты `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY`. Для деплоя на **Render** этот workflow не нужен.

@@ -1,13 +1,22 @@
+# Деплой на СВОЙ VPS по SSH (docker compose). Не используется для Render.
+# Включение: GitHub → Settings → Secrets and variables → Actions → Variables:
+#   ENABLE_SSH_DEPLOY = true
+# И секреты: DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY (private key).
+# Пока переменная не задана или не true — job пропускается (не падает).
+
 name: Deploy to Production
 
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    if: |
+      vars.ENABLE_SSH_DEPLOY == 'true' &&
+      (github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main')
 
     steps:
       - uses: actions/checkout@v4
