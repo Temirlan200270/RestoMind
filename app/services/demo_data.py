@@ -129,31 +129,33 @@ async def seed_demo_data(db: AsyncSession) -> dict[str, int | bool]:
             _line("Казан-кебаб из баранины", 1, 3690),
             _line("Картофель по-деревенски", 1, 1190),
             _line("Американо 0,3 л", 2, 890),
-        ), 5),
+        ), 4),
         (u(2).id, OrderStatus.COMPLETED.value, 8250.0, _order_items(
             _line("Жаз бараний", 2, 1590),
             _line("Греческий", 1, 2690),
             _line("Латте 0,3 л", 2, 1190),
-        ), 7),
+        ), 5),
         (u(3).id, OrderStatus.CANCELLED.value, 2690.0, _order_items(
             _line("Маргарита", 1, 2690),
-        ), 7),
+        ), 6),
         (u(4).id, OrderStatus.COMPLETED.value, 15020.0, _order_items(
             _line("Вагури бухарский", 1, 4100),
             _line("Машхурда", 2, 1990),
             _line("Тандыр-самса с говядиной", 4, 790),
             _line("Марокканский чай 0,8 л", 2, 1890),
-        ), 14),
+        ), 0),
         (u(0).id, OrderStatus.DRAFT.value, 10760.0, _order_items(
             _line("Лагман от шеф-повара", 2, 2790),
             _line("Фреш апельсиновый 0,3 л", 2, 2590),
-        ), 2),
+        ), 1),
         (u(1).id, OrderStatus.COMPLETED.value, 8360.0, _order_items(
             _line("Спагетти болоньезе", 2, 2990),
             _line("Молочный коктейль шоколадный 0,3 л", 2, 1190),
-        ), 21),
+        ), 2),
     ]
 
+    # Полуночь UTC «сегодня» на момент сида: дни 0..6 попадают в окно дашборда (7 дней) и «Сегодня» в UTC.
+    utc_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
     created_orders = 0
     for uid, status, total, items_json, days_ago in orders_spec:
         o = Order(
@@ -162,7 +164,8 @@ async def seed_demo_data(db: AsyncSession) -> dict[str, int | bool]:
             total_price=total,
             items_json=items_json,
         )
-        o.created_at = now - timedelta(days=days_ago, hours=created_orders % 9 + 1)
+        hour_off = 10 + (created_orders % 8)
+        o.created_at = utc_midnight - timedelta(days=days_ago) + timedelta(hours=hour_off)
         db.add(o)
         created_orders += 1
 

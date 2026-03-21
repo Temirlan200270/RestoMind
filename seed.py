@@ -4,7 +4,6 @@
 """
 
 import asyncio
-import random
 from datetime import date, datetime, time, timedelta, timezone
 
 from sqlalchemy import select
@@ -167,11 +166,13 @@ async def seed() -> None:
             ),
         ]
 
-        # Распределяем даты
-        date_offsets = [0, 0, 0, 1, 1, 3, 5, 7, 7, 14, 21, 21]
+        # Даты: все в пределах последних 7 календарных дней UTC (дашборд / мини-график).
+        utc_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        date_offsets = [0, 0, 0, 1, 1, 2, 3, 4, 5, 6, 0, 1]
         for i, order in enumerate(orders):
             offset = date_offsets[i] if i < len(date_offsets) else 0
-            order.created_at = now - timedelta(days=offset, hours=random.randint(1, 12))
+            hour_off = 10 + (i % 8)
+            order.created_at = utc_midnight - timedelta(days=offset) + timedelta(hours=hour_off)
 
         db.add_all(orders)
         await db.flush()

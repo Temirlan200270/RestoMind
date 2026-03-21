@@ -540,6 +540,17 @@ def _order_day_key_utc(created_at: datetime | None) -> str | None:
     return _dt_as_utc(created_at).strftime("%Y-%m-%d")
 
 
+def _sql_dt_for_filter(dt: datetime) -> datetime:
+    """
+    SQLite хранит naive datetime; сравнение с aware в WHERE даёт пустые выборки
+    (особенно узкое окно «сегодня»). Postgres оставляем с tz-aware UTC.
+    """
+    u = _dt_as_utc(dt)
+    if settings.db_mode == "sqlite":
+        return u.replace(tzinfo=None)
+    return u
+
+
 # ─── Статистика дашборда ────────────────────────────────
 
 @router.get("/stats")
@@ -547,9 +558,11 @@ async def dashboard_stats(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Статистика для дашборда: выручка за сегодня, общие счётчики."""
-    today_start = datetime.now(tz=timezone.utc).replace(
-        hour=0, minute=0, second=0, microsecond=0,
-    )
+    now_utc = datetime.now(tz=timezone.utc)
+    today_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+    ts_lo = _sql_dt_for_filter(today_start)
+    ts_hi = _sql_dt_for_filter(now_utc)
+    ys_lo = _sql_dt_for_filter(today_start - timedelta(days=1))
 
     not_cancelled = Order.status != OrderStatus.CANCELLED
 
@@ -563,7 +576,11 @@ async def dashboard_stats(
 
     today_q = await db.execute(
         select(func.count(Order.id), func.coalesce(func.sum(Order.total_price), 0))
-        .where(not_cancelled, Order.created_at >= today_start)
+        .where(
+            not_cancelled,
+            Order.created_at >= ts_lo,
+            Order.created_at <= ts_hi,
+        )
     )
     today_row = today_q.one()
     today_orders = today_row[0]
@@ -574,8 +591,8 @@ async def dashboard_stats(
         select(func.count(Order.id), func.coalesce(func.sum(Order.total_price), 0))
         .where(
             not_cancelled,
-            Order.created_at >= yesterday_start,
-            Order.created_at < today_start,
+            Order.created_at >= ys_lo,
+            Order.created_at < ts_lo,
         )
     )
     yesterday_row = yesterday_q.one()
@@ -678,6 +695,11 @@ async def analytics(
     prev_start = start - prev_duration
     prev_end = start
 
+    start_sql = _sql_dt_for_filter(start)
+    end_sql = _sql_dt_for_filter(end)
+    prev_start_sql = _sql_dt_for_filter(prev_start)
+    prev_end_sql = _sql_dt_for_filter(prev_end)
+
     not_cancelled = Order.status != OrderStatus.CANCELLED
 
     # Агрегаты текущего периода (SQL)
@@ -686,7 +708,7 @@ async def analytics(
             func.count(Order.id),
             func.coalesce(func.sum(Order.total_price), 0),
         )
-        .where(not_cancelled, Order.created_at >= start, Order.created_at <= end)
+        .where(not_cancelled, Order.created_at >= start_sql, Order.created_at <= end_sql)
     )
     cur_row = cur_q.one()
     current_count = cur_row[0]
@@ -698,7 +720,11 @@ async def analytics(
             func.count(Order.id),
             func.coalesce(func.sum(Order.total_price), 0),
         )
-        .where(not_cancelled, Order.created_at >= prev_start, Order.created_at < prev_end)
+        .where(
+            not_cancelled,
+            Order.created_at >= prev_start_sql,
+            Order.created_at < prev_end_sql,
+        )
     )
     prev_row = prev_q.one()
     prev_count = prev_row[0]
@@ -710,7 +736,7 @@ async def analytics(
     # Загружаем только заказы текущего периода (для daily + top_items)
     cur_orders_result = await db.execute(
         select(Order)
-        .where(not_cancelled, Order.created_at >= start, Order.created_at <= end)
+        .where(not_cancelled, Order.created_at >= start_sql, Order.created_at <= end_sql)
     )
     current_orders = cur_orders_result.scalars().all()
 

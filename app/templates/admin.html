@@ -397,7 +397,7 @@
                             </select>
                         </div>
                     </div>
-                    <p class="text-xs text-gray-400 mb-2">Период и дни — в UTC (как на дашборде).</p>
+                    <p class="text-xs text-gray-400 mb-2">Период «Сегодня» и столбцы — <strong>календарные сутки UTC</strong> (как на дашборде). Демо-заказы привязаны к дате генерации: после смены суток на сервере обновите демо («Удалить демо» → «Демо-данные»).</p>
                     <div class="relative w-full min-h-[280px]" style="height: 320px;">
                         <canvas id="revenueChart" class="w-full h-full"></canvas>
                     </div>
@@ -2488,7 +2488,7 @@ function adminApp() {
             if (series.length === 0) return;
 
             const labels = series.map((d) => {
-                const dt = new Date(d.date + 'T00:00:00');
+                const dt = new Date(d.date + 'T12:00:00Z');
                 return dt.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' });
             });
             const isRev = this.dashMiniMetric === 'revenue';
