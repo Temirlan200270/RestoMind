@@ -930,6 +930,12 @@ class MenuItemPatchBody(BaseModel):
     image_url: str | None = Field(None, max_length=500)
 
 
+class ClearMenuBody(BaseModel):
+    """Подтверждение полной очистки таблицы меню (например, на деплое без Shell)."""
+
+    confirm: bool = Field(False, description="Должно быть true")
+
+
 class MenuItemCreateBody(BaseModel):
     """Создание позиции вручную (без iiko)."""
 
@@ -1016,6 +1022,28 @@ async def patch_menu_item(
 
     await db.flush()
     return {"ok": True, "item": _menu_item_dict(item)}
+
+
+@router.post("/menu/clear")
+async def clear_all_menu_items(
+    body: ClearMenuBody,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    Удалить **все** строки из ``menu_items`` (заказы в БД не трогаются — позиции в ``items_json`` сохраняются).
+
+    Требуется ``{"confirm": true}`` — защита от случайного вызова.
+    """
+    if not body.confirm:
+        raise HTTPException(
+            status_code=400,
+            detail="Для очистки меню передайте в теле JSON: {\"confirm\": true}",
+        )
+    cnt = await db.scalar(select(func.count()).select_from(MenuItem)) or 0
+    await db.execute(sql_delete(MenuItem))
+    await db.flush()
+    logger.warning("Админ: полная очистка menu_items, удалено позиций: %d", cnt)
+    return {"ok": True, "deleted": int(cnt)}
 
 
 @router.delete("/menu/{item_id}")

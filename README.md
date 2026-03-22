@@ -83,23 +83,6 @@ python -m uvicorn app.main:app --reload
 
 Откройте в браузере: [http://localhost:8000](http://localhost:8000) или [http://localhost:8000/admin](http://localhost:8000/admin) — форма входа, затем панель.
 
-### Stagewise (опционально, UI-агент в браузере)
-
-[Stagewise](https://stagewise.io) — прокси к dev-серверу с панелью для правок фронтенда (админка Jinja/Alpine). В корне: `package.json`, `stagewise.json` (приложение **8000**, тулбар Stagewise **3100**).
-
-Нужен [Node.js](https://nodejs.org/) (LTS):
-
-```bash
-npm install
-npm run dev:stagewise
-```
-
-В браузере откройте прокси — обычно [http://localhost:3100](http://localhost:3100). Прямой **:8000** — без панели Stagewise.
-
-Расширение IDE Bridge: [stagewise](https://marketplace.visualstudio.com/items?itemName=stagewise.stagewise-vscode-extension); мост: `npm run stagewise:bridge`.
-
-> В npm `stagewise@0.12+` помечен в пользу desktop-приложения; в проекте зафиксирована CLI **0.11.1**. Актуальный способ — [stagewise.io](https://stagewise.io).
-
 ### 5. Тестирование бота (без WhatsApp)
 
 Эндпоинт защищён сессией админки. Удобнее всего: зайти в [http://localhost:8000/docs](http://localhost:8000/docs) → **Authorize** не нужен для cookie, но проще вызвать `POST /api/admin/auth/login`, затем `POST /api/admin/test-bot` из той же сессии браузера.
@@ -171,8 +154,6 @@ RestoMind/
 │   └── VERCEL.md             # почему API не на Vercel
 ├── seed.py
 ├── requirements.txt
-├── package.json               # Stagewise CLI
-├── stagewise.json
 ├── plan.md
 ├── DEPLOY_GUIDE.md
 ├── CHANGELOG.md

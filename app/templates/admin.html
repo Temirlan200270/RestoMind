@@ -1191,6 +1191,12 @@
                                 class="text-sm font-semibold px-4 py-2.5 rounded-xl bg-brand-600 text-white hover:bg-brand-700 shadow-sm shadow-brand-600/20 transition">
                                 + Добавить позицию
                             </button>
+                            <button type="button" x-show="menuItems.length > 0" :disabled="menuClearLoading"
+                                @click="clearAllMenuFromDb()"
+                                class="text-sm font-semibold px-4 py-2.5 rounded-xl border border-red-200 bg-white text-red-700 hover:bg-red-50 shadow-sm transition disabled:opacity-50">
+                                <span x-show="!menuClearLoading">Очистить всё меню</span>
+                                <span x-show="menuClearLoading">Удаление…</span>
+                            </button>
                             <button type="button" @click="toggleMenuBulkMode()"
                                 :class="menuBulkMode ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-gray-600 border-gray-200 hover:border-brand-300'"
                                 class="text-sm font-semibold px-4 py-2.5 rounded-xl border shadow-sm transition">
@@ -1283,7 +1289,7 @@
 
                 <div x-show="menuItems.length === 0" class="text-center py-20 text-gray-400">
                     <div class="text-5xl mb-3">&#x1F372;</div>
-                    <div class="text-lg max-w-md mx-auto">Меню пусто. Нажмите <strong>«Добавить позицию»</strong> или перезапустите сервер — при пустой БД каталог подгрузится сам.</div>
+                    <div class="text-lg max-w-md mx-auto">Меню пусто. Синхронизируйте номенклатуру из <strong>iiko</strong> (раздел «Интеграции») или добавьте позиции вручную.</div>
                                 </div>
 
                 <div x-show="menuItems.length > 0 && menuFilteredItems.length === 0" class="text-center py-20 text-gray-400">
@@ -2112,6 +2118,8 @@ function adminApp() {
         menuBulkMode: false,
         menuBulkSelectedIds: [],
         menuBulkSaving: false,
+        /** Полная очистка меню (POST /api/admin/menu/clear) */
+        menuClearLoading: false,
         /** Статус интеграций (GET /api/admin/integrations/status). */
         integrationStatus: defaultIntegrationStatus(),
         integrationSyncLoading: false,
@@ -3839,6 +3847,41 @@ function adminApp() {
                 return ia - ib;
             });
             this.menuViewRevision += 1;
+        },
+
+        /**
+         * Полная очистка menu_items на сервере (деплой без Shell).
+         * Два confirm подряд — защита от случайного клика.
+         */
+        async clearAllMenuFromDb() {
+            const n = this.menuItems.length;
+            if (!n || this.menuClearLoading) return;
+            if (!window.confirm(`Удалить все ${n} позиций меню из базы? Старые заказы не удалятся.`)) return;
+            if (!window.confirm('Последнее подтверждение: номенклатура будет пуста до синхронизации с iiko.')) return;
+            this.menuClearLoading = true;
+            try {
+                const res = await this.apiFetch('/api/admin/menu/clear', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ confirm: true }),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    alert(typeof data.detail === 'string' ? data.detail : 'Не удалось очистить меню');
+                    return;
+                }
+                this.demoToastMessage = data.deleted != null
+                    ? `Удалено позиций: ${data.deleted}`
+                    : 'Меню очищено';
+                setTimeout(() => { this.demoToastMessage = ''; }, 3200);
+                await this.loadMenu();
+                await this.loadDashStats();
+            } catch (e) {
+                console.error('[admin] clearAllMenuFromDb', e);
+                alert('Ошибка сети');
+            } finally {
+                this.menuClearLoading = false;
+            }
         },
 
         openMenuCreate() {
