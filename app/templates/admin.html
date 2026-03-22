@@ -4,27 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RestoMind — Панель управления</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/static/css/admin.css">
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    fontFamily: { sans: ['Inter', 'sans-serif'] },
-                    colors: {
-                        brand: {
-                            50: '#f0f7ff', 100: '#e0effe', 200: '#bae0fd',
-                            400: '#5bb8f9', 500: '#3b9ef5', 600: '#2563eb',
-                            700: '#1d4ed8', 800: '#1e40af', 900: '#1a2e5e',
-                        }
-                    }
-                }
-            }
-        }
-    </script>
     <style>
         [x-cloak] { display: none !important; }
         .fade-in { animation: fadeIn 0.3s ease-out; }
@@ -168,6 +152,14 @@
                     <button type="button" @click="logoutAdmin()"
                         class="min-h-[44px] px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-medium border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 transition shadow-sm">
                         Выйти
+                    </button>
+                    <button type="button" @click="syncStopListOnly()"
+                        :disabled="stopListSyncLoading || integrationSyncLoading || !integrationStatus.iiko_configured"
+                        :title="integrationStatus.iiko_configured ? 'Синхронизировать стоп-лист из iiko (учётные данные из .env)' : 'Задайте IIKO_API_LOGIN и IIKO_ORGANIZATION_ID в .env'"
+                        class="min-h-[44px] flex items-center gap-2 px-3 sm:px-4 py-2 rounded-xl border text-xs sm:text-sm font-semibold transition shadow-sm disabled:opacity-45 disabled:cursor-not-allowed bg-orange-50 text-orange-900 border-orange-200 hover:bg-orange-100">
+                        <span :class="stopListSyncLoading ? 'animate-spin' : ''">&#x21bb;</span>
+                        <span class="hidden sm:inline">Стоп-лист iiko</span>
+                        <span class="sm:hidden">Стоп</span>
                     </button>
                 <button
                     @click="loadTabData()"
@@ -652,6 +644,9 @@
                                         <span class="font-bold text-brand-600 text-sm" x-text="'#' + order.id"></span>
                                         <span class="text-[10px] text-gray-400" x-text="fmt.time(order.created_at)"></span>
                                     </div>
+                                    <div class="flex flex-wrap gap-1 mb-1" x-show="order.order_type">
+                                        <span class="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-800 border border-indigo-100" x-text="orderTypeBadge(order)"></span>
+                                    </div>
                                     <div class="text-xs font-mono text-gray-600 mb-1 truncate" x-show="order.user_phone" x-text="order.user_phone"></div>
                                     <div class="text-xs text-gray-500 mb-2" x-text="(order.items?.items?.length || 0) + ' позиций'"></div>
                                     <div class="text-sm font-bold text-gray-900" x-text="fmt.money(order.total_price)"></div>
@@ -693,6 +688,9 @@
                                     <div class="flex items-center justify-between mb-2">
                                         <span class="font-bold text-brand-600 text-sm" x-text="'#' + order.id"></span>
                                         <span class="text-[10px] text-gray-400" x-text="fmt.time(order.created_at)"></span>
+                                    </div>
+                                    <div class="flex flex-wrap gap-1 mb-1" x-show="order.order_type">
+                                        <span class="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-800 border border-indigo-100" x-text="orderTypeBadge(order)"></span>
                                     </div>
                                     <div class="text-xs font-mono text-gray-600 mb-1 truncate" x-show="order.user_phone" x-text="order.user_phone"></div>
                                     <div class="text-xs text-gray-500 mb-2" x-text="(order.items?.items?.length || 0) + ' позиций'"></div>
@@ -736,6 +734,9 @@
                                         <span class="font-bold text-brand-600 text-sm" x-text="'#' + order.id"></span>
                                         <span class="text-[10px] text-gray-400" x-text="fmt.time(order.created_at)"></span>
                                     </div>
+                                    <div class="flex flex-wrap gap-1 mb-1" x-show="order.order_type">
+                                        <span class="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-800 border border-indigo-100" x-text="orderTypeBadge(order)"></span>
+                                    </div>
                                     <div class="text-xs font-mono text-gray-600 mb-1 truncate" x-show="order.user_phone" x-text="order.user_phone"></div>
                                     <div class="text-xs text-gray-500 mb-2" x-text="(order.items?.items?.length || 0) + ' позиций'"></div>
                                     <div class="text-sm font-bold text-gray-900" x-text="fmt.money(order.total_price)"></div>
@@ -769,6 +770,9 @@
                                         <button type="button" @click.stop="toggleOrdersSort('client')" class="inline-flex items-center gap-1 hover:text-brand-600">Клиент <span class="text-brand-600" x-text="sortArrow(ordersSort.column, 'client', ordersSort.dir)"></span></button>
                                     </th>
                                     <th class="px-5 pb-3 pt-4 font-medium">
+                                        <button type="button" @click.stop="toggleOrdersSort('order_type')" class="inline-flex items-center gap-1 hover:text-brand-600">Тип <span class="text-brand-600" x-text="sortArrow(ordersSort.column, 'order_type', ordersSort.dir)"></span></button>
+                                    </th>
+                                    <th class="px-5 pb-3 pt-4 font-medium">
                                         <button type="button" @click.stop="toggleOrdersSort('items')" class="inline-flex items-center gap-1 hover:text-brand-600">Позиции <span class="text-brand-600" x-text="sortArrow(ordersSort.column, 'items', ordersSort.dir)"></span></button>
                                     </th>
                                     <th class="px-5 pb-3 pt-4 font-medium">
@@ -793,6 +797,10 @@
                                             <div class="text-xs text-gray-500 truncate max-w-[14rem]" x-show="order.user_name" x-text="order.user_name"></div>
                                         </td>
                                         <td class="px-5 py-4">
+                                            <span x-show="order.order_type" class="inline-block text-[10px] font-black px-2 py-0.5 rounded-lg bg-indigo-50 text-indigo-800 border border-indigo-100" x-text="orderTypeBadge(order)"></span>
+                                            <span x-show="!order.order_type" class="text-gray-300">—</span>
+                                        </td>
+                                        <td class="px-5 py-4">
                                             <span x-text="order.items_count != null ? order.items_count : (order.items?.items?.length || 0)" class="text-gray-600"></span>
                                             <span class="text-gray-400">поз.</span>
                                         </td>
@@ -811,7 +819,7 @@
                                     </tr>
                                 </template>
                                 <tr x-show="orders.length === 0">
-                                    <td colspan="6" class="py-12 text-center text-gray-400">
+                                    <td colspan="7" class="py-12 text-center text-gray-400">
                                         <div class="text-4xl mb-2">&#x1F4E6;</div>
                                         Заказов пока нет
                                     </td>
@@ -831,6 +839,7 @@
                                 <div class="font-mono text-xs text-gray-700" x-text="order.user_phone || '—'"></div>
                                 <div class="flex flex-wrap items-center gap-2">
                                     <span :class="statusConfig[order.status]?.class || 'bg-gray-100 text-gray-600'" x-text="statusConfig[order.status]?.label || order.status" class="px-2 py-0.5 rounded-full text-[10px] font-medium"></span>
+                                    <span x-show="order.order_type" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-800" x-text="orderTypeBadge(order)"></span>
                                     <span class="text-[10px] text-gray-400" x-text="fmt.date(order.created_at)"></span>
                                 </div>
                             </button>
@@ -855,6 +864,9 @@
                                         <div class="text-sm text-gray-500 mt-0.5">
                                             <span x-text="b.guests"></span> гост.
                                             <span x-show="b.comment" class="ml-2 text-gray-400 line-clamp-1" x-text="'— ' + b.comment"></span>
+                                        </div>
+                                        <div x-show="b.linked_order_id" class="text-[11px] text-teal-700 font-semibold mt-1">
+                                            Предзаказ · заказ #<span x-text="b.linked_order_id"></span>
                                         </div>
                                     </div>
                                 </div>
@@ -1398,6 +1410,71 @@
                 </div>
             </div>
 
+            <!-- ========== СТОП-ЛИСТ ========== -->
+            <div x-show="currentTab === 'stoplist'" x-cloak class="fade-in pb-8">
+                <div class="sticky top-0 z-10 -mx-4 sm:-mx-6 md:-mx-8 px-4 sm:px-6 md:px-8 pt-2 pb-4 mb-6 bg-gray-50/95 backdrop-blur-md border-b border-gray-200/80 shadow-sm">
+                    <div class="flex flex-col sm:flex-row gap-4 sm:items-center sm:justify-between">
+                        <div class="relative flex-1 max-w-xl">
+                            <span class="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">&#x1F50D;</span>
+                            <input type="search" x-model.debounce.300ms="stopListSearchQuery" placeholder="Поиск по названию или разделу…"
+                                class="w-full pl-11 pr-4 py-3 rounded-2xl border border-gray-200 bg-white text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-orange-500">
+                        </div>
+                        <button type="button" @click="syncStopListOnly()"
+                            :disabled="stopListSyncLoading || integrationSyncLoading || !integrationStatus.iiko_configured"
+                            class="min-h-[48px] shrink-0 px-6 py-3 rounded-2xl font-bold text-sm bg-orange-600 text-white hover:bg-orange-700 shadow-md shadow-orange-600/25 transition disabled:opacity-45 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+                            <span :class="stopListSyncLoading ? 'animate-spin' : ''">&#x21bb;</span>
+                            Синхронизировать с iiko
+                        </button>
+                    </div>
+                    <p class="text-xs text-gray-500 mt-3">
+                        Список позиций с флагом «нет в наличии». Кнопка подтягивает актуальный стоп из iiko Cloud (те же учётные данные, что в .env).
+                        <span x-show="!integrationStatus.iiko_configured" class="text-amber-700 font-medium"> Настройте IIKO_* в .env.</span>
+                    </p>
+                </div>
+
+                <div x-show="stopListLoadError" x-cloak class="mb-4 text-sm text-red-800 bg-red-50 border border-red-100 rounded-xl px-4 py-3" x-text="stopListLoadError"></div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+                    <div class="lg:col-span-1 rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+                        <div class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Последняя синхронизация</div>
+                        <div class="flex items-center gap-2 text-sm text-gray-800">
+                            <span class="h-2.5 w-2.5 rounded-full shrink-0" :class="integrationStatus.last_stoplist?.ok ? 'bg-emerald-500' : 'bg-red-500'"></span>
+                            <span x-text="integrationStatus.last_stoplist?.at ? fmt.date(integrationStatus.last_stoplist?.at) : '—'"></span>
+                        </div>
+                        <p class="text-xs text-red-600 mt-2 font-medium" x-show="integrationStatus.last_stoplist?.error && !integrationStatus.last_stoplist?.ok"
+                            x-text="integrationStatus.last_stoplist?.error"></p>
+                    </div>
+                    <div class="lg:col-span-2 rounded-2xl border border-orange-100 bg-orange-50/40 p-5">
+                        <div class="text-sm text-orange-950 leading-relaxed">
+                            Если в iiko стоп-лист <strong>очищен</strong>, локальные позиции снова станут доступны после синхронизации (исправлено на сервере: пустой ответ iiko больше не блокирует возврат в продажу).
+                        </div>
+                    </div>
+                </div>
+
+                <div x-show="!loading && stopListFilteredItems.length === 0 && !stopListLoadError" class="text-center py-16 text-gray-500">
+                    <div class="text-5xl mb-3">&#x2705;</div>
+                    <p class="text-lg font-medium text-gray-700">В стопе никого</p>
+                    <p class="text-sm mt-2 max-w-md mx-auto">Все позиции в наличии или ещё не загружено меню. Нажмите «Синхронизировать с iiko», если ожидаете стоп из облака.</p>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                    <template x-for="item in stopListFilteredItems" :key="'sl-' + item.id">
+                        <div class="bg-white rounded-2xl border border-red-100 p-4 shadow-sm hover:shadow-md transition flex flex-col">
+                            <div class="flex justify-between items-start gap-2 mb-2">
+                                <span class="text-[10px] uppercase font-bold text-red-700 bg-red-50 px-2 py-0.5 rounded-md">Стоп</span>
+                                <span class="text-lg font-extrabold text-brand-700 tabular-nums shrink-0" x-text="fmt.money(item.price)"></span>
+                            </div>
+                            <div class="font-semibold text-gray-900 text-sm leading-snug flex-1" x-text="item.name"></div>
+                            <div class="text-[11px] text-gray-500 mt-1" x-text="item.category"></div>
+                            <div class="mt-3 pt-3 border-t border-gray-100 flex gap-2">
+                                <button type="button" @click="currentTab = 'menu'; menuSearchQuery = item.name; menuStockFilter = 'out'; loadTabData();"
+                                    class="text-xs font-semibold text-brand-600 hover:text-brand-800">Открыть в меню</button>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </div>
+
             <!-- ========== ИНТЕГРАЦИИ ========== -->
             <div x-show="currentTab === 'integrations'" x-cloak class="fade-in max-w-3xl">
                 <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
@@ -1414,7 +1491,7 @@
                                     <div class="font-medium text-gray-900">iiko Cloud</div>
                                     <p class="text-sm text-gray-600 mt-1" x-text="integrationStoplistCaption()"></p>
                                     <p class="text-xs text-red-600 mt-1 font-medium" x-show="integrationStatus.last_stoplist?.error && !integrationStatus.last_stoplist?.ok"
-                                        x-text="integrationStatus.last_stoplist.error"></p>
+                                        x-text="integrationStatus.last_stoplist?.error"></p>
                                 </div>
                             </div>
                             <div class="mt-3 flex flex-wrap items-center gap-2 pl-6">
@@ -1424,10 +1501,10 @@
                             <div class="mt-2 pl-6 text-xs text-gray-500" x-show="integrationStatus.last_menu_sync?.at">
                                 Последняя синхронизация <strong>меню</strong>:
                                 <span x-text="integrationStatus.last_menu_sync?.ok ? 'успех' : 'ошибка'"></span>
-                                <span class="text-gray-400" x-text="' · ' + fmt.date(integrationStatus.last_menu_sync.at)"></span>
+                                <span class="text-gray-400" x-text="' · ' + fmt.date(integrationStatus.last_menu_sync?.at)"></span>
                             </div>
                             <p class="text-xs text-red-600 mt-1 pl-6" x-show="integrationStatus.last_menu_sync?.error && !integrationStatus.last_menu_sync?.ok"
-                                x-text="integrationStatus.last_menu_sync.error"></p>
+                                x-text="integrationStatus.last_menu_sync?.error"></p>
                         </div>
 
                         <!-- WhatsApp -->
@@ -1441,14 +1518,19 @@
                         </div>
                     </div>
 
-                    <div class="mt-6 pt-6 border-t border-gray-100">
+                    <div class="mt-6 pt-6 border-t border-gray-100 flex flex-wrap gap-3 items-center">
                         <button type="button" @click="syncIntegrationsNow()"
                             :disabled="integrationSyncLoading || !integrationStatus.iiko_configured"
                             class="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed shadow-sm shadow-brand-600/20">
                             <span x-show="!integrationSyncLoading">Синхронизировать меню и стоп-листы сейчас</span>
                             <span x-show="integrationSyncLoading" x-cloak>Синхронизация…</span>
                         </button>
-                        <p class="text-xs text-gray-400 mt-2">Подтягивает цены и номенклатуру из iiko и обновляет стоп-лист (как после смены цен в офисе).</p>
+                        <button type="button" @click="syncMenuOnlyFromEnv()"
+                            :disabled="integrationSyncLoading || !integrationStatus.iiko_configured"
+                            class="inline-flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold border border-gray-200 bg-white text-gray-800 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">
+                            Только меню (iiko → БД)
+                        </button>
+                        <p class="text-xs text-gray-400 w-full mt-1">Полная кнопка — меню + стоп-листы. «Только меню» — номенклатура и цены в <code class="bg-gray-100 px-1 rounded text-[10px]">menu_items</code> без запроса стоп-листов.</p>
                     </div>
 
                     <div class="rounded-xl border border-gray-200 bg-gray-50/50 p-4 mb-4">
@@ -1651,129 +1733,180 @@
             class="fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] px-5 py-3 rounded-xl bg-slate-900 text-white text-sm font-medium shadow-xl shadow-slate-900/20 max-w-[90vw] text-center"
             x-text="demoToastMessage"></div>
 
-        <div x-show="showOrderModal" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/40" @click.self="showOrderModal = false">
-            <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 fade-in" @click.stop>
-                <div class="flex items-center justify-between mb-5">
-                    <h3 class="text-lg font-bold" x-text="'Заказ #' + selectedOrder?.id"></h3>
-                    <button @click="showOrderModal = false" class="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
-                </div>
-                <div class="mb-4 rounded-xl bg-gray-50 border border-gray-100 px-4 py-3 text-sm" x-show="selectedOrder?.user_phone || selectedOrder?.user_name">
-                    <div class="text-xs text-gray-500 mb-0.5">Клиент (WhatsApp)</div>
-                    <div class="font-mono text-gray-900" x-text="selectedOrder?.user_phone || '—'"></div>
-                    <div class="text-gray-600 mt-1" x-show="selectedOrder?.user_name" x-text="selectedOrder?.user_name"></div>
-                </div>
-                <div x-show="selectedOrder?.iiko_last_error" class="mb-4 flex gap-3 rounded-xl border-2 border-red-400 bg-gradient-to-r from-red-50 to-rose-50 px-4 py-3 shadow-sm" role="alert">
-                    <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-600 text-white text-lg font-black shadow-md" aria-hidden="true">!</div>
-                    <div class="min-w-0">
-                        <p class="text-xs font-bold uppercase tracking-wider text-red-900">Ошибка отправки в iiko</p>
-                        <p class="text-sm text-red-900 font-semibold leading-snug break-words mt-1" x-text="selectedOrder.iiko_last_error"></p>
+        <div x-show="showOrderModal && selectedOrder" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/40" @click.self="showOrderModal = false">
+            <template x-if="selectedOrder">
+                <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 fade-in" @click.stop>
+                    <div class="flex items-center justify-between mb-5">
+                        <h3 class="text-lg font-bold" x-text="'Заказ #' + selectedOrder.id"></h3>
+                        <button @click="showOrderModal = false" class="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
                     </div>
-                </div>
-                <template x-if="selectedOrder?.items?.items">
-                    <div class="space-y-3">
-                        <template x-for="(item, idx) in selectedOrder.items.items" :key="idx">
-                            <div class="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3">
-                                <div>
-                                    <div class="font-medium" x-text="item.name"></div>
-                                    <div x-show="item.exclude_ingredients?.length" class="text-xs text-red-500 mt-0.5" x-text="'Без: ' + (item.exclude_ingredients || []).join(', ')"></div>
-                                </div>
-                                <div class="text-right">
-                                    <div class="font-semibold" x-text="fmt.money(item.item_total)"></div>
-                                    <div class="text-xs text-gray-400" x-text="item.quantity + ' x ' + fmt.money(item.price_per_unit)"></div>
-                                </div>
-                            </div>
-                        </template>
-                        <div class="flex justify-between items-center pt-3 border-t border-gray-200">
-                            <span class="font-semibold text-gray-600">Итого:</span>
-                            <span class="text-xl font-bold text-brand-600" x-text="fmt.money(selectedOrder.total_price)"></span>
+                    <div class="flex flex-wrap items-center gap-2 mb-4" x-show="selectedOrder.order_type">
+                        <span class="px-2.5 py-1 rounded-lg text-[10px] font-black tracking-wide uppercase bg-indigo-100 text-indigo-900 border border-indigo-200/80"
+                            x-text="orderTypeBadge(selectedOrder)"></span>
+                        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-800 border border-slate-200/80"
+                            :title="paymentMethodTitle(selectedOrder)">
+                            <span class="text-base leading-none" x-text="paymentIcon(selectedOrder)"></span>
+                            <span x-text="paymentMethodTitle(selectedOrder)"></span>
+                        </span>
+                        <span x-show="selectedOrder?.prepayment_status && selectedOrder?.prepayment_status !== 'not_required'"
+                            class="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase bg-amber-100 text-amber-900 border border-amber-200/80"
+                            x-text="prepaymentLabel(selectedOrder?.prepayment_status)"></span>
+                    </div>
+                    <div class="mb-4 rounded-xl border border-violet-200 bg-violet-50/60 px-4 py-3 text-sm" x-show="selectedOrder?.booking">
+                        <div class="text-xs font-bold text-violet-800 uppercase tracking-wide mb-1">Бронь (предзаказ в зале)</div>
+                        <p class="text-gray-900 font-semibold" x-text="fmt.bookingDate(selectedOrder?.booking?.date) + ' в ' + (selectedOrder?.booking?.time?.slice(0,5) || '—')"></p>
+                        <p class="text-gray-700 mt-1">
+                            <span x-text="selectedOrder?.booking?.guests"></span> гост. ·
+                            <span x-text="bookingHallLabel(selectedOrder?.booking?.hall)"></span>
+                        </p>
+                        <p class="text-xs text-violet-700 mt-1" x-show="selectedOrder?.booking?.comment" x-text="selectedOrder?.booking?.comment"></p>
+                        <p class="text-[11px] text-violet-600 mt-2">Бронь №<span class="font-mono tabular-nums" x-text="selectedOrder?.booking?.id"></span></p>
+                    </div>
+                    <div class="mb-4 rounded-xl border border-emerald-200 bg-emerald-50/50 px-4 py-3 text-sm" x-show="selectedOrder?.payment_link_url">
+                        <div class="text-xs font-bold text-emerald-800 uppercase tracking-wide mb-1">Ссылка на оплату</div>
+                        <a :href="selectedOrder?.payment_link_url" target="_blank" rel="noopener noreferrer" class="text-emerald-700 font-mono text-xs break-all underline" x-text="selectedOrder?.payment_link_url"></a>
+                    </div>
+                    <div class="mb-4 rounded-xl bg-gray-50 border border-gray-100 px-4 py-3 text-sm" x-show="selectedOrder?.user_phone || selectedOrder?.user_name">
+                        <div class="text-xs text-gray-500 mb-0.5">Клиент (WhatsApp)</div>
+                        <div class="font-mono text-gray-900" x-text="selectedOrder?.user_phone || '—'"></div>
+                        <div class="text-gray-600 mt-1" x-show="selectedOrder?.user_name" x-text="selectedOrder?.user_name"></div>
+                    </div>
+                    <div x-show="selectedOrder?.iiko_last_error" class="mb-4 flex gap-3 rounded-xl border-2 border-red-400 bg-gradient-to-r from-red-50 to-rose-50 px-4 py-3 shadow-sm" role="alert">
+                        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-600 text-white text-lg font-black shadow-md" aria-hidden="true">!</div>
+                        <div class="min-w-0">
+                            <p class="text-xs font-bold uppercase tracking-wider text-red-900">Ошибка отправки в iiko</p>
+                            <p class="text-sm text-red-900 font-semibold leading-snug break-words mt-1" x-text="selectedOrder?.iiko_last_error"></p>
                         </div>
                     </div>
-                </template>
-            </div>
+                    <template x-if="selectedOrder.items?.items">
+                        <div class="space-y-3">
+                            <template x-for="(item, idx) in selectedOrder.items.items" :key="idx">
+                                <div class="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3">
+                                    <div>
+                                        <div class="font-medium" x-text="item.name"></div>
+                                        <div x-show="item.exclude_ingredients?.length" class="text-xs text-red-500 mt-0.5" x-text="'Без: ' + (item.exclude_ingredients || []).join(', ')"></div>
+                                    </div>
+                                    <div class="text-right">
+                                        <div class="font-semibold" x-text="fmt.money(item.item_total)"></div>
+                                        <div class="text-xs text-gray-400" x-text="item.quantity + ' x ' + fmt.money(item.price_per_unit)"></div>
+                                    </div>
+                                </div>
+                            </template>
+                            <template x-if="selectedOrder.items?.fee_lines?.length">
+                                <div class="space-y-2">
+                                    <p class="text-xs font-bold text-gray-500 uppercase tracking-wide">Дополнительно</p>
+                                    <template x-for="(fl, fi) in selectedOrder.items.fee_lines" :key="'fee-' + fi">
+                                        <div class="flex items-center justify-between bg-amber-50/80 border border-amber-100 rounded-xl px-4 py-2.5">
+                                            <span class="text-sm font-medium text-amber-900" x-text="fl.name"></span>
+                                            <span class="font-bold text-amber-800" x-text="fmt.money(fl.item_total)"></span>
+                                        </div>
+                                    </template>
+                                </div>
+                            </template>
+                            <div class="flex justify-between items-center pt-3 border-t border-gray-200">
+                                <span class="font-semibold text-gray-600">Итого:</span>
+                                <span class="text-xl font-bold text-brand-600" x-text="fmt.money(selectedOrder?.total_price)"></span>
+                            </div>
+                            <div x-show="selectedOrder?.delivery_address" class="text-xs text-gray-600 bg-gray-50 rounded-lg px-3 py-2 border border-gray-100">
+                                <span class="font-semibold text-gray-500">Адрес:</span>
+                                <span x-text="selectedOrder?.delivery_address"></span>
+                            </div>
+                            <button type="button"
+                                x-show="selectedOrder?.status === 'confirmed' || selectedOrder?.iiko_last_error"
+                                @click="confirmSendToIiko()"
+                                class="w-full mt-2 py-4 rounded-2xl text-white font-black text-sm tracking-wide shadow-lg shadow-emerald-500/25 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:to-teal-500 transition">
+                                <span x-text="selectedOrder?.iiko_last_error ? 'Повторить отправку в iiko' : 'ПОДТВЕРДИТЬ И ПЕЧАТЬ В IIKO'"></span>
+                            </button>
+                        </div>
+                    </template>
+                </div>
+            </template>
         </div>
 
         <!-- Модалка деталей бронирования -->
-        <div x-show="showBookingModal" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" @click.self="closeBookingModal()">
-            <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 fade-in border border-gray-100" @click.stop role="dialog" aria-modal="true">
-                <div class="flex items-start justify-between gap-3 mb-5">
-                    <div>
-                        <h3 class="text-lg font-bold text-gray-900" x-text="'Бронирование #' + (selectedBooking?.id ?? '')"></h3>
-                        <p class="text-xs text-gray-400 mt-0.5">Столик · резервация</p>
+        <div x-show="showBookingModal && selectedBooking" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" @click.self="closeBookingModal()">
+            <template x-if="selectedBooking">
+                <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 fade-in border border-gray-100" @click.stop role="dialog" aria-modal="true">
+                    <div class="flex items-start justify-between gap-3 mb-5">
+                        <div>
+                            <h3 class="text-lg font-bold text-gray-900" x-text="'Бронирование #' + (selectedBooking.id ?? '')"></h3>
+                            <p class="text-xs text-gray-400 mt-0.5">Столик · резервация</p>
+                        </div>
+                        <button type="button" @click="closeBookingModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none shrink-0" aria-label="Закрыть">&times;</button>
                     </div>
-                    <button type="button" @click="closeBookingModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none shrink-0" aria-label="Закрыть">&times;</button>
-                </div>
 
-                <div class="mb-4">
-                    <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 block">Статус</label>
-                    <select
-                        class="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-brand-500"
-                        x-model="selectedBooking.status"
-                        @change="patchBookingField('status')">
-                        <option value="draft">Черновик</option>
-                        <option value="pending">Ожидает</option>
-                        <option value="confirmed">Подтверждён</option>
-                        <option value="cancelled">Отменён</option>
-                    </select>
-                </div>
+                    <div class="mb-4">
+                        <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 block">Статус</label>
+                        <select
+                            class="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                            x-model="selectedBooking.status"
+                            @change="patchBookingField('status')">
+                            <option value="draft">Черновик</option>
+                            <option value="pending">Ожидает</option>
+                            <option value="confirmed">Подтверждён</option>
+                            <option value="cancelled">Отменён</option>
+                        </select>
+                    </div>
 
-                <div class="rounded-2xl bg-gradient-to-br from-emerald-50 to-teal-50/80 border border-emerald-100/80 px-4 py-4 mb-4">
-                    <p class="text-[10px] font-semibold uppercase tracking-wider text-emerald-700/80 mb-1">Дата и время</p>
-                    <p class="text-lg font-bold text-gray-900" x-text="selectedBooking ? (fmt.bookingDate(selectedBooking.date) + ' в ' + (selectedBooking.time?.slice(0, 5) || '—')) : ''"></p>
-                    <p class="text-sm text-gray-600 mt-2">
-                        <span class="font-semibold text-gray-800" x-text="selectedBooking?.guests ?? '—'"></span>
-                        <span x-text="' ' + bookingGuestsWord(selectedBooking?.guests)"></span>
-                    </p>
-                </div>
+                    <div class="rounded-2xl bg-gradient-to-br from-emerald-50 to-teal-50/80 border border-emerald-100/80 px-4 py-4 mb-4">
+                        <p class="text-[10px] font-semibold uppercase tracking-wider text-emerald-700/80 mb-1">Дата и время</p>
+                        <p class="text-lg font-bold text-gray-900" x-text="fmt.bookingDate(selectedBooking.date) + ' в ' + (selectedBooking.time?.slice(0, 5) || '—')"></p>
+                        <p class="text-sm text-gray-600 mt-2">
+                            <span class="font-semibold text-gray-800" x-text="selectedBooking.guests ?? '—'"></span>
+                            <span x-text="' ' + bookingGuestsWord(selectedBooking.guests)"></span>
+                        </p>
+                    </div>
 
-                <div class="mb-4 rounded-xl border border-violet-100 bg-violet-50/30 px-4 py-3">
-                    <label class="text-xs font-semibold text-violet-900/80 uppercase tracking-wide mb-2 block">Зал</label>
-                    <p class="text-[11px] text-violet-700/80 mb-2">VIP — один стол на слот (дата и время); при занятости сервер не даст сохранить.</p>
-                    <select
-                        class="w-full rounded-xl border border-violet-200/80 bg-white px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-violet-400"
-                        x-model="selectedBooking.hall"
-                        @change="patchBookingField('hall')">
-                        <option value="hall_1">Зал 1</option>
-                        <option value="hall_2">Зал 2</option>
-                        <option value="vip">VIP зал</option>
-                    </select>
-                </div>
+                    <div class="mb-4 rounded-xl border border-violet-100 bg-violet-50/30 px-4 py-3">
+                        <label class="text-xs font-semibold text-violet-900/80 uppercase tracking-wide mb-2 block">Зал</label>
+                        <p class="text-[11px] text-violet-700/80 mb-2">VIP — один стол на слот (дата и время); при занятости сервер не даст сохранить.</p>
+                        <select
+                            class="w-full rounded-xl border border-violet-200/80 bg-white px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                            x-model="selectedBooking.hall"
+                            @change="patchBookingField('hall')">
+                            <option value="hall_1">Зал 1</option>
+                            <option value="hall_2">Зал 2</option>
+                            <option value="vip">VIP зал</option>
+                        </select>
+                    </div>
 
-                <div class="mb-4 rounded-xl bg-gray-50 border border-gray-100 px-4 py-3 text-sm space-y-2">
-                    <p class="text-xs text-gray-500 font-medium uppercase tracking-wide">Клиент (WhatsApp)</p>
-                    <div class="flex items-center justify-between gap-2 flex-wrap">
-                        <p class="font-mono text-gray-900 break-all min-w-0" x-text="selectedBooking?.user_phone || '—'"></p>
-                        <button type="button" x-show="selectedBooking?.user_phone"
-                            @click="copyBookingPhone()"
-                            class="shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg bg-white text-brand-700 hover:bg-brand-50 border border-brand-200 shadow-sm">
-                            Копировать
+                    <div class="mb-4 rounded-xl bg-gray-50 border border-gray-100 px-4 py-3 text-sm space-y-2">
+                        <p class="text-xs text-gray-500 font-medium uppercase tracking-wide">Клиент (WhatsApp)</p>
+                        <div class="flex items-center justify-between gap-2 flex-wrap">
+                            <p class="font-mono text-gray-900 break-all min-w-0" x-text="selectedBooking.user_phone || '—'"></p>
+                            <button type="button" x-show="selectedBooking.user_phone"
+                                @click="copyBookingPhone()"
+                                class="shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg bg-white text-brand-700 hover:bg-brand-50 border border-brand-200 shadow-sm">
+                                Копировать
+                            </button>
+                        </div>
+                        <p class="text-gray-700" x-show="selectedBooking.user_name" x-text="selectedBooking.user_name"></p>
+                        <p class="text-[11px] text-gray-400" x-show="selectedBooking.user_id">user_id: <span class="font-mono tabular-nums" x-text="selectedBooking.user_id"></span></p>
+                    </div>
+
+                    <div class="mb-4 rounded-xl border border-amber-100 bg-amber-50/50 px-4 py-3" x-show="selectedBooking.comment">
+                        <p class="text-xs font-semibold text-amber-800/90 mb-1">Пожелания и комментарий</p>
+                        <p class="text-sm text-gray-800 whitespace-pre-line" x-text="selectedBooking.comment"></p>
+                    </div>
+                    <div x-show="!selectedBooking.comment" class="mb-4 text-sm text-gray-400 italic">Комментарий к брони не указан</div>
+
+                    <div class="rounded-xl bg-slate-50 border border-slate-100 px-4 py-3 text-xs text-slate-600">
+                        <span class="text-slate-400">Запись в системе:</span>
+                        <span class="tabular-nums" x-text="selectedBooking.created_at ? (fmt.date(selectedBooking.created_at) + ', ' + fmt.time(selectedBooking.created_at)) : '—'"></span>
+                    </div>
+
+                    <div class="flex flex-col-reverse sm:flex-row gap-3 mt-6">
+                        <button type="button" @click="closeBookingModal()"
+                            class="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 font-semibold text-sm hover:bg-gray-50 transition">
+                            Закрыть
+                        </button>
+                        <button type="button" x-show="selectedBooking.user_phone" @click="goToChatFromBooking()"
+                            class="flex-1 py-3 rounded-xl bg-brand-600 text-white font-semibold text-sm hover:bg-brand-700 shadow-lg shadow-brand-600/20 transition">
+                            Открыть диалог
                         </button>
                     </div>
-                    <p class="text-gray-700" x-show="selectedBooking?.user_name" x-text="selectedBooking?.user_name"></p>
-                    <p class="text-[11px] text-gray-400" x-show="selectedBooking?.user_id">user_id: <span class="font-mono tabular-nums" x-text="selectedBooking?.user_id"></span></p>
                 </div>
-
-                <div class="mb-4 rounded-xl border border-amber-100 bg-amber-50/50 px-4 py-3" x-show="selectedBooking?.comment">
-                    <p class="text-xs font-semibold text-amber-800/90 mb-1">Пожелания и комментарий</p>
-                    <p class="text-sm text-gray-800 whitespace-pre-line" x-text="selectedBooking?.comment"></p>
-                </div>
-                <div x-show="!selectedBooking?.comment" class="mb-4 text-sm text-gray-400 italic">Комментарий к брони не указан</div>
-
-                <div class="rounded-xl bg-slate-50 border border-slate-100 px-4 py-3 text-xs text-slate-600">
-                    <span class="text-slate-400">Запись в системе:</span>
-                    <span class="tabular-nums" x-text="selectedBooking?.created_at ? (fmt.date(selectedBooking.created_at) + ', ' + fmt.time(selectedBooking.created_at)) : '—'"></span>
-                </div>
-
-                <div class="flex flex-col-reverse sm:flex-row gap-3 mt-6">
-                    <button type="button" @click="closeBookingModal()"
-                        class="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 font-semibold text-sm hover:bg-gray-50 transition">
-                        Закрыть
-                    </button>
-                    <button type="button" x-show="selectedBooking?.user_phone" @click="goToChatFromBooking()"
-                        class="flex-1 py-3 rounded-xl bg-brand-600 text-white font-semibold text-sm hover:bg-brand-700 shadow-lg shadow-brand-600/20 transition">
-                        Открыть диалог
-                    </button>
-                </div>
-            </div>
+            </template>
         </div>
     </main>
 
@@ -1823,7 +1956,7 @@ const adminFormat = {
         return d.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short', year: 'numeric' });
     },
     bookingDate(dateStr) {
-        if (!dateStr) return '';
+        if (dateStr == null || dateStr === '') return '';
         const d = new Date(`${String(dateStr).trim()}T00:00:00`);
         if (Number.isNaN(d.getTime())) return '';
         return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', weekday: 'short' });
@@ -1834,6 +1967,18 @@ const adminFormat = {
         return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
     },
 };
+
+/** Начальное состояние GET /integrations/status — чтобы Alpine не падал на undefined до первой загрузки. */
+function defaultIntegrationStatus() {
+    return {
+        iiko_configured: false,
+        whatsapp_configured: false,
+        webhook_url: '',
+        whatsapp_verify_token_hint: '',
+        last_stoplist: { at: null, ok: false, error: null },
+        last_menu_sync: { at: null, ok: false, error: null },
+    };
+}
 
 function adminApp() {
     return {
@@ -1851,6 +1996,12 @@ function adminApp() {
         demoDeleteError: '',
         demoToastMessage: '',
 
+        /** Вкладка «Стоп-лист»: только позиции с is_available=false */
+        stopListItems: [],
+        stopListLoadError: '',
+        stopListSearchQuery: '',
+        stopListSyncLoading: false,
+
         currentTab: 'dashboard',
         loading: false,
         navItems: [
@@ -1866,6 +2017,8 @@ function adminApp() {
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 01-.825-.242m9.345-8.334a21.05 21.05 0 00-1.889-2.403 19.7 19.7 0 00-1.6-1.562c-.642-.522-1.397-.957-2.23-1.25C16.247 1.872 14.747 1.5 12 1.5c-2.747 0-4.247.372-5.63.99-.833.293-1.588.728-2.23 1.25-.563.459-1.082 1-1.6 1.562A21.05 21.05 0 003.75 8.511"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5.25 8.511c-.884.284-1.5 1.128-1.5 2.097v4.286c0 1.136.847 2.1 1.98 2.193.34.027.68.052 1.02.072v3.091l3-3a11.63 11.63 0 014.02-.163 2.115 2.115 0 001.825-.242M9.378 5.378A21.05 21.05 0 0018.72 3.728"/></svg>' },
             { id: 'menu', label: 'Меню', desc: 'Позиции меню ресторана',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8.25v-1.5m0 1.5c-1.355 0-2.697.056-4.024.166C6.845 8.51 6 9.473 6 10.608v2.513m6-4.871c1.355 0 2.697.055 4.024.165C17.155 8.51 18 9.473 18 10.608v2.513m-3 4.73v-1.59c0-.532-.21-1.042-.586-1.418L12 13.5m-3 4.73c.55.47 1.27.73 2 .73h6c.73 0 1.45-.26 2-.73m-8-4.73V10.6c0-1.12.856-2.08 2.09-2.19.64-.09 1.29-.14 1.91-.14m5 6.37v1.59c0 1.632-.875 3.11-2.25 3.89"/></svg>' },
+            { id: 'stoplist', label: 'Стоп-лист', desc: 'Нет в наличии и синхронизация с iiko',
+              icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>' },
             { id: 'integrations', label: 'Интеграции', desc: 'iiko, WhatsApp и принудительная синхронизация',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m4.95-4.95l1.757-1.757a4.5 4.5 0 016.364 6.364l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757"/></svg>' },
             { id: 'test', label: 'Тест бота', desc: 'Протестируйте AI-оператора вживую',
@@ -1960,7 +2113,7 @@ function adminApp() {
         menuBulkSelectedIds: [],
         menuBulkSaving: false,
         /** Статус интеграций (GET /api/admin/integrations/status). */
-        integrationStatus: {},
+        integrationStatus: defaultIntegrationStatus(),
         integrationSyncLoading: false,
         integrationEvents: [],
         sidebarOpen: false,
@@ -2089,6 +2242,17 @@ function adminApp() {
             return this.menuItems.filter((i) => !i.is_available).length;
         },
 
+        /** Позиции в стопе на вкладке «Стоп-лист» (поиск). */
+        get stopListFilteredItems() {
+            const q = (this.stopListSearchQuery || '').trim().toLowerCase();
+            const items = this.stopListItems || [];
+            if (!q) return items;
+            return items.filter((it) =>
+                String(it.name || '').toLowerCase().includes(q) ||
+                String(it.category || '').toLowerCase().includes(q),
+            );
+        },
+
         get menuCategoriesKitchenList() {
             this._refreshMenuView();
             return this._menuKitchenListCache;
@@ -2158,6 +2322,11 @@ function adminApp() {
                         va = num(a);
                         vb = num(b);
                         break;
+                    case 'order_type': {
+                        const ta = String(a.order_type || '');
+                        const tb = String(b.order_type || '');
+                        return dir * ta.localeCompare(tb, 'ru');
+                    }
                     case 'total':
                         va = Number(a.total_price);
                         vb = Number(b.total_price);
@@ -2323,6 +2492,34 @@ function adminApp() {
             return `${h} ч в ${lab}`;
         },
 
+        orderTypeBadge(order) {
+            if (!order || !order.order_type) return '';
+            const m = { delivery: 'ДОСТАВКА', pickup: 'САМОВЫВОЗ', hall: 'В ЗАЛЕ' };
+            return m[order.order_type] || String(order.order_type);
+        },
+
+        paymentIcon(order) {
+            if (!order || !order.payment_method) return '💵';
+            const m = { cash: '💵', card: '💳', remote: '🔗' };
+            return m[order.payment_method] || '💵';
+        },
+
+        paymentMethodTitle(order) {
+            if (!order || !order.payment_method) return 'Наличные';
+            const m = { cash: 'Наличные', card: 'Карта при получении', remote: 'Удалённая оплата' };
+            return m[order.payment_method] || order.payment_method;
+        },
+
+        prepaymentLabel(st) {
+            const m = {
+                pending: 'Предоплата: ожидает',
+                paid: 'Предоплата: получена',
+                waived: 'Предоплата: снята',
+                not_required: '',
+            };
+            return m[st] || (st ? String(st) : '');
+        },
+
         kanbanDragStart(ev, order) {
             try {
                 ev.dataTransfer.setData('text/plain', String(order.id));
@@ -2355,12 +2552,20 @@ function adminApp() {
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) {
                     alert(this.formatApiDetail(data.detail) || 'Не удалось обновить статус');
-                    return;
+                    return false;
                 }
                 await this.loadOrders();
+                return true;
             } catch {
                 alert('Ошибка сети');
+                return false;
             }
+        },
+
+        async confirmSendToIiko() {
+            if (!this.selectedOrder) return;
+            const ok = await this.patchOrderStatus(this.selectedOrder.id, 'sent_to_iiko');
+            if (ok) this.showOrderModal = false;
         },
 
         handleGlobalKeydown(e) {
@@ -2664,7 +2869,7 @@ function adminApp() {
                 menu_items: 0,
                 bookings: 0,
             };
-            this.integrationStatus = {};
+            this.integrationStatus = defaultIntegrationStatus();
             this.integrationEvents = [];
             this.hasDemoData = false;
         },
@@ -2678,7 +2883,8 @@ function adminApp() {
                     this.wsToken = data.ws_token || '';
                     await this.refreshDemoStatus();
                     this.connectWebSocket();
-            await this.loadTabData();
+                    await this.loadTabData();
+                    await this.loadIntegrationStatus();
                     await this.loadChatList();
                 } else {
                     this.authenticated = false;
@@ -2714,6 +2920,7 @@ function adminApp() {
                 await this.refreshDemoStatus();
                 this.connectWebSocket();
                 await this.loadTabData();
+                await this.loadIntegrationStatus();
                 await this.loadChatList();
             } catch {
                 this.loginError = 'Не удалось связаться с сервером';
@@ -2769,11 +2976,36 @@ function adminApp() {
             return `Последний запрос стоп-листа: ${ok} · ${this.fmt.date(ls.at)}, ${this.fmt.time(ls.at)}`;
         },
 
+        /** Безопасное слияние ответа API: spread `d` не должен затирать last_* значением undefined/null. */
+        mergeIntegrationStatus(d) {
+            if (!d || typeof d !== 'object') return;
+            const base = defaultIntegrationStatus();
+            const {
+                last_stoplist: rawStop,
+                last_menu_sync: rawMenu,
+                ...rest
+            } = d;
+            const last_stoplist =
+                rawStop != null && typeof rawStop === 'object'
+                    ? { ...base.last_stoplist, ...rawStop }
+                    : { ...base.last_stoplist };
+            const last_menu_sync =
+                rawMenu != null && typeof rawMenu === 'object'
+                    ? { ...base.last_menu_sync, ...rawMenu }
+                    : { ...base.last_menu_sync };
+            this.integrationStatus = {
+                ...base,
+                ...rest,
+                last_stoplist,
+                last_menu_sync,
+            };
+        },
+
         async loadIntegrationStatus() {
             try {
                 const res = await this.apiFetch('/api/admin/integrations/status');
                 const d = await res.json().catch(() => ({}));
-                if (res.ok) this.integrationStatus = d;
+                if (res.ok) this.mergeIntegrationStatus(d);
                 const ev = await this.apiFetch('/api/admin/integrations/events?limit=40');
                 const ed = await ev.json().catch(() => ({}));
                 if (ev.ok) this.integrationEvents = ed.events || [];
@@ -2786,17 +3018,116 @@ function adminApp() {
             try {
                 const res = await this.apiFetch('/api/admin/integrations/sync', { method: 'POST' });
                 const data = await res.json().catch(() => ({}));
-                if (res.ok && data.status) {
-                    this.integrationStatus = data.status;
-                    const ev = await this.apiFetch('/api/admin/integrations/events?limit=40');
-                    const ed = await ev.json().catch(() => ({}));
-                    if (ev.ok) this.integrationEvents = ed.events || [];
+                if (!res.ok) {
+                    console.error('[admin] POST /integrations/sync', res.status, data);
+                    alert(this.formatApiDetail(data.detail) || 'Синхронизация не удалась');
+                    return;
+                }
+                if (data.status) {
+                    this.mergeIntegrationStatus(data.status);
+                } else {
+                    console.warn('[admin] ответ без status, подгружаем статус');
+                    await this.loadIntegrationStatus();
+                }
+                const ev = await this.apiFetch('/api/admin/integrations/events?limit=40');
+                const ed = await ev.json().catch(() => ({}));
+                if (ev.ok) this.integrationEvents = ed.events || [];
+                const mOk = data.menu && data.menu.ok;
+                const sOk = data.stop_lists && data.stop_lists.ok;
+                console.info('[admin] синхронизация iiko', { menu: data.menu, stop_lists: data.stop_lists });
+                if (mOk && sOk) {
                     this.demoToastMessage = 'Меню и стоп-листы обновлены из iiko';
-                    setTimeout(() => { this.demoToastMessage = ''; }, 4500);
+                } else if (mOk && !sOk) {
+                    this.demoToastMessage = 'Меню обновлено; стоп-листы: ошибка (см. журнал ниже)';
+                } else if (!mOk && sOk) {
+                    this.demoToastMessage = 'Стоп-листы обновлены; меню: ошибка (см. журнал)';
+                } else {
+                    this.demoToastMessage = 'Синхронизация завершена с предупреждениями — см. журнал';
+                }
+                setTimeout(() => { this.demoToastMessage = ''; }, 5500);
+                this.menuViewRevision += 1;
+                await this.loadMenu();
+                if (this.currentTab === 'stoplist') await this.loadStopList();
+            } catch (e) {
+                console.error('[admin] integrations/sync', e);
+                alert('Ошибка сети');
+            } finally {
+                this.integrationSyncLoading = false;
+            }
+        },
+
+        /** Только стоп-лист iiko → БД (учётные данные из .env). Доступна из шапки и вкладки «Стоп-лист». */
+        async syncStopListOnly() {
+            if (!this.integrationStatus.iiko_configured) {
+                alert('Задайте IIKO_API_LOGIN и IIKO_ORGANIZATION_ID в .env');
+                return;
+            }
+            this.stopListSyncLoading = true;
+            try {
+                const res = await this.apiFetch('/api/admin/stop-lists/sync', { method: 'POST' });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    console.error('[admin] POST /stop-lists/sync', res.status, data);
+                    alert(this.formatApiDetail(data.detail) || 'Синхронизация стоп-листа не удалась');
+                    return;
+                }
+                if (data.integration_status) {
+                    this.mergeIntegrationStatus(data.integration_status);
+                } else {
+                    await this.loadIntegrationStatus();
+                }
+                const ev = await this.apiFetch('/api/admin/integrations/events?limit=40');
+                const ed = await ev.json().catch(() => ({}));
+                if (ev.ok) this.integrationEvents = ed.events || [];
+                const st = data.stopped != null ? data.stopped : 0;
+                const rs = data.restored != null ? data.restored : 0;
+                console.info('[admin] стоп-лист iiko', { stopped: st, restored: rs });
+                this.demoToastMessage = `Стоп-лист iiko: в стоп ${st}, восстановлено ${rs}`;
+                setTimeout(() => { this.demoToastMessage = ''; }, 5000);
+                this.menuViewRevision += 1;
+                await this.loadMenu();
+                if (this.currentTab === 'stoplist') await this.loadStopList();
+            } catch (e) {
+                console.error('[admin] stop-lists/sync', e);
+                alert('Ошибка сети');
+            } finally {
+                this.stopListSyncLoading = false;
+            }
+        },
+
+        async loadStopList() {
+            this.stopListLoadError = '';
+            try {
+                const res = await this.apiFetch('/api/admin/menu?stopped_only=true');
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    this.stopListItems = [];
+                    this.stopListLoadError = this.formatApiDetail(data.detail) || 'Не удалось загрузить стоп-лист';
+                    return;
+                }
+                this.stopListItems = data.items || [];
+            } catch (e) {
+                console.error('[admin] loadStopList', e);
+                this.stopListItems = [];
+                this.stopListLoadError = 'Ошибка сети';
+            }
+        },
+
+        async syncMenuOnlyFromEnv() {
+            if (!this.integrationStatus.iiko_configured) return;
+            this.integrationSyncLoading = true;
+            try {
+                const res = await this.apiFetch('/api/admin/menu/sync', { method: 'POST' });
+                const data = await res.json().catch(() => ({}));
+                if (res.ok && data.ok) {
+                    await this.loadIntegrationStatus();
+                    const sk = data.skipped != null ? `, пропущено ${data.skipped}` : '';
+                    this.demoToastMessage = `Меню из iiko: новых ${data.created ?? 0}, обновлено ${data.updated ?? 0}${sk}`;
+                    setTimeout(() => { this.demoToastMessage = ''; }, 5000);
                     this.menuViewRevision += 1;
                     await this.loadMenu();
                 } else {
-                    alert(this.formatApiDetail(data.detail) || 'Синхронизация не удалась');
+                    alert(this.formatApiDetail(data.detail) || 'Синхронизация меню не удалась');
                 }
             } catch {
                 alert('Ошибка сети');
@@ -3343,6 +3674,8 @@ function adminApp() {
                     await this.loadBookings();
                 } else if (this.currentTab === 'menu') {
                     await this.loadMenu();
+                } else if (this.currentTab === 'stoplist') {
+                    await Promise.all([this.loadStopList(), this.loadIntegrationStatus()]);
                 } else if (this.currentTab === 'integrations') {
                     await this.loadIntegrationStatus();
                 } else if (this.currentTab === 'chats') {
@@ -3443,7 +3776,7 @@ function adminApp() {
             if (this.ordersSort.column === column) {
                 this.ordersSort = { column, dir: this.ordersSort.dir === 'asc' ? 'desc' : 'asc' };
             } else {
-                const dir = column === 'client' || column === 'status' ? 'asc' : 'desc';
+                const dir = column === 'client' || column === 'status' || column === 'order_type' ? 'asc' : 'desc';
                 this.ordersSort = { column, dir };
             }
         },

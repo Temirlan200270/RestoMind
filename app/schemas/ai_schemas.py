@@ -57,8 +57,13 @@ class BookingDetails(BaseModel):
 
 class AIBrainResponse(BaseModel):
     """
-    Структурированный ответ от ИИ.
-    Определяет намерение (intent) клиента и содержит данные для обработки.
+    Структурированный ответ от ИИ (Gemini Structured Output).
+
+    Соответствие формулировкам ТЗ (одна схема, без дублирования полей):
+    тип заказа и оплата — order_type, payment_method;
+    дата/время/гости брони — booking_details (или intent book без блюд);
+    предзаказ блюд — is_preorder;
+    время визита — booking_time и/или booking_details при предзаказе в зале.
     """
 
     intent: Literal["order", "book", "faq", "escalate"] = Field(
@@ -80,5 +85,38 @@ class AIBrainResponse(BaseModel):
     )
     booking_details: BookingDetails | None = Field(
         default=None,
-        description="Детали бронирования (заполняется только при intent='book')",
+        description=(
+            "Детали бронирования: при intent='book' — всегда при наличии даты/времени; "
+            "при intent='order' и order_type='hall' и is_preorder=true — обязательно "
+            "(дата YYYY-MM-DD, время HH:MM, гости, зал) для связки «бронь + предзаказ блюд»"
+        ),
+    )
+    # --- Логистика и оплата (v2.0) — для intent='order' ---
+    order_type: Literal["delivery", "pickup", "hall"] = Field(
+        default="delivery",
+        description=(
+            "Как клиент получит заказ: delivery — доставка (нужен адрес), "
+            "pickup — самовывоз (время получения), "
+            "hall — в зале ресторана (может сочетаться с бронью / предзаказом)"
+        ),
+    )
+    payment_method: Literal["cash", "card", "remote"] = Field(
+        default="cash",
+        description="Способ оплаты: cash — наличные, card — карта при получении, remote — перевод/ссылка",
+    )
+    is_preorder: bool = Field(
+        default=False,
+        description="Предзаказ блюд к визиту (актуально для зала)",
+    )
+    booking_time: str | None = Field(
+        default=None,
+        description="Время визита или самовывоза (свободный текст или HH:MM), если уже известно",
+    )
+    delivery_address: str = Field(
+        default="",
+        description="Адрес доставки при order_type=delivery",
+    )
+    pickup_time_note: str = Field(
+        default="",
+        description="Когда забрать самовывоз или уточнение времени",
     )

@@ -101,19 +101,44 @@ async def _send_order_to_iiko(
                 "amount": item.get("quantity", 1),
             })
 
+        fee_lines = items_json.get("fee_lines", []) if items_json else []
+        for fl in fee_lines:
+            if not isinstance(fl, dict):
+                continue
+            iiko_id = fl.get("iiko_id")
+            if not iiko_id:
+                continue
+            iiko_items.append({
+                "productId": iiko_id,
+                "type": "Product",
+                "amount": int(fl.get("quantity", 1)),
+            })
+
         if not iiko_items:
             msg = "Нет позиций с iiko_id — синхронизируйте меню из iiko"
             logger.warning("Заказ #%d: %s", order_id, msg)
             return False, msg
 
+        meta = items_json.get("order_meta") if items_json else {}
+        comment_bits = [
+            f"Заказ #{order_id} · RestoMind · WhatsApp",
+            f"тип: {meta.get('order_type', '?')}",
+            f"оплата: {meta.get('payment_method', '?')}",
+        ]
+        if meta.get("delivery_address"):
+            comment_bits.append(f"адрес: {meta['delivery_address'][:200]}")
+        comment = " · ".join(comment_bits)
+
+        terminal_group = (settings.iiko_terminal_group_id or "").strip()
         async with IikoClient(api_login=settings.iiko_api_login) as client:
             await client.create_delivery_order(
                 organization_id=settings.iiko_organization_id,
                 order_data={
                     "customer": {"phone": phone},
                     "items": iiko_items,
-                    "comment": f"Заказ #{order_id} через RestoMind",
+                    "comment": comment[:1000],
                 },
+                terminal_group_id=terminal_group or None,
             )
         return True, None
     except Exception as exc:
@@ -152,52 +177,11 @@ async def handle_confirmation(phone: str, message_text: str) -> str:
             "iiko_last_error": None,
         })
 
-        sent_to_iiko, iiko_err = await _send_order_to_iiko(
-            order_id=order.id,
-            phone=phone,
-            items_json=order.items_json,
-        )
-
-        if sent_to_iiko:
-            async with async_session_factory() as db:
-                order_upd = await db.execute(
-                    select(Order).where(Order.id == order.id)
-                )
-                o = order_upd.scalar_one_or_none()
-                if o:
-                    o.status = OrderStatus.SENT_TO_IIKO
-                    o.iiko_last_error = None
-                    await db.commit()
-            await publish_event("order_updated", {
-                "order_id": order.id,
-                "status": OrderStatus.SENT_TO_IIKO,
-                "phone": phone,
-                "total_price": float(order.total_price),
-                "iiko_last_error": None,
-            })
-        elif iiko_err:
-            async with async_session_factory() as db:
-                order_upd = await db.execute(
-                    select(Order).where(Order.id == order.id)
-                )
-                o = order_upd.scalar_one_or_none()
-                if o:
-                    o.iiko_last_error = iiko_err
-                    await db.commit()
-            await publish_event("order_updated", {
-                "order_id": order.id,
-                "status": OrderStatus.CONFIRMED,
-                "phone": phone,
-                "total_price": float(order.total_price),
-                "iiko_last_error": iiko_err,
-            })
-
         await clear_pending_order(redis_client, phone)
 
-        status_msg = "передан в систему ресторана" if sent_to_iiko else "подтверждён и передан на кухню"
         return (
-            f"Отлично! Заказ #{order.id} на сумму {float(order.total_price):.0f} ₸ "
-            f"{status_msg}! 👨‍🍳"
+            f"Отлично! Заказ #{order.id} на сумму {float(order.total_price):.0f} ₸ принят. "
+            "Оператор проверит детали и отправит заказ на кухню — при необходимости с вами свяжутся. 👨‍💼"
         )
 
     if word in CANCEL_WORDS:

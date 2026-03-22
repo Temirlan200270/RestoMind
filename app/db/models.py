@@ -130,9 +130,28 @@ class Order(Base):
         default=None,
         comment="Текст ошибки при последней попытке отправить заказ в iiko (если не пусто — показать в админке)",
     )
+    booking_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("bookings.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="Бронь при предзаказе в зале (заказ + стол в одной карточке)",
+    )
+    prepayment_status: Mapped[str] = mapped_column(
+        String(30),
+        default="not_required",
+        server_default="not_required",
+        comment="not_required | pending | paid | waived — предоплата за бронь (Kaspi/эквайринг)",
+    )
+    payment_link_url: Mapped[str | None] = mapped_column(
+        String(1024),
+        nullable=True,
+        comment="Ссылка на оплату; заполняет оператор или платёжный webhook",
+    )
 
     # Связи
     user: Mapped["User"] = relationship(back_populates="orders")
+    booking: Mapped["Booking | None"] = relationship(back_populates="linked_order")
 
     def __repr__(self) -> str:
         return f"<Order id={self.id} status={self.status} total={self.total_price}>"
@@ -202,6 +221,7 @@ class Booking(Base):
 
     # Связи
     user: Mapped["User"] = relationship(back_populates="bookings")
+    linked_order: Mapped["Order | None"] = relationship(back_populates="booking", uselist=False)
 
     def __repr__(self) -> str:
         return f"<Booking id={self.id} date={self.booking_date} time={self.booking_time} guests={self.guests}>"

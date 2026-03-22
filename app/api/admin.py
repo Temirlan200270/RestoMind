@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from sqlalchemy import delete as sql_delete
 from sqlalchemy import exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 
 from pydantic import BaseModel, Field
 
@@ -156,6 +157,29 @@ def _order_items_count(items_json: dict | None) -> int:
     return len(items) if isinstance(items, list) else 0
 
 
+def _order_meta_from_items_json(items_json: dict | None) -> dict:
+    """Метаданные v2 (тип заказа, оплата, адрес) из items_json."""
+    if not isinstance(items_json, dict):
+        return {}
+    raw = items_json.get("order_meta")
+    return raw if isinstance(raw, dict) else {}
+
+
+def _booking_public(b: Booking | None) -> dict | None:
+    """Краткие данные брони для админки (предзаказ в зале)."""
+    if b is None:
+        return None
+    return {
+        "id": b.id,
+        "date": b.booking_date.isoformat(),
+        "time": b.booking_time.isoformat(),
+        "guests": b.guests,
+        "hall": b.hall,
+        "status": b.status,
+        "comment": b.comment or "",
+    }
+
+
 @router.get("/orders")
 async def list_orders(
     status: str | None = Query(None, description="Фильтр по статусу (draft, confirmed, ...)"),
@@ -170,6 +194,7 @@ async def list_orders(
     query = (
         select(Order, User.phone, User.name)
         .join(User, Order.user_id == User.id)
+        .options(joinedload(Order.booking))
     )
     if status:
         query = query.where(Order.status == status)
@@ -203,6 +228,7 @@ async def list_orders(
     out: list[dict] = []
     for o, phone, user_name in rows:
         items_json = o.items_json
+        meta = _order_meta_from_items_json(items_json if isinstance(items_json, dict) else None)
         out.append(
             {
                 "id": o.id,
@@ -216,6 +242,13 @@ async def list_orders(
                 "created_at": o.created_at.isoformat() if o.created_at else None,
                 "updated_at": o.updated_at.isoformat() if o.updated_at else None,
                 "iiko_last_error": o.iiko_last_error,
+                "order_type": meta.get("order_type"),
+                "payment_method": meta.get("payment_method"),
+                "delivery_address": meta.get("delivery_address") or "",
+                "booking_id": o.booking_id,
+                "booking": _booking_public(o.booking),
+                "prepayment_status": getattr(o, "prepayment_status", None) or "not_required",
+                "payment_link_url": getattr(o, "payment_link_url", None),
             }
         )
 
@@ -231,6 +264,53 @@ class OrderPatchBody(BaseModel):
     status: str = Field(..., description="draft | confirmed | sent_to_iiko | …")
 
 
+PREPAYMENT_STATUS_KEYS = frozenset({"not_required", "pending", "paid", "waived"})
+
+
+class OrderPaymentPatchBody(BaseModel):
+    """Ручное обновление предоплаты (Kaspi-ссылка и т.д.) до подключения платёжного API."""
+
+    prepayment_status: str | None = Field(default=None, description="not_required | pending | paid | waived")
+    payment_link_url: str | None = Field(default=None, description="URL для оплаты или пустая строка чтобы сбросить")
+
+
+@router.patch("/orders/{order_id}/payment")
+async def patch_order_payment_meta(
+    order_id: int,
+    body: OrderPaymentPatchBody,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Проставить ссылку на оплату и статус предоплаты (оператор или будущий webhook)."""
+    if body.prepayment_status is None and body.payment_link_url is None:
+        raise HTTPException(status_code=400, detail="Укажите prepayment_status и/или payment_link_url")
+
+    res = await db.execute(select(Order).where(Order.id == order_id))
+    order = res.scalar_one_or_none()
+    if order is None:
+        raise HTTPException(status_code=404, detail="Заказ не найден")
+
+    if body.prepayment_status is not None:
+        st = (body.prepayment_status or "").strip().lower()
+        if st not in PREPAYMENT_STATUS_KEYS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Недопустимый prepayment_status (ожидается одно из: {', '.join(sorted(PREPAYMENT_STATUS_KEYS))})",
+            )
+        order.prepayment_status = st
+
+    if body.payment_link_url is not None:
+        url = (body.payment_link_url or "").strip()
+        order.payment_link_url = url if url else None
+
+    await db.commit()
+    return {
+        "ok": True,
+        "id": order.id,
+        "prepayment_status": order.prepayment_status,
+        "payment_link_url": order.payment_link_url,
+    }
+
+
 @router.patch("/orders/{order_id}")
 async def patch_order_status(
     order_id: int,
@@ -240,6 +320,7 @@ async def patch_order_status(
     """
     Обновление статуса (DnD канбан): draft→confirmed, confirmed→sent_to_iiko,
     confirmed→draft (откат ошибки оператора).
+    Отправка в iiko только при переходе confirmed→sent_to_iiko (не из чата WhatsApp автоматически).
     """
     from app.api.webhooks import _send_order_to_iiko
 
@@ -280,40 +361,12 @@ async def patch_order_status(
         await db.commit()
         return await _emit(order)
 
-    # Черновик → подтверждён (оператор договорился с клиентом)
+    # Черновик → подтверждён (оператор договорился с клиентом; в iiko — только отдельной кнопкой)
     if cur == OrderStatus.DRAFT.value and want == OrderStatus.CONFIRMED.value:
         o2 = await confirm_order(db, order_id)
         if not o2:
             raise HTTPException(status_code=400, detail="Нельзя подтвердить заказ")
         await db.commit()
-
-        sent_to_iiko, iiko_err = await _send_order_to_iiko(
-            order_id=o2.id,
-            phone=phone,
-            items_json=o2.items_json,
-        )
-
-        if sent_to_iiko:
-            async with async_session_factory() as db2:
-                r2 = await db2.execute(select(Order).where(Order.id == o2.id))
-                ou = r2.scalar_one_or_none()
-                if ou:
-                    ou.status = OrderStatus.SENT_TO_IIKO.value
-                    ou.iiko_last_error = None
-                    await db2.commit()
-                o_final = ou or o2
-            return await _emit(o_final)
-
-        if iiko_err:
-            async with async_session_factory() as db2:
-                r2 = await db2.execute(select(Order).where(Order.id == o2.id))
-                ou = r2.scalar_one_or_none()
-                if ou:
-                    ou.iiko_last_error = iiko_err
-                    await db2.commit()
-                o_final = ou or o2
-            return await _emit(o_final)
-
         return await _emit(o2)
 
     # Подтверждён, но iiko не принял — повторная отправка на кухню
@@ -370,6 +423,7 @@ async def global_search(
 
     r1 = await db.execute(oq)
     for o, p, nm in r1.all():
+        meta = _order_meta_from_items_json(o.items_json if isinstance(o.items_json, dict) else None)
         out_orders.append(
             {
                 "id": o.id,
@@ -378,6 +432,8 @@ async def global_search(
                 "user_name": nm,
                 "total_price": float(o.total_price),
                 "created_at": o.created_at.isoformat() if o.created_at else None,
+                "order_type": meta.get("order_type"),
+                "payment_method": meta.get("payment_method"),
             },
         )
 
@@ -484,9 +540,12 @@ async def integrations_sync_now(db: AsyncSession = Depends(get_db)) -> dict:
             db, settings.iiko_api_login, settings.iiko_organization_id,
         )
         menu_block = {"ok": True, "stats": stats_m, "error": None}
+        sk = stats_m.get("skipped")
         detail_m = (
             f"Синхронизация меню: успешно "
-            f"(всего {stats_m.get('total', 0)}, новых {stats_m.get('created', 0)}, обновлено {stats_m.get('updated', 0)})"
+            f"(всего {stats_m.get('total', 0)}, новых {stats_m.get('created', 0)}, обновлено {stats_m.get('updated', 0)}"
+            + (f", пропущено {sk}" if sk else "")
+            + ")"
         )
         await record_menu_sync(db, True, None, detail=detail_m)
     except Exception as exc:
@@ -522,6 +581,13 @@ async def integrations_sync_now(db: AsyncSession = Depends(get_db)) -> dict:
         iiko_configured=True,
         whatsapp_configured=_whatsapp_env_configured(),
     )
+    logger.info(
+        "Ручная синхронизация iiko завершена: меню ok=%s %s; стоп-листы ok=%s %s",
+        menu_block["ok"],
+        menu_block.get("stats") or menu_block.get("error"),
+        stop_block["ok"],
+        stop_block.get("stats") or stop_block.get("error"),
+    )
     return {
         "ok": True,
         "menu": menu_block,
@@ -541,8 +607,9 @@ async def list_bookings(
 ) -> dict:
     """Список бронирований."""
     query = (
-        select(Booking, User.phone, User.name)
+        select(Booking, User.phone, User.name, Order.id)
         .join(User, Booking.user_id == User.id)
+        .outerjoin(Order, Order.booking_id == Booking.id)
         .order_by(Booking.created_at.desc())
     )
     if status:
@@ -569,8 +636,9 @@ async def list_bookings(
                 "comment": b.comment,
                 "status": b.status,
                 "created_at": b.created_at.isoformat() if b.created_at else None,
+                "linked_order_id": linked_oid,
             }
-            for b, phone, name in rows
+            for b, phone, name, linked_oid in rows
         ],
     }
 
@@ -877,13 +945,19 @@ class MenuItemCreateBody(BaseModel):
 async def list_menu(
     category: str | None = Query(None, description="Фильтр по категории"),
     available_only: bool = Query(True),
+    stopped_only: bool = Query(
+        False,
+        description="Только позиции в стопе (is_available=false); при True игнорируется available_only",
+    ),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Список позиций меню."""
     query = select(MenuItem).order_by(MenuItem.category, MenuItem.name)
     if category:
         query = query.where(MenuItem.category == category)
-    if available_only:
+    if stopped_only:
+        query = query.where(MenuItem.is_available.is_(False))
+    elif available_only:
         query = query.where(MenuItem.is_available.is_(True))
 
     result = await db.execute(query)
@@ -960,20 +1034,43 @@ async def delete_menu_item(
 
 @router.post("/menu/sync")
 async def sync_menu(
-    api_login: str = Query(..., description="API-логин iiko"),
-    organization_id: str = Query(..., description="ID организации в iiko"),
+    api_login: str | None = Query(
+        None,
+        description="API-логин iiko (если не задан — берётся IIKO_API_LOGIN из .env)",
+    ),
+    organization_id: str | None = Query(
+        None,
+        description="ID организации в iiko (если не задан — IIKO_ORGANIZATION_ID из .env)",
+    ),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """
-    Принудительная синхронизация меню из iiko.
-    Скачивает номенклатуру и обновляет таблицу menu_items.
+    Синхронизация номенклатуры iiko → ``menu_items`` (цены и UUID для бота).
+    Учётные данные из query или из .env. Совпадение по ``iiko_id``, не по первичному ключу БД.
     """
+    login = (api_login or settings.iiko_api_login or "").strip()
+    org = (organization_id or settings.iiko_organization_id or "").strip()
+    if not login or not org:
+        raise HTTPException(
+            status_code=400,
+            detail="Задайте IIKO_API_LOGIN и IIKO_ORGANIZATION_ID в .env или передайте api_login и organization_id в query.",
+        )
     try:
-        stats = await sync_menu_from_iiko(db, api_login, organization_id)
-        return {"status": "ok", **stats}
+        stats = await sync_menu_from_iiko(db, login, org)
+        sk = stats.get("skipped")
+        detail_m = (
+            f"Синхронизация меню: успешно "
+            f"(всего {stats.get('total', 0)}, новых {stats.get('created', 0)}, обновлено {stats.get('updated', 0)}"
+            + (f", пропущено {sk}" if sk else "")
+            + ")"
+        )
+        await record_menu_sync(db, True, None, detail=detail_m)
+        return {"ok": True, "status": "ok", **stats}
     except Exception as exc:
+        err = str(exc)
         logger.error("Ошибка синхронизации меню: %s", exc, exc_info=True)
-        raise HTTPException(status_code=502, detail=f"Ошибка при обращении к iiko: {exc}")
+        await record_menu_sync(db, False, err, detail=f"Синхронизация меню: ошибка — {err[:400]}")
+        raise HTTPException(status_code=502, detail=f"Ошибка при обращении к iiko: {err}")
 
 
 @router.post("/menu/stop-lists")
@@ -992,6 +1089,49 @@ async def sync_stop_lists_endpoint(
     except Exception as exc:
         logger.error("Ошибка синхронизации стоп-листов: %s", exc, exc_info=True)
         raise HTTPException(status_code=502, detail=f"Ошибка при обращении к iiko: {exc}")
+
+
+@router.post("/stop-lists/sync")
+async def sync_stop_lists_from_env(
+    api_login: str | None = Query(
+        None,
+        description="API-логин iiko (если не задан — IIKO_API_LOGIN из .env)",
+    ),
+    organization_id: str | None = Query(
+        None,
+        description="ID организации (если не задан — IIKO_ORGANIZATION_ID из .env)",
+    ),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    Синхронизация стоп-листов iiko → флаги is_available в menu_items (учётные данные из .env или query).
+    """
+    login = (api_login or settings.iiko_api_login or "").strip()
+    org = (organization_id or settings.iiko_organization_id or "").strip()
+    if not login or not org:
+        raise HTTPException(
+            status_code=400,
+            detail="Задайте IIKO_API_LOGIN и IIKO_ORGANIZATION_ID в .env или передайте api_login и organization_id в query.",
+        )
+    try:
+        stats = await sync_stop_lists(db, login, org)
+        detail_s = (
+            f"Стоп-листы: успешно "
+            f"(в стопе: {stats.get('stopped', 0)}, восстановлено: {stats.get('restored', 0)})"
+        )
+        await record_stoplist_sync(db, True, None, detail=detail_s)
+        snap = await build_status_payload(
+            db,
+            iiko_configured=True,
+            whatsapp_configured=_whatsapp_env_configured(),
+        )
+        logger.info("Синхронизация стоп-листов из админки (.env): %s", stats)
+        return {"ok": True, "status": "ok", **stats, "integration_status": snap}
+    except Exception as exc:
+        err = str(exc)
+        logger.error("Ошибка синхронизации стоп-листов (.env): %s", exc, exc_info=True)
+        await record_stoplist_sync(db, False, err, detail=f"Стоп-листы: ошибка — {err[:400]}")
+        raise HTTPException(status_code=502, detail=f"Ошибка при обращении к iiko: {err}")
 
 
 # ─── Демо-данные (админка) ──────────────────────────────

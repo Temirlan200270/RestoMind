@@ -66,8 +66,85 @@ class Settings(BaseSettings):
     )
 
     # --- iiko Cloud API ---
-    iiko_api_login: str = ""
-    iiko_organization_id: str = ""
+    iiko_api_login: str = Field(
+        default="",
+        validation_alias=AliasChoices("IIKO_API_LOGIN", "iiko_api_login"),
+    )
+    iiko_organization_id: str = Field(
+        default="",
+        validation_alias=AliasChoices("IIKO_ORGANIZATION_ID", "iiko_organization_id"),
+    )
+    # Терминальная группа (для доставок/заказов в iiko) — подставляется позже из API или вручную
+    iiko_terminal_group_id: str = Field(
+        default="",
+        validation_alias=AliasChoices("IIKO_TERMINAL_GROUP_ID", "iiko_terminal_group_id"),
+    )
+    # UUID товаров в iiko для автострок (можно один общий контейнер или раздельно по ТЗ)
+    iiko_product_id_container: str = Field(
+        default="",
+        validation_alias=AliasChoices("IIKO_PRODUCT_ID_CONTAINER", "iiko_product_id_container"),
+        description="Общий UUID контейнера, если не заданы отдельные для зала / доставки",
+    )
+    iiko_product_id_container_hall: str = Field(
+        default="",
+        validation_alias=AliasChoices("IIKO_PRODUCT_ID_CONTAINER_HALL", "iiko_product_id_container_hall"),
+    )
+    iiko_product_id_container_delivery_pickup: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "IIKO_PRODUCT_ID_CONTAINER_DELIVERY",
+            "IIKO_PRODUCT_ID_CONTAINER_DELIVERY_PICKUP",
+            "iiko_product_id_container_delivery_pickup",
+        ),
+    )
+    iiko_product_id_delivery: str = Field(
+        default="",
+        validation_alias=AliasChoices("IIKO_PRODUCT_ID_DELIVERY", "iiko_product_id_delivery"),
+    )
+    # Синхронизация меню: только позиции с type Dish/Good (отсекает модификаторы и пр.; при False — все продукты)
+    iiko_menu_sync_only_dish_good: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("IIKO_MENU_SYNC_ONLY_DISH_GOOD", "iiko_menu_sync_only_dish_good"),
+    )
+
+    # --- Тарификация заказов (v2.0) — тенге ---
+    pricing_container_hall: float = Field(
+        default=0.0,
+        validation_alias=AliasChoices("PRICING_CONTAINER_HALL", "pricing_container_hall"),
+        description="Цена контейнера при заказе «в зале» (0 = бесплатно)",
+    )
+    pricing_container_delivery_pickup: float = Field(
+        default=250.0,
+        validation_alias=AliasChoices("PRICING_CONTAINER_DELIVERY_PICKUP", "pricing_container_delivery_pickup"),
+        description="Цена контейнера при доставке или самовывозе",
+    )
+    pricing_delivery_fee: float = Field(
+        default=700.0,
+        validation_alias=AliasChoices(
+            "PRICING_DELIVERY_FEE", "pricing_delivery_fee", "DELIVERY_FEE", "delivery_fee",
+        ),
+        description="Плата за доставку при сумме блюд ниже порога (ТЗ: 700 ₸)",
+    )
+    pricing_delivery_free_threshold: float = Field(
+        default=10_000.0,
+        validation_alias=AliasChoices(
+            "PRICING_DELIVERY_FREE_THRESHOLD",
+            "pricing_delivery_free_threshold",
+            "DELIVERY_FREE_THRESHOLD",
+            "delivery_free_threshold",
+        ),
+        description="Сумма блюд, от которой доставка 0 ₸ (ТЗ: 10 000)",
+    )
+    hall_prepayment_min: int = Field(
+        default=5000,
+        validation_alias=AliasChoices("HALL_PREPAYMENT_MIN", "hall_prepayment_min"),
+        description="Минимальная предоплата за бронь в зале (ТЗ), текстом для клиента",
+    )
+    pricing_containers_per_main_unit: float = Field(
+        default=1.0,
+        validation_alias=AliasChoices("PRICING_CONTAINERS_PER_MAIN_UNIT", "pricing_containers_per_main_unit"),
+        description="Сколько контейнеров на 1 порцию основного блюда (обычно 1)",
+    )
 
     # --- Админ-панель ---
     admin_username: str = "admin"

@@ -12,6 +12,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import text
 from starlette.middleware.sessions import SessionMiddleware
@@ -26,6 +27,7 @@ from app.db.session import async_engine, async_session_factory, redis_client
 from app.services.menu_bootstrap import ensure_default_menu_if_empty
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
+STATIC_DIR = Path(__file__).parent / "static"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 LOG_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
@@ -189,6 +191,27 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception:
         pass
 
+    # Заказ: связь с бронью (предзаказ в зале) и поля предоплаты
+    for sql_sqlite, sql_pg in (
+        ("ALTER TABLE orders ADD COLUMN booking_id INTEGER", "ALTER TABLE orders ADD COLUMN IF NOT EXISTS booking_id INTEGER"),
+        (
+            "ALTER TABLE orders ADD COLUMN prepayment_status VARCHAR(30) DEFAULT 'not_required'",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS prepayment_status VARCHAR(30) DEFAULT 'not_required'",
+        ),
+        (
+            "ALTER TABLE orders ADD COLUMN payment_link_url VARCHAR(1024)",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_link_url VARCHAR(1024)",
+        ),
+    ):
+        try:
+            async with async_engine.begin() as conn:
+                if settings.db_mode == "sqlite":
+                    await conn.execute(text(sql_sqlite))
+                else:
+                    await conn.execute(text(sql_pg))
+        except Exception:
+            pass
+
     # Пустое меню → встроенный каталог (один раз; дальше правки через админку / iiko)
     try:
         async with async_session_factory() as db:
@@ -243,6 +266,9 @@ app.include_router(admin_auth_router, prefix="/api")
 app.include_router(admin_router, prefix="/api")
 app.include_router(admin_ws_router, prefix="/api")
 
+STATIC_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
 
 # --- Системные эндпоинты ---
 
@@ -283,4 +309,7 @@ async def deep_health_check() -> dict:
 @app.get("/admin", response_class=HTMLResponse, tags=["Admin Panel"])
 async def admin_page(request: Request) -> HTMLResponse:
     """Главная страница — админ-панель."""
-    return templates.TemplateResponse("admin.html", {"request": request})
+    response = templates.TemplateResponse("admin.html", {"request": request})
+    # Чтобы браузер не держал устаревший HTML (Alpine/шаблон после деплоя).
+    response.headers["Cache-Control"] = "no-store, max-age=0, must-revalidate"
+    return response

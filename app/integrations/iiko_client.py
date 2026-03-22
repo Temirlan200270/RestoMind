@@ -97,10 +97,12 @@ class IikoClient:
         if not self._http:
             raise RuntimeError("HTTP-клиент не инициализирован.")
 
+        # Крупная номенклатура может отвечать дольше стандартного таймаута
         response = await self._http.post(
             "/api/1/nomenclature",
             headers=self._auth_headers(),
             json={"organizationId": organization_id},
+            timeout=60.0,
         )
         response.raise_for_status()
         data = response.json()
@@ -113,10 +115,18 @@ class IikoClient:
         )
         return data
 
+    async def fetch_menu(self, organization_id: str) -> dict[str, Any]:
+        """
+        Синоним ``get_nomenclature`` (ТЗ): дерево групп и продуктов для синхронизации ``menu_items``.
+        """
+        return await self.get_nomenclature(organization_id)
+
     async def create_delivery_order(
         self,
         organization_id: str,
         order_data: dict[str, Any],
+        *,
+        terminal_group_id: str | None = None,
     ) -> dict[str, Any]:
         """
         Создать заказ на доставку/самовывоз в iiko.
@@ -125,7 +135,8 @@ class IikoClient:
 
         Args:
             organization_id: UUID организации в iiko.
-            order_data: Словарь с данными заказа.
+            order_data: Словарь с данными заказа (корзина, комментарий и т.д.).
+            terminal_group_id: UUID группы терминалов (касса/кухня) — часто обязателен для печати на нужной точке.
 
         Returns:
             Ответ iiko с orderInfo (correlationId, orderId и т.д.).
@@ -133,10 +144,13 @@ class IikoClient:
         if not self._http:
             raise RuntimeError("HTTP-клиент не инициализирован.")
 
-        payload = {
+        payload: dict[str, Any] = {
             "organizationId": organization_id,
             "order": order_data,
         }
+        tg = (terminal_group_id or "").strip()
+        if tg:
+            payload["terminalGroupId"] = tg
 
         last_exc: Exception | None = None
         for attempt in range(1, MAX_RETRIES + 1):

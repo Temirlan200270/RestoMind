@@ -23,7 +23,12 @@ from app.services.booking_halls import (
 from app.schemas.ai_schemas import AIBrainResponse
 from app.services.dialog_mgr import UserState
 from app.services.events import publish_event
-from app.services.order_logic import validate_order
+from app.services.order_logic import (
+    build_order_items_json,
+    format_order_confirmation_summary,
+    merge_total_into_items_json,
+    validate_order,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -80,16 +85,66 @@ async def _handle_order(
 
     user = await get_or_create_user(db, phone)
 
+    booking_row: Booking | None = None
+    if ai_response.order_type == "hall" and ai_response.is_preorder:
+        if not ai_response.booking_details:
+            return RouteResult(
+                reply_text=(
+                    f"{ai_response.reply_text}\n\n"
+                    "⚠️ Для предзаказа в зале укажите **дату брони** (можно не сегодня), "
+                    "**время визита** и **сколько гостей** — например: «завтра в 19:00, нас четверо, зал 1»."
+                ),
+            )
+        bd = ai_response.booking_details
+        try:
+            booking_date = date.fromisoformat(bd.date)
+            booking_time = time.fromisoformat(bd.time)
+        except ValueError:
+            logger.warning(
+                "Предзаказ в зале: неверная дата/время %s %s", bd.date, bd.time,
+            )
+            return RouteResult(
+                reply_text=(
+                    f"{ai_response.reply_text}\n\n"
+                    "⚠️ Не удалось определить дату или время брони. Укажите дату (например «25.03») и время."
+                ),
+            )
+        hall = normalize_hall_key(bd.hall)
+        if hall == BOOKING_HALL_VIP and await vip_slot_occupied(db, booking_date, booking_time, None):
+            return RouteResult(
+                reply_text=(
+                    f"{ai_response.reply_text}\n\n"
+                    "⚠️ VIP-зал на это время уже занят. Предложите другое время или Зал 1 / Зал 2."
+                ),
+            )
+        booking_row = Booking(
+            user_id=user.id,
+            booking_date=booking_date,
+            booking_time=booking_time,
+            guests=bd.guests,
+            hall=hall,
+            comment=bd.comment,
+            status="draft",
+        )
+        db.add(booking_row)
+        await db.flush()
+
+    payload, grand_total = build_order_items_json(validated, ai_response)
+    items_json = merge_total_into_items_json(payload, grand_total)
+
     order = Order(
         user_id=user.id,
         status=OrderStatus.DRAFT,
-        items_json={"items": validated.valid_items},
-        total_price=validated.total_price,
+        items_json=items_json,
+        total_price=grand_total,
+        booking_id=booking_row.id if booking_row else None,
+        prepayment_status="pending" if booking_row else "not_required",
     )
     db.add(order)
     await db.flush()
 
-    reply = ai_response.reply_text + "\n\n📋 Ваш заказ:\n" + validated.summary_text
+    body_text = format_order_confirmation_summary(items_json, validated.summary_text)
+    reply = ai_response.reply_text + "\n\n📋 Ваш заказ:\n" + body_text
 
     if validated.unknown_items:
         reply += "\n\nНе нашёл в меню некоторые позиции. Уточните, пожалуйста."
@@ -97,14 +152,17 @@ async def _handle_order(
     reply += "\n\n✅ Подтверждаете заказ? (Да / Нет)"
 
     logger.info(
-        "Заказ #%d (DRAFT): %d позиций, %.2f ₸ — ожидает подтверждения",
-        order.id, len(validated.valid_items), validated.total_price,
+        "Заказ #%d (DRAFT): %d позиций блюд, %.2f ₸ итого — ожидает подтверждения",
+        order.id, len(validated.valid_items), grand_total,
     )
 
     await publish_event("order_updated", {
         "order_id": order.id, "status": OrderStatus.DRAFT,
-        "phone": phone, "total_price": validated.total_price,
+        "phone": phone, "total_price": grand_total,
         "items": validated.valid_items,
+        "order_type": ai_response.order_type,
+        "payment_method": ai_response.payment_method,
+        "booking_id": booking_row.id if booking_row else None,
     })
 
     return RouteResult(
@@ -205,11 +263,15 @@ async def _handle_escalate(
 
 
 async def confirm_order(db: AsyncSession, order_id: int) -> Order | None:
-    """Подтвердить заказ — перевести из DRAFT в confirmed."""
+    """Подтвердить заказ — перевести из DRAFT в confirmed; связанную бронь — тоже."""
     result = await db.execute(select(Order).where(Order.id == order_id))
     order = result.scalar_one_or_none()
 
     if order and order.status == OrderStatus.DRAFT:
+        if order.booking_id:
+            _bk, err = await confirm_booking(db, order.booking_id)
+            if err:
+                return None
         order.status = OrderStatus.CONFIRMED
         await db.flush()
         logger.info("Заказ #%d подтверждён клиентом", order_id)
@@ -251,12 +313,14 @@ async def cancel_booking(db: AsyncSession, booking_id: int) -> Booking | None:
 
 
 async def cancel_order(db: AsyncSession, order_id: int) -> Order | None:
-    """Отменить заказ — перевести из DRAFT в cancelled."""
+    """Отменить заказ — перевести из DRAFT в cancelled; черновую бронь — отменить."""
     result = await db.execute(select(Order).where(Order.id == order_id))
     order = result.scalar_one_or_none()
 
     if order and order.status == OrderStatus.DRAFT:
         order.status = OrderStatus.CANCELLED
+        if order.booking_id:
+            await cancel_booking(db, order.booking_id)
         await db.flush()
         logger.info("Заказ #%d отменён клиентом", order_id)
     return order

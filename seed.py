@@ -11,6 +11,7 @@ from sqlalchemy import select
 from app.db.models import Base, Booking, ChatLog, MenuItem, Order, OrderStatus, User
 from app.db.session import async_engine, async_session_factory
 from app.services.menu_bootstrap import ensure_default_menu_if_empty
+from app.services.order_logic import build_demo_order_payload
 
 
 async def seed() -> None:
@@ -45,125 +46,135 @@ async def seed() -> None:
             mi.name: mi.iiko_id for mi in menu_rows if mi.iiko_id
         }
 
-        def _items(raw: list[dict]) -> dict:
-            """Добавляет iiko_id к каждой позиции заказа из справочника."""
+        def _attach_iiko_and_build(
+            raw: list[dict],
+            order_type: str,
+            payment_method: str,
+            **meta: object,
+        ) -> tuple[dict, float]:
+            """iiko_id из меню + полный items_json v2 (тарифы как в проде)."""
             for item in raw:
-                item["iiko_id"] = menu_iiko.get(item["name"], "")
-            return {"items": raw}
+                item["iiko_id"] = menu_iiko.get(item["name"], "") or ""
+            return build_demo_order_payload(raw, order_type, payment_method, **meta)
 
-        # === Заказы (разные даты для аналитики) ===
+        # === Заказы (разные даты для аналитики); суммы с учётом контейнеров/доставки v2 ===
+        _p0, _t0 = _attach_iiko_and_build(
+            [
+                {"name": "Плов праздничный баранина", "quantity": 2, "price_per_unit": 2790, "item_total": 5580, "exclude_ingredients": []},
+                {"name": "Шорпа с бараниной", "quantity": 2, "price_per_unit": 2190, "item_total": 4380, "exclude_ingredients": []},
+                {"name": "Ташкентский чай 0,8 л", "quantity": 1, "price_per_unit": 1890, "item_total": 1890, "exclude_ingredients": []},
+            ],
+            "delivery", "cash",
+            delivery_address="г. Алматы, ул. Сейфуллина 500",
+        )
+        _p1, _t1 = _attach_iiko_and_build(
+            [
+                {"name": "Люля-кебаб из баранины", "quantity": 3, "price_per_unit": 1490, "item_total": 4470, "exclude_ingredients": []},
+                {"name": "Капучино 0,3 л", "quantity": 2, "price_per_unit": 1190, "item_total": 2380, "exclude_ingredients": []},
+                {"name": "Лепёшка", "quantity": 2, "price_per_unit": 350, "item_total": 700, "exclude_ingredients": []},
+            ],
+            "pickup", "card",
+            pickup_time_note="18:00–19:00",
+        )
+        _p2, _t2 = _attach_iiko_and_build(
+            [
+                {"name": "Пепперони", "quantity": 1, "price_per_unit": 3190, "item_total": 3190, "exclude_ingredients": []},
+                {"name": "Фетучини Альфредо", "quantity": 1, "price_per_unit": 3190, "item_total": 3190, "exclude_ingredients": []},
+                {"name": "Лимонад киви-яблоко 1 л", "quantity": 1, "price_per_unit": 2390, "item_total": 2390, "exclude_ingredients": []},
+            ],
+            "hall", "remote",
+            booking_time="2026-06-20 19:30",
+            is_preorder=True,
+        )
+        _p3, _t3 = _attach_iiko_and_build(
+            [
+                {"name": "Манты уйгурские", "quantity": 2, "price_per_unit": 2390, "item_total": 4780, "exclude_ingredients": []},
+                {"name": "Ачучук", "quantity": 1, "price_per_unit": 990, "item_total": 990, "exclude_ingredients": []},
+                {"name": "Облепиховый чай 0,8 л", "quantity": 1, "price_per_unit": 1890, "item_total": 1890, "exclude_ingredients": []},
+            ],
+            "delivery", "card",
+            delivery_address="ул. Желтоксан 137",
+        )
+        _p4, _t4 = _attach_iiko_and_build(
+            [
+                {"name": "Том ям с морепродуктами", "quantity": 1, "price_per_unit": 3790, "item_total": 3790, "exclude_ingredients": []},
+                {"name": "Цезарь с курицей", "quantity": 1, "price_per_unit": 2790, "item_total": 2790, "exclude_ingredients": []},
+                {"name": "Раф 0,3 л", "quantity": 2, "price_per_unit": 1590, "item_total": 3180, "exclude_ingredients": []},
+            ],
+            "pickup", "cash",
+            pickup_time_note="после 14:00",
+        )
+        _p5, _t5 = _attach_iiko_and_build(
+            [
+                {"name": "ПловXана сет 5-6 персон", "quantity": 1, "price_per_unit": 29900, "item_total": 29900, "exclude_ingredients": []},
+                {"name": "Смородина-мята 1,6 л", "quantity": 2, "price_per_unit": 2590, "item_total": 5180, "exclude_ingredients": []},
+            ],
+            "delivery", "remote",
+            delivery_address="Банкет, отдельный вход с парковки",
+        )
+        _p6, _t6 = _attach_iiko_and_build(
+            [
+                {"name": "Казан-кебаб из баранины", "quantity": 1, "price_per_unit": 3690, "item_total": 3690, "exclude_ingredients": []},
+                {"name": "Картофель по-деревенски", "quantity": 1, "price_per_unit": 1190, "item_total": 1190, "exclude_ingredients": []},
+                {"name": "Американо 0,3 л", "quantity": 2, "price_per_unit": 890, "item_total": 1780, "exclude_ingredients": []},
+            ],
+            "hall", "cash",
+            booking_time="2026-06-18 20:00",
+        )
+        _p7, _t7 = _attach_iiko_and_build(
+            [
+                {"name": "Жаз бараний", "quantity": 2, "price_per_unit": 1590, "item_total": 3180, "exclude_ingredients": []},
+                {"name": "Греческий", "quantity": 1, "price_per_unit": 2690, "item_total": 2690, "exclude_ingredients": []},
+                {"name": "Латте 0,3 л", "quantity": 2, "price_per_unit": 1190, "item_total": 2380, "exclude_ingredients": []},
+            ],
+            "delivery", "card",
+            delivery_address="БЦ «Нурлы», 5 этаж",
+        )
+        _p8, _t8 = _attach_iiko_and_build(
+            [{"name": "Маргарита", "quantity": 1, "price_per_unit": 2690, "item_total": 2690, "exclude_ingredients": []}],
+            "pickup", "cash",
+            pickup_time_note="отменён",
+        )
+        _p9, _t9 = _attach_iiko_and_build(
+            [
+                {"name": "Вагури бухарский", "quantity": 1, "price_per_unit": 4100, "item_total": 4100, "exclude_ingredients": []},
+                {"name": "Машхурда", "quantity": 2, "price_per_unit": 1990, "item_total": 3980, "exclude_ingredients": []},
+                {"name": "Тандыр-самса с говядиной", "quantity": 4, "price_per_unit": 790, "item_total": 3160, "exclude_ingredients": []},
+                {"name": "Марокканский чай 0,8 л", "quantity": 2, "price_per_unit": 1890, "item_total": 3780, "exclude_ingredients": []},
+            ],
+            "delivery", "cash",
+            delivery_address="ЖК «Демо», ул. Толе би 42",
+        )
+        _p10, _t10 = _attach_iiko_and_build(
+            [
+                {"name": "Лагман от шеф-повара", "quantity": 2, "price_per_unit": 2790, "item_total": 5580, "exclude_ingredients": []},
+                {"name": "Фреш апельсиновый 0,3 л", "quantity": 2, "price_per_unit": 2590, "item_total": 5180, "exclude_ingredients": []},
+            ],
+            "pickup", "remote",
+            pickup_time_note="в течение часа",
+        )
+        _p11, _t11 = _attach_iiko_and_build(
+            [
+                {"name": "Спагетти болоньезе", "quantity": 2, "price_per_unit": 2990, "item_total": 5980, "exclude_ingredients": []},
+                {"name": "Молочный коктейль шоколадный 0,3 л", "quantity": 2, "price_per_unit": 1190, "item_total": 2380, "exclude_ingredients": []},
+            ],
+            "delivery", "card",
+            delivery_address="мкр. Аксай-1, ул. Гагарина 7",
+        )
+
         orders = [
-            # Сегодня
-            Order(
-                user_id=users[0].id, status=OrderStatus.COMPLETED,
-                items_json=_items([
-                    {"name": "Плов праздничный баранина", "quantity": 2, "price_per_unit": 2790, "item_total": 5580, "exclude_ingredients": []},
-                    {"name": "Шорпа с бараниной", "quantity": 2, "price_per_unit": 2190, "item_total": 4380, "exclude_ingredients": []},
-                    {"name": "Ташкентский чай 0,8 л", "quantity": 1, "price_per_unit": 1890, "item_total": 1890, "exclude_ingredients": []},
-                ]),
-                total_price=11850,
-            ),
-            Order(
-                user_id=users[1].id, status=OrderStatus.COMPLETED,
-                items_json=_items([
-                    {"name": "Люля-кебаб из баранины", "quantity": 3, "price_per_unit": 1490, "item_total": 4470, "exclude_ingredients": []},
-                    {"name": "Капучино 0,3 л", "quantity": 2, "price_per_unit": 1190, "item_total": 2380, "exclude_ingredients": []},
-                    {"name": "Лепёшка", "quantity": 2, "price_per_unit": 350, "item_total": 700, "exclude_ingredients": []},
-                ]),
-                total_price=7550,
-            ),
-            Order(
-                user_id=users[2].id, status=OrderStatus.CONFIRMED,
-                items_json=_items([
-                    {"name": "Пепперони", "quantity": 1, "price_per_unit": 3190, "item_total": 3190, "exclude_ingredients": []},
-                    {"name": "Фетучини Альфредо", "quantity": 1, "price_per_unit": 3190, "item_total": 3190, "exclude_ingredients": []},
-                    {"name": "Лимонад киви-яблоко 1 л", "quantity": 1, "price_per_unit": 2390, "item_total": 2390, "exclude_ingredients": []},
-                ]),
-                total_price=8770,
-            ),
-            # Вчера
-            Order(
-                user_id=users[3].id, status=OrderStatus.COMPLETED,
-                items_json=_items([
-                    {"name": "Манты уйгурские", "quantity": 2, "price_per_unit": 2390, "item_total": 4780, "exclude_ingredients": []},
-                    {"name": "Ачучук", "quantity": 1, "price_per_unit": 990, "item_total": 990, "exclude_ingredients": []},
-                    {"name": "Облепиховый чай 0,8 л", "quantity": 1, "price_per_unit": 1890, "item_total": 1890, "exclude_ingredients": []},
-                ]),
-                total_price=7660,
-            ),
-            Order(
-                user_id=users[4].id, status=OrderStatus.COMPLETED,
-                items_json=_items([
-                    {"name": "Том ям с морепродуктами", "quantity": 1, "price_per_unit": 3790, "item_total": 3790, "exclude_ingredients": []},
-                    {"name": "Цезарь с курицей", "quantity": 1, "price_per_unit": 2790, "item_total": 2790, "exclude_ingredients": []},
-                    {"name": "Раф 0,3 л", "quantity": 2, "price_per_unit": 1590, "item_total": 3180, "exclude_ingredients": []},
-                ]),
-                total_price=9760,
-            ),
-            # 3 дня назад
-            Order(
-                user_id=users[0].id, status=OrderStatus.COMPLETED,
-                items_json=_items([
-                    {"name": "ПловXана сет 5-6 персон", "quantity": 1, "price_per_unit": 29900, "item_total": 29900, "exclude_ingredients": []},
-                    {"name": "Смородина-мята 1,6 л", "quantity": 2, "price_per_unit": 2590, "item_total": 5180, "exclude_ingredients": []},
-                ]),
-                total_price=35080,
-            ),
-            # 5 дней назад
-            Order(
-                user_id=users[1].id, status=OrderStatus.COMPLETED,
-                items_json=_items([
-                    {"name": "Казан-кебаб из баранины", "quantity": 1, "price_per_unit": 3690, "item_total": 3690, "exclude_ingredients": []},
-                    {"name": "Картофель по-деревенски", "quantity": 1, "price_per_unit": 1190, "item_total": 1190, "exclude_ingredients": []},
-                    {"name": "Американо 0,3 л", "quantity": 2, "price_per_unit": 890, "item_total": 1780, "exclude_ingredients": []},
-                ]),
-                total_price=6660,
-            ),
-            # Неделю назад
-            Order(
-                user_id=users[2].id, status=OrderStatus.COMPLETED,
-                items_json=_items([
-                    {"name": "Жаз бараний", "quantity": 2, "price_per_unit": 1590, "item_total": 3180, "exclude_ingredients": []},
-                    {"name": "Греческий", "quantity": 1, "price_per_unit": 2690, "item_total": 2690, "exclude_ingredients": []},
-                    {"name": "Латте 0,3 л", "quantity": 2, "price_per_unit": 1190, "item_total": 2380, "exclude_ingredients": []},
-                ]),
-                total_price=8250,
-            ),
-            Order(
-                user_id=users[3].id, status=OrderStatus.CANCELLED,
-                items_json=_items([
-                    {"name": "Маргарита", "quantity": 1, "price_per_unit": 2690, "item_total": 2690, "exclude_ingredients": []},
-                ]),
-                total_price=2690,
-            ),
-            # 2 недели назад
-            Order(
-                user_id=users[4].id, status=OrderStatus.COMPLETED,
-                items_json=_items([
-                    {"name": "Вагури бухарский", "quantity": 1, "price_per_unit": 4100, "item_total": 4100, "exclude_ingredients": []},
-                    {"name": "Машхурда", "quantity": 2, "price_per_unit": 1990, "item_total": 3980, "exclude_ingredients": []},
-                    {"name": "Тандыр-самса с говядиной", "quantity": 4, "price_per_unit": 790, "item_total": 3160, "exclude_ingredients": []},
-                    {"name": "Марокканский чай 0,8 л", "quantity": 2, "price_per_unit": 1890, "item_total": 3780, "exclude_ingredients": []},
-                ]),
-                total_price=15020,
-            ),
-            # 3 недели назад
-            Order(
-                user_id=users[0].id, status=OrderStatus.COMPLETED,
-                items_json=_items([
-                    {"name": "Лагман от шеф-повара", "quantity": 2, "price_per_unit": 2790, "item_total": 5580, "exclude_ingredients": []},
-                    {"name": "Фреш апельсиновый 0,3 л", "quantity": 2, "price_per_unit": 2590, "item_total": 5180, "exclude_ingredients": []},
-                ]),
-                total_price=10760,
-            ),
-            Order(
-                user_id=users[1].id, status=OrderStatus.COMPLETED,
-                items_json=_items([
-                    {"name": "Спагетти болоньезе", "quantity": 2, "price_per_unit": 2990, "item_total": 5980, "exclude_ingredients": []},
-                    {"name": "Молочный коктейль шоколадный 0,3 л", "quantity": 2, "price_per_unit": 1190, "item_total": 2380, "exclude_ingredients": []},
-                ]),
-                total_price=8360,
-            ),
+            Order(user_id=users[0].id, status=OrderStatus.COMPLETED, items_json=_p0, total_price=_t0),
+            Order(user_id=users[1].id, status=OrderStatus.COMPLETED, items_json=_p1, total_price=_t1),
+            Order(user_id=users[2].id, status=OrderStatus.CONFIRMED, items_json=_p2, total_price=_t2),
+            Order(user_id=users[3].id, status=OrderStatus.COMPLETED, items_json=_p3, total_price=_t3),
+            Order(user_id=users[4].id, status=OrderStatus.COMPLETED, items_json=_p4, total_price=_t4),
+            Order(user_id=users[0].id, status=OrderStatus.COMPLETED, items_json=_p5, total_price=_t5),
+            Order(user_id=users[1].id, status=OrderStatus.COMPLETED, items_json=_p6, total_price=_t6),
+            Order(user_id=users[2].id, status=OrderStatus.COMPLETED, items_json=_p7, total_price=_t7),
+            Order(user_id=users[3].id, status=OrderStatus.CANCELLED, items_json=_p8, total_price=_t8),
+            Order(user_id=users[4].id, status=OrderStatus.COMPLETED, items_json=_p9, total_price=_t9),
+            Order(user_id=users[0].id, status=OrderStatus.COMPLETED, items_json=_p10, total_price=_t10),
+            Order(user_id=users[1].id, status=OrderStatus.COMPLETED, items_json=_p11, total_price=_t11),
         ]
 
         # Даты: все в пределах последних 7 календарных дней UTC (дашборд / мини-график).

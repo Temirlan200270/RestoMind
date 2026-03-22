@@ -1,6 +1,8 @@
 # RestoMind — Руководство по деплою
 
-Пошаговая инструкция запуска RestoMind на боевом сервере с автоматическим HTTPS.
+Пошаговая инструкция запуска RestoMind на **своём VPS** с Docker и автоматическим HTTPS (Traefik).
+
+**Управляемый хостинг без отдельного сервера:** [DEPLOY_RENDER.md](DEPLOY_RENDER.md) (Render Web Service + PostgreSQL, `render.yaml`).
 
 ---
 

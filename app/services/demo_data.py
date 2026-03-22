@@ -4,6 +4,7 @@
 
 import logging
 from datetime import date, datetime, time, timedelta, timezone
+from typing import Any
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +13,7 @@ from app.db.models import Booking, ChatLog, Order, OrderStatus, User
 from app.db.session import redis_client
 from app.services.dialog_mgr import purge_all_session_keys_for_phone
 from app.services.menu_bootstrap import ensure_default_menu_if_empty
+from app.services.order_logic import build_demo_order_payload
 
 logger = logging.getLogger(__name__)
 
@@ -40,27 +42,38 @@ def _line(name: str, qty: int, price_per_unit: float) -> dict:
     }
 
 
-def _order_items(*lines: dict) -> dict:
-    return {"items": list(lines)}
+def _demo_order(
+    *lines: dict,
+    order_type: str = "delivery",
+    payment_method: str = "cash",
+    **meta: Any,
+) -> dict:
+    """Полный items_json v2 (блюда, fee_lines, order_meta, total_price)."""
+    payload, _grand = build_demo_order_payload(
+        list(lines), order_type, payment_method, **meta,
+    )
+    return payload
 
 
-def _extra_volume_orders(users: list[User]) -> list[tuple[int, str, float, dict | None, int]]:
+def _extra_volume_orders(users: list[User]) -> list[tuple[int, str, dict, int]]:
     """
     Дополнительные заказы по 7 календарным дням UTC — график дашборда и канбан нагляднее.
+    Типы доставки/самовывоза/зала и оплаты чередуются для демо v2.
     """
     if not users:
         return []
     n = len(users)
-    dish_sets = [
-        _order_items(_line("Самса с тыквой", 2, 690)),
-        _order_items(_line("Шашлык из баранины", 2, 4290), _line("Лепёшка", 2, 350)),
-        _order_items(_line("Борщ украинский", 2, 2190), _line("Сало с чесноком", 1, 1490)),
-        _order_items(_line("Холодец домашний", 1, 2790)),
-        _order_items(_line("Чак-чак", 1, 1990), _line("Чай улун 0,6 л", 1, 1190)),
-        _order_items(_line("Бешбармак классический", 2, 3490)),
-        _order_items(_line("Куырдак", 1, 3990), _line("Кумыс 0,5 л", 1, 1590)),
+    dish_line_sets = [
+        [_line("Самса с тыквой", 2, 690)],
+        [_line("Шашлык из баранины", 2, 4290), _line("Лепёшка", 2, 350)],
+        [_line("Борщ украинский", 2, 2190), _line("Сало с чесноком", 1, 1490)],
+        [_line("Холодец домашний", 1, 2790)],
+        [_line("Чак-чак", 1, 1990), _line("Чай улун 0,6 л", 1, 1190)],
+        [_line("Бешбармак классический", 2, 3490)],
+        [_line("Куырдак", 1, 3990), _line("Кумыс 0,5 л", 1, 1590)],
     ]
-    base_totals = [4200.0, 8900.0, 5600.0, 12400.0, 3300.0, 9800.0, 7200.0, 4500.0, 6700.0, 10200.0]
+    otypes = ("delivery", "pickup", "hall")
+    pays = ("cash", "card", "remote")
     statuses = [
         OrderStatus.COMPLETED.value,
         OrderStatus.COMPLETED.value,
@@ -68,35 +81,54 @@ def _extra_volume_orders(users: list[User]) -> list[tuple[int, str, float, dict 
         OrderStatus.COMPLETED.value,
         OrderStatus.SENT_TO_IIKO.value,
     ]
-    out: list[tuple[int, str, float, dict | None, int]] = []
+    out: list[tuple[int, str, dict, int]] = []
     idx = 0
     for days_ago in range(7):
         for slot in range(5):
             uid = users[(days_ago + slot * 2) % n].id
-            total = round(
-                base_totals[idx % len(base_totals)] + slot * 410.0 + days_ago * 95.0,
-                2,
-            )
             st = statuses[(days_ago + slot) % len(statuses)]
-            items = dish_sets[(days_ago + slot) % len(dish_sets)]
-            out.append((uid, st, total, items, days_ago))
+            lines = dish_line_sets[(days_ago + slot) % len(dish_line_sets)]
+            ot = otypes[(days_ago + slot + idx) % 3]
+            pm = pays[(days_ago + slot * 2) % 3]
+            meta: dict[str, Any] = {}
+            if ot == "delivery":
+                meta["delivery_address"] = f"г. Алматы, ул. Демо {idx % 90 + 1}, кв. {slot + 1}"
+            elif ot == "pickup":
+                h1, h2 = 17 + slot % 3, 18 + slot % 2
+                m1, m2 = (10 + days_ago * 3) % 60, (20 + idx % 40) % 60
+                meta["pickup_time_note"] = f"{h1}:{m1:02d}–{h2}:{m2:02d}"
+            else:
+                meta["booking_time"] = f"2026-06-{15 + (idx % 10):02d} {19 + slot % 2}:00"
+                meta["is_preorder"] = (idx % 2) == 0
+            payload, _ = build_demo_order_payload(lines, ot, pm, **meta)
+            out.append((uid, st, payload, days_ago))
             idx += 1
     return out
 
 
-def _extra_month_history_orders(users: list[User]) -> list[tuple[int, str, float, dict | None, int]]:
+def _extra_month_history_orders(users: list[User]) -> list[tuple[int, str, dict, int]]:
     """
     Заказы 8…29 суток назад (UTC) — в «Неделю» не попадают, в «Месяц» дают сумму больше, чем за неделю.
     """
     if not users:
         return []
     n = len(users)
-    dish = _order_items(_line("Комбо-ланч демо", 1, 2590), _line("Чай чёрный 0,4 л", 1, 590))
-    out: list[tuple[int, str, float, dict | None, int]] = []
+    out: list[tuple[int, str, dict, int]] = []
     for days_ago in range(8, 30):
         uid = users[days_ago % n].id
-        total = round(3200.0 + (days_ago % 11) * 450.0, 2)
-        out.append((uid, OrderStatus.COMPLETED.value, total, dish, days_ago))
+        lines = [
+            _line("Комбо-ланч демо", 1, 2590),
+            _line("Чай чёрный 0,4 л", 1, 590),
+        ]
+        ot = "delivery" if days_ago % 2 == 0 else "pickup"
+        pm = "remote" if days_ago % 3 == 0 else "cash"
+        meta: dict[str, Any] = {}
+        if ot == "delivery":
+            meta["delivery_address"] = "г. Алматы, мкр. Демо-история, 12"
+        else:
+            meta["pickup_time_note"] = "вечером после 18:00"
+        payload, _ = build_demo_order_payload(lines, ot, pm, **meta)
+        out.append((uid, OrderStatus.COMPLETED.value, payload, days_ago))
     return out
 
 
@@ -155,63 +187,100 @@ async def seed_demo_data(db: AsyncSession) -> dict[str, int | bool]:
     def u(i: int) -> User:
         return demo_users[min(i, len(demo_users) - 1)]
 
-    # Заказы: разные статусы и даты (аналитика / канбан)
-    orders_spec: list[tuple[int, str, float, dict | None, int]] = [
-        (u(0).id, OrderStatus.COMPLETED.value, 11850.0, _order_items(
+    # Заказы: разные статусы и даты (аналитика / канбан); суммы и fee_lines — по тарифам v2
+    orders_spec: list[tuple[int, str, dict, int]] = [
+        (u(0).id, OrderStatus.COMPLETED.value, _demo_order(
             _line("Плов праздничный баранина", 2, 2790),
             _line("Шорпа с бараниной", 2, 2190),
             _line("Ташкентский чай 0,8 л", 1, 1890),
+            order_type="delivery",
+            payment_method="cash",
+            delivery_address="г. Алматы, мкр. Самал-2, ул. Баумана 58, кв. 12",
         ), 0),
-        (u(1).id, OrderStatus.COMPLETED.value, 7550.0, _order_items(
+        (u(1).id, OrderStatus.COMPLETED.value, _demo_order(
             _line("Люля-кебаб из баранины", 3, 1490),
             _line("Капучино 0,3 л", 2, 1190),
             _line("Лепёшка", 2, 350),
+            order_type="pickup",
+            payment_method="card",
+            pickup_time_note="с 18:30 до 19:15",
         ), 0),
-        (u(2).id, OrderStatus.CONFIRMED.value, 8770.0, _order_items(
+        (u(2).id, OrderStatus.CONFIRMED.value, _demo_order(
             _line("Пепперони", 1, 3190),
             _line("Фетучини Альфредо", 1, 3190),
             _line("Лимонад киви-яблоко 1 л", 1, 2390),
+            order_type="hall",
+            payment_method="remote",
+            booking_time="2026-06-20 19:30",
+            is_preorder=True,
         ), 0),
-        (u(3).id, OrderStatus.DRAFT.value, 7660.0, _order_items(
+        (u(3).id, OrderStatus.DRAFT.value, _demo_order(
             _line("Манты уйгурские", 2, 2390),
             _line("Ачучук", 1, 990),
             _line("Облепиховый чай 0,8 л", 1, 1890),
+            order_type="delivery",
+            payment_method="card",
+            delivery_address="ул. Достык 89, подъезд 3, домофон 45",
         ), 1),
-        (u(4).id, OrderStatus.COMPLETED.value, 9760.0, _order_items(
+        (u(4).id, OrderStatus.COMPLETED.value, _demo_order(
             _line("Том ям с морепродуктами", 1, 3790),
             _line("Цезарь с курицей", 1, 2790),
             _line("Раф 0,3 л", 2, 1590),
+            order_type="pickup",
+            payment_method="cash",
+            pickup_time_note="завтра к 13:00",
         ), 1),
-        (u(0).id, OrderStatus.SENT_TO_IIKO.value, 35080.0, _order_items(
+        (u(0).id, OrderStatus.SENT_TO_IIKO.value, _demo_order(
             _line("ПловXана сет 5-6 персон", 1, 29900),
             _line("Смородина-мята 1,6 л", 2, 2590),
+            order_type="delivery",
+            payment_method="remote",
+            delivery_address="Банкетный зал, доставка к отдельному входу",
         ), 3),
-        (u(1).id, OrderStatus.COMPLETED.value, 6660.0, _order_items(
+        (u(1).id, OrderStatus.COMPLETED.value, _demo_order(
             _line("Казан-кебаб из баранины", 1, 3690),
             _line("Картофель по-деревенски", 1, 1190),
             _line("Американо 0,3 л", 2, 890),
+            order_type="hall",
+            payment_method="cash",
+            booking_time="2026-06-18 20:00",
         ), 4),
-        (u(2).id, OrderStatus.COMPLETED.value, 8250.0, _order_items(
+        (u(2).id, OrderStatus.COMPLETED.value, _demo_order(
             _line("Жаз бараний", 2, 1590),
             _line("Греческий", 1, 2690),
             _line("Латте 0,3 л", 2, 1190),
+            order_type="delivery",
+            payment_method="card",
+            delivery_address="пр. Абая 109, офис 304",
         ), 5),
-        (u(3).id, OrderStatus.CANCELLED.value, 2690.0, _order_items(
+        (u(3).id, OrderStatus.CANCELLED.value, _demo_order(
             _line("Маргарита", 1, 2690),
+            order_type="pickup",
+            payment_method="cash",
+            pickup_time_note="отменён клиентом",
         ), 6),
-        (u(4).id, OrderStatus.COMPLETED.value, 15020.0, _order_items(
+        (u(4).id, OrderStatus.COMPLETED.value, _demo_order(
             _line("Вагури бухарский", 1, 4100),
             _line("Машхурда", 2, 1990),
             _line("Тандыр-самса с говядиной", 4, 790),
             _line("Марокканский чай 0,8 л", 2, 1890),
+            order_type="delivery",
+            payment_method="cash",
+            delivery_address="ЖК «Демо», ул. Толе би 42",
         ), 0),
-        (u(0).id, OrderStatus.DRAFT.value, 10760.0, _order_items(
+        (u(0).id, OrderStatus.DRAFT.value, _demo_order(
             _line("Лагман от шеф-повара", 2, 2790),
             _line("Фреш апельсиновый 0,3 л", 2, 2590),
+            order_type="pickup",
+            payment_method="remote",
+            pickup_time_note="сегодня вечером",
         ), 1),
-        (u(1).id, OrderStatus.COMPLETED.value, 8360.0, _order_items(
+        (u(1).id, OrderStatus.COMPLETED.value, _demo_order(
             _line("Спагетти болоньезе", 2, 2990),
             _line("Молочный коктейль шоколадный 0,3 л", 2, 1190),
+            order_type="delivery",
+            payment_method="card",
+            delivery_address="мкр. Аксай-1, ул. Гагарина 7",
         ), 2),
     ]
     orders_spec.extend(_extra_volume_orders(demo_users))
@@ -224,7 +293,8 @@ async def seed_demo_data(db: AsyncSession) -> dict[str, int | bool]:
     # иначе при раннем UTC (до 10:00) аналитика «Сегодня» была бы пустой (раньше были часы 10–17).
     elapsed_today = max(120, int((now - utc_midnight).total_seconds()))
 
-    for idx, (uid, status, total, items_json, days_ago) in enumerate(orders_spec):
+    for idx, (uid, status, items_json, days_ago) in enumerate(orders_spec):
+        total = float(items_json["total_price"])
         o = Order(
             user_id=uid,
             status=status,
