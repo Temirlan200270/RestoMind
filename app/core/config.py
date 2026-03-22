@@ -74,7 +74,7 @@ class Settings(BaseSettings):
         default="",
         validation_alias=AliasChoices("IIKO_ORGANIZATION_ID", "iiko_organization_id"),
     )
-    # Терминальная группа (для доставок/заказов в iiko) — подставляется позже из API или вручную
+    # Терминальная группа (касса/точка): доставки в iiko + фильтр стоп-листа по одной точке (сеть)
     iiko_terminal_group_id: str = Field(
         default="",
         validation_alias=AliasChoices("IIKO_TERMINAL_GROUP_ID", "iiko_terminal_group_id"),

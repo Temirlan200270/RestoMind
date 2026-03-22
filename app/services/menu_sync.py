@@ -177,36 +177,92 @@ async def sync_iiko_menu_to_db(db: AsyncSession) -> dict[str, int]:
     return await sync_menu_from_iiko(db, login, org)
 
 
+def _collect_stopped_product_ids_from_iiko_response(
+    stop_data: dict[str, Any],
+    terminal_group_id: str,
+) -> tuple[set[str], int, int]:
+    """
+    Собирает productId из ответа POST /api/1/stop_lists.
+
+    Структура iiko: terminalGroupStopLists[] → { organizationId, items: [
+      { terminalGroupId, items: [ { productId, balance } ] }
+    ] }.
+
+    Если ``terminal_group_id`` непустой — учитывается только эта терминальная группа
+    (одна точка вместо объединения стопов всех заведений сети).
+    """
+    want_filter = bool((terminal_group_id or "").strip())
+    want = (terminal_group_id or "").strip().lower()
+
+    stopped_ids: set[str] = set()
+    blocks_total = 0
+    blocks_used = 0
+
+    for org_wrapper in stop_data.get("terminalGroupStopLists") or []:
+        for block in org_wrapper.get("items") or []:
+            if not isinstance(block, dict):
+                continue
+            blocks_total += 1
+            bid = (block.get("terminalGroupId") or "").strip().lower()
+            if want_filter and bid != want:
+                continue
+            blocks_used += 1
+            for row in block.get("items") or []:
+                if not isinstance(row, dict):
+                    continue
+                product_id = row.get("productId") or ""
+                if product_id:
+                    stopped_ids.add(product_id)
+
+    return stopped_ids, blocks_total, blocks_used
+
+
 async def sync_stop_lists(
     db: AsyncSession,
     api_login: str,
     organization_id: str,
+    *,
+    terminal_group_id: str | None = None,
 ) -> dict[str, int]:
     """
     Синхронизация стоп-листов из iiko.
     Ставит is_available=False для позиций, которых нет в наличии.
 
+    Если в .env задан ``IIKO_TERMINAL_GROUP_ID`` (или передан ``terminal_group_id``),
+    стоп применяется **только** к этой терминальной группе; иначе — объединение
+    стопов по всем группам организации (старое поведение).
+
     Returns:
-        Статистика: {"stopped": N, "restored": N}
+        stopped, restored, terminal_groups_total, terminal_groups_used (счётчики блоков в ответе API)
     """
+    tg = (
+        (terminal_group_id if terminal_group_id is not None else settings.iiko_terminal_group_id)
+        or ""
+    ).strip()
+
     async with IikoClient(api_login=api_login) as client:
         stop_data = await client.get_stop_lists([organization_id])
 
-    stopped_ids: set[str] = set()
-    terminal_groups = stop_data.get("terminalGroupStopLists", [])
-    for tg in terminal_groups:
-        for item_list in tg.get("items", []):
-            for item in item_list.get("items", []):
-                product_id = item.get("productId", "")
-                if product_id:
-                    stopped_ids.add(product_id)
+    stopped_ids, blocks_total, blocks_used = _collect_stopped_product_ids_from_iiko_response(
+        stop_data, tg,
+    )
+
+    if tg and blocks_used == 0 and blocks_total > 0:
+        logger.warning(
+            "Стоп-листы: IIKO_TERMINAL_GROUP_ID=%s… не совпал ни с одной из %d терминальных групп в ответе — стоп пуст, все локальные позиции будут в продаже. Проверьте UUID в .env (скрипт scripts/list_iiko_terminal_groups.py).",
+            tg[:8],
+            blocks_total,
+        )
 
     # Важно: при пустом ответе iiko нельзя делать ранний return — иначе позиции,
     # ранее помеченные стопом локально, никогда не вернутся в продажу.
     logger.info(
-        "Стоп-листы iiko: организация=%s…, групп терминалов=%d, уникальных productId в стопе=%d",
+        "Стоп-листы iiko: организация=%s…, блоков терм.групп=%d, учтено блоков=%s, "
+        "фильтр по группе=%s, уникальных productId в стопе=%d",
         (organization_id or "")[:8],
-        len(terminal_groups),
+        blocks_total,
+        str(blocks_used) if tg else "все",
+        (tg[:8] + "…") if tg else "нет",
         len(stopped_ids),
     )
 
@@ -232,4 +288,9 @@ async def sync_stop_lists(
         "Стоп-листы применены к БД: в стоп добавлено %d, восстановлено в продажу %d",
         stopped_count, restored_count,
     )
-    return {"stopped": stopped_count, "restored": restored_count}
+    return {
+        "stopped": stopped_count,
+        "restored": restored_count,
+        "terminal_groups_total": blocks_total,
+        "terminal_groups_used": blocks_used,
+    }

@@ -24,7 +24,6 @@ from app.api.webhooks import router as webhooks_router
 from app.core.config import settings
 from app.db.models import Base
 from app.db.session import async_engine, async_session_factory, redis_client
-from app.services.menu_bootstrap import ensure_default_menu_if_empty
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
@@ -211,16 +210,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     await conn.execute(text(sql_pg))
         except Exception:
             pass
-
-    # Пустое меню → встроенный каталог (один раз; дальше правки через админку / iiko)
-    try:
-        async with async_session_factory() as db:
-            added = await ensure_default_menu_if_empty(db)
-            await db.commit()
-            if added:
-                logger.info("Меню: автоматически добавлено %s позиций (встроенный каталог)", added)
-    except Exception as exc:
-        logger.warning("Автозагрузка меню не выполнена: %s", exc)
 
     try:
         await redis_client.ping()

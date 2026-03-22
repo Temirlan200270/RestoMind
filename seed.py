@@ -10,7 +10,6 @@ from sqlalchemy import select
 
 from app.db.models import Base, Booking, ChatLog, MenuItem, Order, OrderStatus, User
 from app.db.session import async_engine, async_session_factory
-from app.services.menu_bootstrap import ensure_default_menu_if_empty
 from app.services.order_logic import build_demo_order_payload
 
 
@@ -36,10 +35,9 @@ async def seed() -> None:
         await db.flush()
         print(f"[OK] Создано {len(users)} пользователей")
 
-        # === Меню ПловXана (встроенный каталог, как при автозапуске приложения) ===
-        n_menu = await ensure_default_menu_if_empty(db)
+        # Меню из встроенного каталога не загружаем — только iiko (scripts/sync_menu_from_iiko.py).
         await db.flush()
-        print(f"[OK] Создано {n_menu} позиций меню (с фейковыми iiko_id)")
+        print("[OK] Меню: 0 позиций — после сида выполните: python scripts/sync_menu_from_iiko.py")
 
         menu_rows = (await db.execute(select(MenuItem))).scalars().all()
         menu_iiko: dict[str, str] = {

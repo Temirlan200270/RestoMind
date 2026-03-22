@@ -202,3 +202,29 @@ class IikoClient:
 
         logger.info("iiko: получены стоп-листы для %d организаций", len(organization_ids))
         return data
+
+    async def get_terminal_groups(
+        self,
+        organization_ids: list[str],
+        *,
+        include_disabled: bool = False,
+    ) -> dict[str, Any]:
+        """
+        Список терминальных групп (кассы/точки) по организациям.
+        Эндпоинт: POST /api/1/terminal_groups
+        """
+        if not self._http:
+            raise RuntimeError("HTTP-клиент не инициализирован.")
+
+        response = await self._http.post(
+            "/api/1/terminal_groups",
+            headers=self._auth_headers(),
+            json={
+                "organizationIds": organization_ids,
+                "includeDisabled": include_disabled,
+            },
+        )
+        response.raise_for_status()
+        data = response.json()
+        logger.info("iiko: запрошены терминальные группы для %d организаций", len(organization_ids))
+        return data

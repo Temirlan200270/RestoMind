@@ -12,7 +12,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import Booking, ChatLog, Order, OrderStatus, User
 from app.db.session import redis_client
 from app.services.dialog_mgr import purge_all_session_keys_for_phone
-from app.services.menu_bootstrap import ensure_default_menu_if_empty
 from app.services.order_logic import build_demo_order_payload
 
 logger = logging.getLogger(__name__)
@@ -135,19 +134,12 @@ def _extra_month_history_orders(users: list[User]) -> list[tuple[int, str, dict,
 async def seed_demo_data(db: AsyncSession) -> dict[str, int | bool]:
     """
     Добавить фиктивных пользователей, заказы, брони и сообщения.
-    Не очищает существующие данные (кроме добавления меню, если таблица пуста).
-
-    Если демо-пользователи уже есть — возвращает skipped, но при пустом меню
-    всё равно может добавить позиции меню (идемпотентно по меню).
+    Не очищает существующие данные. Меню из встроенного каталога не подмешивается.
     """
-    menu_items_added = await ensure_default_menu_if_empty(db)
-
     if await demo_data_exists(db):
-        if menu_items_added:
-            await db.commit()
         return {
             "skipped": True,
-            "menu_items_added": menu_items_added,
+            "menu_items_added": 0,
         }
 
     today = date.today()
@@ -182,7 +174,7 @@ async def seed_demo_data(db: AsyncSession) -> dict[str, int | bool]:
     demo_users = list(all_demo.all())
     if not demo_users:
         await db.commit()
-        return {"users": 0, "orders": 0, "bookings": 0, "chat_logs": 0, "menu_items_added": menu_items_added}
+        return {"users": 0, "orders": 0, "bookings": 0, "chat_logs": 0, "menu_items_added": 0}
 
     def u(i: int) -> User:
         return demo_users[min(i, len(demo_users) - 1)]
@@ -381,8 +373,8 @@ async def seed_demo_data(db: AsyncSession) -> dict[str, int | bool]:
 
     await db.commit()
     logger.info(
-        "Демо-данные: +users=%s orders=%s bookings=%s logs=%s menu_added=%s",
-        created_users, created_orders, created_bookings, created_logs, menu_items_added,
+        "Демо-данные: +users=%s orders=%s bookings=%s logs=%s",
+        created_users, created_orders, created_bookings, created_logs,
     )
     return {
         "skipped": False,
@@ -390,7 +382,7 @@ async def seed_demo_data(db: AsyncSession) -> dict[str, int | bool]:
         "orders_added": created_orders,
         "bookings_added": created_bookings,
         "chat_logs_added": created_logs,
-        "menu_items_added": menu_items_added,
+        "menu_items_added": 0,
     }
 
 
