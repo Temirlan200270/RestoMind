@@ -1786,8 +1786,8 @@
                                         <td class="p-2 font-semibold" x-text="fmt.money(row.total_price)"></td>
                                         <td class="p-2 text-gray-600 truncate max-w-[10rem]" x-text="row.user_phone || '—'"></td>
                                         <td class="p-2">
-                                            <button type="button" @click="settingsDeleteOneOrder(row.id)" :disabled="settingsSingleDeleteId === row.id"
-                                                class="text-xs font-semibold text-red-600 hover:text-red-800 hover:underline disabled:opacity-40">
+                                            <button type="button" @click="openOrderDeleteConfirm([row.id], 'settings_single')"
+                                                class="text-xs font-semibold text-red-600 hover:text-red-800 hover:underline">
                                                 Удалить
                                             </button>
                                         </td>
@@ -1804,10 +1804,9 @@
                             <span x-show="settingsBulkCancelLoading" x-cloak>Отмена…</span>
                         </button>
                         <button type="button" @click="settingsBulkDeleteOrders()"
-                            :disabled="settingsBulkDeleteLoading || settingsSelectedOrderIds.length === 0"
+                            :disabled="settingsSelectedOrderIds.length === 0"
                             class="text-sm font-semibold px-4 py-2.5 rounded-xl bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 disabled:pointer-events-none">
-                            <span x-show="!settingsBulkDeleteLoading">Удалить выбранные (<span x-text="settingsSelectedOrderIds.length"></span>)</span>
-                            <span x-show="settingsBulkDeleteLoading" x-cloak>Удаление…</span>
+                            Удалить выбранные (<span x-text="settingsSelectedOrderIds.length"></span>)…
                         </button>
                         <button type="button" @click="settingsSelectedOrderIds = []" x-show="settingsSelectedOrderIds.length > 0" x-cloak
                             class="text-sm text-gray-600 hover:text-gray-900 underline">Снять выделение</button>
@@ -2127,13 +2126,11 @@
                     </template>
                     <div class="mt-6 pt-4 border-t border-gray-200">
                         <button type="button"
-                            @click="deleteOrderFromModal()"
-                            :disabled="orderModalDeleteLoading"
-                            class="w-full py-3 rounded-xl text-sm font-semibold border-2 border-red-200 text-red-800 bg-red-50 hover:bg-red-100 transition disabled:opacity-50 disabled:pointer-events-none">
-                            <span x-show="!orderModalDeleteLoading">Удалить заказ из базы</span>
-                            <span x-show="orderModalDeleteLoading" x-cloak>Удаление…</span>
+                            @click="openOrderDeleteConfirmFromModal()"
+                            class="w-full py-3 rounded-xl text-sm font-semibold border-2 border-red-200 text-red-800 bg-red-50 hover:bg-red-100 transition">
+                            Удалить заказ из базы…
                         </button>
-                        <p class="text-[11px] text-gray-400 text-center mt-2">Безвозвратно. Потребуется двойное подтверждение.</p>
+                        <p class="text-[11px] text-gray-400 text-center mt-2">Откроется окно подтверждения</p>
                     </div>
                 </div>
             </template>
@@ -2225,6 +2222,52 @@
             </template>
         </div>
     </main>
+
+    <!-- Подтверждение удаления заказа: сразу под корнем приложения — поверх main/order modal и прочих оверлеев -->
+    <div x-show="showOrderDeleteConfirmModal" x-cloak x-transition.opacity
+        class="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/55 backdrop-blur-sm"
+        @click.self="closeOrderDeleteConfirm()">
+        <div class="bg-white rounded-2xl shadow-2xl border border-gray-100 w-full max-w-md overflow-hidden fade-in" @click.stop role="dialog" aria-modal="true" aria-labelledby="order-delete-confirm-title">
+            <div class="h-1.5 bg-gradient-to-r from-red-600 via-rose-500 to-orange-400"></div>
+            <div class="p-6 md:p-8">
+                <div class="flex items-start gap-4 mb-5">
+                    <div class="w-12 h-12 rounded-2xl bg-red-50 border border-red-100 flex items-center justify-center shrink-0">
+                        <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                    </div>
+                    <div class="min-w-0">
+                        <h2 id="order-delete-confirm-title" class="text-lg font-bold text-gray-900" x-text="orderDeleteConfirmIds.length > 1 ? 'Удалить выбранные заказы?' : 'Удалить заказ?'"></h2>
+                        <p class="text-sm text-gray-500 mt-1.5 leading-relaxed" x-show="orderDeleteConfirmIds.length === 1">
+                            Заказ <span class="font-mono font-semibold text-red-700 bg-red-50 px-1.5 py-0.5 rounded-md" x-text="'#' + orderDeleteConfirmIds[0]"></span> будет удалён из базы. Восстановление невозможно; запись пропадёт из списков и аналитики.
+                        </p>
+                        <div x-show="orderDeleteConfirmIds.length > 1" x-cloak class="mt-2 space-y-2">
+                            <p class="text-sm text-gray-600">Будут удалены <span class="font-bold text-gray-900" x-text="orderDeleteConfirmIds.length"></span> заказов (безвозвратно).</p>
+                            <div class="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 max-h-28 overflow-y-auto text-xs font-mono text-gray-800 leading-relaxed break-all" x-text="orderDeleteConfirmIds.map((i) => '#' + i).join(', ')"></div>
+                        </div>
+                    </div>
+                </div>
+                <label class="flex items-start gap-3 cursor-pointer group mb-2">
+                    <input type="checkbox" x-model="orderDeleteConfirmAck" class="mt-1 rounded border-gray-300 text-red-600 focus:ring-red-500">
+                    <span class="text-sm text-gray-700 group-hover:text-gray-900">Я понимаю, что это действие нельзя отменить</span>
+                </label>
+                <p x-show="orderDeleteConfirmError" x-cloak class="text-sm text-red-600 mt-3" x-text="orderDeleteConfirmError"></p>
+                <div class="flex flex-col-reverse sm:flex-row gap-3 mt-8">
+                    <button type="button" @click="closeOrderDeleteConfirm()" :disabled="orderDeleteConfirmLoading"
+                        class="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 font-semibold text-sm hover:bg-gray-50 transition disabled:opacity-50">
+                        Отмена
+                    </button>
+                    <button type="button" @click="executeOrderDeleteConfirmed()"
+                        :disabled="orderDeleteConfirmLoading || !orderDeleteConfirmAck"
+                        class="flex-1 py-3 rounded-xl bg-red-600 text-white font-semibold text-sm hover:bg-red-700 shadow-lg shadow-red-600/25 transition disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+                        <span x-show="!orderDeleteConfirmLoading">Удалить навсегда</span>
+                        <span x-show="orderDeleteConfirmLoading" x-cloak class="flex items-center gap-2">
+                            <span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                            Удаляем…
+                        </span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
 
 </div><!-- /authenticated -->
 
@@ -2322,7 +2365,6 @@ function adminApp() {
         settingsOrdersList: [],
         settingsOrdersLoading: false,
         settingsSelectedOrderIds: [],
-        settingsBulkDeleteLoading: false,
         settingsMenuClearLoading: false,
         settingsMenuStopClearLoading: false,
         settingsPurgeModalOpen: false,
@@ -2330,7 +2372,6 @@ function adminApp() {
         settingsPurgeAck: false,
         settingsPurgeLoading: false,
         settingsPurgeError: '',
-        settingsSingleDeleteId: null,
         settingsEnv: null,
         settingsEnvLoading: false,
         settingsRedisPhone: '',
@@ -2391,7 +2432,13 @@ function adminApp() {
         ordersSort: { column: 'date', dir: 'desc' },
         showOrderModal: false,
         selectedOrder: null,
-        orderModalDeleteLoading: false,
+        /** Кастомное подтверждение удаления заказа */
+        showOrderDeleteConfirmModal: false,
+        orderDeleteConfirmIds: [],
+        orderDeleteConfirmSource: '',
+        orderDeleteConfirmAck: false,
+        orderDeleteConfirmLoading: false,
+        orderDeleteConfirmError: '',
 
         showBookingModal: false,
         selectedBooking: null,
@@ -2944,6 +2991,8 @@ function adminApp() {
                     return false;
                 }
                 await this.loadOrders();
+                await this.loadDashStats();
+                await this.syncDashboardChartIfVisible();
                 return true;
             } catch {
                 alert('Ошибка сети');
@@ -2957,36 +3006,84 @@ function adminApp() {
             if (ok) this.showOrderModal = false;
         },
 
-        /** Удаление из модалки (дашборд «Последние заказы», вкладка «Заказы»). */
-        async deleteOrderFromModal() {
+        openOrderDeleteConfirmFromModal() {
             const o = this.selectedOrder;
-            if (!o || o.id == null || this.orderModalDeleteLoading) return;
-            const id = Number(o.id);
-            if (!window.confirm(`Удалить заказ #${id} из базы безвозвратно?`)) return;
-            if (!window.confirm('Последнее подтверждение: заказ исчезнет из списков и аналитики.')) return;
-            this.orderModalDeleteLoading = true;
+            if (!o || o.id == null) return;
+            this.openOrderDeleteConfirm([Number(o.id)], 'modal');
+        },
+
+        openOrderDeleteConfirm(ids, source) {
+            const clean = [...new Set((ids || []).map((x) => Number(x)).filter((n) => Number.isFinite(n) && n > 0))].sort((a, b) => a - b);
+            if (!clean.length) return;
+            this.orderDeleteConfirmIds = clean;
+            this.orderDeleteConfirmSource = source || '';
+            this.orderDeleteConfirmAck = false;
+            this.orderDeleteConfirmError = '';
+            this.orderDeleteConfirmLoading = false;
+            this.showOrderDeleteConfirmModal = true;
+        },
+
+        closeOrderDeleteConfirm() {
+            if (this.orderDeleteConfirmLoading) return;
+            this.showOrderDeleteConfirmModal = false;
+            this.orderDeleteConfirmIds = [];
+            this.orderDeleteConfirmSource = '';
+            this.orderDeleteConfirmAck = false;
+            this.orderDeleteConfirmError = '';
+        },
+
+        async executeOrderDeleteConfirmed() {
+            if (!this.orderDeleteConfirmAck || this.orderDeleteConfirmLoading) return;
+            const ids = [...this.orderDeleteConfirmIds];
+            if (!ids.length) return;
+            this.orderDeleteConfirmLoading = true;
+            this.orderDeleteConfirmError = '';
+            const src = this.orderDeleteConfirmSource;
             try {
-                const res = await this.apiFetch(`/api/admin/orders/${id}/delete`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ confirm: true }),
-                });
-                const data = await res.json().catch(() => ({}));
-                if (!res.ok) {
-                    alert(typeof data.detail === 'string' ? data.detail : 'Ошибка удаления');
-                    return;
+                if (ids.length === 1) {
+                    const id = ids[0];
+                    const res = await this.apiFetch(`/api/admin/orders/${id}/delete`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ confirm: true }),
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok) {
+                        this.orderDeleteConfirmError = typeof data.detail === 'string' ? data.detail : 'Ошибка удаления';
+                        return;
+                    }
+                    if (src === 'modal') {
+                        this.showOrderModal = false;
+                        this.selectedOrder = null;
+                    }
+                    this.demoToastMessage = `Заказ #${id} удалён`;
+                    setTimeout(() => { this.demoToastMessage = ''; }, 3500);
+                } else {
+                    const res = await this.apiFetch('/api/admin/orders/bulk-delete', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ confirm: true, order_ids: ids }),
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok) {
+                        this.orderDeleteConfirmError = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail || data);
+                        return;
+                    }
+                    this.demoToastMessage = `Удалено заказов: ${data.deleted ?? ids.length}`;
+                    setTimeout(() => { this.demoToastMessage = ''; }, 4000);
                 }
-                this.showOrderModal = false;
-                this.selectedOrder = null;
-                this.settingsSelectedOrderIds = this.settingsSelectedOrderIds.filter((x) => Number(x) !== id);
-                this.demoToastMessage = `Заказ #${id} удалён`;
-                setTimeout(() => { this.demoToastMessage = ''; }, 3500);
+                this.removeOrderIdsFromLocalState(ids);
+                this.showOrderDeleteConfirmModal = false;
+                this.orderDeleteConfirmIds = [];
+                this.orderDeleteConfirmSource = '';
+                this.orderDeleteConfirmAck = false;
                 await Promise.all([this.loadOrders(), this.loadDashStats(), this.loadSettingsOrders()]);
+                await this.syncDashboardChartIfVisible();
             } catch (e) {
-                console.error('[admin] deleteOrderFromModal', e);
-                alert('Ошибка сети');
+                console.error('[admin] executeOrderDeleteConfirmed', e);
+                this.orderDeleteConfirmError = 'Ошибка сети';
             } finally {
-                this.orderModalDeleteLoading = false;
+                this.orderDeleteConfirmLoading = false;
             }
         },
 
@@ -2997,6 +3094,7 @@ function adminApp() {
             }
             if (e.key === 'Escape') {
                 this.globalSearchOpen = false;
+                if (this.showOrderDeleteConfirmModal) this.closeOrderDeleteConfirm();
             }
         },
 
@@ -3681,6 +3779,7 @@ function adminApp() {
                 this.onNewMessage(data);
             } else if (type === 'order_updated') {
                 this.onOrderUpdated(data);
+                this.scheduleDashStatsRefreshDebounced();
             } else if (type === 'order_deleted') {
                 const i = this.orders.findIndex((o) => o.id === data.order_id);
                 if (i >= 0) {
@@ -3697,6 +3796,7 @@ function adminApp() {
                     this.showOrderModal = false;
                     this.selectedOrder = null;
                 }
+                this.scheduleDashStatsRefreshDebounced();
             } else if (type === 'human_needed') {
                 this.onHumanNeeded(data);
             } else if (type === 'state_changed') {
@@ -3744,14 +3844,18 @@ function adminApp() {
         },
 
         onOrderUpdated(data) {
+            const applyPatch = (row) => {
+                if (!row) return;
+                row.status = data.status;
+                if (data.total_price !== undefined) row.total_price = data.total_price;
+                if (data.iiko_last_error !== undefined) {
+                    row.iiko_last_error = data.iiko_last_error;
+                }
+                row.updated_at = new Date().toISOString();
+            };
             const idx = this.orders.findIndex(o => o.id === data.order_id);
             if (idx >= 0) {
-                this.orders[idx].status = data.status;
-                if (data.total_price !== undefined) this.orders[idx].total_price = data.total_price;
-                if (data.iiko_last_error !== undefined) {
-                    this.orders[idx].iiko_last_error = data.iiko_last_error;
-                }
-                this.orders[idx].updated_at = new Date().toISOString();
+                applyPatch(this.orders[idx]);
             } else {
                 this.orders.unshift({
                     id: data.order_id,
@@ -3763,6 +3867,10 @@ function adminApp() {
                     iiko_last_error: data.iiko_last_error ?? null,
                 });
                 this.playOrderPing();
+            }
+            const sidx = this.settingsOrdersList.findIndex((o) => o.id === data.order_id);
+            if (sidx >= 0) {
+                applyPatch(this.settingsOrdersList[sidx]);
             }
         },
 
@@ -4203,6 +4311,49 @@ function adminApp() {
             });
         },
 
+        /** После изменения заказов: перерисовать мини-график, если открыт дашборд. */
+        async syncDashboardChartIfVisible() {
+            await this.$nextTick();
+            if (this.currentTab === 'dashboard') {
+                await this.scheduleDashboardChartRender();
+            }
+        },
+
+        /**
+         * Несколько WS-событий подряд (массовое удаление) не должны дергать stats десятки раз.
+         */
+        scheduleDashStatsRefreshDebounced() {
+            if (this._dashOrderChangeTimer) {
+                clearTimeout(this._dashOrderChangeTimer);
+            }
+            this._dashOrderChangeTimer = setTimeout(async () => {
+                this._dashOrderChangeTimer = null;
+                try {
+                    await this.loadDashStats();
+                    await this.syncDashboardChartIfVisible();
+                } catch (e) {
+                    console.error('[admin] scheduleDashStatsRefreshDebounced', e);
+                }
+            }, 350);
+        },
+
+        /** Мгновенно убрать заказы из локальных списков (до прихода ответа loadOrders). */
+        removeOrderIdsFromLocalState(ids) {
+            const s = new Set(
+                (ids || []).map((x) => Number(x)).filter((n) => Number.isFinite(n)),
+            );
+            if (!s.size) return;
+            this.orders = this.orders.filter((o) => !s.has(Number(o.id)));
+            this.settingsOrdersList = this.settingsOrdersList.filter((o) => !s.has(Number(o.id)));
+            this.settingsSelectedOrderIds = this.settingsSelectedOrderIds.filter(
+                (id) => !s.has(Number(id)),
+            );
+            if (this.selectedOrder && s.has(Number(this.selectedOrder.id))) {
+                this.showOrderModal = false;
+                this.selectedOrder = null;
+            }
+        },
+
         toggleAnalyticsDaySort(col) {
             if (this.analyticsDaySort === col) {
                 this.analyticsDayDir = this.analyticsDayDir === 'asc' ? 'desc' : 'asc';
@@ -4236,7 +4387,11 @@ function adminApp() {
                 p.set('sum_max', String(Number(smax)));
             }
             const res = await this.apiFetch(`/api/admin/orders?${p.toString()}`);
-            const data = await res.json();
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                console.warn('[admin] loadOrders', res.status, data);
+                return;
+            }
             this.orders = data.orders || [];
         },
 
@@ -4401,6 +4556,7 @@ function adminApp() {
                 this.demoToastMessage = `Отменено заказов: ${data.cancelled ?? 0}; уже были отменены: ${data.skipped_already_cancelled ?? 0}`;
                 setTimeout(() => { this.demoToastMessage = ''; }, 4500);
                 await Promise.all([this.loadSettingsOrders(), this.loadOrders(), this.loadDashStats(), this.loadSettingsEnvironment()]);
+                await this.syncDashboardChartIfVisible();
             } catch (e) {
                 console.error('[admin] settingsBulkCancelOrders', e);
                 alert('Ошибка сети');
@@ -4435,60 +4591,10 @@ function adminApp() {
             }
         },
 
-        async settingsDeleteOneOrder(orderId) {
-            const id = Number(orderId);
-            if (!Number.isFinite(id) || id <= 0) return;
-            if (!window.confirm(`Удалить заказ #${id} из базы безвозвратно?`)) return;
-            this.settingsSingleDeleteId = id;
-            try {
-                const res = await this.apiFetch(`/api/admin/orders/${id}/delete`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ confirm: true }),
-                });
-                const data = await res.json().catch(() => ({}));
-                if (!res.ok) {
-                    alert(typeof data.detail === 'string' ? data.detail : 'Ошибка удаления');
-                    return;
-                }
-                this.settingsSelectedOrderIds = this.settingsSelectedOrderIds.filter((x) => Number(x) !== id);
-                this.demoToastMessage = `Заказ #${id} удалён`;
-                setTimeout(() => { this.demoToastMessage = ''; }, 3500);
-                await Promise.all([this.loadSettingsOrders(), this.loadOrders(), this.loadDashStats()]);
-            } catch (e) {
-                console.error('[admin] settingsDeleteOneOrder', e);
-                alert('Ошибка сети');
-            } finally {
-                this.settingsSingleDeleteId = null;
-            }
-        },
-
         async settingsBulkDeleteOrders() {
             const ids = [...new Set(this.settingsSelectedOrderIds.map((x) => Number(x)).filter((n) => Number.isFinite(n) && n > 0))];
-            if (!ids.length || this.settingsBulkDeleteLoading) return;
-            if (!window.confirm(`Удалить ${ids.length} заказ(ов) из базы безвозвратно?`)) return;
-            this.settingsBulkDeleteLoading = true;
-            try {
-                const res = await this.apiFetch('/api/admin/orders/bulk-delete', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ confirm: true, order_ids: ids }),
-                });
-                const data = await res.json().catch(() => ({}));
-                if (!res.ok) {
-                    alert(typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail || data));
-                    return;
-                }
-                this.settingsSelectedOrderIds = [];
-                this.demoToastMessage = `Удалено заказов: ${data.deleted ?? ids.length}`;
-                setTimeout(() => { this.demoToastMessage = ''; }, 4000);
-                await Promise.all([this.loadSettingsOrders(), this.loadOrders(), this.loadDashStats()]);
-            } catch (e) {
-                console.error('[admin] settingsBulkDeleteOrders', e);
-                alert('Ошибка сети');
-            } finally {
-                this.settingsBulkDeleteLoading = false;
-            }
+            if (!ids.length) return;
+            this.openOrderDeleteConfirm(ids, 'settings_bulk');
         },
 
         async settingsClearMenuOnly() {
@@ -4510,6 +4616,7 @@ function adminApp() {
                 this.demoToastMessage = data.deleted != null ? `Меню: удалено позиций ${data.deleted}` : 'Меню очищено';
                 setTimeout(() => { this.demoToastMessage = ''; }, 4000);
                 await Promise.all([this.loadMenu(), this.loadDashStats()]);
+                await this.syncDashboardChartIfVisible();
             } catch (e) {
                 console.error(e);
                 alert('Ошибка сети');
@@ -4542,6 +4649,7 @@ function adminApp() {
                     this.loadStopList(),
                     this.loadIntegrationStatus(),
                 ]);
+                await this.syncDashboardChartIfVisible();
             } catch (e) {
                 console.error(e);
                 alert('Ошибка сети');
@@ -4580,6 +4688,7 @@ function adminApp() {
                     this.loadDashStats(),
                     this.loadIntegrationStatus(),
                 ]);
+                await this.syncDashboardChartIfVisible();
             } catch (e) {
                 console.error(e);
                 this.settingsPurgeError = 'Ошибка сети';
@@ -4611,6 +4720,7 @@ function adminApp() {
                 setTimeout(() => { this.demoToastMessage = ''; }, 3200);
                 await this.loadMenu();
                 await this.loadDashStats();
+                await this.syncDashboardChartIfVisible();
             } catch (e) {
                 console.error('[admin] clearAllMenuFromDb', e);
                 alert('Ошибка сети');
