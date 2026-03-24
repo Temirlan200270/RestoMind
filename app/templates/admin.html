@@ -25,9 +25,15 @@
         .alert-banner { animation: pulseAlert 2s infinite; }
         .ws-dot { transition: background-color 0.3s; }
         .msg-new { animation: slideIn 0.25s ease-out; }
-        .analytics-hint-details > summary { list-style: none; }
-        .analytics-hint-details > summary::-webkit-details-marker { display: none; }
-        .analytics-hint-details[open] > summary .analytics-hint-chevron { transform: rotate(90deg); }
+        /* Сворачиваемые подсказки (закрыты по умолчанию) */
+        .hint-details > summary { list-style: none; }
+        .hint-details > summary::-webkit-details-marker { display: none; }
+        .hint-details[open] > summary .hint-chevron { transform: rotate(90deg); }
+        .admin-header-actions-scroll {
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: thin;
+        }
+        .admin-header-actions-scroll::-webkit-scrollbar { height: 4px; }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen font-sans text-gray-800">
@@ -121,56 +127,51 @@
     <!-- Правая колонка: шапка + алерт (shrink-0) + область контента (flex-1 min-h-0) -->
     <main class="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
         <header class="shrink-0 glass border-b border-gray-200 px-3 sm:px-4 md:px-8 py-2.5 md:py-4 z-10">
-            <div class="flex flex-wrap items-center justify-between gap-2 md:gap-3">
-                <div class="flex items-start gap-2 md:gap-3 min-w-0 flex-1">
-                    <button type="button" class="md:hidden min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 shrink-0" @click="sidebarOpen = true" aria-label="Меню">
+            <div class="flex flex-col gap-2 md:flex-row md:items-start md:justify-between md:gap-3">
+                <div class="flex items-center gap-2 md:gap-3 min-w-0 md:flex-1">
+                    <button type="button" class="md:hidden min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 shrink-0" @click="sidebarOpen = true" aria-label="Открыть меню">
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
                     </button>
-                    <div class="flex-1 min-w-0">
-                        <div class="flex flex-wrap items-center gap-2 mb-1">
-                            <button type="button" @click="openGlobalSearch()" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border border-gray-200 bg-white text-xs sm:text-sm text-gray-500 hover:bg-gray-50 shrink-0"
+                    <div class="min-w-0 flex-1">
+                        <div class="flex items-center gap-2 min-w-0">
+                            <h1 class="text-lg sm:text-xl md:text-2xl font-bold text-gray-900 truncate flex-1 min-w-0" x-text="navItems.find(i => i.id === currentTab)?.label"></h1>
+                            <button type="button" @click="openGlobalSearch()"
+                                class="md:hidden shrink-0 min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 hover:bg-gray-50"
+                                title="Быстрый поиск (Ctrl+K)" aria-label="Поиск по заказам и чатам">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                            </button>
+                            <button type="button" @click="openGlobalSearch()" class="hidden md:inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border border-gray-200 bg-white text-sm text-gray-500 hover:bg-gray-50 shrink-0"
                                 title="Быстрый поиск (Ctrl+K)">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-                                <span class="hidden xs:inline">Поиск…</span>
-                                <kbd class="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 font-mono hidden sm:inline">Ctrl K</kbd>
+                                <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                                <span>Поиск…</span>
+                                <kbd class="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 font-mono">Ctrl K</kbd>
                             </button>
                         </div>
-                        <h1 class="text-lg sm:text-xl md:text-2xl font-bold text-gray-900 truncate" x-text="navItems.find(i => i.id === currentTab)?.label"></h1>
                         <p class="hidden sm:block text-sm text-gray-500 mt-0.5 line-clamp-2" x-text="navItems.find(i => i.id === currentTab)?.desc"></p>
                     </div>
                 </div>
-                <div class="flex flex-wrap items-center gap-1.5 sm:gap-2 justify-end w-full sm:w-auto">
+                <div class="flex items-center gap-1.5 sm:gap-2 overflow-x-auto max-w-full shrink-0 pb-0.5 md:pb-0 md:flex-wrap md:overflow-visible md:justify-end admin-header-actions-scroll">
                     <button type="button" @click="seedDemoData()" :disabled="demoActionLoading || hasDemoData"
-                        class="min-h-[44px] px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-medium border transition shadow-sm disabled:opacity-40 disabled:cursor-not-allowed bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100">
+                        class="min-h-[44px] shrink-0 px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-medium border transition shadow-sm disabled:opacity-40 disabled:cursor-not-allowed bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100">
                         Демо-данные
                     </button>
                     <button type="button" x-show="hasDemoData" @click="openDemoDeleteModal()"
-                        class="min-h-[44px] px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-medium border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 transition shadow-sm flex items-center gap-2">
+                        class="min-h-[44px] shrink-0 px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-medium border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 transition shadow-sm flex items-center gap-2">
                         <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                         Удалить демо
                     </button>
                     <button type="button" @click="logoutAdmin()"
-                        class="min-h-[44px] px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-medium border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 transition shadow-sm">
+                        class="min-h-[44px] shrink-0 px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-medium border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 transition shadow-sm">
                         Выйти
                     </button>
                     <button type="button" @click="syncStopListOnly()"
                         :disabled="stopListSyncLoading || integrationSyncLoading || !integrationStatus.iiko_configured"
                         :title="integrationStatus.iiko_configured ? 'Синхронизировать стоп-лист из iiko (учётные данные из .env)' : 'Задайте IIKO_API_LOGIN и IIKO_ORGANIZATION_ID в .env'"
-                        class="min-h-[44px] flex items-center gap-2 px-3 sm:px-4 py-2 rounded-xl border text-xs sm:text-sm font-semibold transition shadow-sm disabled:opacity-45 disabled:cursor-not-allowed bg-orange-50 text-orange-900 border-orange-200 hover:bg-orange-100">
+                        class="min-h-[44px] shrink-0 flex items-center gap-2 px-3 sm:px-4 py-2 rounded-xl border text-xs sm:text-sm font-semibold transition shadow-sm disabled:opacity-45 disabled:cursor-not-allowed bg-orange-50 text-orange-900 border-orange-200 hover:bg-orange-100">
                         <span :class="stopListSyncLoading ? 'animate-spin' : ''">&#x21bb;</span>
                         <span class="hidden sm:inline">Стоп-лист iiko</span>
                         <span class="sm:hidden">Стоп</span>
                     </button>
-                <button
-                    type="button"
-                    @click="loadTabData()"
-                    title="Обновить данные на текущей вкладке из сервера (списки, без выгрузки из iiko). Синхронизация меню и стоп-листа — в «Интеграциях» или кнопка «Стоп-лист iiko»."
-                    class="min-h-[44px] flex items-center gap-2 px-3 sm:px-4 py-2 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition shadow-sm text-xs sm:text-sm"
-                >
-                    <span :class="loading ? 'animate-spin' : ''">&#x21bb;</span>
-                    <span class="hidden sm:inline">Обновить данные</span>
-                    <span class="sm:hidden">Обновить</span>
-                </button>
                 </div>
             </div>
         </header>
@@ -348,29 +349,41 @@
             <!-- ========== АНАЛИТИКА ========== -->
             <div x-show="currentTab === 'analytics'" x-cloak class="fade-in">
                 <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 mb-6">
-                    <div class="flex flex-wrap items-center gap-3">
-                        <span class="text-sm font-medium text-gray-600 mr-2">Период:</span>
-                        <template x-for="p in [{id:'day', label:'Сегодня'}, {id:'week', label:'Неделя'}, {id:'month', label:'Месяц'}]" :key="p.id">
+                    <div class="flex flex-col gap-3">
+                        <div class="flex flex-col gap-2 min-w-0 sm:flex-row sm:flex-wrap sm:items-center">
+                            <span class="text-sm font-medium text-gray-600 shrink-0">Период:</span>
+                            <div class="flex flex-wrap gap-2">
+                                <template x-for="p in [{id:'day', label:'Сегодня'}, {id:'week', label:'Неделя'}, {id:'month', label:'Месяц'}]" :key="p.id">
+                                    <button
+                                        @click="analyticsPeriod = p.id; analyticsCustom = false; reloadAnalyticsForUi()"
+                                        :class="analyticsPeriod === p.id && !analyticsCustom
+                                            ? 'bg-brand-600 text-white shadow-md'
+                                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'"
+                                        class="px-3 sm:px-4 py-2 rounded-xl text-sm font-medium transition"
+                                        x-text="p.label"
+                                    ></button>
+                                </template>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-1 min-[400px]:grid-cols-2 gap-2 min-w-0 w-full max-w-2xl">
+                            <input type="date" x-model="analyticsFrom" class="min-w-0 w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50">
+                            <input type="date" x-model="analyticsTo" class="min-w-0 w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50">
                             <button
-                                @click="analyticsPeriod = p.id; analyticsCustom = false; reloadAnalyticsForUi()"
-                                :class="analyticsPeriod === p.id && !analyticsCustom
-                                    ? 'bg-brand-600 text-white shadow-md'
-                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'"
-                                class="px-4 py-2 rounded-xl text-sm font-medium transition"
-                                x-text="p.label"
-                            ></button>
-                        </template>
-                        <div class="flex items-center gap-2 ml-4">
-                            <input type="date" x-model="analyticsFrom" class="border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50">
-                            <span class="text-gray-400">—</span>
-                            <input type="date" x-model="analyticsTo" class="border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50">
-                            <button
+                                type="button"
                                 @click="analyticsPeriod = 'custom'; analyticsCustom = true; reloadAnalyticsForUi()"
-                                class="px-4 py-2 bg-brand-600 text-white rounded-xl text-sm font-medium hover:bg-brand-700 transition"
-                            >Применить</button>
+                                class="min-[400px]:col-span-2 w-full px-4 py-2 bg-brand-600 text-white rounded-xl text-sm font-medium hover:bg-brand-700 transition"
+                            >Применить диапазон</button>
                         </div>
                     </div>
-                    <p class="text-xs text-gray-400 mt-3">Сутки «Сегодня» и длительность «Неделя» / «Месяц» считаются в <span class="text-gray-500">UTC</span> (как на сервере), чтобы цифры совпадали с дашбордом.</p>
+                    <details class="hint-details mt-3 rounded-xl border border-gray-200/80 bg-gray-50/40 px-3 py-2 hover:bg-gray-50/80 transition-colors">
+                        <summary class="cursor-pointer flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-brand-700 select-none py-1">
+                            <svg class="w-4 h-4 text-gray-400 shrink-0 transition-transform duration-200 hint-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                            Про часовой пояс (UTC)
+                        </summary>
+                        <div class="pb-2 pt-1 pl-6 border-l-2 border-brand-200 ml-1 text-xs text-gray-600 leading-relaxed">
+                            Сутки «Сегодня» и длительность «Неделя» / «Месяц» считаются в <strong>UTC</strong> (как на сервере), чтобы цифры совпадали с дашбордом.
+                        </div>
+                    </details>
 
                     <div x-show="analyticsData.date_from && analyticsData.date_to" x-cloak
                         class="mt-4 flex flex-col sm:flex-row sm:items-stretch gap-3 rounded-2xl border border-brand-200/60 bg-gradient-to-br from-brand-50/90 via-white to-violet-50/50 p-4 shadow-sm shadow-brand-900/5">
@@ -386,9 +399,9 @@
                         </div>
                     </div>
 
-                    <details class="analytics-hint-details mt-3 rounded-xl border border-gray-200/80 bg-gray-50/40 px-3 py-2 hover:bg-gray-50/80 transition-colors">
+                    <details class="hint-details mt-3 rounded-xl border border-gray-200/80 bg-gray-50/40 px-3 py-2 hover:bg-gray-50/80 transition-colors">
                         <summary class="cursor-pointer flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-brand-700 select-none py-1">
-                            <svg class="w-4 h-4 text-gray-400 shrink-0 transition-transform duration-200 analytics-hint-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                            <svg class="w-4 h-4 text-gray-400 shrink-0 transition-transform duration-200 hint-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
                             Почему суммы за день, неделю и месяц иногда совпадают?
                         </summary>
                         <div class="pb-2 pt-1 pl-6 border-l-2 border-brand-200 ml-1 text-xs text-gray-600 leading-relaxed">
@@ -496,7 +509,15 @@
                             </select>
                         </div>
                     </div>
-                    <p class="text-xs text-gray-400 mb-2">Период «Сегодня» и столбцы — <strong>календарные сутки UTC</strong> (как на дашборде). Демо-заказы привязаны к дате генерации: после смены суток на сервере обновите демо («Удалить демо» → «Демо-данные»).</p>
+                    <details class="hint-details mb-3 rounded-xl border border-gray-200/80 bg-gray-50/40 px-3 py-2">
+                        <summary class="cursor-pointer flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-brand-700 select-none py-0.5">
+                            <svg class="w-4 h-4 text-gray-400 shrink-0 transition-transform duration-200 hint-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                            Про «Сегодня» на графике и демо-данные
+                        </summary>
+                        <div class="pb-2 pt-1 pl-6 border-l-2 border-brand-200 ml-1 text-xs text-gray-600 leading-relaxed">
+                            Период «Сегодня» и столбцы — <strong>календарные сутки UTC</strong> (как на дашборде). Демо-заказы привязаны к дате генерации: после смены суток на сервере обновите демо («Удалить демо» → «Демо-данные»).
+                        </div>
+                    </details>
                     <div class="relative w-full min-h-[320px]" style="height: 320px;">
                         <canvas id="revenueChart" class="w-full h-full"></canvas>
                     </div>
@@ -1181,50 +1202,62 @@
                     <span class="shrink-0 mt-0.5" aria-hidden="true">&#x26A0;&#xFE0F;</span>
                     <span x-text="menuLoadError"></span>
                 </div>
-                <!-- На мобилке блок категорий ограничен по высоте и скроллится — иначе sticky «съедает» весь экран -->
+                <!-- На узком экране: только поиск + кнопка «Фильтры»; остальное открывается по нажатию -->
                 <div class="sticky top-0 z-10 -mx-4 sm:-mx-6 md:-mx-8 px-4 sm:px-6 md:px-8 pt-2 pb-3 mb-4 md:pb-4 md:mb-6 bg-gray-50/90 backdrop-blur-md border-b border-gray-200/80 shadow-sm">
-                    <div class="flex flex-col xl:flex-row gap-4 xl:items-center xl:justify-between shrink-0">
-                        <div class="relative flex-1 max-w-2xl">
-                            <span class="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 text-lg pointer-events-none">&#x1F50D;</span>
-                            <input type="search" x-model.debounce.300ms="menuSearchQuery" placeholder="Поиск по названию, описанию или разделу..."
-                                class="w-full pl-11 pr-4 py-3 rounded-2xl border border-gray-200 bg-white text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
-                        </div>
-                        <div class="flex flex-wrap items-center gap-3">
-                            <button type="button" @click="openMenuCreate()"
-                                class="text-sm font-semibold px-4 py-2.5 rounded-xl bg-brand-600 text-white hover:bg-brand-700 shadow-sm shadow-brand-600/20 transition">
-                                + Добавить позицию
-                            </button>
-                            <button type="button" x-show="menuItems.length > 0" :disabled="menuClearLoading"
-                                @click="clearAllMenuFromDb()"
-                                class="text-sm font-semibold px-4 py-2.5 rounded-xl border border-red-200 bg-white text-red-700 hover:bg-red-50 shadow-sm transition disabled:opacity-50">
-                                <span x-show="!menuClearLoading">Очистить всё меню</span>
-                                <span x-show="menuClearLoading">Удаление…</span>
-                            </button>
-                            <button type="button" @click="toggleMenuBulkMode()"
-                                :class="menuBulkMode ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-gray-600 border-gray-200 hover:border-brand-300'"
-                                class="text-sm font-semibold px-4 py-2.5 rounded-xl border shadow-sm transition">
-                                <span x-text="menuBulkMode ? 'Отменить выбор' : 'Выбрать'"></span>
-                            </button>
-                            <button type="button" x-show="menuBulkMode && menuFilteredItems.length > 0" @click="menuBulkSelectFiltered()"
-                                class="text-xs font-semibold px-3 py-2 rounded-xl border border-brand-200 bg-brand-50 text-brand-800 hover:bg-brand-100 transition">
-                                Все на экране
-                            </button>
-                            <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500">
-                                <span class="tabular-nums"><span x-text="menuFilteredItems.length"></span> поз.</span>
-                                <button type="button" x-show="menuStopCount > 0" @click="menuStockFilter = 'out'; menuCategoryFilter = ''"
-                                    class="text-xs font-bold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-100 rounded-full px-3 py-1 transition tabular-nums"
-                                    title="Показать только позиции в стопе">
-                                    <span x-text="menuStopCount"></span> в стопе
-                                </button>
+                    <div class="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                        <div class="flex items-center gap-2 min-w-0 w-full xl:max-w-2xl xl:flex-1">
+                            <div class="relative flex-1 min-w-0">
+                                <span class="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 text-lg pointer-events-none">&#x1F50D;</span>
+                                <input type="search" x-model.debounce.300ms="menuSearchQuery" placeholder="Поиск по названию, описанию или разделу..."
+                                    class="w-full pl-11 pr-4 py-3 rounded-2xl border border-gray-200 bg-white text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
                             </div>
-                            <select x-model="menuStockFilter"
-                                class="text-sm border border-gray-200 rounded-xl px-3 py-2.5 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
-                                <option value="all">Все статусы</option>
-                                <option value="in">Только в наличии</option>
-                                <option value="out">Нет в наличии</option>
-                            </select>
+                            <button type="button"
+                                class="md:hidden shrink-0 min-h-[48px] min-w-[48px] inline-flex items-center justify-center rounded-2xl border border-gray-200 bg-white text-gray-600 shadow-sm hover:bg-gray-50"
+                                @click="menuToolbarExpanded = !menuToolbarExpanded"
+                                :aria-expanded="menuToolbarExpanded"
+                                :class="menuToolbarExpanded ? 'ring-2 ring-brand-400 border-brand-300 bg-brand-50/50' : ''"
+                                title="Фильтры, действия и разделы"
+                                aria-label="Открыть панель фильтров и действий">
+                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/></svg>
+                            </button>
                         </div>
-                    </div>
+                        <div class="flex flex-col gap-2 min-w-0 flex-1 md:flex xl:items-end"
+                            :class="menuToolbarExpanded ? '' : 'max-md:hidden'">
+                            <div class="flex flex-wrap items-center gap-3">
+                                <button type="button" @click="openMenuCreate()"
+                                    class="text-sm font-semibold px-4 py-2.5 rounded-xl bg-brand-600 text-white hover:bg-brand-700 shadow-sm shadow-brand-600/20 transition">
+                                    + Добавить позицию
+                                </button>
+                                <button type="button" x-show="menuItems.length > 0" :disabled="menuClearLoading"
+                                    @click="clearAllMenuFromDb()"
+                                    class="text-sm font-semibold px-4 py-2.5 rounded-xl border border-red-200 bg-white text-red-700 hover:bg-red-50 shadow-sm transition disabled:opacity-50">
+                                    <span x-show="!menuClearLoading">Очистить всё меню</span>
+                                    <span x-show="menuClearLoading">Удаление…</span>
+                                </button>
+                                <button type="button" @click="toggleMenuBulkMode()"
+                                    :class="menuBulkMode ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-gray-600 border-gray-200 hover:border-brand-300'"
+                                    class="text-sm font-semibold px-4 py-2.5 rounded-xl border shadow-sm transition">
+                                    <span x-text="menuBulkMode ? 'Отменить выбор' : 'Выбрать'"></span>
+                                </button>
+                                <button type="button" x-show="menuBulkMode && menuFilteredItems.length > 0" @click="menuBulkSelectFiltered()"
+                                    class="text-xs font-semibold px-3 py-2 rounded-xl border border-brand-200 bg-brand-50 text-brand-800 hover:bg-brand-100 transition">
+                                    Все на экране
+                                </button>
+                                <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500">
+                                    <span class="tabular-nums"><span x-text="menuFilteredItems.length"></span> поз.</span>
+                                    <button type="button" x-show="menuStopCount > 0" @click="menuStockFilter = 'out'; menuCategoryFilter = ''"
+                                        class="text-xs font-bold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-100 rounded-full px-3 py-1 transition tabular-nums"
+                                        title="Показать только позиции в стопе">
+                                        <span x-text="menuStopCount"></span> в стопе
+                                    </button>
+                                </div>
+                                <select x-model="menuStockFilter"
+                                    class="text-sm border border-gray-200 rounded-xl px-3 py-2.5 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 w-full min-[420px]:w-auto">
+                                    <option value="all">Все статусы</option>
+                                    <option value="in">Только в наличии</option>
+                                    <option value="out">Нет в наличии</option>
+                                </select>
+                            </div>
                     <div class="flex flex-wrap items-center gap-2 mt-2" x-show="menuHasActiveFilters()" x-cloak>
                         <span class="text-xs text-amber-900 bg-amber-100/90 border border-amber-200/80 rounded-lg px-2.5 py-1">Включён фильтр</span>
                         <button type="button" @click="resetMenuFilters()"
@@ -1297,13 +1330,21 @@
                             </div>
                         </template>
                     </div>
+                        </div>
+                    </div>
                 </div>
 
-                <p class="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-4 py-2 mb-6">
-                    Меню загружается из <strong>iiko Cloud</strong> (синхронизация в разделе интеграций или <code class="text-[11px]">python scripts/sync_menu_from_iiko.py</code>).
-                    Позиции можно <strong>редактировать здесь</strong> («Изменить», стоп-лист одним кликом). Синхронизация <strong>iiko</strong> при настроенном API перезапишет номенклатуру из облака.
-                    Цены как в меню ресторана; обслуживание 10% — отдельно.
-                </p>
+                <details class="hint-details text-xs text-amber-800 bg-amber-50/80 border border-amber-100 rounded-xl px-4 py-2 mb-6">
+                    <summary class="cursor-pointer flex items-center gap-2 font-medium text-amber-900 select-none list-none py-0.5">
+                        <svg class="w-4 h-4 text-amber-600 shrink-0 transition-transform duration-200 hint-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                        Откуда берётся меню и что перезаписывает iiko
+                    </summary>
+                    <div class="mt-2 pl-6 border-l-2 border-amber-200 text-amber-900/90 leading-relaxed pb-1">
+                        Меню загружается из <strong>iiko Cloud</strong> (синхронизация в разделе интеграций или <code class="text-[11px]">python scripts/sync_menu_from_iiko.py</code>).
+                        Позиции можно <strong>редактировать здесь</strong> («Изменить», стоп-лист одним кликом). Синхронизация <strong>iiko</strong> при настроенном API перезапишет номенклатуру из облака.
+                        Цены как в меню ресторана; обслуживание 10% — отдельно.
+                    </div>
+                </details>
 
                 <div x-show="menuItems.length === 0" class="text-center py-20 text-gray-400">
                     <div class="text-5xl mb-3">&#x1F372;</div>
@@ -1450,10 +1491,16 @@
                             Синхронизировать с iiko
                         </button>
                     </div>
-                    <p class="text-xs text-gray-500 mt-3">
-                        Список позиций с флагом «нет в наличии». Кнопка подтягивает актуальный стоп из iiko Cloud (те же учётные данные, что в .env).
-                        <span x-show="!integrationStatus.iiko_configured" class="text-amber-700 font-medium"> Настройте IIKO_* в .env.</span>
-                    </p>
+                    <details class="hint-details mt-3 rounded-xl border border-gray-200/80 bg-gray-50/50 px-3 py-2">
+                        <summary class="cursor-pointer flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-orange-800 select-none py-1">
+                            <svg class="w-4 h-4 text-gray-400 shrink-0 transition-transform duration-200 hint-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                            Что показывает эта вкладка и кнопка синхронизации
+                        </summary>
+                        <div class="pb-2 pt-1 pl-6 border-l-2 border-orange-200 ml-1 text-xs text-gray-600 leading-relaxed">
+                            Список позиций с флагом «нет в наличии». Кнопка подтягивает актуальный стоп из iiko Cloud (те же учётные данные, что в .env).
+                            <span x-show="!integrationStatus.iiko_configured" class="text-amber-700 font-medium"> Настройте IIKO_* в .env.</span>
+                        </div>
+                    </details>
                 </div>
 
                 <div x-show="stopListLoadError" x-cloak class="mb-4 text-sm text-red-800 bg-red-50 border border-red-100 rounded-xl px-4 py-3" x-text="stopListLoadError"></div>
@@ -1468,11 +1515,15 @@
                         <p class="text-xs text-red-600 mt-2 font-medium" x-show="integrationStatus.last_stoplist?.error && !integrationStatus.last_stoplist?.ok"
                             x-text="integrationStatus.last_stoplist?.error"></p>
                     </div>
-                    <div class="lg:col-span-2 rounded-2xl border border-orange-100 bg-orange-50/40 p-5">
-                        <div class="text-sm text-orange-950 leading-relaxed">
+                    <details class="hint-details lg:col-span-2 rounded-2xl border border-orange-100 bg-orange-50/40 p-5">
+                        <summary class="cursor-pointer flex items-center gap-2 text-sm font-semibold text-orange-950 select-none list-none">
+                            <svg class="w-4 h-4 text-orange-700 shrink-0 transition-transform duration-200 hint-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                            Если в iiko стоп-лист очищен…
+                        </summary>
+                        <div class="mt-3 text-sm text-orange-950 leading-relaxed pl-6 border-l-2 border-orange-200">
                             Если в iiko стоп-лист <strong>очищен</strong>, локальные позиции снова станут доступны после синхронизации (исправлено на сервере: пустой ответ iiko больше не блокирует возврат в продажу).
                         </div>
-                    </div>
+                    </details>
                 </div>
 
                 <div x-show="!loading && stopListFilteredItems.length === 0 && !stopListLoadError" class="text-center py-16 text-gray-500">
@@ -1554,7 +1605,13 @@
                             class="inline-flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold border border-gray-200 bg-white text-gray-800 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">
                             Только меню (iiko → БД)
                         </button>
-                        <p class="text-xs text-gray-400 w-full mt-1">Полная кнопка — меню + стоп-листы. «Только меню» — номенклатура и цены в <code class="bg-gray-100 px-1 rounded text-[10px]">menu_items</code> без запроса стоп-листов.</p>
+                        <details class="hint-details w-full mt-2 rounded-xl border border-gray-200/80 bg-gray-50/50 px-3 py-2">
+                            <summary class="cursor-pointer text-xs font-medium text-gray-600 select-none flex items-center gap-2">
+                                <svg class="w-3.5 h-3.5 text-gray-400 shrink-0 transition-transform duration-200 hint-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                                Чем отличаются кнопки синхронизации
+                            </summary>
+                            <p class="text-xs text-gray-500 mt-2 pl-5 border-l-2 border-gray-200 ml-0.5">Полная кнопка — меню + стоп-листы. «Только меню» — номенклатура и цены в <code class="bg-gray-100 px-1 rounded text-[10px]">menu_items</code> без запроса стоп-листов.</p>
+                        </details>
                     </div>
 
                     <div class="rounded-xl border border-gray-200 bg-gray-50/50 p-4 mb-4">
@@ -1638,10 +1695,16 @@
                         </div>
                     </div>
 
-                    <div class="mt-4 bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-700">
-                        <strong>Как это работает:</strong> Сообщения отправляются напрямую в Gemini AI через ваш бэкенд.
-                        Бот определит намерение (заказ, бронь, вопрос) и ответит структурированно.
-                    </div>
+                    <details class="hint-details mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
+                        <summary class="cursor-pointer text-sm font-semibold text-amber-900 select-none flex items-center gap-2">
+                            <svg class="w-4 h-4 text-amber-700 shrink-0 transition-transform duration-200 hint-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                            Как работает тест
+                        </summary>
+                        <div class="text-sm text-amber-800 mt-2 pl-5 border-l-2 border-amber-300 leading-relaxed">
+                            Сообщения отправляются напрямую в Gemini AI через ваш бэкенд.
+                            Бот определит намерение (заказ, бронь, вопрос) и ответит структурированно.
+                        </div>
+                    </details>
                 </div>
             </div>
 
@@ -2140,6 +2203,8 @@ function adminApp() {
         menuClearLoading: false,
         /** Чипы разделов: на узких экранах по умолчанию скрыты, чтобы не перекрывать карточки */
         menuCategoryChipsOpen: true,
+        /** Панель действий/фильтров вкладки «Меню»: на мобилке по умолчанию свёрнута */
+        menuToolbarExpanded: false,
         /** Статус интеграций (GET /api/admin/integrations/status). */
         integrationStatus: defaultIntegrationStatus(),
         integrationSyncLoading: false,
@@ -2384,9 +2449,12 @@ function adminApp() {
             this.analyticsFrom = weekAgo.toISOString().slice(0, 10);
 
             try {
-                this.menuCategoryChipsOpen = window.matchMedia('(min-width: 768px)').matches;
+                const m = window.matchMedia('(min-width: 768px)').matches;
+                this.menuCategoryChipsOpen = m;
+                this.menuToolbarExpanded = m;
             } catch (e) {
                 this.menuCategoryChipsOpen = true;
+                this.menuToolbarExpanded = true;
             }
 
             await this.checkSession();
@@ -2414,9 +2482,12 @@ function adminApp() {
             this.menuCategoryFilter = '';
             this.menuStockFilter = 'out';
             try {
-                this.menuCategoryChipsOpen = window.matchMedia('(min-width: 768px)').matches;
+                const m = window.matchMedia('(min-width: 768px)').matches;
+                this.menuCategoryChipsOpen = m;
+                this.menuToolbarExpanded = true;
             } catch (e) {
                 this.menuCategoryChipsOpen = false;
+                this.menuToolbarExpanded = true;
             }
             this.loadTabData();
         },
