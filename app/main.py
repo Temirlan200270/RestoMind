@@ -127,6 +127,33 @@ async def _stop_list_sync_loop() -> None:
                     logger.error("Не удалось сохранить статус интеграции iiko: %s", exc2)
 
 
+async def _chat_log_retention_loop() -> None:
+    """Фоновая задача: удаление старых chat_logs по CHAT_LOG_RETENTION_DAYS."""
+    from app.services.chat_log_retention import purge_old_chat_logs
+
+    if settings.chat_log_retention_days <= 0:
+        logger.info("CHAT_LOG_RETENTION_DAYS=0 — автоочистка chat_logs выключена")
+        return
+
+    interval = settings.chat_log_retention_interval_seconds
+    first_cycle = True
+    while True:
+        try:
+            if not first_cycle:
+                await asyncio.sleep(interval)
+            first_cycle = False
+        except asyncio.CancelledError:
+            break
+        try:
+            async with async_session_factory() as db:
+                await purge_old_chat_logs(db)
+                await db.commit()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.error("Ошибка ретеншна chat_logs: %s", exc, exc_info=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
@@ -226,14 +253,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.info("Redis не используется — in-memory режим")
 
     stop_list_task = asyncio.create_task(_stop_list_sync_loop())
+    chat_retention_task = asyncio.create_task(_chat_log_retention_loop())
 
     yield
 
-    stop_list_task.cancel()
-    try:
-        await stop_list_task
-    except asyncio.CancelledError:
-        pass
+    for bg in (stop_list_task, chat_retention_task):
+        bg.cancel()
+        try:
+            await bg
+        except asyncio.CancelledError:
+            pass
 
     await redis_client.aclose()
     await async_engine.dispose()
@@ -243,7 +272,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 app = FastAPI(
     title=settings.app_name,
     description="AI-оператор для ресторана: заказы, бронирование, FAQ через WhatsApp",
-    version="0.1.0",
+    version=settings.app_version,
     lifespan=lifespan,
 )
 

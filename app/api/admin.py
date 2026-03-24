@@ -4,11 +4,13 @@ REST-эндпоинты для просмотра заказов, диалого
 """
 
 import asyncio
+import csv
+import io
 import logging
 import secrets
 import uuid
-from datetime import date, datetime, timedelta, timezone
 from collections import defaultdict
+from datetime import date, datetime, time as dt_time, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
 from sqlalchemy import delete as sql_delete
@@ -41,6 +43,7 @@ from app.services.integration_health import (
     record_menu_sync,
     record_stoplist_sync,
 )
+from app.services.chat_log_retention import count_chat_logs_eligible_for_purge, purge_old_chat_logs
 from app.services.dialog_mgr import (
     UserState,
     append_to_history,
@@ -48,6 +51,7 @@ from app.services.dialog_mgr import (
     get_chat_history,
     get_pending_order,
     get_user_state,
+    purge_all_session_keys_for_phone,
     set_pending_booking,
     set_pending_order,
     set_user_state,
@@ -1414,6 +1418,287 @@ async def delete_single_order(
     await publish_event("order_deleted", {"order_id": order_id})
     logger.warning("Админ: удалён заказ #%s", order_id)
     return {"ok": True, "id": order_id}
+
+
+MAX_CSV_EXPORT_ROWS = 50_000
+
+
+def _export_range_utc(date_from: date | None, date_to: date | None) -> tuple[datetime, datetime]:
+    """
+    Полуинтервал [lo, hi) в UTC для фильтрации по created_at.
+    По умолчанию — последние 90 суток.
+    """
+    today = datetime.now(timezone.utc).date()
+    df = date_from or (today - timedelta(days=90))
+    dt_end = date_to or today
+    if df > dt_end:
+        raise HTTPException(status_code=400, detail="date_from не может быть позже date_to")
+    lo = datetime.combine(df, dt_time.min, tzinfo=timezone.utc)
+    hi_excl = datetime.combine(dt_end, dt_time.min, tzinfo=timezone.utc) + timedelta(days=1)
+    return lo, hi_excl
+
+
+class RedisPurgePhoneBody(BaseModel):
+    """Сброс ключей Redis/InMemory-сессии по номеру (без изменений в БД)."""
+
+    confirm: bool = Field(False, description="Должно быть true")
+    phone: str = Field(..., min_length=8, max_length=32, description="Телефон как в WhatsApp (E.164)")
+
+
+class RetentionRunBody(BaseModel):
+    confirm: bool = Field(True, description="Должно быть true")
+
+
+@router.get("/settings/environment")
+async def settings_environment(db: AsyncSession = Depends(get_db)) -> dict:
+    """
+    Безопасный снимок окружения для админки (без секретов и полных токенов).
+    """
+    elig = await count_chat_logs_eligible_for_purge(db)
+    integ = await build_status_payload(
+        db,
+        iiko_configured=_iiko_env_configured(),
+        whatsapp_configured=_whatsapp_env_configured(),
+    )
+    return {
+        "app_name": settings.app_name,
+        "app_version": settings.app_version,
+        "app_debug": settings.app_debug,
+        "db_mode": settings.db_mode,
+        "redis_enabled": settings.redis_enabled,
+        "redis_backend": "redis" if settings.redis_enabled else "in_memory",
+        "integrations": {
+            "iiko": {
+                "configured": _iiko_env_configured(),
+                "terminal_group_id_set": bool(str(settings.iiko_terminal_group_id or "").strip()),
+            },
+            "whatsapp": {
+                "configured": _whatsapp_env_configured(),
+                "phone_number_id_set": bool(str(settings.whatsapp_phone_number_id or "").strip()),
+            },
+            "telegram": {
+                "configured": bool(
+                    str(settings.telegram_bot_token or "").strip()
+                    and str(settings.telegram_admin_chat_id or "").strip(),
+                ),
+            },
+            "gemini": {"configured": bool(str(settings.gemini_api_key or "").strip())},
+            "public_base_url_set": bool(str(settings.public_base_url or "").strip()),
+        },
+        "integration_health": {
+            "last_stoplist": integ.get("last_stoplist"),
+            "last_menu_sync": integ.get("last_menu_sync"),
+        },
+        "chat_log_retention": {
+            "enabled": settings.chat_log_retention_days > 0,
+            "retention_days": settings.chat_log_retention_days,
+            "interval_seconds": settings.chat_log_retention_interval_seconds,
+            "eligible_for_purge_count": elig,
+        },
+    }
+
+
+@router.post("/settings/redis-purge-phone")
+async def redis_purge_phone(body: RedisPurgePhoneBody) -> dict:
+    """Удалить из Redis/in-memory ключи chat:history, user:state, pending_order/booking для номера."""
+    if not body.confirm:
+        raise HTTPException(
+            status_code=400,
+            detail='Передайте {"confirm": true, "phone": "+7700..."}',
+        )
+    phone = (body.phone or "").strip()
+    if not phone:
+        raise HTTPException(status_code=400, detail="Укажите телефон")
+    await purge_all_session_keys_for_phone(redis_client, phone)
+    logger.warning("Админ: сброшена Redis-сессия для %s", phone[:6] + "…")
+    return {"ok": True, "phone": phone}
+
+
+@router.post("/settings/chat-logs/run-retention")
+async def run_chat_log_retention_manual(
+    body: RetentionRunBody,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Разовый запуск политики ретеншна (та же, что в фоне по расписанию)."""
+    if not body.confirm:
+        raise HTTPException(status_code=400, detail='Передайте {"confirm": true}')
+    if settings.chat_log_retention_days <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Ретеншн выключен: задайте CHAT_LOG_RETENTION_DAYS > 0 в .env",
+        )
+    n = await purge_old_chat_logs(db)
+    await db.commit()
+    return {"ok": True, "deleted": n, "retention_days": settings.chat_log_retention_days}
+
+
+@router.post("/orders/bulk-cancel")
+async def bulk_cancel_orders(
+    body: DeleteOrdersBulkBody,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Перевести заказы в статус cancelled (строки в БД сохраняются)."""
+    if not body.confirm:
+        raise HTTPException(
+            status_code=400,
+            detail='Передайте {"confirm": true, "order_ids": [1, 2, ...]}',
+        )
+    ids = sorted({int(x) for x in body.order_ids if int(x) > 0})
+    if not ids:
+        raise HTTPException(status_code=400, detail="Список order_ids пуст")
+
+    res = await db.execute(
+        select(Order, User.phone)
+        .join(User, Order.user_id == User.id)
+        .where(Order.id.in_(ids)),
+    )
+    rows = res.all()
+    found = {o.id for o, _p in rows}
+    missing = sorted(set(ids) - found)
+    if missing:
+        raise HTTPException(status_code=404, detail=f"Заказы не найдены: {missing}")
+
+    cancelled = 0
+    skipped = 0
+    to_emit: list[tuple[int, str, float]] = []
+    for order, phone in rows:
+        if order.status == OrderStatus.CANCELLED.value:
+            skipped += 1
+            continue
+        order.status = OrderStatus.CANCELLED.value
+        order.iiko_last_error = None
+        await _clear_redis_pending_if_matches(phone, order.id)
+        cancelled += 1
+        to_emit.append((order.id, phone, float(order.total_price)))
+
+    await db.commit()
+    for oid, phone, total in to_emit:
+        await publish_event(
+            "order_updated",
+            {
+                "order_id": oid,
+                "status": OrderStatus.CANCELLED.value,
+                "phone": phone,
+                "total_price": total,
+                "iiko_last_error": None,
+            },
+        )
+    logger.warning("Админ: массовая отмена заказов: ids=%s, отменено=%d, уже были отменены=%d", ids, cancelled, skipped)
+    return {"ok": True, "cancelled": cancelled, "skipped_already_cancelled": skipped, "order_ids": ids}
+
+
+@router.get("/export/orders")
+async def export_orders_csv(
+    date_from: date | None = Query(None, description="Начало периода (UTC, дата)"),
+    date_to: date | None = Query(None, description="Конец периода включительно (UTC, дата)"),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """CSV заказов за период (UTF-8 с BOM для Excel)."""
+    lo, hi_excl = _export_range_utc(date_from, date_to)
+    lo_sql = _sql_dt_for_filter(lo)
+    hi_sql = _sql_dt_for_filter(hi_excl)
+
+    res = await db.execute(
+        select(Order, User.phone, User.name)
+        .join(User, Order.user_id == User.id)
+        .where(Order.created_at >= lo_sql, Order.created_at < hi_sql)
+        .order_by(Order.id.asc())
+        .limit(MAX_CSV_EXPORT_ROWS + 1),
+    )
+    rows = res.all()
+    if len(rows) > MAX_CSV_EXPORT_ROWS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Слишком много строк (> {MAX_CSV_EXPORT_ROWS}). Сузьте период.",
+        )
+
+    buf = io.StringIO()
+    w = csv.writer(buf, lineterminator="\n")
+    w.writerow(
+        [
+            "order_id",
+            "user_id",
+            "user_phone",
+            "user_name",
+            "status",
+            "total_price",
+            "order_type",
+            "created_at_utc",
+            "updated_at_utc",
+        ],
+    )
+    for o, phone, name in rows:
+        meta = _order_meta_from_items_json(o.items_json if isinstance(o.items_json, dict) else None)
+        w.writerow(
+            [
+                o.id,
+                o.user_id,
+                phone or "",
+                name or "",
+                o.status or "",
+                float(o.total_price),
+                meta.get("order_type") or "",
+                o.created_at.isoformat() if o.created_at else "",
+                o.updated_at.isoformat() if o.updated_at else "",
+            ],
+        )
+
+    return Response(
+        content=buf.getvalue().encode("utf-8-sig"),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": 'attachment; filename="restomind_orders_export.csv"',
+        },
+    )
+
+
+@router.get("/export/chats")
+async def export_chats_csv(
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """CSV сообщений chat_logs за период (роль, телефон клиента)."""
+    lo, hi_excl = _export_range_utc(date_from, date_to)
+    lo_sql = _sql_dt_for_filter(lo)
+    hi_sql = _sql_dt_for_filter(hi_excl)
+
+    res = await db.execute(
+        select(ChatLog, User.phone)
+        .join(User, ChatLog.user_id == User.id)
+        .where(ChatLog.created_at >= lo_sql, ChatLog.created_at < hi_sql)
+        .order_by(ChatLog.id.asc())
+        .limit(MAX_CSV_EXPORT_ROWS + 1),
+    )
+    rows = res.all()
+    if len(rows) > MAX_CSV_EXPORT_ROWS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Слишком много строк (> {MAX_CSV_EXPORT_ROWS}). Сузьте период.",
+        )
+
+    buf = io.StringIO()
+    w = csv.writer(buf, lineterminator="\n")
+    w.writerow(["log_id", "user_id", "user_phone", "role", "created_at_utc", "content"])
+    for cl, phone in rows:
+        w.writerow(
+            [
+                cl.id,
+                cl.user_id,
+                phone or "",
+                cl.role or "",
+                cl.created_at.isoformat() if cl.created_at else "",
+                (cl.content or "").replace("\r\n", "\n").replace("\r", "\n"),
+            ],
+        )
+
+    return Response(
+        content=buf.getvalue().encode("utf-8-sig"),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": 'attachment; filename="restomind_chats_export.csv"',
+        },
+    )
 
 
 # ─── Даты заказов (UTC) — общие для /stats и /analytics ───

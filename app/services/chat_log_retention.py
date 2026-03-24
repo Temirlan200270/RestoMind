@@ -5,7 +5,7 @@
 import logging
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import delete as sql_delete, select
+from sqlalchemy import delete as sql_delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -45,12 +45,12 @@ async def purge_old_chat_logs(session: AsyncSession) -> int:
     return out
 
 
-async def count_chat_logs_to_purge(session: AsyncSession) -> int:
+async def count_chat_logs_eligible_for_purge(session: AsyncSession) -> int:
     """Сколько строк попадёт под текущую политику (без удаления)."""
     if settings.chat_log_retention_days <= 0:
         return 0
     cutoff = _cutoff_for_sql()
-    q = await session.scalar(
-        select(ChatLog.id).where(ChatLog.created_at < cutoff).count(),  # wrong
+    c = await session.scalar(
+        select(func.count()).select_from(ChatLog).where(ChatLog.created_at < cutoff),
     )
-    ...
+    return int(c or 0)
