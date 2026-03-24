@@ -149,6 +149,25 @@ class Settings(BaseSettings):
     # --- Админ-панель ---
     admin_username: str = "admin"
     admin_password: str = "restomind"
+    # Версия для отображения в админке (можно переопределить при деплое)
+    app_version: str = Field(
+        default="0.1.0",
+        validation_alias=AliasChoices("APP_VERSION", "app_version"),
+    )
+    # Ретеншн chat_logs: 0 = выключено; иначе удалять записи старше N суток (фоновая задача)
+    chat_log_retention_days: int = Field(
+        default=0,
+        ge=0,
+        validation_alias=AliasChoices("CHAT_LOG_RETENTION_DAYS", "chat_log_retention_days"),
+    )
+    chat_log_retention_interval_seconds: int = Field(
+        default=86_400,
+        ge=60,
+        validation_alias=AliasChoices(
+            "CHAT_LOG_RETENTION_INTERVAL_SECONDS",
+            "chat_log_retention_interval_seconds",
+        ),
+    )
 
     # --- Sentry (опционально) ---
     sentry_dsn: str = ""
