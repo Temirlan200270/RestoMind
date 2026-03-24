@@ -126,9 +126,9 @@
 
     <!-- Правая колонка: шапка + алерт (shrink-0) + область контента (flex-1 min-h-0) -->
     <main class="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
-        <header class="shrink-0 glass border-b border-gray-200 px-3 sm:px-4 md:px-8 py-2.5 md:py-4 z-10">
-            <div class="flex flex-col gap-2 md:flex-row md:items-start md:justify-between md:gap-3">
-                <div class="flex items-center gap-2 md:gap-3 min-w-0 md:flex-1">
+        <header class="shrink-0 glass border-b border-gray-200 px-3 sm:px-4 md:px-8 py-2.5 md:py-4 z-10 min-w-0 max-w-full overflow-x-clip">
+            <div class="flex flex-col gap-2 min-w-0 md:flex-row md:items-start md:justify-between md:gap-3">
+                <div class="flex items-center gap-2 md:gap-3 min-w-0 md:flex-1 md:min-w-0">
                     <button type="button" class="md:hidden min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 shrink-0" @click="sidebarOpen = true" aria-label="Открыть меню">
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
                     </button>
@@ -200,7 +200,7 @@
         <div
             id="admin-content-scroll"
             class="flex-1 min-h-0"
-            :class="currentTab === 'chats' ? 'flex flex-col overflow-hidden px-3 sm:px-4 md:px-6 pb-3 sm:pb-4 md:pb-6' : 'overflow-y-auto px-4 sm:px-6 md:px-8 py-4 md:py-6'"
+            :class="currentTab === 'chats' ? 'flex flex-col overflow-hidden px-3 sm:px-4 md:px-6 pb-3 sm:pb-4 md:pb-6' : 'overflow-y-auto overflow-x-hidden min-w-0 px-4 sm:px-6 md:px-8 py-4 md:py-6'"
         >
             <!-- ========== ДАШБОРД ========== -->
             <div x-show="currentTab === 'dashboard'" x-cloak class="fade-in">
@@ -1197,15 +1197,15 @@
             </div>
 
             <!-- ========== МЕНЮ ========== -->
-            <div x-show="currentTab === 'menu'" x-cloak class="fade-in pb-24">
+            <div x-show="currentTab === 'menu'" x-cloak class="fade-in pb-24 min-w-0 max-w-full">
                 <div x-show="menuLoadError" x-cloak class="mb-4 text-sm text-red-800 bg-red-50 border border-red-100 rounded-xl px-4 py-3 flex items-start gap-2">
                     <span class="shrink-0 mt-0.5" aria-hidden="true">&#x26A0;&#xFE0F;</span>
                     <span x-text="menuLoadError"></span>
                 </div>
                 <!-- На узком экране: только поиск + кнопка «Фильтры»; остальное открывается по нажатию -->
-                <div class="sticky top-0 z-10 -mx-4 sm:-mx-6 md:-mx-8 px-4 sm:px-6 md:px-8 pt-2 pb-3 mb-4 md:pb-4 md:mb-6 bg-gray-50/90 backdrop-blur-md border-b border-gray-200/80 shadow-sm">
-                    <div class="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-                        <div class="flex items-center gap-2 min-w-0 w-full xl:max-w-2xl xl:flex-1">
+                <div class="sticky top-0 z-10 -mx-4 sm:-mx-6 md:-mx-8 px-4 sm:px-6 md:px-8 pt-2 pb-3 mb-4 md:pb-4 md:mb-6 bg-gray-50/90 backdrop-blur-md border-b border-gray-200/80 shadow-sm min-w-0 max-w-full overflow-x-clip">
+                    <div class="flex flex-col gap-3 min-w-0 xl:flex-row xl:items-start xl:gap-4">
+                        <div class="flex items-center gap-2 min-w-0 w-full max-w-full xl:w-auto xl:max-w-2xl xl:shrink-0">
                             <div class="relative flex-1 min-w-0">
                                 <span class="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 text-lg pointer-events-none">&#x1F50D;</span>
                                 <input type="search" x-model.debounce.300ms="menuSearchQuery" placeholder="Поиск по названию, описанию или разделу..."
@@ -1221,9 +1221,9 @@
                                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/></svg>
                             </button>
                         </div>
-                        <div class="flex flex-col gap-2 min-w-0 flex-1 md:flex xl:items-end"
+                        <div class="flex flex-col gap-2 min-w-0 w-full flex-1 md:flex xl:min-w-0"
                             :class="menuToolbarExpanded ? '' : 'max-md:hidden'">
-                            <div class="flex flex-wrap items-center gap-3">
+                            <div class="flex flex-wrap items-center gap-3 max-w-full">
                                 <button type="button" @click="openMenuCreate()"
                                     class="text-sm font-semibold px-4 py-2.5 rounded-xl bg-brand-600 text-white hover:bg-brand-700 shadow-sm shadow-brand-600/20 transition">
                                     + Добавить позицию

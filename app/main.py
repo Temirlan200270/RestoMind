@@ -14,6 +14,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 from sqlalchemy import text
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -27,7 +28,14 @@ from app.db.session import async_engine, async_session_factory, redis_client
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+# cache_size=0: обход падения Jinja2 LRUCache на Python 3.14 (TypeError при ключе кэша).
+templates = Jinja2Templates(
+    env=Environment(
+        loader=FileSystemLoader(str(TEMPLATES_DIR)),
+        autoescape=select_autoescape(),
+        cache_size=0,
+    ),
+)
 
 LOG_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
 LOG_DIR = Path("logs")
@@ -298,7 +306,7 @@ async def deep_health_check() -> dict:
 @app.get("/admin", response_class=HTMLResponse, tags=["Admin Panel"])
 async def admin_page(request: Request) -> HTMLResponse:
     """Главная страница — админ-панель."""
-    response = templates.TemplateResponse("admin.html", {"request": request})
+    response = templates.TemplateResponse(request, "admin.html")
     # Чтобы браузер не держал устаревший HTML (Alpine/шаблон после деплоя).
     response.headers["Cache-Control"] = "no-store, max-age=0, must-revalidate"
     return response
