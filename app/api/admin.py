@@ -19,7 +19,17 @@ from sqlalchemy.orm import joinedload
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
-from app.db.models import Booking, ChatLog, EscalationEvent, MenuItem, Order, OrderStatus, User
+from app.db.models import (
+    Booking,
+    ChatLog,
+    EscalationEvent,
+    IntegrationEvent,
+    IntegrationHealth,
+    MenuItem,
+    Order,
+    OrderStatus,
+    User,
+)
 from app.db.session import async_session_factory, get_db, redis_client
 from app.integrations.whatsapp import send_message
 from app.services.admin_tokens import create_admin_ws_token, parse_admin_ws_token
@@ -34,7 +44,9 @@ from app.services.integration_health import (
 from app.services.dialog_mgr import (
     UserState,
     append_to_history,
+    clear_pending_order,
     get_chat_history,
+    get_pending_order,
     get_user_state,
     set_pending_booking,
     set_pending_order,
@@ -1212,6 +1224,196 @@ async def demo_delete_post(db: AsyncSession = Depends(get_db)) -> dict:
     Нужен для сред, где HTTP DELETE режется прокси/CDN (удаление «не работает», а POST проходит).
     """
     return await _demo_delete_core(db)
+
+
+# ─── Настройки: опасные операции с БД ───────────────────
+
+SETTINGS_PURGE_PHRASE = "УДАЛИТЬ ВСЕ ДАННЫЕ"
+
+
+class PurgeOperationalBody(BaseModel):
+    """Сброс операционных данных (заказы, чаты, брони и т.д.) без удаления клиентов ``users``."""
+
+    confirm: bool = Field(False, description="Должно быть true")
+    phrase: str = Field("", description="Точная фраза подтверждения")
+
+
+class DeleteOrdersBulkBody(BaseModel):
+    """Удаление заказов по списку id (и сброс Redis pending_order при совпадении)."""
+
+    confirm: bool = Field(False, description="Должно быть true")
+    order_ids: list[int] = Field(..., min_length=1, max_length=80)
+
+
+class DeleteSingleOrderBody(BaseModel):
+    confirm: bool = Field(False, description="Должно быть true")
+
+
+def _sql_delete_rowcount(res) -> int:
+    n = res.rowcount
+    return int(n) if n is not None and n >= 0 else 0
+
+
+async def _clear_redis_pending_if_matches(phone: str, order_id: int) -> None:
+    """Если в Redis висит черновик этого заказа — снять, чтобы клиент не застрял на мёртвом id."""
+    try:
+        pid = await get_pending_order(redis_client, phone)
+        if pid == order_id:
+            await clear_pending_order(redis_client, phone)
+    except Exception:
+        logger.exception("Redis: не удалось сбросить pending_order для %s", phone)
+
+
+@router.post("/settings/purge-operational-data")
+async def purge_operational_data(
+    body: PurgeOperationalBody,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    Удалить **все** операционные записи: ``chat_logs``, ``orders``, ``bookings``,
+    ``escalation_events``, ``integration_events``.
+
+    Таблицы ``users``, ``menu_items``, ``organizations`` **не** трогаются.
+    Сбрасывается строка ``integration_health`` (id=1), если есть.
+    Требуются ``confirm: true`` и фраза «УДАЛИТЬ ВСЕ ДАННЫЕ».
+    """
+    if not body.confirm:
+        raise HTTPException(
+            status_code=400,
+            detail='Передайте {"confirm": true, "phrase": "УДАЛИТЬ ВСЕ ДАННЫЕ"}',
+        )
+    if (body.phrase or "").strip() != SETTINGS_PURGE_PHRASE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Введите фразу подтверждения: {SETTINGS_PURGE_PHRASE}",
+        )
+
+    r_chat = await db.execute(sql_delete(ChatLog))
+    r_ord = await db.execute(sql_delete(Order))
+    r_book = await db.execute(sql_delete(Booking))
+    r_esc = await db.execute(sql_delete(EscalationEvent))
+    r_int = await db.execute(sql_delete(IntegrationEvent))
+
+    row = await db.get(IntegrationHealth, 1)
+    if row is not None:
+        row.last_stoplist_at = None
+        row.last_stoplist_ok = False
+        row.last_stoplist_error = ""
+        row.last_menu_sync_at = None
+        row.last_menu_sync_ok = False
+        row.last_menu_sync_error = ""
+
+    await db.commit()
+    logger.warning(
+        "Админ: полный сброс операционных данных (чаты/заказы/брони/эскалации/журнал интеграций)",
+    )
+    return {
+        "ok": True,
+        "chat_logs_deleted": _sql_delete_rowcount(r_chat),
+        "orders_deleted": _sql_delete_rowcount(r_ord),
+        "bookings_deleted": _sql_delete_rowcount(r_book),
+        "escalation_events_deleted": _sql_delete_rowcount(r_esc),
+        "integration_events_deleted": _sql_delete_rowcount(r_int),
+    }
+
+
+@router.post("/settings/clear-menu-and-stop-snapshot")
+async def clear_menu_and_stop_snapshot(
+    body: ClearMenuBody,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    Удалить все строки ``menu_items`` и сбросить в UI блок «последняя синхронизация стоп-листа»
+    (поля ``integration_health`` для стопа). Отдельной таблицы стоп-листа в БД нет.
+    """
+    if not body.confirm:
+        raise HTTPException(
+            status_code=400,
+            detail='Для очистки передайте в теле JSON: {"confirm": true}',
+        )
+    cnt = await db.scalar(select(func.count()).select_from(MenuItem)) or 0
+    await db.execute(sql_delete(MenuItem))
+    row = await db.get(IntegrationHealth, 1)
+    if row is not None:
+        row.last_stoplist_at = None
+        row.last_stoplist_ok = False
+        row.last_stoplist_error = ""
+    await db.commit()
+    logger.warning(
+        "Админ: очистка menu_items и сброс снимка стоп-листа в integration_health, позиций: %d",
+        int(cnt),
+    )
+    return {"ok": True, "menu_items_deleted": int(cnt), "stop_snapshot_reset": True}
+
+
+@router.post("/orders/bulk-delete")
+async def bulk_delete_orders(
+    body: DeleteOrdersBulkBody,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Удалить заказы по списку id. Клиенты (users) не удаляются."""
+    if not body.confirm:
+        raise HTTPException(
+            status_code=400,
+            detail='Передайте {"confirm": true, "order_ids": [1, 2, ...]}',
+        )
+    ids = sorted({int(x) for x in body.order_ids if int(x) > 0})
+    if not ids:
+        raise HTTPException(status_code=400, detail="Список order_ids пуст")
+
+    res = await db.execute(
+        select(Order, User.phone)
+        .join(User, Order.user_id == User.id)
+        .where(Order.id.in_(ids)),
+    )
+    rows = res.all()
+    found = {o.id for o, _p in rows}
+    missing = sorted(set(ids) - found)
+    if missing:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Заказы не найдены: {missing}",
+        )
+
+    for order, phone in rows:
+        await _clear_redis_pending_if_matches(phone, order.id)
+
+    r_del = await db.execute(sql_delete(Order).where(Order.id.in_(ids)))
+    await db.commit()
+    deleted = _sql_delete_rowcount(r_del)
+    for oid in ids:
+        await publish_event("order_deleted", {"order_id": oid})
+    logger.warning("Админ: удалено заказов (bulk): %s", ids)
+    return {"ok": True, "deleted": deleted, "order_ids": ids}
+
+
+@router.post("/orders/{order_id}/delete")
+async def delete_single_order(
+    order_id: int,
+    body: DeleteSingleOrderBody,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Удалить один заказ по id."""
+    if not body.confirm:
+        raise HTTPException(
+            status_code=400,
+            detail='Передайте {"confirm": true}',
+        )
+    res = await db.execute(
+        select(Order, User.phone)
+        .join(User, Order.user_id == User.id)
+        .where(Order.id == order_id),
+    )
+    row = res.one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Заказ не найден")
+    order, phone = row
+    await _clear_redis_pending_if_matches(phone, order.id)
+    await db.execute(sql_delete(Order).where(Order.id == order_id))
+    await db.commit()
+    await publish_event("order_deleted", {"order_id": order_id})
+    logger.warning("Админ: удалён заказ #%s", order_id)
+    return {"ok": True, "id": order_id}
 
 
 # ─── Даты заказов (UTC) — общие для /stats и /analytics ───
