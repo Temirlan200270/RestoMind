@@ -6,7 +6,7 @@ import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
 from app.schemas.ai_schemas import AIBrainResponse
-from app.services.ai_brain import _FALLBACK_RESPONSE, call_gemini
+from app.services.ai_brain import _FALLBACK_RESPONSE, call_gemini, call_gemini_with_audio
 
 
 @pytest.mark.asyncio
@@ -106,3 +106,25 @@ async def test_gemini_menu_context_injected() -> None:
         system_text = config.get("system_instruction", "")
 
         assert "Плов" in system_text
+
+
+@pytest.mark.asyncio
+async def test_gemini_with_audio_returns_valid_response() -> None:
+    """Мультимодальный вызов парсится в AIBrainResponse."""
+    valid_json = (
+        '{"intent":"faq","reply_text":"Слышу, помогу","items":[],"booking_details":null,'
+        '"recognized_speech":"хочу столик"}'
+    )
+    mock_response = MagicMock()
+    mock_response.text = valid_json
+
+    with patch("app.services.ai_brain._gemini_client") as mock_client:
+        mock_client.aio.models.generate_content = AsyncMock(return_value=mock_response)
+        result = await call_gemini_with_audio(
+            [{"role": "user", "content": "Привет"}],
+            b"\x00fake",
+            "audio/ogg",
+        )
+
+    assert result.intent == "faq"
+    assert result.recognized_speech == "хочу столик"

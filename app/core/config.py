@@ -56,6 +56,16 @@ class Settings(BaseSettings):
     whatsapp_phone_number_id: str = ""
     # Публичный URL сайта (https://your-domain.com) — для подсказки URL вебхука в админке
     public_base_url: str = Field(default="", validation_alias=AliasChoices("PUBLIC_BASE_URL", "public_base_url"))
+    # Дублировать ответ бота голосом (edge-tts, бесплатно) после текста — только если клиент прислал голос
+    whatsapp_voice_replies: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("WHATSAPP_VOICE_REPLIES", "whatsapp_voice_replies"),
+    )
+    # Голос Microsoft Edge TTS (ru-RU-SvetlanaNeural, и др.)
+    edge_tts_voice: str = Field(
+        default="ru-RU-SvetlanaNeural",
+        validation_alias=AliasChoices("EDGE_TTS_VOICE", "edge_tts_voice"),
+    )
 
     # --- Telegram (оповещения при эскалации на оператора) ---
     telegram_bot_token: str = Field(

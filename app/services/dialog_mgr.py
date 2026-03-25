@@ -26,6 +26,8 @@ class UserState(StrEnum):
     """Состояния пользователя в диалоге."""
 
     CHATTING = "chatting"
+    # Черновик заказа создан; ждём явный выбор оплаты — затем CONFIRMING_ORDER
+    AWAITING_ORDER_PAYMENT = "awaiting_order_payment"
     CONFIRMING_ORDER = "confirming_order"
     CONFIRMING_BOOKING = "confirming_booking"
     HUMAN_MODE = "human_mode"

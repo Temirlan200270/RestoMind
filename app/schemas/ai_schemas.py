@@ -7,6 +7,9 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+# Язык ответа клиенту (для мультиязычности и выбора голоса TTS)
+DetectedReplyLanguage = Literal["ru", "kk", "en", "uz"]
+
 
 class OrderItem(BaseModel):
     """Одна позиция заказа, распознанная ИИ из речи клиента."""
@@ -77,7 +80,19 @@ class AIBrainResponse(BaseModel):
         ),
     )
     reply_text: str = Field(
-        ..., description="Текст ответа клиенту на русском языке"
+        ...,
+        description=(
+            "Текст ответа клиенту **на том же языке, на котором пишет клиент** "
+            "(русский, қазақша, English, o'zbek и смешанный код-свитчинг — естественно и вежливо)."
+        ),
+    )
+    detected_language: DetectedReplyLanguage = Field(
+        default="ru",
+        description=(
+            "Основной язык поля `reply_text`: ru — русский, kk — қазақша, en — English, uz — o'zbek. "
+            "Обязан совпадать с языком ответа. Если ответ преимущественно на киргизском или другом языке "
+            "вне списка — укажи ru (озвучка по умолчанию)."
+        ),
     )
     items: list[OrderItem] = Field(
         default_factory=list,
@@ -119,4 +134,11 @@ class AIBrainResponse(BaseModel):
     pickup_time_note: str = Field(
         default="",
         description="Когда забрать самовывоз или уточнение времени",
+    )
+    recognized_speech: str | None = Field(
+        default=None,
+        description=(
+            "Только при голосовом вводе: дословная расшифровка речи клиента. "
+            "В обычном текстовом чате — null (не заполнять)."
+        ),
     )

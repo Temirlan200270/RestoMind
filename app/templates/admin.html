@@ -140,17 +140,18 @@
                                 title="Быстрый поиск (Ctrl+K)" aria-label="Поиск по заказам и чатам">
                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
                             </button>
-                            <button type="button" @click="openGlobalSearch()" class="hidden md:inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border border-gray-200 bg-white text-sm text-gray-500 hover:bg-gray-50 shrink-0"
-                                title="Быстрый поиск (Ctrl+K)">
-                                <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-                                <span>Поиск…</span>
-                                <kbd class="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 font-mono">Ctrl K</kbd>
-                            </button>
                         </div>
                         <p class="hidden sm:block text-sm text-gray-500 mt-0.5 line-clamp-2" x-text="navItems.find(i => i.id === currentTab)?.desc"></p>
                     </div>
                 </div>
                 <div class="flex items-center gap-1.5 sm:gap-2 overflow-x-auto max-w-full shrink-0 pb-0.5 md:pb-0 md:flex-wrap md:overflow-visible md:justify-end admin-header-actions-scroll">
+                    <button type="button" @click="openGlobalSearch()"
+                        class="hidden md:inline-flex items-center gap-2 min-h-[44px] shrink-0 px-3 sm:px-4 py-2 rounded-xl border border-gray-200 bg-white text-sm font-medium text-gray-600 hover:bg-gray-50 transition shadow-sm"
+                        title="Быстрый поиск (Ctrl+K)">
+                        <svg class="w-4 h-4 shrink-0 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                        <span>Поиск…</span>
+                        <kbd class="text-[10px] px-1.5 py-0.5 rounded-md bg-gray-100 text-gray-500 font-mono border border-gray-200/80">Ctrl K</kbd>
+                    </button>
                     <button type="button" @click="seedDemoData()" :disabled="demoActionLoading || hasDemoData"
                         class="min-h-[44px] shrink-0 px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-medium border transition shadow-sm disabled:opacity-40 disabled:cursor-not-allowed bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100">
                         Демо-данные
@@ -668,8 +669,9 @@
                                         <span class="font-bold text-brand-600 text-sm" x-text="'#' + order.id"></span>
                                         <span class="text-[10px] text-gray-400" x-text="fmt.time(order.created_at)"></span>
                                     </div>
-                                    <div class="flex flex-wrap gap-1 mb-1" x-show="order.order_type">
-                                        <span class="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-800 border border-indigo-100" x-text="orderTypeBadge(order)"></span>
+                                    <div class="flex flex-wrap gap-1 mb-1 items-center">
+                                        <span x-show="order.order_type" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-800 border border-indigo-100" x-text="orderTypeBadge(order)"></span>
+                                        <span :class="paymentKanbanBadgeClass(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded border tracking-wide" x-text="paymentMethodShort(order)"></span>
                                     </div>
                                     <div class="text-xs font-mono text-gray-600 mb-1 truncate" x-show="order.user_phone" x-text="order.user_phone"></div>
                                     <div class="text-xs text-gray-500 mb-2" x-text="(order.items?.items?.length || 0) + ' позиций'"></div>
@@ -713,8 +715,9 @@
                                         <span class="font-bold text-brand-600 text-sm" x-text="'#' + order.id"></span>
                                         <span class="text-[10px] text-gray-400" x-text="fmt.time(order.created_at)"></span>
                                     </div>
-                                    <div class="flex flex-wrap gap-1 mb-1" x-show="order.order_type">
-                                        <span class="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-800 border border-indigo-100" x-text="orderTypeBadge(order)"></span>
+                                    <div class="flex flex-wrap gap-1 mb-1 items-center">
+                                        <span x-show="order.order_type" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-800 border border-indigo-100" x-text="orderTypeBadge(order)"></span>
+                                        <span :class="paymentKanbanBadgeClass(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded border tracking-wide" x-text="paymentMethodShort(order)"></span>
                                     </div>
                                     <div class="text-xs font-mono text-gray-600 mb-1 truncate" x-show="order.user_phone" x-text="order.user_phone"></div>
                                     <div class="text-xs text-gray-500 mb-2" x-text="(order.items?.items?.length || 0) + ' позиций'"></div>
@@ -758,8 +761,9 @@
                                         <span class="font-bold text-brand-600 text-sm" x-text="'#' + order.id"></span>
                                         <span class="text-[10px] text-gray-400" x-text="fmt.time(order.created_at)"></span>
                                     </div>
-                                    <div class="flex flex-wrap gap-1 mb-1" x-show="order.order_type">
-                                        <span class="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-800 border border-indigo-100" x-text="orderTypeBadge(order)"></span>
+                                    <div class="flex flex-wrap gap-1 mb-1 items-center">
+                                        <span x-show="order.order_type" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-800 border border-indigo-100" x-text="orderTypeBadge(order)"></span>
+                                        <span :class="paymentKanbanBadgeClass(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded border tracking-wide" x-text="paymentMethodShort(order)"></span>
                                     </div>
                                     <div class="text-xs font-mono text-gray-600 mb-1 truncate" x-show="order.user_phone" x-text="order.user_phone"></div>
                                     <div class="text-xs text-gray-500 mb-2" x-text="(order.items?.items?.length || 0) + ' позиций'"></div>
@@ -1589,6 +1593,10 @@
                             <div>
                                 <div class="font-medium text-gray-900">WhatsApp (Meta)</div>
                                 <p class="text-sm text-gray-600 mt-1" x-text="integrationStatus.whatsapp_configured ? 'Токен и Phone Number ID заданы — исходящие сообщения включены.' : 'Задайте WHATSAPP_API_TOKEN и WHATSAPP_PHONE_NUMBER_ID для реальной отправки.'"></p>
+                                <p class="text-xs text-gray-500 mt-2">
+                                    <span class="font-medium text-gray-700">Голосовые в чате:</span>
+                                    <span x-text="integrationStatus.gemini_configured ? ('Распознавание через Gemini (GEMINI_API_KEY). ' + (integrationStatus.whatsapp_voice_replies_enabled ? 'Ответ дублируется голосом (edge-tts).' : 'Ответ текстом; для голоса ответа задайте WHATSAPP_VOICE_REPLIES=true.')) : 'Задайте GEMINI_API_KEY — нужен для текста и для голосовых.'"></span>
+                                </p>
                             </div>
                         </div>
                     </div>
@@ -1635,6 +1643,96 @@
                                 </div>
                             </template>
                             <p x-show="!integrationEvents.length" class="px-3 py-6 text-center text-gray-400">Событий пока нет — нажмите «Синхронизировать» или дождитесь фонового цикла стоп-листов</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ========== БАЗА ЗНАНИЙ ========== -->
+            <div x-show="currentTab === 'knowledge'" x-cloak class="fade-in max-w-4xl space-y-6 pb-16">
+                <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+                    <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
+                        <div>
+                            <h3 class="text-lg font-bold text-gray-900">База знаний</h3>
+                            <p class="text-sm text-gray-500 mt-1">Активные записи подставляются в промпт Gemini (раздел «Справочник заведения») для WhatsApp и теста бота. Цены и блюда по-прежнему только из меню.</p>
+                        </div>
+                        <button type="button" @click="openKnowledgeCreate()"
+                            class="shrink-0 px-4 py-2.5 rounded-xl bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 shadow-sm">
+                            Добавить запись
+                        </button>
+                    </div>
+                    <p x-show="knowledgeLoading" class="text-sm text-gray-400 py-6">Загрузка…</p>
+                    <div x-show="!knowledgeLoading && !knowledgeItems.length" x-cloak class="text-sm text-gray-500 py-8 text-center border border-dashed border-gray-200 rounded-xl">
+                        Пока пусто. Добавьте парковку, часы работы, банкеты — бот будет опираться на этот текст.
+                    </div>
+                    <div class="space-y-3" x-show="!knowledgeLoading && knowledgeItems.length">
+                        <template x-for="k in knowledgeItems" :key="k.id">
+                            <div class="rounded-xl border border-gray-100 bg-gray-50/50 p-4 flex flex-col sm:flex-row sm:items-start gap-3">
+                                <div class="flex-1 min-w-0">
+                                    <div class="flex flex-wrap items-center gap-2 mb-1">
+                                        <span class="text-xs font-bold uppercase tracking-wide text-brand-600" x-text="k.category || 'Общее'"></span>
+                                        <span x-show="!k.is_active" class="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-200 text-gray-700">Выкл</span>
+                                        <span class="text-[10px] text-gray-400 font-mono" x-text="'#' + k.id"></span>
+                                    </div>
+                                    <p class="font-semibold text-gray-900" x-text="k.question"></p>
+                                    <p class="text-sm text-gray-600 mt-2 whitespace-pre-wrap" x-text="k.answer"></p>
+                                </div>
+                                <div class="flex shrink-0 gap-2">
+                                    <button type="button" @click="openKnowledgeEdit(k)"
+                                        class="px-3 py-2 rounded-lg text-xs font-semibold border border-gray-200 bg-white hover:bg-gray-50">Изменить</button>
+                                    <button type="button" @click="deleteKnowledgeItem(k.id)"
+                                        class="px-3 py-2 rounded-lg text-xs font-semibold border border-red-200 text-red-700 bg-red-50 hover:bg-red-100">Удалить</button>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                <div x-show="knowledgeEditOpen" x-cloak x-transition.opacity
+                    class="fixed inset-0 z-[85] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
+                    @click.self="closeKnowledgeEdit()">
+                    <div class="bg-white rounded-2xl shadow-2xl border border-gray-100 w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col" @click.stop role="dialog" aria-modal="true">
+                        <div class="p-5 border-b border-gray-100 flex items-center justify-between shrink-0">
+                            <h3 class="font-bold text-gray-900" x-text="knowledgeEditForm.id ? 'Редактировать запись' : 'Новая запись'"></h3>
+                            <button type="button" @click="closeKnowledgeEdit()" class="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
+                        </div>
+                        <div class="p-5 overflow-y-auto flex-1 space-y-4">
+                            <p x-show="knowledgeEditError" x-cloak class="text-sm text-red-600" x-text="knowledgeEditError"></p>
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Категория</label>
+                                <input type="text" x-model="knowledgeEditForm.category" placeholder="Парковка, Банкеты…"
+                                    class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Вопрос / заголовок</label>
+                                <input type="text" x-model="knowledgeEditForm.question" placeholder="Коротко, о чём блок"
+                                    class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Ответ</label>
+                                <textarea x-model="knowledgeEditForm.answer" rows="8" placeholder="Текст для гостей и бота"
+                                    class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm font-sans resize-y min-h-[120px]"></textarea>
+                            </div>
+                            <div class="flex flex-wrap gap-4 items-center">
+                                <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-700">
+                                    <input type="checkbox" x-model="knowledgeEditForm.is_active" class="rounded border-gray-300 text-brand-600">
+                                    Активна (в промпте)
+                                </label>
+                                <div class="flex items-center gap-2 text-sm">
+                                    <span class="text-gray-500">Порядок</span>
+                                    <input type="number" x-model.number="knowledgeEditForm.sort_order" step="1"
+                                        class="w-24 rounded-xl border border-gray-200 px-2 py-1.5 text-sm">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="p-5 border-t border-gray-100 flex gap-3 shrink-0">
+                            <button type="button" @click="closeKnowledgeEdit()" :disabled="knowledgeSaveLoading"
+                                class="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 font-semibold text-sm hover:bg-gray-50 disabled:opacity-50">Отмена</button>
+                            <button type="button" @click="saveKnowledgeItem()" :disabled="knowledgeSaveLoading"
+                                class="flex-1 py-3 rounded-xl bg-brand-600 text-white font-semibold text-sm hover:bg-brand-700 disabled:opacity-50">
+                                <span x-show="!knowledgeSaveLoading">Сохранить</span>
+                                <span x-show="knowledgeSaveLoading" x-cloak>Сохранение…</span>
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -2041,18 +2139,24 @@
         <div x-show="showOrderModal && selectedOrder" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/40" @click.self="showOrderModal = false">
             <template x-if="selectedOrder">
                 <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 fade-in" @click.stop>
-                    <div class="flex items-center justify-between mb-5">
-                        <h3 class="text-lg font-bold" x-text="'Заказ #' + selectedOrder.id"></h3>
-                        <button @click="showOrderModal = false" class="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+                    <div class="flex items-start justify-between mb-5 gap-3">
+                        <div class="min-w-0 flex-1">
+                            <h3 class="text-lg font-bold text-gray-900" x-text="'Заказ #' + selectedOrder.id"></h3>
+                            <p class="text-sm mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                                <span class="text-gray-500 font-semibold shrink-0">Оплата:</span>
+                                <span class="inline-flex items-center gap-1.5 font-bold"
+                                    :class="paymentModalPayClass(selectedOrder)">
+                                    <span class="text-base leading-none" x-text="paymentIcon(selectedOrder)"></span>
+                                    <span x-text="paymentMethodTitle(selectedOrder)"></span>
+                                </span>
+                            </p>
+                        </div>
+                        <button type="button" @click="showOrderModal = false" class="text-gray-400 hover:text-gray-600 text-xl shrink-0 leading-none" aria-label="Закрыть">&times;</button>
                     </div>
-                    <div class="flex flex-wrap items-center gap-2 mb-4" x-show="selectedOrder.order_type">
-                        <span class="px-2.5 py-1 rounded-lg text-[10px] font-black tracking-wide uppercase bg-indigo-100 text-indigo-900 border border-indigo-200/80"
+                    <div class="flex flex-wrap items-center gap-2 mb-4"
+                        x-show="selectedOrder.order_type || (selectedOrder?.prepayment_status && selectedOrder?.prepayment_status !== 'not_required')">
+                        <span x-show="selectedOrder.order_type" class="px-2.5 py-1 rounded-lg text-[10px] font-black tracking-wide uppercase bg-indigo-100 text-indigo-900 border border-indigo-200/80"
                             x-text="orderTypeBadge(selectedOrder)"></span>
-                        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-800 border border-slate-200/80"
-                            :title="paymentMethodTitle(selectedOrder)">
-                            <span class="text-base leading-none" x-text="paymentIcon(selectedOrder)"></span>
-                            <span x-text="paymentMethodTitle(selectedOrder)"></span>
-                        </span>
                         <span x-show="selectedOrder?.prepayment_status && selectedOrder?.prepayment_status !== 'not_required'"
                             class="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase bg-amber-100 text-amber-900 border border-amber-200/80"
                             x-text="prepaymentLabel(selectedOrder?.prepayment_status)"></span>
@@ -2223,52 +2327,6 @@
         </div>
     </main>
 
-    <!-- Подтверждение удаления заказа: сразу под корнем приложения — поверх main/order modal и прочих оверлеев -->
-    <div x-show="showOrderDeleteConfirmModal" x-cloak x-transition.opacity
-        class="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/55 backdrop-blur-sm"
-        @click.self="closeOrderDeleteConfirm()">
-        <div class="bg-white rounded-2xl shadow-2xl border border-gray-100 w-full max-w-md overflow-hidden fade-in" @click.stop role="dialog" aria-modal="true" aria-labelledby="order-delete-confirm-title">
-            <div class="h-1.5 bg-gradient-to-r from-red-600 via-rose-500 to-orange-400"></div>
-            <div class="p-6 md:p-8">
-                <div class="flex items-start gap-4 mb-5">
-                    <div class="w-12 h-12 rounded-2xl bg-red-50 border border-red-100 flex items-center justify-center shrink-0">
-                        <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
-                    </div>
-                    <div class="min-w-0">
-                        <h2 id="order-delete-confirm-title" class="text-lg font-bold text-gray-900" x-text="orderDeleteConfirmIds.length > 1 ? 'Удалить выбранные заказы?' : 'Удалить заказ?'"></h2>
-                        <p class="text-sm text-gray-500 mt-1.5 leading-relaxed" x-show="orderDeleteConfirmIds.length === 1">
-                            Заказ <span class="font-mono font-semibold text-red-700 bg-red-50 px-1.5 py-0.5 rounded-md" x-text="'#' + orderDeleteConfirmIds[0]"></span> будет удалён из базы. Восстановление невозможно; запись пропадёт из списков и аналитики.
-                        </p>
-                        <div x-show="orderDeleteConfirmIds.length > 1" x-cloak class="mt-2 space-y-2">
-                            <p class="text-sm text-gray-600">Будут удалены <span class="font-bold text-gray-900" x-text="orderDeleteConfirmIds.length"></span> заказов (безвозвратно).</p>
-                            <div class="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 max-h-28 overflow-y-auto text-xs font-mono text-gray-800 leading-relaxed break-all" x-text="orderDeleteConfirmIds.map((i) => '#' + i).join(', ')"></div>
-                        </div>
-                    </div>
-                </div>
-                <label class="flex items-start gap-3 cursor-pointer group mb-2">
-                    <input type="checkbox" x-model="orderDeleteConfirmAck" class="mt-1 rounded border-gray-300 text-red-600 focus:ring-red-500">
-                    <span class="text-sm text-gray-700 group-hover:text-gray-900">Я понимаю, что это действие нельзя отменить</span>
-                </label>
-                <p x-show="orderDeleteConfirmError" x-cloak class="text-sm text-red-600 mt-3" x-text="orderDeleteConfirmError"></p>
-                <div class="flex flex-col-reverse sm:flex-row gap-3 mt-8">
-                    <button type="button" @click="closeOrderDeleteConfirm()" :disabled="orderDeleteConfirmLoading"
-                        class="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 font-semibold text-sm hover:bg-gray-50 transition disabled:opacity-50">
-                        Отмена
-                    </button>
-                    <button type="button" @click="executeOrderDeleteConfirmed()"
-                        :disabled="orderDeleteConfirmLoading || !orderDeleteConfirmAck"
-                        class="flex-1 py-3 rounded-xl bg-red-600 text-white font-semibold text-sm hover:bg-red-700 shadow-lg shadow-red-600/25 transition disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-                        <span x-show="!orderDeleteConfirmLoading">Удалить навсегда</span>
-                        <span x-show="orderDeleteConfirmLoading" x-cloak class="flex items-center gap-2">
-                            <span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
-                            Удаляем…
-                        </span>
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-
 </div><!-- /authenticated -->
 
 <script>
@@ -2332,6 +2390,8 @@ function defaultIntegrationStatus() {
     return {
         iiko_configured: false,
         whatsapp_configured: false,
+        gemini_configured: false,
+        whatsapp_voice_replies_enabled: false,
         webhook_url: '',
         whatsapp_verify_token_hint: '',
         last_stoplist: { at: null, ok: false, error: null },
@@ -2382,6 +2442,20 @@ function adminApp() {
         settingsBulkCancelLoading: false,
         settingsRetentionRunLoading: false,
 
+        knowledgeItems: [],
+        knowledgeLoading: false,
+        knowledgeSaveLoading: false,
+        knowledgeEditOpen: false,
+        knowledgeEditError: '',
+        knowledgeEditForm: {
+            id: null,
+            category: '',
+            question: '',
+            answer: '',
+            is_active: true,
+            sort_order: 0,
+        },
+
         currentTab: 'dashboard',
         loading: false,
         navItems: [
@@ -2401,6 +2475,8 @@ function adminApp() {
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>' },
             { id: 'integrations', label: 'Интеграции', desc: 'iiko, WhatsApp и принудительная синхронизация',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m4.95-4.95l1.757-1.757a4.5 4.5 0 016.364 6.364l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757"/></svg>' },
+            { id: 'knowledge', label: 'База знаний', desc: 'Справочник для AI: парковка, банкеты, правила',
+              icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v15.128A9 9 0 009 18c0 1.518.39 2.948 1.082 4.192m3-16.15V18c0 1.518-.39 2.948-1.082 4.192M15 6.042a8.967 8.967 0 014.5 2.292v15.128A9 9 0 0015 18c0-1.518-.39-2.948-1.082-4.192"/></svg>' },
             { id: 'settings', label: 'Настройки', desc: 'Опасная зона: сброс данных и удаление заказов',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>' },
             { id: 'test', label: 'Тест бота', desc: 'Протестируйте AI-оператора вживую',
@@ -2942,8 +3018,33 @@ function adminApp() {
 
         paymentMethodTitle(order) {
             if (!order || !order.payment_method) return 'Наличные';
-            const m = { cash: 'Наличные', card: 'Карта при получении', remote: 'Удалённая оплата' };
+            const m = {
+                cash: 'Наличные',
+                card: 'Карта при получении',
+                remote: 'Удалённо (Kaspi, Payme, ссылка…)',
+            };
             return m[order.payment_method] || order.payment_method;
+        },
+
+        paymentMethodShort(order) {
+            const pm = order?.payment_method || 'cash';
+            const m = { cash: 'НАЛИЧНЫЕ', card: 'КАРТА', remote: 'ОНЛАЙН' };
+            return m[pm] || String(pm).toUpperCase();
+        },
+
+        paymentKanbanBadgeClass(order) {
+            const pm = order?.payment_method || 'cash';
+            const base = 'uppercase';
+            if (pm === 'card') return base + ' bg-blue-50 text-blue-800 border-blue-200';
+            if (pm === 'remote') return base + ' bg-gradient-to-r from-amber-100 to-orange-100 text-amber-950 border-amber-400';
+            return base + ' bg-gray-100 text-gray-700 border-gray-300';
+        },
+
+        paymentModalPayClass(order) {
+            const pm = order?.payment_method || 'cash';
+            if (pm === 'card') return 'text-blue-700';
+            if (pm === 'remote') return 'text-amber-800';
+            return 'text-gray-800';
         },
 
         prepaymentLabel(st) {
@@ -3032,6 +3133,20 @@ function adminApp() {
             this.orderDeleteConfirmError = '';
         },
 
+        /** Текст ошибки из тела FastAPI (detail строка, массив validation errors или объект). */
+        formatHttpDetail(data) {
+            const raw = data && data.detail != null ? data.detail : null;
+            if (raw == null) return 'Ошибка запроса';
+            if (typeof raw === 'string') return raw;
+            if (Array.isArray(raw)) {
+                return raw
+                    .map((e) => (e && typeof e === 'object' && e.msg != null ? String(e.msg) : JSON.stringify(e)))
+                    .join('; ');
+            }
+            if (typeof raw === 'object') return JSON.stringify(raw);
+            return String(raw);
+        },
+
         async executeOrderDeleteConfirmed() {
             if (!this.orderDeleteConfirmAck || this.orderDeleteConfirmLoading) return;
             const ids = [...this.orderDeleteConfirmIds];
@@ -3049,7 +3164,7 @@ function adminApp() {
                     });
                     const data = await res.json().catch(() => ({}));
                     if (!res.ok) {
-                        this.orderDeleteConfirmError = typeof data.detail === 'string' ? data.detail : 'Ошибка удаления';
+                        this.orderDeleteConfirmError = this.formatHttpDetail(data);
                         return;
                     }
                     if (src === 'modal') {
@@ -3066,7 +3181,7 @@ function adminApp() {
                     });
                     const data = await res.json().catch(() => ({}));
                     if (!res.ok) {
-                        this.orderDeleteConfirmError = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail || data);
+                        this.orderDeleteConfirmError = this.formatHttpDetail(data);
                         return;
                     }
                     this.demoToastMessage = `Удалено заказов: ${data.deleted ?? ids.length}`;
@@ -3077,8 +3192,12 @@ function adminApp() {
                 this.orderDeleteConfirmIds = [];
                 this.orderDeleteConfirmSource = '';
                 this.orderDeleteConfirmAck = false;
-                await Promise.all([this.loadOrders(), this.loadDashStats(), this.loadSettingsOrders()]);
-                await this.syncDashboardChartIfVisible();
+                try {
+                    await Promise.all([this.loadOrders(), this.loadDashStats(), this.loadSettingsOrders()]);
+                    await this.syncDashboardChartIfVisible();
+                } catch (refreshErr) {
+                    console.error('[admin] обновление списков после удаления заказа', refreshErr);
+                }
             } catch (e) {
                 console.error('[admin] executeOrderDeleteConfirmed', e);
                 this.orderDeleteConfirmError = 'Ошибка сети';
@@ -3094,6 +3213,7 @@ function adminApp() {
             }
             if (e.key === 'Escape') {
                 this.globalSearchOpen = false;
+                if (this.knowledgeEditOpen) this.closeKnowledgeEdit();
                 if (this.showOrderDeleteConfirmModal) this.closeOrderDeleteConfirm();
             }
         },
@@ -3519,6 +3639,118 @@ function adminApp() {
                 last_stoplist,
                 last_menu_sync,
             };
+        },
+
+        async loadKnowledgeBase() {
+            this.knowledgeLoading = true;
+            try {
+                const res = await this.apiFetch('/api/admin/knowledge');
+                const data = await res.json().catch(() => ({}));
+                if (res.ok) {
+                    this.knowledgeItems = Array.isArray(data.items) ? data.items : [];
+                } else {
+                    this.knowledgeItems = [];
+                }
+            } catch (e) {
+                console.error('[admin] loadKnowledgeBase', e);
+                this.knowledgeItems = [];
+            } finally {
+                this.knowledgeLoading = false;
+            }
+        },
+
+        openKnowledgeCreate() {
+            this.knowledgeEditError = '';
+            this.knowledgeEditForm = {
+                id: null,
+                category: '',
+                question: '',
+                answer: '',
+                is_active: true,
+                sort_order: 0,
+            };
+            this.knowledgeEditOpen = true;
+        },
+
+        openKnowledgeEdit(k) {
+            if (!k) return;
+            this.knowledgeEditError = '';
+            this.knowledgeEditForm = {
+                id: k.id,
+                category: k.category || '',
+                question: k.question || '',
+                answer: k.answer || '',
+                is_active: !!k.is_active,
+                sort_order: Number(k.sort_order) || 0,
+            };
+            this.knowledgeEditOpen = true;
+        },
+
+        closeKnowledgeEdit() {
+            if (this.knowledgeSaveLoading) return;
+            this.knowledgeEditOpen = false;
+            this.knowledgeEditError = '';
+        },
+
+        async saveKnowledgeItem() {
+            const f = this.knowledgeEditForm;
+            if (!((f.question || '').trim()) || !((f.answer || '').trim())) {
+                this.knowledgeEditError = 'Заполните вопрос и ответ';
+                return;
+            }
+            this.knowledgeSaveLoading = true;
+            this.knowledgeEditError = '';
+            try {
+                const payload = {
+                    category: (f.category || '').trim(),
+                    question: f.question.trim(),
+                    answer: f.answer.trim(),
+                    is_active: !!f.is_active,
+                    sort_order: Number(f.sort_order) || 0,
+                };
+                let res;
+                if (f.id) {
+                    res = await this.apiFetch(`/api/admin/knowledge/${f.id}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload),
+                    });
+                } else {
+                    res = await this.apiFetch('/api/admin/knowledge', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload),
+                    });
+                }
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    this.knowledgeEditError = typeof data.detail === 'string' ? data.detail : 'Ошибка сохранения';
+                    return;
+                }
+                this.knowledgeEditOpen = false;
+                await this.loadKnowledgeBase();
+            } catch (e) {
+                console.error('[admin] saveKnowledgeItem', e);
+                this.knowledgeEditError = 'Ошибка сети';
+            } finally {
+                this.knowledgeSaveLoading = false;
+            }
+        },
+
+        async deleteKnowledgeItem(id) {
+            if (id == null || !window.confirm('Удалить эту запись из базы знаний?')) return;
+            try {
+                // POST — часть прокси режет HTTP DELETE; эндпоинт тот же по смыслу, что DELETE /knowledge/{id}
+                const res = await this.apiFetch(`/api/admin/knowledge/${id}/delete`, { method: 'POST' });
+                if (res.ok) await this.loadKnowledgeBase();
+                else {
+                    const data = await res.json().catch(() => ({}));
+                    alert(this.formatHttpDetail(data));
+                }
+            } catch (e) {
+                console.error('[admin] deleteKnowledgeItem', e);
+                alert('Ошибка сети');
+            }
         },
 
         async loadIntegrationStatus() {
@@ -4224,6 +4456,8 @@ function adminApp() {
                     await Promise.all([this.loadStopList(), this.loadIntegrationStatus()]);
                 } else if (this.currentTab === 'integrations') {
                     await this.loadIntegrationStatus();
+                } else if (this.currentTab === 'knowledge') {
+                    await this.loadKnowledgeBase();
                 } else if (this.currentTab === 'settings') {
                     await Promise.all([this.loadSettingsOrders(), this.loadSettingsEnvironment()]);
                 } else if (this.currentTab === 'chats') {
@@ -5221,6 +5455,52 @@ function adminApp() {
     };
 }
 </script>
+
+    <!-- Подтверждение удаления заказа: вне flex-контейнера приложения — всегда поверх модалок заказа/брони (z-50) и шапки -->
+    <div x-show="authenticated && showOrderDeleteConfirmModal" x-cloak x-transition.opacity
+        class="fixed inset-0 z-[9999] flex items-center justify-center p-4 overflow-y-auto bg-slate-900/60 backdrop-blur-sm"
+        @click.self="closeOrderDeleteConfirm()">
+        <div class="bg-white rounded-2xl shadow-2xl border border-gray-100 w-full max-w-md overflow-hidden fade-in shrink-0 relative z-10" @click.stop role="dialog" aria-modal="true" aria-labelledby="order-delete-confirm-title">
+            <div class="h-1.5 bg-gradient-to-r from-red-600 via-rose-500 to-orange-400"></div>
+            <div class="p-6 md:p-8">
+                <div class="flex items-start gap-4 mb-5">
+                    <div class="w-12 h-12 rounded-2xl bg-red-50 border border-red-100 flex items-center justify-center shrink-0">
+                        <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                    </div>
+                    <div class="min-w-0">
+                        <h2 id="order-delete-confirm-title" class="text-lg font-bold text-gray-900" x-text="orderDeleteConfirmIds.length > 1 ? 'Удалить выбранные заказы?' : 'Удалить заказ?'"></h2>
+                        <p class="text-sm text-gray-500 mt-1.5 leading-relaxed" x-show="orderDeleteConfirmIds.length === 1">
+                            Заказ <span class="font-mono font-semibold text-red-700 bg-red-50 px-1.5 py-0.5 rounded-md" x-text="'#' + orderDeleteConfirmIds[0]"></span> будет удалён из базы. Восстановление невозможно; запись пропадёт из списков и аналитики.
+                        </p>
+                        <div x-show="orderDeleteConfirmIds.length > 1" x-cloak class="mt-2 space-y-2">
+                            <p class="text-sm text-gray-600">Будут удалены <span class="font-bold text-gray-900" x-text="orderDeleteConfirmIds.length"></span> заказов (безвозвратно).</p>
+                            <div class="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 max-h-28 overflow-y-auto text-xs font-mono text-gray-800 leading-relaxed break-all" x-text="orderDeleteConfirmIds.map((i) => '#' + i).join(', ')"></div>
+                        </div>
+                    </div>
+                </div>
+                <label class="flex items-start gap-3 cursor-pointer group mb-2">
+                    <input type="checkbox" x-model="orderDeleteConfirmAck" class="mt-1 rounded border-gray-300 text-red-600 focus:ring-red-500">
+                    <span class="text-sm text-gray-700 group-hover:text-gray-900">Я понимаю, что это действие нельзя отменить</span>
+                </label>
+                <p x-show="orderDeleteConfirmError" x-cloak class="text-sm text-red-600 mt-3" x-text="orderDeleteConfirmError"></p>
+                <div class="flex flex-col-reverse sm:flex-row gap-3 mt-8">
+                    <button type="button" @click="closeOrderDeleteConfirm()" :disabled="orderDeleteConfirmLoading"
+                        class="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 font-semibold text-sm hover:bg-gray-50 transition disabled:opacity-50">
+                        Отмена
+                    </button>
+                    <button type="button" @click="executeOrderDeleteConfirmed()"
+                        :disabled="orderDeleteConfirmLoading || !orderDeleteConfirmAck"
+                        class="flex-1 py-3 rounded-xl bg-red-600 text-white font-semibold text-sm hover:bg-red-700 shadow-lg shadow-red-600/25 transition disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+                        <span x-show="!orderDeleteConfirmLoading">Удалить навсегда</span>
+                        <span x-show="orderDeleteConfirmLoading" x-cloak class="flex items-center gap-2">
+                            <span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                            Удаляем…
+                        </span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
 
 </body>
 </html>

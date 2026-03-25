@@ -27,6 +27,7 @@ from app.db.models import (
     EscalationEvent,
     IntegrationEvent,
     IntegrationHealth,
+    KnowledgeItem,
     MenuItem,
     Order,
     OrderStatus,
@@ -60,6 +61,7 @@ from app.services.events import publish_event, subscribe_events
 from app.services.booking_halls import BOOKING_HALL_KEYS, BOOKING_HALL_VIP, vip_slot_occupied
 from app.services.intent_router import confirm_order, get_or_create_user, route_intent
 from app.services.menu_sync import sync_menu_from_iiko, sync_stop_lists
+from app.services.knowledge_context import load_knowledge_context_block
 from app.services.order_logic import build_menu_context, load_available_menu
 
 logger = logging.getLogger(__name__)
@@ -524,6 +526,8 @@ async def integrations_status(db: AsyncSession = Depends(get_db)) -> dict:
         if settings.whatsapp_verify_token
         else None
     )
+    base["gemini_configured"] = bool(str(settings.gemini_api_key or "").strip())
+    base["whatsapp_voice_replies_enabled"] = bool(settings.whatsapp_voice_replies)
     return base
 
 
@@ -1076,6 +1080,123 @@ async def delete_menu_item(
     return {"ok": True, "id": item_id}
 
 
+# ─── База знаний (FAQ заведения для промпта Gemini) ──────
+
+
+def _knowledge_item_dict(row: KnowledgeItem) -> dict:
+    return {
+        "id": row.id,
+        "organization_id": row.organization_id,
+        "category": row.category or "",
+        "question": row.question,
+        "answer": row.answer,
+        "is_active": row.is_active,
+        "sort_order": row.sort_order,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+class KnowledgeItemCreateBody(BaseModel):
+    category: str = Field(default="", max_length=120)
+    question: str = Field(..., min_length=1, max_length=500)
+    answer: str = Field(..., min_length=1, max_length=50_000)
+    is_active: bool = True
+    sort_order: int = Field(0, ge=-10_000, le=10_000)
+    organization_id: int | None = Field(None, description="NULL — общая запись для всех организаций")
+
+
+class KnowledgeItemPatchBody(BaseModel):
+    category: str | None = Field(None, max_length=120)
+    question: str | None = Field(None, min_length=1, max_length=500)
+    answer: str | None = Field(None, min_length=1, max_length=50_000)
+    is_active: bool | None = None
+    sort_order: int | None = Field(None, ge=-10_000, le=10_000)
+    organization_id: int | None = None
+
+
+@router.get("/knowledge")
+async def list_knowledge_items(
+    db: AsyncSession = Depends(get_db),
+    active_only: bool = Query(False, description="Только is_active=true"),
+) -> dict:
+    """Список записей базы знаний для админки."""
+    q = select(KnowledgeItem).order_by(KnowledgeItem.sort_order, KnowledgeItem.id)
+    if active_only:
+        q = q.where(KnowledgeItem.is_active.is_(True))
+    result = await db.execute(q)
+    rows = list(result.scalars().all())
+    return {"items": [_knowledge_item_dict(r) for r in rows]}
+
+
+@router.post("/knowledge")
+async def create_knowledge_item(
+    body: KnowledgeItemCreateBody,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    row = KnowledgeItem(
+        organization_id=body.organization_id,
+        category=(body.category or "").strip(),
+        question=body.question.strip(),
+        answer=body.answer.strip(),
+        is_active=body.is_active,
+        sort_order=body.sort_order,
+    )
+    db.add(row)
+    await db.flush()
+    return {"ok": True, "item": _knowledge_item_dict(row)}
+
+
+@router.patch("/knowledge/{item_id}")
+async def patch_knowledge_item(
+    item_id: int,
+    body: KnowledgeItemPatchBody,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    row = await db.get(KnowledgeItem, item_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Запись не найдена")
+    data = body.model_dump(exclude_unset=True)
+    if "category" in data and data["category"] is not None:
+        data["category"] = data["category"].strip()
+    if "question" in data and data["question"] is not None:
+        data["question"] = data["question"].strip()
+    if "answer" in data and data["answer"] is not None:
+        data["answer"] = data["answer"].strip()
+    for key, value in data.items():
+        setattr(row, key, value)
+    await db.flush()
+    return {"ok": True, "item": _knowledge_item_dict(row)}
+
+
+@router.delete("/knowledge/{item_id}")
+async def delete_knowledge_item(
+    item_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    return await _delete_knowledge_item_impl(item_id, db)
+
+
+@router.post("/knowledge/{item_id}/delete")
+async def delete_knowledge_item_post(
+    item_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    То же, что DELETE /knowledge/{id}: часть хостингов/прокси режет метод DELETE.
+    """
+    return await _delete_knowledge_item_impl(item_id, db)
+
+
+async def _delete_knowledge_item_impl(item_id: int, db: AsyncSession) -> dict:
+    row = await db.get(KnowledgeItem, item_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Запись не найдена")
+    await db.execute(sql_delete(KnowledgeItem).where(KnowledgeItem.id == item_id))
+    await db.flush()
+    return {"ok": True, "id": item_id}
+
+
 @router.post("/menu/sync")
 async def sync_menu(
     api_login: str | None = Query(
@@ -1258,8 +1379,10 @@ def _sql_delete_rowcount(res) -> int:
     return int(n) if n is not None and n >= 0 else 0
 
 
-async def _clear_redis_pending_if_matches(phone: str, order_id: int) -> None:
+async def _clear_redis_pending_if_matches(phone: str | None, order_id: int) -> None:
     """Если в Redis висит черновик этого заказа — снять, чтобы клиент не застрял на мёртвом id."""
+    if not phone:
+        return
     try:
         pid = await get_pending_order(redis_client, phone)
         if pid == order_id:
@@ -1365,9 +1488,10 @@ async def bulk_delete_orders(
     if not ids:
         raise HTTPException(status_code=400, detail="Список order_ids пуст")
 
+    # outerjoin: заказ должен удаляться даже при битом user_id (INNER JOIN давал бы «не найден»).
     res = await db.execute(
         select(Order, User.phone)
-        .join(User, Order.user_id == User.id)
+        .outerjoin(User, Order.user_id == User.id)
         .where(Order.id.in_(ids)),
     )
     rows = res.all()
@@ -1405,7 +1529,7 @@ async def delete_single_order(
         )
     res = await db.execute(
         select(Order, User.phone)
-        .join(User, Order.user_id == User.id)
+        .outerjoin(User, Order.user_id == User.id)
         .where(Order.id == order_id),
     )
     row = res.one_or_none()
@@ -2183,7 +2307,11 @@ async def test_bot(body: TextRequest) -> dict:
     Тестовый endpoint: эмулирует диалог с ботом без WhatsApp.
     Использует фиктивный номер 'test-admin', проходит полный цикл AI.
     """
-    from app.api.webhooks import handle_booking_confirmation, handle_confirmation
+    from app.api.webhooks import (
+        handle_booking_confirmation,
+        handle_confirmation,
+        handle_order_payment_choice,
+    )
 
     phone = "test-admin"
     message_text = body.text
@@ -2192,6 +2320,13 @@ async def test_bot(body: TextRequest) -> dict:
 
     if state == UserState.HUMAN_MODE:
         return {"reply": "[HUMAN_MODE — AI отключён]", "state": state.value, "intent": None}
+
+    if state == UserState.AWAITING_ORDER_PAYMENT:
+        reply = await handle_order_payment_choice(phone, message_text)
+        await append_to_history(redis_client, phone, "user", message_text)
+        await append_to_history(redis_client, phone, "assistant", reply)
+        new_state = await get_user_state(redis_client, phone)
+        return {"reply": reply, "state": new_state.value, "intent": None}
 
     if state == UserState.CONFIRMING_ORDER:
         reply = await handle_confirmation(phone, message_text)
@@ -2213,7 +2348,10 @@ async def test_bot(body: TextRequest) -> dict:
     async with async_session_factory() as db:
         menu_items = await load_available_menu(db)
         menu_context = build_menu_context(menu_items)
-        ai_response = await call_gemini(history, message_text, menu_context)
+        u_row = await db.scalar(select(User).where(User.phone == phone))
+        org_id = u_row.organization_id if u_row else None
+        kb_context = await load_knowledge_context_block(db, org_id)
+        ai_response = await call_gemini(history, message_text, menu_context, kb_context)
         result = await route_intent(
             db, phone, ai_response, menu_items=menu_items,
         )
