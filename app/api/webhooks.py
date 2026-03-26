@@ -171,6 +171,11 @@ async def _send_order_to_iiko(
         comment = " · ".join(comment_bits)
 
         terminal_group = (settings.iiko_terminal_group_id or "").strip()
+        order_type_id = (settings.iiko_order_type_id or "").strip()
+        if not order_type_id:
+            msg = "IIKO_ORDER_TYPE_ID не задан — iiko deliveries/create требует orderTypeId или orderServiceType"
+            logger.warning("Заказ #%d: %s", order_id, msg)
+            return False, msg
         async with IikoClient(api_login=settings.iiko_api_login) as client:
             await client.create_delivery_order(
                 organization_id=settings.iiko_organization_id,
@@ -178,6 +183,7 @@ async def _send_order_to_iiko(
                     "customer": {"phone": phone},
                     "items": iiko_items,
                     "comment": comment[:1000],
+                    "orderTypeId": order_type_id,
                 },
                 terminal_group_id=terminal_group or None,
             )

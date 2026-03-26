@@ -244,3 +244,27 @@ class IikoClient:
         data = response.json()
         logger.info("iiko: запрошены терминальные группы для %d организаций", len(organization_ids))
         return data
+
+    async def get_delivery_order_types(self, organization_ids: list[str]) -> dict[str, Any]:
+        """
+        Типы заказов для deliveries/create (orderTypeId / orderServiceType).
+        Эндпоинт: POST /api/1/deliveries/order_types
+
+        Args:
+            organization_ids: Список UUID организаций.
+
+        Returns:
+            Словарь со списками типов заказов (структура зависит от iiko-окружения).
+        """
+        if not self._http:
+            raise RuntimeError("HTTP-клиент не инициализирован.")
+
+        response = await self._http.post(
+            "/api/1/deliveries/order_types",
+            headers=self._auth_headers(),
+            json={"organizationIds": organization_ids},
+        )
+        response.raise_for_status()
+        data = response.json()
+        logger.info("iiko: запрошены типы заказов deliveries для %d организаций", len(organization_ids))
+        return data

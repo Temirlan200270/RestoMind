@@ -4076,6 +4076,7 @@ function adminApp() {
         },
 
         onOrderUpdated(data) {
+            const oid = Number(data.order_id);
             const applyPatch = (row) => {
                 if (!row) return;
                 row.status = data.status;
@@ -4085,12 +4086,12 @@ function adminApp() {
                 }
                 row.updated_at = new Date().toISOString();
             };
-            const idx = this.orders.findIndex(o => o.id === data.order_id);
+            const idx = this.orders.findIndex(o => Number(o.id) === oid);
             if (idx >= 0) {
                 applyPatch(this.orders[idx]);
             } else {
                 this.orders.unshift({
-                    id: data.order_id,
+                    id: oid,
                     status: data.status,
                     total_price: data.total_price || 0,
                     items: data.items ? { items: data.items } : {},
@@ -4100,7 +4101,7 @@ function adminApp() {
                 });
                 this.playOrderPing();
             }
-            const sidx = this.settingsOrdersList.findIndex((o) => o.id === data.order_id);
+            const sidx = this.settingsOrdersList.findIndex((o) => Number(o.id) === oid);
             if (sidx >= 0) {
                 applyPatch(this.settingsOrdersList[sidx]);
             }

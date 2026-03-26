@@ -111,6 +111,13 @@ class Settings(BaseSettings):
         default="",
         validation_alias=AliasChoices("IIKO_PRODUCT_ID_DELIVERY", "iiko_product_id_delivery"),
     )
+    # Тип заказа для iiko deliveries/create (обязательное поле).
+    # iiko требует РОВНО одно из: orderTypeId или orderServiceType.
+    # Для MVP задаём orderTypeId (UUID из iiko Office / Cloud).
+    iiko_order_type_id: str = Field(
+        default="",
+        validation_alias=AliasChoices("IIKO_ORDER_TYPE_ID", "iiko_order_type_id"),
+    )
     # Синхронизация меню: только позиции с type Dish/Good (отсекает модификаторы и пр.; при False — все продукты)
     iiko_menu_sync_only_dish_good: bool = Field(
         default=False,
