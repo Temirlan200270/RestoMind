@@ -149,10 +149,16 @@ async def _handle_order(
     if validated.unknown_items:
         reply += "\n\nНе нашёл в меню некоторые позиции. Уточните, пожалуйста."
 
-    reply += "\n\n✅ Подтверждаете заказ? (Да / Нет)"
+    reply += (
+        "\n\n💳 **Как удобнее оплатить заказ?**\n"
+        "  • наличными при получении\n"
+        "  • картой при получении (терминал)\n"
+        "  • удалённо (перевод / ссылка на оплату)\n"
+        "\nНапишите один вариант — после этого я пришлю итог и спрошу финальное подтверждение."
+    )
 
     logger.info(
-        "Заказ #%d (DRAFT): %d позиций блюд, %.2f ₸ итого — ожидает подтверждения",
+        "Заказ #%d (DRAFT): %d позиций блюд, %.2f ₸ — ждём способ оплаты",
         order.id, len(validated.valid_items), grand_total,
     )
 
@@ -168,7 +174,7 @@ async def _handle_order(
     return RouteResult(
         reply_text=reply,
         pending_order_id=order.id,
-        new_state=UserState.CONFIRMING_ORDER,
+        new_state=UserState.AWAITING_ORDER_PAYMENT,
     )
 
 

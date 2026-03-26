@@ -14,6 +14,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 from sqlalchemy import text
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -27,7 +28,14 @@ from app.db.session import async_engine, async_session_factory, redis_client
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+# cache_size=0: обход падения Jinja2 LRUCache на Python 3.14 (TypeError при ключе кэша).
+templates = Jinja2Templates(
+    env=Environment(
+        loader=FileSystemLoader(str(TEMPLATES_DIR)),
+        autoescape=select_autoescape(),
+        cache_size=0,
+    ),
+)
 
 LOG_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
 LOG_DIR = Path("logs")
@@ -117,6 +125,33 @@ async def _stop_list_sync_loop() -> None:
                     await db.commit()
                 except Exception as exc2:
                     logger.error("Не удалось сохранить статус интеграции iiko: %s", exc2)
+
+
+async def _chat_log_retention_loop() -> None:
+    """Фоновая задача: удаление старых chat_logs по CHAT_LOG_RETENTION_DAYS."""
+    from app.services.chat_log_retention import purge_old_chat_logs
+
+    if settings.chat_log_retention_days <= 0:
+        logger.info("CHAT_LOG_RETENTION_DAYS=0 — автоочистка chat_logs выключена")
+        return
+
+    interval = settings.chat_log_retention_interval_seconds
+    first_cycle = True
+    while True:
+        try:
+            if not first_cycle:
+                await asyncio.sleep(interval)
+            first_cycle = False
+        except asyncio.CancelledError:
+            break
+        try:
+            async with async_session_factory() as db:
+                await purge_old_chat_logs(db)
+                await db.commit()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.error("Ошибка ретеншна chat_logs: %s", exc, exc_info=True)
 
 
 @asynccontextmanager
@@ -218,14 +253,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.info("Redis не используется — in-memory режим")
 
     stop_list_task = asyncio.create_task(_stop_list_sync_loop())
+    chat_retention_task = asyncio.create_task(_chat_log_retention_loop())
 
     yield
 
-    stop_list_task.cancel()
-    try:
-        await stop_list_task
-    except asyncio.CancelledError:
-        pass
+    for bg in (stop_list_task, chat_retention_task):
+        bg.cancel()
+        try:
+            await bg
+        except asyncio.CancelledError:
+            pass
 
     await redis_client.aclose()
     await async_engine.dispose()
@@ -235,7 +272,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 app = FastAPI(
     title=settings.app_name,
     description="AI-оператор для ресторана: заказы, бронирование, FAQ через WhatsApp",
-    version="0.1.0",
+    version=settings.app_version,
     lifespan=lifespan,
 )
 
@@ -298,7 +335,7 @@ async def deep_health_check() -> dict:
 @app.get("/admin", response_class=HTMLResponse, tags=["Admin Panel"])
 async def admin_page(request: Request) -> HTMLResponse:
     """Главная страница — админ-панель."""
-    response = templates.TemplateResponse("admin.html", {"request": request})
+    response = templates.TemplateResponse(request, "admin.html")
     # Чтобы браузер не держал устаревший HTML (Alpine/шаблон после деплоя).
     response.headers["Cache-Control"] = "no-store, max-age=0, must-revalidate"
     return response

@@ -25,9 +25,15 @@
         .alert-banner { animation: pulseAlert 2s infinite; }
         .ws-dot { transition: background-color 0.3s; }
         .msg-new { animation: slideIn 0.25s ease-out; }
-        .analytics-hint-details > summary { list-style: none; }
-        .analytics-hint-details > summary::-webkit-details-marker { display: none; }
-        .analytics-hint-details[open] > summary .analytics-hint-chevron { transform: rotate(90deg); }
+        /* Сворачиваемые подсказки (закрыты по умолчанию) */
+        .hint-details > summary { list-style: none; }
+        .hint-details > summary::-webkit-details-marker { display: none; }
+        .hint-details[open] > summary .hint-chevron { transform: rotate(90deg); }
+        .admin-header-actions-scroll {
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: thin;
+        }
+        .admin-header-actions-scroll::-webkit-scrollbar { height: 4px; }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen font-sans text-gray-800">
@@ -120,57 +126,53 @@
 
     <!-- Правая колонка: шапка + алерт (shrink-0) + область контента (flex-1 min-h-0) -->
     <main class="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
-        <header class="shrink-0 glass border-b border-gray-200 px-3 sm:px-4 md:px-8 py-2.5 md:py-4 z-10">
-            <div class="flex flex-wrap items-center justify-between gap-2 md:gap-3">
-                <div class="flex items-start gap-2 md:gap-3 min-w-0 flex-1">
-                    <button type="button" class="md:hidden min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 shrink-0" @click="sidebarOpen = true" aria-label="Меню">
+        <header class="shrink-0 glass border-b border-gray-200 px-3 sm:px-4 md:px-8 py-2.5 md:py-4 z-10 min-w-0 max-w-full overflow-x-clip">
+            <div class="flex flex-col gap-2 min-w-0 md:flex-row md:items-start md:justify-between md:gap-3">
+                <div class="flex items-center gap-2 md:gap-3 min-w-0 md:flex-1 md:min-w-0">
+                    <button type="button" class="md:hidden min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 shrink-0" @click="sidebarOpen = true" aria-label="Открыть меню">
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
                     </button>
-                    <div class="flex-1 min-w-0">
-                        <div class="flex flex-wrap items-center gap-2 mb-1">
-                            <button type="button" @click="openGlobalSearch()" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border border-gray-200 bg-white text-xs sm:text-sm text-gray-500 hover:bg-gray-50 shrink-0"
-                                title="Быстрый поиск (Ctrl+K)">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-                                <span class="hidden xs:inline">Поиск…</span>
-                                <kbd class="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 font-mono hidden sm:inline">Ctrl K</kbd>
+                    <div class="min-w-0 flex-1">
+                        <div class="flex items-center gap-2 min-w-0">
+                            <h1 class="text-lg sm:text-xl md:text-2xl font-bold text-gray-900 truncate flex-1 min-w-0" x-text="navItems.find(i => i.id === currentTab)?.label"></h1>
+                            <button type="button" @click="openGlobalSearch()"
+                                class="md:hidden shrink-0 min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 hover:bg-gray-50"
+                                title="Быстрый поиск (Ctrl+K)" aria-label="Поиск по заказам и чатам">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
                             </button>
                         </div>
-                        <h1 class="text-lg sm:text-xl md:text-2xl font-bold text-gray-900 truncate" x-text="navItems.find(i => i.id === currentTab)?.label"></h1>
                         <p class="hidden sm:block text-sm text-gray-500 mt-0.5 line-clamp-2" x-text="navItems.find(i => i.id === currentTab)?.desc"></p>
                     </div>
                 </div>
-                <div class="flex flex-wrap items-center gap-1.5 sm:gap-2 justify-end w-full sm:w-auto">
+                <div class="flex items-center gap-1.5 sm:gap-2 overflow-x-auto max-w-full shrink-0 pb-0.5 md:pb-0 md:flex-wrap md:overflow-visible md:justify-end admin-header-actions-scroll">
+                    <button type="button" @click="openGlobalSearch()"
+                        class="hidden md:inline-flex items-center gap-2 min-h-[44px] shrink-0 px-3 sm:px-4 py-2 rounded-xl border border-gray-200 bg-white text-sm font-medium text-gray-600 hover:bg-gray-50 transition shadow-sm"
+                        title="Быстрый поиск (Ctrl+K)">
+                        <svg class="w-4 h-4 shrink-0 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                        <span>Поиск…</span>
+                        <kbd class="text-[10px] px-1.5 py-0.5 rounded-md bg-gray-100 text-gray-500 font-mono border border-gray-200/80">Ctrl K</kbd>
+                    </button>
                     <button type="button" @click="seedDemoData()" :disabled="demoActionLoading || hasDemoData"
-                        class="min-h-[44px] px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-medium border transition shadow-sm disabled:opacity-40 disabled:cursor-not-allowed bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100">
+                        class="min-h-[44px] shrink-0 px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-medium border transition shadow-sm disabled:opacity-40 disabled:cursor-not-allowed bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100">
                         Демо-данные
                     </button>
                     <button type="button" x-show="hasDemoData" @click="openDemoDeleteModal()"
-                        class="min-h-[44px] px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-medium border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 transition shadow-sm flex items-center gap-2">
+                        class="min-h-[44px] shrink-0 px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-medium border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 transition shadow-sm flex items-center gap-2">
                         <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                         Удалить демо
                     </button>
                     <button type="button" @click="logoutAdmin()"
-                        class="min-h-[44px] px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-medium border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 transition shadow-sm">
+                        class="min-h-[44px] shrink-0 px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-medium border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 transition shadow-sm">
                         Выйти
                     </button>
                     <button type="button" @click="syncStopListOnly()"
                         :disabled="stopListSyncLoading || integrationSyncLoading || !integrationStatus.iiko_configured"
                         :title="integrationStatus.iiko_configured ? 'Синхронизировать стоп-лист из iiko (учётные данные из .env)' : 'Задайте IIKO_API_LOGIN и IIKO_ORGANIZATION_ID в .env'"
-                        class="min-h-[44px] flex items-center gap-2 px-3 sm:px-4 py-2 rounded-xl border text-xs sm:text-sm font-semibold transition shadow-sm disabled:opacity-45 disabled:cursor-not-allowed bg-orange-50 text-orange-900 border-orange-200 hover:bg-orange-100">
+                        class="min-h-[44px] shrink-0 flex items-center gap-2 px-3 sm:px-4 py-2 rounded-xl border text-xs sm:text-sm font-semibold transition shadow-sm disabled:opacity-45 disabled:cursor-not-allowed bg-orange-50 text-orange-900 border-orange-200 hover:bg-orange-100">
                         <span :class="stopListSyncLoading ? 'animate-spin' : ''">&#x21bb;</span>
                         <span class="hidden sm:inline">Стоп-лист iiko</span>
                         <span class="sm:hidden">Стоп</span>
                     </button>
-                <button
-                    type="button"
-                    @click="loadTabData()"
-                    title="Обновить данные на текущей вкладке из сервера (списки, без выгрузки из iiko). Синхронизация меню и стоп-листа — в «Интеграциях» или кнопка «Стоп-лист iiko»."
-                    class="min-h-[44px] flex items-center gap-2 px-3 sm:px-4 py-2 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition shadow-sm text-xs sm:text-sm"
-                >
-                    <span :class="loading ? 'animate-spin' : ''">&#x21bb;</span>
-                    <span class="hidden sm:inline">Обновить данные</span>
-                    <span class="sm:hidden">Обновить</span>
-                </button>
                 </div>
             </div>
         </header>
@@ -199,7 +201,7 @@
         <div
             id="admin-content-scroll"
             class="flex-1 min-h-0"
-            :class="currentTab === 'chats' ? 'flex flex-col overflow-hidden px-3 sm:px-4 md:px-6 pb-3 sm:pb-4 md:pb-6' : 'overflow-y-auto px-4 sm:px-6 md:px-8 py-4 md:py-6'"
+            :class="currentTab === 'chats' ? 'flex flex-col overflow-hidden px-3 sm:px-4 md:px-6 pb-3 sm:pb-4 md:pb-6' : 'overflow-y-auto overflow-x-hidden min-w-0 px-4 sm:px-6 md:px-8 py-4 md:py-6'"
         >
             <!-- ========== ДАШБОРД ========== -->
             <div x-show="currentTab === 'dashboard'" x-cloak class="fade-in">
@@ -348,29 +350,41 @@
             <!-- ========== АНАЛИТИКА ========== -->
             <div x-show="currentTab === 'analytics'" x-cloak class="fade-in">
                 <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 mb-6">
-                    <div class="flex flex-wrap items-center gap-3">
-                        <span class="text-sm font-medium text-gray-600 mr-2">Период:</span>
-                        <template x-for="p in [{id:'day', label:'Сегодня'}, {id:'week', label:'Неделя'}, {id:'month', label:'Месяц'}]" :key="p.id">
+                    <div class="flex flex-col gap-3">
+                        <div class="flex flex-col gap-2 min-w-0 sm:flex-row sm:flex-wrap sm:items-center">
+                            <span class="text-sm font-medium text-gray-600 shrink-0">Период:</span>
+                            <div class="flex flex-wrap gap-2">
+                                <template x-for="p in [{id:'day', label:'Сегодня'}, {id:'week', label:'Неделя'}, {id:'month', label:'Месяц'}]" :key="p.id">
+                                    <button
+                                        @click="analyticsPeriod = p.id; analyticsCustom = false; reloadAnalyticsForUi()"
+                                        :class="analyticsPeriod === p.id && !analyticsCustom
+                                            ? 'bg-brand-600 text-white shadow-md'
+                                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'"
+                                        class="px-3 sm:px-4 py-2 rounded-xl text-sm font-medium transition"
+                                        x-text="p.label"
+                                    ></button>
+                                </template>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-1 min-[400px]:grid-cols-2 gap-2 min-w-0 w-full max-w-2xl">
+                            <input type="date" x-model="analyticsFrom" class="min-w-0 w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50">
+                            <input type="date" x-model="analyticsTo" class="min-w-0 w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50">
                             <button
-                                @click="analyticsPeriod = p.id; analyticsCustom = false; reloadAnalyticsForUi()"
-                                :class="analyticsPeriod === p.id && !analyticsCustom
-                                    ? 'bg-brand-600 text-white shadow-md'
-                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'"
-                                class="px-4 py-2 rounded-xl text-sm font-medium transition"
-                                x-text="p.label"
-                            ></button>
-                        </template>
-                        <div class="flex items-center gap-2 ml-4">
-                            <input type="date" x-model="analyticsFrom" class="border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50">
-                            <span class="text-gray-400">—</span>
-                            <input type="date" x-model="analyticsTo" class="border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50">
-                            <button
+                                type="button"
                                 @click="analyticsPeriod = 'custom'; analyticsCustom = true; reloadAnalyticsForUi()"
-                                class="px-4 py-2 bg-brand-600 text-white rounded-xl text-sm font-medium hover:bg-brand-700 transition"
-                            >Применить</button>
+                                class="min-[400px]:col-span-2 w-full px-4 py-2 bg-brand-600 text-white rounded-xl text-sm font-medium hover:bg-brand-700 transition"
+                            >Применить диапазон</button>
                         </div>
                     </div>
-                    <p class="text-xs text-gray-400 mt-3">Сутки «Сегодня» и длительность «Неделя» / «Месяц» считаются в <span class="text-gray-500">UTC</span> (как на сервере), чтобы цифры совпадали с дашбордом.</p>
+                    <details class="hint-details mt-3 rounded-xl border border-gray-200/80 bg-gray-50/40 px-3 py-2 hover:bg-gray-50/80 transition-colors">
+                        <summary class="cursor-pointer flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-brand-700 select-none py-1">
+                            <svg class="w-4 h-4 text-gray-400 shrink-0 transition-transform duration-200 hint-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                            Про часовой пояс (UTC)
+                        </summary>
+                        <div class="pb-2 pt-1 pl-6 border-l-2 border-brand-200 ml-1 text-xs text-gray-600 leading-relaxed">
+                            Сутки «Сегодня» и длительность «Неделя» / «Месяц» считаются в <strong>UTC</strong> (как на сервере), чтобы цифры совпадали с дашбордом.
+                        </div>
+                    </details>
 
                     <div x-show="analyticsData.date_from && analyticsData.date_to" x-cloak
                         class="mt-4 flex flex-col sm:flex-row sm:items-stretch gap-3 rounded-2xl border border-brand-200/60 bg-gradient-to-br from-brand-50/90 via-white to-violet-50/50 p-4 shadow-sm shadow-brand-900/5">
@@ -386,9 +400,9 @@
                         </div>
                     </div>
 
-                    <details class="analytics-hint-details mt-3 rounded-xl border border-gray-200/80 bg-gray-50/40 px-3 py-2 hover:bg-gray-50/80 transition-colors">
+                    <details class="hint-details mt-3 rounded-xl border border-gray-200/80 bg-gray-50/40 px-3 py-2 hover:bg-gray-50/80 transition-colors">
                         <summary class="cursor-pointer flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-brand-700 select-none py-1">
-                            <svg class="w-4 h-4 text-gray-400 shrink-0 transition-transform duration-200 analytics-hint-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                            <svg class="w-4 h-4 text-gray-400 shrink-0 transition-transform duration-200 hint-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
                             Почему суммы за день, неделю и месяц иногда совпадают?
                         </summary>
                         <div class="pb-2 pt-1 pl-6 border-l-2 border-brand-200 ml-1 text-xs text-gray-600 leading-relaxed">
@@ -496,7 +510,15 @@
                             </select>
                         </div>
                     </div>
-                    <p class="text-xs text-gray-400 mb-2">Период «Сегодня» и столбцы — <strong>календарные сутки UTC</strong> (как на дашборде). Демо-заказы привязаны к дате генерации: после смены суток на сервере обновите демо («Удалить демо» → «Демо-данные»).</p>
+                    <details class="hint-details mb-3 rounded-xl border border-gray-200/80 bg-gray-50/40 px-3 py-2">
+                        <summary class="cursor-pointer flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-brand-700 select-none py-0.5">
+                            <svg class="w-4 h-4 text-gray-400 shrink-0 transition-transform duration-200 hint-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                            Про «Сегодня» на графике и демо-данные
+                        </summary>
+                        <div class="pb-2 pt-1 pl-6 border-l-2 border-brand-200 ml-1 text-xs text-gray-600 leading-relaxed">
+                            Период «Сегодня» и столбцы — <strong>календарные сутки UTC</strong> (как на дашборде). Демо-заказы привязаны к дате генерации: после смены суток на сервере обновите демо («Удалить демо» → «Демо-данные»).
+                        </div>
+                    </details>
                     <div class="relative w-full min-h-[320px]" style="height: 320px;">
                         <canvas id="revenueChart" class="w-full h-full"></canvas>
                     </div>
@@ -647,8 +669,9 @@
                                         <span class="font-bold text-brand-600 text-sm" x-text="'#' + order.id"></span>
                                         <span class="text-[10px] text-gray-400" x-text="fmt.time(order.created_at)"></span>
                                     </div>
-                                    <div class="flex flex-wrap gap-1 mb-1" x-show="order.order_type">
-                                        <span class="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-800 border border-indigo-100" x-text="orderTypeBadge(order)"></span>
+                                    <div class="flex flex-wrap gap-1 mb-1 items-center">
+                                        <span x-show="order.order_type" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-800 border border-indigo-100" x-text="orderTypeBadge(order)"></span>
+                                        <span :class="paymentKanbanBadgeClass(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded border tracking-wide" x-text="paymentMethodShort(order)"></span>
                                     </div>
                                     <div class="text-xs font-mono text-gray-600 mb-1 truncate" x-show="order.user_phone" x-text="order.user_phone"></div>
                                     <div class="text-xs text-gray-500 mb-2" x-text="(order.items?.items?.length || 0) + ' позиций'"></div>
@@ -692,8 +715,9 @@
                                         <span class="font-bold text-brand-600 text-sm" x-text="'#' + order.id"></span>
                                         <span class="text-[10px] text-gray-400" x-text="fmt.time(order.created_at)"></span>
                                     </div>
-                                    <div class="flex flex-wrap gap-1 mb-1" x-show="order.order_type">
-                                        <span class="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-800 border border-indigo-100" x-text="orderTypeBadge(order)"></span>
+                                    <div class="flex flex-wrap gap-1 mb-1 items-center">
+                                        <span x-show="order.order_type" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-800 border border-indigo-100" x-text="orderTypeBadge(order)"></span>
+                                        <span :class="paymentKanbanBadgeClass(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded border tracking-wide" x-text="paymentMethodShort(order)"></span>
                                     </div>
                                     <div class="text-xs font-mono text-gray-600 mb-1 truncate" x-show="order.user_phone" x-text="order.user_phone"></div>
                                     <div class="text-xs text-gray-500 mb-2" x-text="(order.items?.items?.length || 0) + ' позиций'"></div>
@@ -737,8 +761,9 @@
                                         <span class="font-bold text-brand-600 text-sm" x-text="'#' + order.id"></span>
                                         <span class="text-[10px] text-gray-400" x-text="fmt.time(order.created_at)"></span>
                                     </div>
-                                    <div class="flex flex-wrap gap-1 mb-1" x-show="order.order_type">
-                                        <span class="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-800 border border-indigo-100" x-text="orderTypeBadge(order)"></span>
+                                    <div class="flex flex-wrap gap-1 mb-1 items-center">
+                                        <span x-show="order.order_type" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-800 border border-indigo-100" x-text="orderTypeBadge(order)"></span>
+                                        <span :class="paymentKanbanBadgeClass(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded border tracking-wide" x-text="paymentMethodShort(order)"></span>
                                     </div>
                                     <div class="text-xs font-mono text-gray-600 mb-1 truncate" x-show="order.user_phone" x-text="order.user_phone"></div>
                                     <div class="text-xs text-gray-500 mb-2" x-text="(order.items?.items?.length || 0) + ' позиций'"></div>
@@ -1176,55 +1201,67 @@
             </div>
 
             <!-- ========== МЕНЮ ========== -->
-            <div x-show="currentTab === 'menu'" x-cloak class="fade-in pb-24">
+            <div x-show="currentTab === 'menu'" x-cloak class="fade-in pb-24 min-w-0 max-w-full">
                 <div x-show="menuLoadError" x-cloak class="mb-4 text-sm text-red-800 bg-red-50 border border-red-100 rounded-xl px-4 py-3 flex items-start gap-2">
                     <span class="shrink-0 mt-0.5" aria-hidden="true">&#x26A0;&#xFE0F;</span>
                     <span x-text="menuLoadError"></span>
                 </div>
-                <!-- На мобилке блок категорий ограничен по высоте и скроллится — иначе sticky «съедает» весь экран -->
-                <div class="sticky top-0 z-10 -mx-4 sm:-mx-6 md:-mx-8 px-4 sm:px-6 md:px-8 pt-2 pb-3 mb-4 md:pb-4 md:mb-6 bg-gray-50/90 backdrop-blur-md border-b border-gray-200/80 shadow-sm">
-                    <div class="flex flex-col xl:flex-row gap-4 xl:items-center xl:justify-between shrink-0">
-                        <div class="relative flex-1 max-w-2xl">
-                            <span class="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 text-lg pointer-events-none">&#x1F50D;</span>
-                            <input type="search" x-model.debounce.300ms="menuSearchQuery" placeholder="Поиск по названию, описанию или разделу..."
-                                class="w-full pl-11 pr-4 py-3 rounded-2xl border border-gray-200 bg-white text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
-                        </div>
-                        <div class="flex flex-wrap items-center gap-3">
-                            <button type="button" @click="openMenuCreate()"
-                                class="text-sm font-semibold px-4 py-2.5 rounded-xl bg-brand-600 text-white hover:bg-brand-700 shadow-sm shadow-brand-600/20 transition">
-                                + Добавить позицию
-                            </button>
-                            <button type="button" x-show="menuItems.length > 0" :disabled="menuClearLoading"
-                                @click="clearAllMenuFromDb()"
-                                class="text-sm font-semibold px-4 py-2.5 rounded-xl border border-red-200 bg-white text-red-700 hover:bg-red-50 shadow-sm transition disabled:opacity-50">
-                                <span x-show="!menuClearLoading">Очистить всё меню</span>
-                                <span x-show="menuClearLoading">Удаление…</span>
-                            </button>
-                            <button type="button" @click="toggleMenuBulkMode()"
-                                :class="menuBulkMode ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-gray-600 border-gray-200 hover:border-brand-300'"
-                                class="text-sm font-semibold px-4 py-2.5 rounded-xl border shadow-sm transition">
-                                <span x-text="menuBulkMode ? 'Отменить выбор' : 'Выбрать'"></span>
-                            </button>
-                            <button type="button" x-show="menuBulkMode && menuFilteredItems.length > 0" @click="menuBulkSelectFiltered()"
-                                class="text-xs font-semibold px-3 py-2 rounded-xl border border-brand-200 bg-brand-50 text-brand-800 hover:bg-brand-100 transition">
-                                Все на экране
-                            </button>
-                            <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500">
-                                <span class="tabular-nums"><span x-text="menuFilteredItems.length"></span> поз.</span>
-                                <button type="button" x-show="menuStopCount > 0" @click="menuStockFilter = 'out'; menuCategoryFilter = ''"
-                                    class="text-xs font-bold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-100 rounded-full px-3 py-1 transition tabular-nums"
-                                    title="Показать только позиции в стопе">
-                                    <span x-text="menuStopCount"></span> в стопе
-                                </button>
+                <!-- На узком экране: только поиск + кнопка «Фильтры»; остальное открывается по нажатию -->
+                <div class="sticky top-0 z-10 -mx-4 sm:-mx-6 md:-mx-8 px-4 sm:px-6 md:px-8 pt-2 pb-3 mb-4 md:pb-4 md:mb-6 bg-gray-50/90 backdrop-blur-md border-b border-gray-200/80 shadow-sm min-w-0 max-w-full overflow-x-clip">
+                    <div class="flex flex-col gap-3 min-w-0">
+                        <div class="flex items-center gap-2 min-w-0 w-full max-w-full">
+                            <div class="relative flex-1 min-w-0">
+                                <span class="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 text-lg pointer-events-none">&#x1F50D;</span>
+                                <input type="search" x-model.debounce.300ms="menuSearchQuery" placeholder="Поиск по названию, описанию или разделу..."
+                                    class="w-full pl-11 pr-4 py-3 rounded-2xl border border-gray-200 bg-white text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
                             </div>
-                            <select x-model="menuStockFilter"
-                                class="text-sm border border-gray-200 rounded-xl px-3 py-2.5 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
-                                <option value="all">Все статусы</option>
-                                <option value="in">Только в наличии</option>
-                                <option value="out">Нет в наличии</option>
-                            </select>
+                            <button type="button"
+                                class="md:hidden shrink-0 min-h-[48px] min-w-[48px] inline-flex items-center justify-center rounded-2xl border border-gray-200 bg-white text-gray-600 shadow-sm hover:bg-gray-50"
+                                @click="menuToolbarExpanded = !menuToolbarExpanded"
+                                :aria-expanded="menuToolbarExpanded"
+                                :class="menuToolbarExpanded ? 'ring-2 ring-brand-400 border-brand-300 bg-brand-50/50' : ''"
+                                title="Фильтры, действия и разделы"
+                                aria-label="Открыть панель фильтров и действий">
+                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/></svg>
+                            </button>
                         </div>
-                    </div>
+                        <div class="flex flex-col gap-2 min-w-0 w-full flex-1 md:flex"
+                            :class="menuToolbarExpanded ? '' : 'max-md:hidden'">
+                            <div class="flex flex-wrap items-center gap-3 max-w-full">
+                                <button type="button" @click="openMenuCreate()"
+                                    class="text-sm font-semibold px-4 py-2.5 rounded-xl bg-brand-600 text-white hover:bg-brand-700 shadow-sm shadow-brand-600/20 transition">
+                                    + Добавить позицию
+                                </button>
+                                <button type="button" x-show="menuItems.length > 0" :disabled="menuClearLoading"
+                                    @click="clearAllMenuFromDb()"
+                                    class="text-sm font-semibold px-4 py-2.5 rounded-xl border border-red-200 bg-white text-red-700 hover:bg-red-50 shadow-sm transition disabled:opacity-50">
+                                    <span x-show="!menuClearLoading">Очистить всё меню</span>
+                                    <span x-show="menuClearLoading">Удаление…</span>
+                                </button>
+                                <button type="button" @click="toggleMenuBulkMode()"
+                                    :class="menuBulkMode ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-gray-600 border-gray-200 hover:border-brand-300'"
+                                    class="text-sm font-semibold px-4 py-2.5 rounded-xl border shadow-sm transition">
+                                    <span x-text="menuBulkMode ? 'Отменить выбор' : 'Выбрать'"></span>
+                                </button>
+                                <button type="button" x-show="menuBulkMode && menuFilteredItems.length > 0" @click="menuBulkSelectFiltered()"
+                                    class="text-xs font-semibold px-3 py-2 rounded-xl border border-brand-200 bg-brand-50 text-brand-800 hover:bg-brand-100 transition">
+                                    Все на экране
+                                </button>
+                                <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500">
+                                    <span class="tabular-nums"><span x-text="menuFilteredItems.length"></span> поз.</span>
+                                    <button type="button" x-show="menuStopCount > 0" @click="menuStockFilter = 'out'; menuCategoryFilter = ''"
+                                        class="text-xs font-bold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-100 rounded-full px-3 py-1 transition tabular-nums"
+                                        title="Показать только позиции в стопе">
+                                        <span x-text="menuStopCount"></span> в стопе
+                                    </button>
+                                </div>
+                                <select x-model="menuStockFilter"
+                                    class="text-sm border border-gray-200 rounded-xl px-3 py-2.5 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 w-full min-[420px]:w-auto">
+                                    <option value="all">Все статусы</option>
+                                    <option value="in">Только в наличии</option>
+                                    <option value="out">Нет в наличии</option>
+                                </select>
+                            </div>
                     <div class="flex flex-wrap items-center gap-2 mt-2" x-show="menuHasActiveFilters()" x-cloak>
                         <span class="text-xs text-amber-900 bg-amber-100/90 border border-amber-200/80 rounded-lg px-2.5 py-1">Включён фильтр</span>
                         <button type="button" @click="resetMenuFilters()"
@@ -1297,13 +1334,21 @@
                             </div>
                         </template>
                     </div>
+                        </div>
+                    </div>
                 </div>
 
-                <p class="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-4 py-2 mb-6">
-                    Меню загружается из <strong>iiko Cloud</strong> (синхронизация в разделе интеграций или <code class="text-[11px]">python scripts/sync_menu_from_iiko.py</code>).
-                    Позиции можно <strong>редактировать здесь</strong> («Изменить», стоп-лист одним кликом). Синхронизация <strong>iiko</strong> при настроенном API перезапишет номенклатуру из облака.
-                    Цены как в меню ресторана; обслуживание 10% — отдельно.
-                </p>
+                <details class="hint-details text-xs text-amber-800 bg-amber-50/80 border border-amber-100 rounded-xl px-4 py-2 mb-6">
+                    <summary class="cursor-pointer flex items-center gap-2 font-medium text-amber-900 select-none list-none py-0.5">
+                        <svg class="w-4 h-4 text-amber-600 shrink-0 transition-transform duration-200 hint-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                        Откуда берётся меню и что перезаписывает iiko
+                    </summary>
+                    <div class="mt-2 pl-6 border-l-2 border-amber-200 text-amber-900/90 leading-relaxed pb-1">
+                        Меню загружается из <strong>iiko Cloud</strong> (синхронизация в разделе интеграций или <code class="text-[11px]">python scripts/sync_menu_from_iiko.py</code>).
+                        Позиции можно <strong>редактировать здесь</strong> («Изменить», стоп-лист одним кликом). Синхронизация <strong>iiko</strong> при настроенном API перезапишет номенклатуру из облака.
+                        Цены как в меню ресторана; обслуживание 10% — отдельно.
+                    </div>
+                </details>
 
                 <div x-show="menuItems.length === 0" class="text-center py-20 text-gray-400">
                     <div class="text-5xl mb-3">&#x1F372;</div>
@@ -1450,10 +1495,16 @@
                             Синхронизировать с iiko
                         </button>
                     </div>
-                    <p class="text-xs text-gray-500 mt-3">
-                        Список позиций с флагом «нет в наличии». Кнопка подтягивает актуальный стоп из iiko Cloud (те же учётные данные, что в .env).
-                        <span x-show="!integrationStatus.iiko_configured" class="text-amber-700 font-medium"> Настройте IIKO_* в .env.</span>
-                    </p>
+                    <details class="hint-details mt-3 rounded-xl border border-gray-200/80 bg-gray-50/50 px-3 py-2">
+                        <summary class="cursor-pointer flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-orange-800 select-none py-1">
+                            <svg class="w-4 h-4 text-gray-400 shrink-0 transition-transform duration-200 hint-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                            Что показывает эта вкладка и кнопка синхронизации
+                        </summary>
+                        <div class="pb-2 pt-1 pl-6 border-l-2 border-orange-200 ml-1 text-xs text-gray-600 leading-relaxed">
+                            Список позиций с флагом «нет в наличии». Кнопка подтягивает актуальный стоп из iiko Cloud (те же учётные данные, что в .env).
+                            <span x-show="!integrationStatus.iiko_configured" class="text-amber-700 font-medium"> Настройте IIKO_* в .env.</span>
+                        </div>
+                    </details>
                 </div>
 
                 <div x-show="stopListLoadError" x-cloak class="mb-4 text-sm text-red-800 bg-red-50 border border-red-100 rounded-xl px-4 py-3" x-text="stopListLoadError"></div>
@@ -1468,11 +1519,15 @@
                         <p class="text-xs text-red-600 mt-2 font-medium" x-show="integrationStatus.last_stoplist?.error && !integrationStatus.last_stoplist?.ok"
                             x-text="integrationStatus.last_stoplist?.error"></p>
                     </div>
-                    <div class="lg:col-span-2 rounded-2xl border border-orange-100 bg-orange-50/40 p-5">
-                        <div class="text-sm text-orange-950 leading-relaxed">
+                    <details class="hint-details lg:col-span-2 rounded-2xl border border-orange-100 bg-orange-50/40 p-5">
+                        <summary class="cursor-pointer flex items-center gap-2 text-sm font-semibold text-orange-950 select-none list-none">
+                            <svg class="w-4 h-4 text-orange-700 shrink-0 transition-transform duration-200 hint-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                            Если в iiko стоп-лист очищен…
+                        </summary>
+                        <div class="mt-3 text-sm text-orange-950 leading-relaxed pl-6 border-l-2 border-orange-200">
                             Если в iiko стоп-лист <strong>очищен</strong>, локальные позиции снова станут доступны после синхронизации (исправлено на сервере: пустой ответ iiko больше не блокирует возврат в продажу).
                         </div>
-                    </div>
+                    </details>
                 </div>
 
                 <div x-show="!loading && stopListFilteredItems.length === 0 && !stopListLoadError" class="text-center py-16 text-gray-500">
@@ -1538,6 +1593,10 @@
                             <div>
                                 <div class="font-medium text-gray-900">WhatsApp (Meta)</div>
                                 <p class="text-sm text-gray-600 mt-1" x-text="integrationStatus.whatsapp_configured ? 'Токен и Phone Number ID заданы — исходящие сообщения включены.' : 'Задайте WHATSAPP_API_TOKEN и WHATSAPP_PHONE_NUMBER_ID для реальной отправки.'"></p>
+                                <p class="text-xs text-gray-500 mt-2">
+                                    <span class="font-medium text-gray-700">Голосовые в чате:</span>
+                                    <span x-text="integrationStatus.gemini_configured ? ('Распознавание через Gemini (GEMINI_API_KEY). ' + (integrationStatus.whatsapp_voice_replies_enabled ? 'Ответ дублируется голосом (edge-tts).' : 'Ответ текстом; для голоса ответа задайте WHATSAPP_VOICE_REPLIES=true.')) : 'Задайте GEMINI_API_KEY — нужен для текста и для голосовых.'"></span>
+                                </p>
                             </div>
                         </div>
                     </div>
@@ -1554,7 +1613,13 @@
                             class="inline-flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold border border-gray-200 bg-white text-gray-800 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">
                             Только меню (iiko → БД)
                         </button>
-                        <p class="text-xs text-gray-400 w-full mt-1">Полная кнопка — меню + стоп-листы. «Только меню» — номенклатура и цены в <code class="bg-gray-100 px-1 rounded text-[10px]">menu_items</code> без запроса стоп-листов.</p>
+                        <details class="hint-details w-full mt-2 rounded-xl border border-gray-200/80 bg-gray-50/50 px-3 py-2">
+                            <summary class="cursor-pointer text-xs font-medium text-gray-600 select-none flex items-center gap-2">
+                                <svg class="w-3.5 h-3.5 text-gray-400 shrink-0 transition-transform duration-200 hint-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                                Чем отличаются кнопки синхронизации
+                            </summary>
+                            <p class="text-xs text-gray-500 mt-2 pl-5 border-l-2 border-gray-200 ml-0.5">Полная кнопка — меню + стоп-листы. «Только меню» — номенклатура и цены в <code class="bg-gray-100 px-1 rounded text-[10px]">menu_items</code> без запроса стоп-листов.</p>
+                        </details>
                     </div>
 
                     <div class="rounded-xl border border-gray-200 bg-gray-50/50 p-4 mb-4">
@@ -1581,6 +1646,281 @@
                         </div>
                     </div>
                 </div>
+            </div>
+
+            <!-- ========== БАЗА ЗНАНИЙ ========== -->
+            <div x-show="currentTab === 'knowledge'" x-cloak class="fade-in max-w-4xl space-y-6 pb-16">
+                <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+                    <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
+                        <div>
+                            <h3 class="text-lg font-bold text-gray-900">База знаний</h3>
+                            <p class="text-sm text-gray-500 mt-1">Активные записи подставляются в промпт Gemini (раздел «Справочник заведения») для WhatsApp и теста бота. Цены и блюда по-прежнему только из меню.</p>
+                        </div>
+                        <button type="button" @click="openKnowledgeCreate()"
+                            class="shrink-0 px-4 py-2.5 rounded-xl bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 shadow-sm">
+                            Добавить запись
+                        </button>
+                    </div>
+                    <p x-show="knowledgeLoading" class="text-sm text-gray-400 py-6">Загрузка…</p>
+                    <div x-show="!knowledgeLoading && !knowledgeItems.length" x-cloak class="text-sm text-gray-500 py-8 text-center border border-dashed border-gray-200 rounded-xl">
+                        Пока пусто. Добавьте парковку, часы работы, банкеты — бот будет опираться на этот текст.
+                    </div>
+                    <div class="space-y-3" x-show="!knowledgeLoading && knowledgeItems.length">
+                        <template x-for="k in knowledgeItems" :key="k.id">
+                            <div class="rounded-xl border border-gray-100 bg-gray-50/50 p-4 flex flex-col sm:flex-row sm:items-start gap-3">
+                                <div class="flex-1 min-w-0">
+                                    <div class="flex flex-wrap items-center gap-2 mb-1">
+                                        <span class="text-xs font-bold uppercase tracking-wide text-brand-600" x-text="k.category || 'Общее'"></span>
+                                        <span x-show="!k.is_active" class="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-200 text-gray-700">Выкл</span>
+                                        <span class="text-[10px] text-gray-400 font-mono" x-text="'#' + k.id"></span>
+                                    </div>
+                                    <p class="font-semibold text-gray-900" x-text="k.question"></p>
+                                    <p class="text-sm text-gray-600 mt-2 whitespace-pre-wrap" x-text="k.answer"></p>
+                                </div>
+                                <div class="flex shrink-0 gap-2">
+                                    <button type="button" @click="openKnowledgeEdit(k)"
+                                        class="px-3 py-2 rounded-lg text-xs font-semibold border border-gray-200 bg-white hover:bg-gray-50">Изменить</button>
+                                    <button type="button" @click="deleteKnowledgeItem(k.id)"
+                                        class="px-3 py-2 rounded-lg text-xs font-semibold border border-red-200 text-red-700 bg-red-50 hover:bg-red-100">Удалить</button>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                <div x-show="knowledgeEditOpen" x-cloak x-transition.opacity
+                    class="fixed inset-0 z-[85] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
+                    @click.self="closeKnowledgeEdit()">
+                    <div class="bg-white rounded-2xl shadow-2xl border border-gray-100 w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col" @click.stop role="dialog" aria-modal="true">
+                        <div class="p-5 border-b border-gray-100 flex items-center justify-between shrink-0">
+                            <h3 class="font-bold text-gray-900" x-text="knowledgeEditForm.id ? 'Редактировать запись' : 'Новая запись'"></h3>
+                            <button type="button" @click="closeKnowledgeEdit()" class="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
+                        </div>
+                        <div class="p-5 overflow-y-auto flex-1 space-y-4">
+                            <p x-show="knowledgeEditError" x-cloak class="text-sm text-red-600" x-text="knowledgeEditError"></p>
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Категория</label>
+                                <input type="text" x-model="knowledgeEditForm.category" placeholder="Парковка, Банкеты…"
+                                    class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Вопрос / заголовок</label>
+                                <input type="text" x-model="knowledgeEditForm.question" placeholder="Коротко, о чём блок"
+                                    class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Ответ</label>
+                                <textarea x-model="knowledgeEditForm.answer" rows="8" placeholder="Текст для гостей и бота"
+                                    class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm font-sans resize-y min-h-[120px]"></textarea>
+                            </div>
+                            <div class="flex flex-wrap gap-4 items-center">
+                                <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-700">
+                                    <input type="checkbox" x-model="knowledgeEditForm.is_active" class="rounded border-gray-300 text-brand-600">
+                                    Активна (в промпте)
+                                </label>
+                                <div class="flex items-center gap-2 text-sm">
+                                    <span class="text-gray-500">Порядок</span>
+                                    <input type="number" x-model.number="knowledgeEditForm.sort_order" step="1"
+                                        class="w-24 rounded-xl border border-gray-200 px-2 py-1.5 text-sm">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="p-5 border-t border-gray-100 flex gap-3 shrink-0">
+                            <button type="button" @click="closeKnowledgeEdit()" :disabled="knowledgeSaveLoading"
+                                class="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 font-semibold text-sm hover:bg-gray-50 disabled:opacity-50">Отмена</button>
+                            <button type="button" @click="saveKnowledgeItem()" :disabled="knowledgeSaveLoading"
+                                class="flex-1 py-3 rounded-xl bg-brand-600 text-white font-semibold text-sm hover:bg-brand-700 disabled:opacity-50">
+                                <span x-show="!knowledgeSaveLoading">Сохранить</span>
+                                <span x-show="knowledgeSaveLoading" x-cloak>Сохранение…</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ========== НАСТРОЙКИ ========== -->
+            <div x-show="currentTab === 'settings'" x-cloak class="fade-in max-w-3xl space-y-6 pb-16">
+                <div class="rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-950">
+                    <strong class="font-semibold">Опасная зона.</strong> Действия необратимы. Клиенты в таблице <code class="text-xs bg-white/80 px-1 rounded">users</code> не удаляются при сбросе операционных данных и при удалении отдельных заказов.
+                </div>
+
+                <!-- Окружение (read-only) -->
+                <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-3">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                        <h3 class="text-base font-bold text-gray-900">Окружение</h3>
+                        <button type="button" @click="loadSettingsEnvironment()" :disabled="settingsEnvLoading"
+                            class="text-xs font-semibold px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-50">Обновить</button>
+                    </div>
+                    <p class="text-xs text-gray-500">Без секретов: версия, режим БД, флаги интеграций.</p>
+                    <div x-show="settingsEnvLoading" class="text-sm text-gray-400 py-4">Загрузка…</div>
+                    <div x-show="!settingsEnvLoading && settingsEnv" x-cloak class="text-sm space-y-2 font-mono text-xs bg-slate-50 rounded-xl p-4 border border-slate-100 overflow-x-auto">
+                        <div><span class="text-gray-500">app_version</span> <span class="text-gray-900" x-text="settingsEnv.app_version"></span></div>
+                        <div><span class="text-gray-500">db_mode</span> <span class="text-gray-900" x-text="settingsEnv.db_mode"></span></div>
+                        <div><span class="text-gray-500">redis_backend</span> <span class="text-gray-900" x-text="settingsEnv.redis_backend"></span></div>
+                        <div><span class="text-gray-500">app_debug</span> <span class="text-gray-900" x-text="settingsEnv.app_debug"></span></div>
+                        <div class="pt-2 border-t border-slate-200 text-gray-700">integrations</div>
+                        <template x-if="settingsEnv.integrations">
+                            <ul class="list-none space-y-1 pl-2">
+                                <li>iiko: <span x-text="settingsEnv.integrations.iiko?.configured ? 'да' : 'нет'"></span>, terminal_group: <span x-text="settingsEnv.integrations.iiko?.terminal_group_id_set ? 'задан' : '—'"></span></li>
+                                <li>whatsapp: <span x-text="settingsEnv.integrations.whatsapp?.configured ? 'да' : 'нет'"></span></li>
+                                <li>telegram: <span x-text="settingsEnv.integrations.telegram?.configured ? 'да' : 'нет'"></span></li>
+                                <li>gemini: <span x-text="settingsEnv.integrations.gemini?.configured ? 'да' : 'нет'"></span></li>
+                                <li>public_base_url: <span x-text="settingsEnv.integrations.public_base_url_set ? 'задан' : 'нет'"></span></li>
+                            </ul>
+                        </template>
+                        <div class="pt-2 border-t border-slate-200 text-gray-700">chat_log_retention</div>
+                        <template x-if="settingsEnv.chat_log_retention">
+                            <ul class="list-none space-y-1 pl-2">
+                                <li>включено: <span x-text="settingsEnv.chat_log_retention.enabled ? 'да' : 'нет'"></span></li>
+                                <li>дней: <span x-text="settingsEnv.chat_log_retention.retention_days"></span>, интервал с: <span x-text="settingsEnv.chat_log_retention.interval_seconds"></span></li>
+                                <li>кандидатов на удаление сейчас: <span x-text="settingsEnv.chat_log_retention.eligible_for_purge_count"></span></li>
+                            </ul>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- Сброс Redis по телефону -->
+                <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-3">
+                    <h3 class="text-base font-bold text-gray-900">Сброс сессии Redis / памяти</h3>
+                    <p class="text-sm text-gray-600">Очистить историю диалога и состояние бота для номера (как в WhatsApp). Записи в БД не меняются.</p>
+                    <div class="flex flex-col sm:flex-row gap-2 sm:items-center">
+                        <input type="text" x-model="settingsRedisPhone" placeholder="+77001234567"
+                            class="flex-1 rounded-xl border border-gray-200 px-3 py-2.5 text-sm font-mono">
+                        <button type="button" @click="settingsPurgeRedisSession()" :disabled="settingsRedisPurgeLoading || !settingsRedisPhone.trim()"
+                            class="text-sm font-semibold px-4 py-2.5 rounded-xl bg-slate-800 text-white hover:bg-slate-900 disabled:opacity-50 shrink-0">
+                            <span x-show="!settingsRedisPurgeLoading">Сбросить ключи</span>
+                            <span x-show="settingsRedisPurgeLoading" x-cloak>…</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Экспорт CSV -->
+                <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-3">
+                    <h3 class="text-base font-bold text-gray-900">Экспорт CSV</h3>
+                    <p class="text-sm text-gray-600">Период в <strong>UTC</strong> по дате создания. Пустые поля — последние 90 суток. Лимит 50 000 строк за выгрузку.</p>
+                    <div class="flex flex-wrap gap-3 items-end">
+                        <label class="text-xs text-gray-500">С <input type="date" x-model="settingsExportDateFrom" class="ml-1 rounded-lg border border-gray-200 px-2 py-1.5 text-sm"></label>
+                        <label class="text-xs text-gray-500">По <input type="date" x-model="settingsExportDateTo" class="ml-1 rounded-lg border border-gray-200 px-2 py-1.5 text-sm"></label>
+                    </div>
+                    <div class="flex flex-wrap gap-3">
+                        <button type="button" @click="settingsDownloadOrdersCsv()" :disabled="settingsExportLoading"
+                            class="text-sm font-semibold px-4 py-2.5 rounded-xl border border-brand-200 bg-brand-50 text-brand-800 hover:bg-brand-100 disabled:opacity-50">Скачать заказы</button>
+                        <button type="button" @click="settingsDownloadChatsCsv()" :disabled="settingsExportLoading"
+                            class="text-sm font-semibold px-4 py-2.5 rounded-xl border border-brand-200 bg-brand-50 text-brand-800 hover:bg-brand-100 disabled:opacity-50">Скачать чаты (логи)</button>
+                    </div>
+                </div>
+
+                <!-- Ретеншн chat_logs -->
+                <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-3">
+                    <h3 class="text-base font-bold text-gray-900">Ретеншн логов чата</h3>
+                    <p class="text-sm text-gray-600">Фоновая задача удаляет строки <code class="text-xs bg-gray-100 px-1 rounded">chat_logs</code> старше <code class="text-xs bg-gray-100 px-1">CHAT_LOG_RETENTION_DAYS</code> с интервалом <code class="text-xs bg-gray-100 px-1">CHAT_LOG_RETENTION_INTERVAL_SECONDS</code>. При <code class="text-xs bg-gray-100 px-1">0</code> дней — выключено.</p>
+                    <button type="button" @click="settingsRunChatRetention()" :disabled="settingsRetentionRunLoading"
+                        class="text-sm font-semibold px-4 py-2.5 rounded-xl border border-gray-300 bg-white text-gray-800 hover:bg-gray-50 disabled:opacity-50">
+                        <span x-show="!settingsRetentionRunLoading">Запустить очистку сейчас</span>
+                        <span x-show="settingsRetentionRunLoading" x-cloak>Выполняется…</span>
+                    </button>
+                </div>
+
+                <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-4">
+                    <h3 class="text-base font-bold text-gray-900">Операционные данные</h3>
+                    <p class="text-sm text-gray-600">Заказы, брони, история чатов в БД, эскалации и журнал синхронизаций. Меню и список клиентов сохраняются.</p>
+                    <button type="button" @click="settingsPurgeModalOpen = true; settingsPurgePhrase = ''; settingsPurgeAck = false; settingsPurgeError = ''"
+                        class="text-sm font-semibold px-4 py-2.5 rounded-xl border border-red-200 bg-red-50 text-red-800 hover:bg-red-100 transition">
+                        Удалить все операционные данные…
+                    </button>
+                </div>
+
+                <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-4">
+                    <h3 class="text-base font-bold text-gray-900">Меню и стоп-лист (локально)</h3>
+                    <p class="text-sm text-gray-600">Стоп-лист iiko отражается в поле «в наличии» у позиций; отдельной таблицы стопа нет.</p>
+                    <div class="flex flex-col sm:flex-row flex-wrap gap-3">
+                        <button type="button" @click="settingsClearMenuOnly()" :disabled="settingsMenuClearLoading"
+                            class="text-sm font-semibold px-4 py-2.5 rounded-xl border border-orange-200 bg-orange-50 text-orange-900 hover:bg-orange-100 transition disabled:opacity-50">
+                            <span x-show="!settingsMenuClearLoading">Удалить данные меню</span>
+                            <span x-show="settingsMenuClearLoading" x-cloak>Удаление…</span>
+                        </button>
+                        <button type="button" @click="settingsClearMenuAndStopSnapshot()" :disabled="settingsMenuStopClearLoading"
+                            class="text-sm font-semibold px-4 py-2.5 rounded-xl border border-red-200 bg-red-50 text-red-800 hover:bg-red-100 transition disabled:opacity-50">
+                            <span x-show="!settingsMenuStopClearLoading">Удалить меню и сбросить снимок стоп-листа</span>
+                            <span x-show="settingsMenuStopClearLoading" x-cloak>Удаление…</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-4">
+                    <div class="flex flex-wrap items-center justify-between gap-3">
+                        <h3 class="text-base font-bold text-gray-900">Удаление заказов</h3>
+                        <button type="button" @click="loadSettingsOrders()" :disabled="settingsOrdersLoading"
+                            class="text-sm font-semibold px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50">
+                            Обновить список
+                        </button>
+                    </div>
+                    <p class="text-sm text-gray-600">Отметьте заказы и удалите их из БД. Если у клиента в Redis «висел» черновик этого заказа, ключ сбросится — удобно при одном зависшем заказе на деплое.</p>
+                    <div x-show="settingsOrdersLoading" class="text-sm text-gray-500 py-6 text-center">Загрузка…</div>
+                    <div x-show="!settingsOrdersLoading && settingsOrdersList.length === 0" class="text-sm text-gray-400 py-6 text-center border border-dashed border-gray-200 rounded-xl">Нет заказов (или нажмите «Обновить список»)</div>
+                    <div x-show="!settingsOrdersLoading && settingsOrdersList.length > 0" x-cloak class="overflow-x-auto rounded-xl border border-gray-100 max-h-72 overflow-y-auto">
+                        <table class="w-full text-sm">
+                            <thead class="sticky top-0 bg-gray-50 text-left text-gray-500 border-b border-gray-100">
+                                <tr>
+                                    <th class="p-2 w-10"></th>
+                                    <th class="p-2 font-medium">ID</th>
+                                    <th class="p-2 font-medium">Статус</th>
+                                    <th class="p-2 font-medium">Сумма</th>
+                                    <th class="p-2 font-medium">Клиент</th>
+                                    <th class="p-2 font-medium w-24"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="row in settingsOrdersList" :key="row.id">
+                                    <tr class="border-b border-gray-50 hover:bg-gray-50/80">
+                                        <td class="p-2">
+                                            <input type="checkbox" class="rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                                                :value="row.id" x-model="settingsSelectedOrderIds">
+                                        </td>
+                                        <td class="p-2 font-mono text-brand-600" x-text="'#' + row.id"></td>
+                                        <td class="p-2">
+                                            <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700" x-text="statusConfig[row.status]?.label || row.status"></span>
+                                        </td>
+                                        <td class="p-2 font-semibold" x-text="fmt.money(row.total_price)"></td>
+                                        <td class="p-2 text-gray-600 truncate max-w-[10rem]" x-text="row.user_phone || '—'"></td>
+                                        <td class="p-2">
+                                            <button type="button" @click="openOrderDeleteConfirm([row.id], 'settings_single')"
+                                                class="text-xs font-semibold text-red-600 hover:text-red-800 hover:underline">
+                                                Удалить
+                                            </button>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-3">
+                        <button type="button" @click="settingsBulkCancelOrders()"
+                            :disabled="settingsBulkCancelLoading || settingsSelectedOrderIds.length === 0"
+                            class="text-sm font-semibold px-4 py-2.5 rounded-xl border border-amber-300 bg-amber-50 text-amber-950 hover:bg-amber-100 disabled:opacity-50 disabled:pointer-events-none">
+                            <span x-show="!settingsBulkCancelLoading">Отменить выбранные (<span x-text="settingsSelectedOrderIds.length"></span>)</span>
+                            <span x-show="settingsBulkCancelLoading" x-cloak>Отмена…</span>
+                        </button>
+                        <button type="button" @click="settingsBulkDeleteOrders()"
+                            :disabled="settingsSelectedOrderIds.length === 0"
+                            class="text-sm font-semibold px-4 py-2.5 rounded-xl bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 disabled:pointer-events-none">
+                            Удалить выбранные (<span x-text="settingsSelectedOrderIds.length"></span>)…
+                        </button>
+                        <button type="button" @click="settingsSelectedOrderIds = []" x-show="settingsSelectedOrderIds.length > 0" x-cloak
+                            class="text-sm text-gray-600 hover:text-gray-900 underline">Снять выделение</button>
+                    </div>
+                </div>
+
+                <details class="hint-details rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
+                    <summary class="cursor-pointer text-sm font-semibold text-gray-800 select-none flex items-center gap-2">
+                        <svg class="w-4 h-4 text-gray-500 shrink-0 transition-transform duration-200 hint-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                        Идеи на будущее
+                    </summary>
+                    <ul class="text-sm text-gray-600 mt-2 pl-5 list-disc space-y-1">
+                        <li>Полный бэкап БД (дамп / JSON) по кнопке</li>
+                        <li>Политика ретеншна для других таблиц</li>
+                    </ul>
+                </details>
             </div>
 
             <!-- ========== ТЕСТ БОТА ========== -->
@@ -1638,10 +1978,16 @@
                         </div>
                     </div>
 
-                    <div class="mt-4 bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-700">
-                        <strong>Как это работает:</strong> Сообщения отправляются напрямую в Gemini AI через ваш бэкенд.
-                        Бот определит намерение (заказ, бронь, вопрос) и ответит структурированно.
-                    </div>
+                    <details class="hint-details mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
+                        <summary class="cursor-pointer text-sm font-semibold text-amber-900 select-none flex items-center gap-2">
+                            <svg class="w-4 h-4 text-amber-700 shrink-0 transition-transform duration-200 hint-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                            Как работает тест
+                        </summary>
+                        <div class="text-sm text-amber-800 mt-2 pl-5 border-l-2 border-amber-300 leading-relaxed">
+                            Сообщения отправляются напрямую в Gemini AI через ваш бэкенд.
+                            Бот определит намерение (заказ, бронь, вопрос) и ответит структурированно.
+                        </div>
+                    </details>
                 </div>
             </div>
 
@@ -1752,6 +2098,39 @@
             </div>
         </div>
 
+        <!-- Модалка: сброс всех операционных данных (настройки) -->
+        <div x-show="settingsPurgeModalOpen" x-cloak x-transition.opacity
+            class="fixed inset-0 z-[61] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
+            @click.self="settingsPurgeModalOpen = false">
+            <div class="bg-white rounded-2xl shadow-2xl border border-gray-100 w-full max-w-md overflow-hidden fade-in" @click.stop role="dialog" aria-modal="true" aria-labelledby="settings-purge-title">
+                <div class="h-1.5 bg-gradient-to-r from-red-600 via-red-500 to-orange-500"></div>
+                <div class="p-6 md:p-8">
+                    <h2 id="settings-purge-title" class="text-lg font-bold text-gray-900">Удалить все операционные данные?</h2>
+                    <p class="text-sm text-gray-500 mt-2">Будут удалены все строки в таблицах: чаты, заказы, брони, эскалации, журнал интеграций. Сбросится блок последних синхронизаций в настройках интеграций.</p>
+                    <p class="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 mt-4"><strong>Не удаляются:</strong> клиенты (<code class="text-[11px]">users</code>), меню (<code class="text-[11px]">menu_items</code>), организации.</p>
+                    <label class="block text-sm font-medium text-gray-700 mt-5">Введите фразу <span class="font-mono text-xs bg-gray-100 px-1 rounded">УДАЛИТЬ ВСЕ ДАННЫЕ</span></label>
+                    <input type="text" x-model="settingsPurgePhrase" autocomplete="off"
+                        class="mt-2 w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                        placeholder="УДАЛИТЬ ВСЕ ДАННЫЕ">
+                    <label class="flex items-start gap-3 cursor-pointer group mt-4">
+                        <input type="checkbox" x-model="settingsPurgeAck" class="mt-1 rounded border-gray-300 text-red-600 focus:ring-red-500">
+                        <span class="text-sm text-gray-700">Я понимаю, что восстановление невозможно</span>
+                    </label>
+                    <p x-show="settingsPurgeError" x-cloak class="text-sm text-red-600 mt-3" x-text="settingsPurgeError"></p>
+                    <div class="flex flex-col-reverse sm:flex-row gap-3 mt-6">
+                        <button type="button" @click="settingsPurgeModalOpen = false" :disabled="settingsPurgeLoading"
+                            class="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 font-semibold text-sm hover:bg-gray-50 disabled:opacity-50">Отмена</button>
+                        <button type="button" @click="confirmSettingsPurgeOperational()"
+                            :disabled="settingsPurgeLoading || !settingsPurgeAck || settingsPurgePhrase.trim() !== 'УДАЛИТЬ ВСЕ ДАННЫЕ'"
+                            class="flex-1 py-3 rounded-xl bg-red-600 text-white font-semibold text-sm hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed">
+                            <span x-show="!settingsPurgeLoading">Выполнить сброс</span>
+                            <span x-show="settingsPurgeLoading" x-cloak>Удаление…</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Тост после удаления демо -->
         <div x-show="demoToastMessage" x-cloak x-transition
             class="fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] px-5 py-3 rounded-xl bg-slate-900 text-white text-sm font-medium shadow-xl shadow-slate-900/20 max-w-[90vw] text-center"
@@ -1760,18 +2139,24 @@
         <div x-show="showOrderModal && selectedOrder" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/40" @click.self="showOrderModal = false">
             <template x-if="selectedOrder">
                 <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 fade-in" @click.stop>
-                    <div class="flex items-center justify-between mb-5">
-                        <h3 class="text-lg font-bold" x-text="'Заказ #' + selectedOrder.id"></h3>
-                        <button @click="showOrderModal = false" class="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+                    <div class="flex items-start justify-between mb-5 gap-3">
+                        <div class="min-w-0 flex-1">
+                            <h3 class="text-lg font-bold text-gray-900" x-text="'Заказ #' + selectedOrder.id"></h3>
+                            <p class="text-sm mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                                <span class="text-gray-500 font-semibold shrink-0">Оплата:</span>
+                                <span class="inline-flex items-center gap-1.5 font-bold"
+                                    :class="paymentModalPayClass(selectedOrder)">
+                                    <span class="text-base leading-none" x-text="paymentIcon(selectedOrder)"></span>
+                                    <span x-text="paymentMethodTitle(selectedOrder)"></span>
+                                </span>
+                            </p>
+                        </div>
+                        <button type="button" @click="showOrderModal = false" class="text-gray-400 hover:text-gray-600 text-xl shrink-0 leading-none" aria-label="Закрыть">&times;</button>
                     </div>
-                    <div class="flex flex-wrap items-center gap-2 mb-4" x-show="selectedOrder.order_type">
-                        <span class="px-2.5 py-1 rounded-lg text-[10px] font-black tracking-wide uppercase bg-indigo-100 text-indigo-900 border border-indigo-200/80"
+                    <div class="flex flex-wrap items-center gap-2 mb-4"
+                        x-show="selectedOrder.order_type || (selectedOrder?.prepayment_status && selectedOrder?.prepayment_status !== 'not_required')">
+                        <span x-show="selectedOrder.order_type" class="px-2.5 py-1 rounded-lg text-[10px] font-black tracking-wide uppercase bg-indigo-100 text-indigo-900 border border-indigo-200/80"
                             x-text="orderTypeBadge(selectedOrder)"></span>
-                        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-800 border border-slate-200/80"
-                            :title="paymentMethodTitle(selectedOrder)">
-                            <span class="text-base leading-none" x-text="paymentIcon(selectedOrder)"></span>
-                            <span x-text="paymentMethodTitle(selectedOrder)"></span>
-                        </span>
                         <span x-show="selectedOrder?.prepayment_status && selectedOrder?.prepayment_status !== 'not_required'"
                             class="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase bg-amber-100 text-amber-900 border border-amber-200/80"
                             x-text="prepaymentLabel(selectedOrder?.prepayment_status)"></span>
@@ -1843,6 +2228,14 @@
                             </button>
                         </div>
                     </template>
+                    <div class="mt-6 pt-4 border-t border-gray-200">
+                        <button type="button"
+                            @click="openOrderDeleteConfirmFromModal()"
+                            class="w-full py-3 rounded-xl text-sm font-semibold border-2 border-red-200 text-red-800 bg-red-50 hover:bg-red-100 transition">
+                            Удалить заказ из базы…
+                        </button>
+                        <p class="text-[11px] text-gray-400 text-center mt-2">Откроется окно подтверждения</p>
+                    </div>
                 </div>
             </template>
         </div>
@@ -1997,6 +2390,8 @@ function defaultIntegrationStatus() {
     return {
         iiko_configured: false,
         whatsapp_configured: false,
+        gemini_configured: false,
+        whatsapp_voice_replies_enabled: false,
         webhook_url: '',
         whatsapp_verify_token_hint: '',
         last_stoplist: { at: null, ok: false, error: null },
@@ -2026,6 +2421,41 @@ function adminApp() {
         stopListSearchQuery: '',
         stopListSyncLoading: false,
 
+        /** Вкладка «Настройки»: список заказов для выборочного удаления */
+        settingsOrdersList: [],
+        settingsOrdersLoading: false,
+        settingsSelectedOrderIds: [],
+        settingsMenuClearLoading: false,
+        settingsMenuStopClearLoading: false,
+        settingsPurgeModalOpen: false,
+        settingsPurgePhrase: '',
+        settingsPurgeAck: false,
+        settingsPurgeLoading: false,
+        settingsPurgeError: '',
+        settingsEnv: null,
+        settingsEnvLoading: false,
+        settingsRedisPhone: '',
+        settingsRedisPurgeLoading: false,
+        settingsExportDateFrom: '',
+        settingsExportDateTo: '',
+        settingsExportLoading: false,
+        settingsBulkCancelLoading: false,
+        settingsRetentionRunLoading: false,
+
+        knowledgeItems: [],
+        knowledgeLoading: false,
+        knowledgeSaveLoading: false,
+        knowledgeEditOpen: false,
+        knowledgeEditError: '',
+        knowledgeEditForm: {
+            id: null,
+            category: '',
+            question: '',
+            answer: '',
+            is_active: true,
+            sort_order: 0,
+        },
+
         currentTab: 'dashboard',
         loading: false,
         navItems: [
@@ -2045,6 +2475,10 @@ function adminApp() {
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>' },
             { id: 'integrations', label: 'Интеграции', desc: 'iiko, WhatsApp и принудительная синхронизация',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m4.95-4.95l1.757-1.757a4.5 4.5 0 016.364 6.364l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757"/></svg>' },
+            { id: 'knowledge', label: 'База знаний', desc: 'Справочник для AI: парковка, банкеты, правила',
+              icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v15.128A9 9 0 009 18c0 1.518.39 2.948 1.082 4.192m3-16.15V18c0 1.518-.39 2.948-1.082 4.192M15 6.042a8.967 8.967 0 014.5 2.292v15.128A9 9 0 0015 18c0-1.518-.39-2.948-1.082-4.192"/></svg>' },
+            { id: 'settings', label: 'Настройки', desc: 'Опасная зона: сброс данных и удаление заказов',
+              icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>' },
             { id: 'test', label: 'Тест бота', desc: 'Протестируйте AI-оператора вживую',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25zm.75-12h9v9h-9v-9z"/></svg>' },
         ],
@@ -2074,6 +2508,13 @@ function adminApp() {
         ordersSort: { column: 'date', dir: 'desc' },
         showOrderModal: false,
         selectedOrder: null,
+        /** Кастомное подтверждение удаления заказа */
+        showOrderDeleteConfirmModal: false,
+        orderDeleteConfirmIds: [],
+        orderDeleteConfirmSource: '',
+        orderDeleteConfirmAck: false,
+        orderDeleteConfirmLoading: false,
+        orderDeleteConfirmError: '',
 
         showBookingModal: false,
         selectedBooking: null,
@@ -2140,6 +2581,8 @@ function adminApp() {
         menuClearLoading: false,
         /** Чипы разделов: на узких экранах по умолчанию скрыты, чтобы не перекрывать карточки */
         menuCategoryChipsOpen: true,
+        /** Панель действий/фильтров вкладки «Меню»: на мобилке по умолчанию свёрнута */
+        menuToolbarExpanded: false,
         /** Статус интеграций (GET /api/admin/integrations/status). */
         integrationStatus: defaultIntegrationStatus(),
         integrationSyncLoading: false,
@@ -2384,9 +2827,12 @@ function adminApp() {
             this.analyticsFrom = weekAgo.toISOString().slice(0, 10);
 
             try {
-                this.menuCategoryChipsOpen = window.matchMedia('(min-width: 768px)').matches;
+                const m = window.matchMedia('(min-width: 768px)').matches;
+                this.menuCategoryChipsOpen = m;
+                this.menuToolbarExpanded = m;
             } catch (e) {
                 this.menuCategoryChipsOpen = true;
+                this.menuToolbarExpanded = true;
             }
 
             await this.checkSession();
@@ -2414,9 +2860,12 @@ function adminApp() {
             this.menuCategoryFilter = '';
             this.menuStockFilter = 'out';
             try {
-                this.menuCategoryChipsOpen = window.matchMedia('(min-width: 768px)').matches;
+                const m = window.matchMedia('(min-width: 768px)').matches;
+                this.menuCategoryChipsOpen = m;
+                this.menuToolbarExpanded = true;
             } catch (e) {
                 this.menuCategoryChipsOpen = false;
+                this.menuToolbarExpanded = true;
             }
             this.loadTabData();
         },
@@ -2569,8 +3018,33 @@ function adminApp() {
 
         paymentMethodTitle(order) {
             if (!order || !order.payment_method) return 'Наличные';
-            const m = { cash: 'Наличные', card: 'Карта при получении', remote: 'Удалённая оплата' };
+            const m = {
+                cash: 'Наличные',
+                card: 'Карта при получении',
+                remote: 'Удалённо (Kaspi, Payme, ссылка…)',
+            };
             return m[order.payment_method] || order.payment_method;
+        },
+
+        paymentMethodShort(order) {
+            const pm = order?.payment_method || 'cash';
+            const m = { cash: 'НАЛИЧНЫЕ', card: 'КАРТА', remote: 'ОНЛАЙН' };
+            return m[pm] || String(pm).toUpperCase();
+        },
+
+        paymentKanbanBadgeClass(order) {
+            const pm = order?.payment_method || 'cash';
+            const base = 'uppercase';
+            if (pm === 'card') return base + ' bg-blue-50 text-blue-800 border-blue-200';
+            if (pm === 'remote') return base + ' bg-gradient-to-r from-amber-100 to-orange-100 text-amber-950 border-amber-400';
+            return base + ' bg-gray-100 text-gray-700 border-gray-300';
+        },
+
+        paymentModalPayClass(order) {
+            const pm = order?.payment_method || 'cash';
+            if (pm === 'card') return 'text-blue-700';
+            if (pm === 'remote') return 'text-amber-800';
+            return 'text-gray-800';
         },
 
         prepaymentLabel(st) {
@@ -2618,6 +3092,8 @@ function adminApp() {
                     return false;
                 }
                 await this.loadOrders();
+                await this.loadDashStats();
+                await this.syncDashboardChartIfVisible();
                 return true;
             } catch {
                 alert('Ошибка сети');
@@ -2631,6 +3107,105 @@ function adminApp() {
             if (ok) this.showOrderModal = false;
         },
 
+        openOrderDeleteConfirmFromModal() {
+            const o = this.selectedOrder;
+            if (!o || o.id == null) return;
+            this.openOrderDeleteConfirm([Number(o.id)], 'modal');
+        },
+
+        openOrderDeleteConfirm(ids, source) {
+            const clean = [...new Set((ids || []).map((x) => Number(x)).filter((n) => Number.isFinite(n) && n > 0))].sort((a, b) => a - b);
+            if (!clean.length) return;
+            this.orderDeleteConfirmIds = clean;
+            this.orderDeleteConfirmSource = source || '';
+            this.orderDeleteConfirmAck = false;
+            this.orderDeleteConfirmError = '';
+            this.orderDeleteConfirmLoading = false;
+            this.showOrderDeleteConfirmModal = true;
+        },
+
+        closeOrderDeleteConfirm() {
+            if (this.orderDeleteConfirmLoading) return;
+            this.showOrderDeleteConfirmModal = false;
+            this.orderDeleteConfirmIds = [];
+            this.orderDeleteConfirmSource = '';
+            this.orderDeleteConfirmAck = false;
+            this.orderDeleteConfirmError = '';
+        },
+
+        /** Текст ошибки из тела FastAPI (detail строка, массив validation errors или объект). */
+        formatHttpDetail(data) {
+            const raw = data && data.detail != null ? data.detail : null;
+            if (raw == null) return 'Ошибка запроса';
+            if (typeof raw === 'string') return raw;
+            if (Array.isArray(raw)) {
+                return raw
+                    .map((e) => (e && typeof e === 'object' && e.msg != null ? String(e.msg) : JSON.stringify(e)))
+                    .join('; ');
+            }
+            if (typeof raw === 'object') return JSON.stringify(raw);
+            return String(raw);
+        },
+
+        async executeOrderDeleteConfirmed() {
+            if (!this.orderDeleteConfirmAck || this.orderDeleteConfirmLoading) return;
+            const ids = [...this.orderDeleteConfirmIds];
+            if (!ids.length) return;
+            this.orderDeleteConfirmLoading = true;
+            this.orderDeleteConfirmError = '';
+            const src = this.orderDeleteConfirmSource;
+            try {
+                if (ids.length === 1) {
+                    const id = ids[0];
+                    const res = await this.apiFetch(`/api/admin/orders/${id}/delete`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ confirm: true }),
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok) {
+                        this.orderDeleteConfirmError = this.formatHttpDetail(data);
+                        return;
+                    }
+                    if (src === 'modal') {
+                        this.showOrderModal = false;
+                        this.selectedOrder = null;
+                    }
+                    this.demoToastMessage = `Заказ #${id} удалён`;
+                    setTimeout(() => { this.demoToastMessage = ''; }, 3500);
+                } else {
+                    const res = await this.apiFetch('/api/admin/orders/bulk-delete', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ confirm: true, order_ids: ids }),
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok) {
+                        this.orderDeleteConfirmError = this.formatHttpDetail(data);
+                        return;
+                    }
+                    this.demoToastMessage = `Удалено заказов: ${data.deleted ?? ids.length}`;
+                    setTimeout(() => { this.demoToastMessage = ''; }, 4000);
+                }
+                this.removeOrderIdsFromLocalState(ids);
+                this.showOrderDeleteConfirmModal = false;
+                this.orderDeleteConfirmIds = [];
+                this.orderDeleteConfirmSource = '';
+                this.orderDeleteConfirmAck = false;
+                try {
+                    await Promise.all([this.loadOrders(), this.loadDashStats(), this.loadSettingsOrders()]);
+                    await this.syncDashboardChartIfVisible();
+                } catch (refreshErr) {
+                    console.error('[admin] обновление списков после удаления заказа', refreshErr);
+                }
+            } catch (e) {
+                console.error('[admin] executeOrderDeleteConfirmed', e);
+                this.orderDeleteConfirmError = 'Ошибка сети';
+            } finally {
+                this.orderDeleteConfirmLoading = false;
+            }
+        },
+
         handleGlobalKeydown(e) {
             if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
                 e.preventDefault();
@@ -2638,6 +3213,8 @@ function adminApp() {
             }
             if (e.key === 'Escape') {
                 this.globalSearchOpen = false;
+                if (this.knowledgeEditOpen) this.closeKnowledgeEdit();
+                if (this.showOrderDeleteConfirmModal) this.closeOrderDeleteConfirm();
             }
         },
 
@@ -3064,6 +3641,118 @@ function adminApp() {
             };
         },
 
+        async loadKnowledgeBase() {
+            this.knowledgeLoading = true;
+            try {
+                const res = await this.apiFetch('/api/admin/knowledge');
+                const data = await res.json().catch(() => ({}));
+                if (res.ok) {
+                    this.knowledgeItems = Array.isArray(data.items) ? data.items : [];
+                } else {
+                    this.knowledgeItems = [];
+                }
+            } catch (e) {
+                console.error('[admin] loadKnowledgeBase', e);
+                this.knowledgeItems = [];
+            } finally {
+                this.knowledgeLoading = false;
+            }
+        },
+
+        openKnowledgeCreate() {
+            this.knowledgeEditError = '';
+            this.knowledgeEditForm = {
+                id: null,
+                category: '',
+                question: '',
+                answer: '',
+                is_active: true,
+                sort_order: 0,
+            };
+            this.knowledgeEditOpen = true;
+        },
+
+        openKnowledgeEdit(k) {
+            if (!k) return;
+            this.knowledgeEditError = '';
+            this.knowledgeEditForm = {
+                id: k.id,
+                category: k.category || '',
+                question: k.question || '',
+                answer: k.answer || '',
+                is_active: !!k.is_active,
+                sort_order: Number(k.sort_order) || 0,
+            };
+            this.knowledgeEditOpen = true;
+        },
+
+        closeKnowledgeEdit() {
+            if (this.knowledgeSaveLoading) return;
+            this.knowledgeEditOpen = false;
+            this.knowledgeEditError = '';
+        },
+
+        async saveKnowledgeItem() {
+            const f = this.knowledgeEditForm;
+            if (!((f.question || '').trim()) || !((f.answer || '').trim())) {
+                this.knowledgeEditError = 'Заполните вопрос и ответ';
+                return;
+            }
+            this.knowledgeSaveLoading = true;
+            this.knowledgeEditError = '';
+            try {
+                const payload = {
+                    category: (f.category || '').trim(),
+                    question: f.question.trim(),
+                    answer: f.answer.trim(),
+                    is_active: !!f.is_active,
+                    sort_order: Number(f.sort_order) || 0,
+                };
+                let res;
+                if (f.id) {
+                    res = await this.apiFetch(`/api/admin/knowledge/${f.id}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload),
+                    });
+                } else {
+                    res = await this.apiFetch('/api/admin/knowledge', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload),
+                    });
+                }
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    this.knowledgeEditError = typeof data.detail === 'string' ? data.detail : 'Ошибка сохранения';
+                    return;
+                }
+                this.knowledgeEditOpen = false;
+                await this.loadKnowledgeBase();
+            } catch (e) {
+                console.error('[admin] saveKnowledgeItem', e);
+                this.knowledgeEditError = 'Ошибка сети';
+            } finally {
+                this.knowledgeSaveLoading = false;
+            }
+        },
+
+        async deleteKnowledgeItem(id) {
+            if (id == null || !window.confirm('Удалить эту запись из базы знаний?')) return;
+            try {
+                // POST — часть прокси режет HTTP DELETE; эндпоинт тот же по смыслу, что DELETE /knowledge/{id}
+                const res = await this.apiFetch(`/api/admin/knowledge/${id}/delete`, { method: 'POST' });
+                if (res.ok) await this.loadKnowledgeBase();
+                else {
+                    const data = await res.json().catch(() => ({}));
+                    alert(this.formatHttpDetail(data));
+                }
+            } catch (e) {
+                console.error('[admin] deleteKnowledgeItem', e);
+                alert('Ошибка сети');
+            }
+        },
+
         async loadIntegrationStatus() {
             try {
                 const res = await this.apiFetch('/api/admin/integrations/status');
@@ -3322,6 +4011,24 @@ function adminApp() {
                 this.onNewMessage(data);
             } else if (type === 'order_updated') {
                 this.onOrderUpdated(data);
+                this.scheduleDashStatsRefreshDebounced();
+            } else if (type === 'order_deleted') {
+                const i = this.orders.findIndex((o) => o.id === data.order_id);
+                if (i >= 0) {
+                    this.orders.splice(i, 1);
+                }
+                const si = this.settingsOrdersList.findIndex((o) => o.id === data.order_id);
+                if (si >= 0) {
+                    this.settingsOrdersList.splice(si, 1);
+                }
+                this.settingsSelectedOrderIds = this.settingsSelectedOrderIds.filter(
+                    (id) => Number(id) !== data.order_id,
+                );
+                if (this.selectedOrder && this.selectedOrder.id === data.order_id) {
+                    this.showOrderModal = false;
+                    this.selectedOrder = null;
+                }
+                this.scheduleDashStatsRefreshDebounced();
             } else if (type === 'human_needed') {
                 this.onHumanNeeded(data);
             } else if (type === 'state_changed') {
@@ -3369,14 +4076,18 @@ function adminApp() {
         },
 
         onOrderUpdated(data) {
+            const applyPatch = (row) => {
+                if (!row) return;
+                row.status = data.status;
+                if (data.total_price !== undefined) row.total_price = data.total_price;
+                if (data.iiko_last_error !== undefined) {
+                    row.iiko_last_error = data.iiko_last_error;
+                }
+                row.updated_at = new Date().toISOString();
+            };
             const idx = this.orders.findIndex(o => o.id === data.order_id);
             if (idx >= 0) {
-                this.orders[idx].status = data.status;
-                if (data.total_price !== undefined) this.orders[idx].total_price = data.total_price;
-                if (data.iiko_last_error !== undefined) {
-                    this.orders[idx].iiko_last_error = data.iiko_last_error;
-                }
-                this.orders[idx].updated_at = new Date().toISOString();
+                applyPatch(this.orders[idx]);
             } else {
                 this.orders.unshift({
                     id: data.order_id,
@@ -3388,6 +4099,10 @@ function adminApp() {
                     iiko_last_error: data.iiko_last_error ?? null,
                 });
                 this.playOrderPing();
+            }
+            const sidx = this.settingsOrdersList.findIndex((o) => o.id === data.order_id);
+            if (sidx >= 0) {
+                applyPatch(this.settingsOrdersList[sidx]);
             }
         },
 
@@ -3741,6 +4456,10 @@ function adminApp() {
                     await Promise.all([this.loadStopList(), this.loadIntegrationStatus()]);
                 } else if (this.currentTab === 'integrations') {
                     await this.loadIntegrationStatus();
+                } else if (this.currentTab === 'knowledge') {
+                    await this.loadKnowledgeBase();
+                } else if (this.currentTab === 'settings') {
+                    await Promise.all([this.loadSettingsOrders(), this.loadSettingsEnvironment()]);
                 } else if (this.currentTab === 'chats') {
                     await this.loadChatList();
                 }
@@ -3826,6 +4545,49 @@ function adminApp() {
             });
         },
 
+        /** После изменения заказов: перерисовать мини-график, если открыт дашборд. */
+        async syncDashboardChartIfVisible() {
+            await this.$nextTick();
+            if (this.currentTab === 'dashboard') {
+                await this.scheduleDashboardChartRender();
+            }
+        },
+
+        /**
+         * Несколько WS-событий подряд (массовое удаление) не должны дергать stats десятки раз.
+         */
+        scheduleDashStatsRefreshDebounced() {
+            if (this._dashOrderChangeTimer) {
+                clearTimeout(this._dashOrderChangeTimer);
+            }
+            this._dashOrderChangeTimer = setTimeout(async () => {
+                this._dashOrderChangeTimer = null;
+                try {
+                    await this.loadDashStats();
+                    await this.syncDashboardChartIfVisible();
+                } catch (e) {
+                    console.error('[admin] scheduleDashStatsRefreshDebounced', e);
+                }
+            }, 350);
+        },
+
+        /** Мгновенно убрать заказы из локальных списков (до прихода ответа loadOrders). */
+        removeOrderIdsFromLocalState(ids) {
+            const s = new Set(
+                (ids || []).map((x) => Number(x)).filter((n) => Number.isFinite(n)),
+            );
+            if (!s.size) return;
+            this.orders = this.orders.filter((o) => !s.has(Number(o.id)));
+            this.settingsOrdersList = this.settingsOrdersList.filter((o) => !s.has(Number(o.id)));
+            this.settingsSelectedOrderIds = this.settingsSelectedOrderIds.filter(
+                (id) => !s.has(Number(id)),
+            );
+            if (this.selectedOrder && s.has(Number(this.selectedOrder.id))) {
+                this.showOrderModal = false;
+                this.selectedOrder = null;
+            }
+        },
+
         toggleAnalyticsDaySort(col) {
             if (this.analyticsDaySort === col) {
                 this.analyticsDayDir = this.analyticsDayDir === 'asc' ? 'desc' : 'asc';
@@ -3859,7 +4621,11 @@ function adminApp() {
                 p.set('sum_max', String(Number(smax)));
             }
             const res = await this.apiFetch(`/api/admin/orders?${p.toString()}`);
-            const data = await res.json();
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                console.warn('[admin] loadOrders', res.status, data);
+                return;
+            }
             this.orders = data.orders || [];
         },
 
@@ -3904,10 +4670,267 @@ function adminApp() {
             this.menuViewRevision += 1;
         },
 
-        /**
-         * Полная очистка menu_items на сервере (деплой без Shell).
-         * Два confirm подряд — защита от случайного клика.
-         */
+        /** Список заказов для вкладки «Настройки» (до 100 шт.). */
+        async loadSettingsOrders() {
+            this.settingsOrdersLoading = true;
+            try {
+                const res = await this.apiFetch('/api/admin/orders?limit=100&offset=0');
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    this.settingsOrdersList = [];
+                    return;
+                }
+                this.settingsOrdersList = Array.isArray(data.orders) ? data.orders : [];
+            } catch (e) {
+                console.error('[admin] loadSettingsOrders', e);
+                this.settingsOrdersList = [];
+            } finally {
+                this.settingsOrdersLoading = false;
+            }
+        },
+
+        async loadSettingsEnvironment() {
+            this.settingsEnvLoading = true;
+            try {
+                const res = await this.apiFetch('/api/admin/settings/environment');
+                const data = await res.json().catch(() => null);
+                this.settingsEnv = res.ok && data ? data : null;
+            } catch (e) {
+                console.error('[admin] loadSettingsEnvironment', e);
+                this.settingsEnv = null;
+            } finally {
+                this.settingsEnvLoading = false;
+            }
+        },
+
+        async settingsPurgeRedisSession() {
+            const phone = (this.settingsRedisPhone || '').trim();
+            if (!phone || this.settingsRedisPurgeLoading) return;
+            if (!window.confirm(`Сбросить Redis/in-memory сессию для ${phone}? История диалога в памяти будет очищена.`)) return;
+            this.settingsRedisPurgeLoading = true;
+            try {
+                const res = await this.apiFetch('/api/admin/settings/redis-purge-phone', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ confirm: true, phone }),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    alert(typeof data.detail === 'string' ? data.detail : 'Ошибка');
+                    return;
+                }
+                this.demoToastMessage = `Сессия сброшена: ${phone}`;
+                setTimeout(() => { this.demoToastMessage = ''; }, 3500);
+            } catch (e) {
+                console.error(e);
+                alert('Ошибка сети');
+            } finally {
+                this.settingsRedisPurgeLoading = false;
+            }
+        },
+
+        _settingsExportQuery() {
+            const p = new URLSearchParams();
+            if (this.settingsExportDateFrom) p.set('date_from', this.settingsExportDateFrom);
+            if (this.settingsExportDateTo) p.set('date_to', this.settingsExportDateTo);
+            const q = p.toString();
+            return q ? `?${q}` : '';
+        },
+
+        async _settingsDownloadCsv(path, filename) {
+            if (this.settingsExportLoading) return;
+            this.settingsExportLoading = true;
+            try {
+                const res = await this.apiFetch(path + this._settingsExportQuery());
+                if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    alert(typeof data.detail === 'string' ? data.detail : 'Ошибка выгрузки');
+                    return;
+                }
+                const blob = await res.blob();
+                const u = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = u;
+                a.download = filename;
+                a.click();
+                URL.revokeObjectURL(u);
+            } catch (e) {
+                console.error('[admin] export csv', e);
+                alert('Ошибка сети');
+            } finally {
+                this.settingsExportLoading = false;
+            }
+        },
+
+        async settingsDownloadOrdersCsv() {
+            await this._settingsDownloadCsv('/api/admin/export/orders', 'restomind_orders_export.csv');
+        },
+
+        async settingsDownloadChatsCsv() {
+            await this._settingsDownloadCsv('/api/admin/export/chats', 'restomind_chats_export.csv');
+        },
+
+        async settingsBulkCancelOrders() {
+            const ids = [...new Set(this.settingsSelectedOrderIds.map((x) => Number(x)).filter((n) => Number.isFinite(n) && n > 0))];
+            if (!ids.length || this.settingsBulkCancelLoading) return;
+            if (!window.confirm(`Отменить ${ids.length} заказ(ов)? Статус станет «отменён», строки в БД сохранятся.`)) return;
+            this.settingsBulkCancelLoading = true;
+            try {
+                const res = await this.apiFetch('/api/admin/orders/bulk-cancel', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ confirm: true, order_ids: ids }),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    alert(typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail || data));
+                    return;
+                }
+                this.settingsSelectedOrderIds = [];
+                this.demoToastMessage = `Отменено заказов: ${data.cancelled ?? 0}; уже были отменены: ${data.skipped_already_cancelled ?? 0}`;
+                setTimeout(() => { this.demoToastMessage = ''; }, 4500);
+                await Promise.all([this.loadSettingsOrders(), this.loadOrders(), this.loadDashStats(), this.loadSettingsEnvironment()]);
+                await this.syncDashboardChartIfVisible();
+            } catch (e) {
+                console.error('[admin] settingsBulkCancelOrders', e);
+                alert('Ошибка сети');
+            } finally {
+                this.settingsBulkCancelLoading = false;
+            }
+        },
+
+        async settingsRunChatRetention() {
+            if (this.settingsRetentionRunLoading) return;
+            if (!window.confirm('Удалить старые записи chat_logs по политике CHAT_LOG_RETENTION_DAYS?')) return;
+            this.settingsRetentionRunLoading = true;
+            try {
+                const res = await this.apiFetch('/api/admin/settings/chat-logs/run-retention', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ confirm: true }),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    alert(typeof data.detail === 'string' ? data.detail : 'Ошибка');
+                    return;
+                }
+                this.demoToastMessage = `Удалено записей чата: ${data.deleted ?? 0}`;
+                setTimeout(() => { this.demoToastMessage = ''; }, 4000);
+                await this.loadSettingsEnvironment();
+            } catch (e) {
+                console.error(e);
+                alert('Ошибка сети');
+            } finally {
+                this.settingsRetentionRunLoading = false;
+            }
+        },
+
+        async settingsBulkDeleteOrders() {
+            const ids = [...new Set(this.settingsSelectedOrderIds.map((x) => Number(x)).filter((n) => Number.isFinite(n) && n > 0))];
+            if (!ids.length) return;
+            this.openOrderDeleteConfirm(ids, 'settings_bulk');
+        },
+
+        async settingsClearMenuOnly() {
+            if (this.settingsMenuClearLoading) return;
+            if (!window.confirm('Удалить все позиции меню из базы? Заказы в БД не удаляются.')) return;
+            if (!window.confirm('Подтвердите ещё раз: каталог будет пуст до синхронизации с iiko.')) return;
+            this.settingsMenuClearLoading = true;
+            try {
+                const res = await this.apiFetch('/api/admin/menu/clear', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ confirm: true }),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    alert(typeof data.detail === 'string' ? data.detail : 'Не удалось очистить меню');
+                    return;
+                }
+                this.demoToastMessage = data.deleted != null ? `Меню: удалено позиций ${data.deleted}` : 'Меню очищено';
+                setTimeout(() => { this.demoToastMessage = ''; }, 4000);
+                await Promise.all([this.loadMenu(), this.loadDashStats()]);
+                await this.syncDashboardChartIfVisible();
+            } catch (e) {
+                console.error(e);
+                alert('Ошибка сети');
+            } finally {
+                this.settingsMenuClearLoading = false;
+            }
+        },
+
+        async settingsClearMenuAndStopSnapshot() {
+            if (this.settingsMenuStopClearLoading) return;
+            if (!window.confirm('Удалить всё меню и сбросить в админке блок «последняя синхронизация стоп-листа»?')) return;
+            if (!window.confirm('Последнее подтверждение: номенклатура будет пуста.')) return;
+            this.settingsMenuStopClearLoading = true;
+            try {
+                const res = await this.apiFetch('/api/admin/settings/clear-menu-and-stop-snapshot', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ confirm: true }),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    alert(typeof data.detail === 'string' ? data.detail : 'Ошибка очистки');
+                    return;
+                }
+                this.demoToastMessage = `Меню очищено (${data.menu_items_deleted ?? 0} поз.), снимок стопа сброшен`;
+                setTimeout(() => { this.demoToastMessage = ''; }, 4500);
+                await Promise.all([
+                    this.loadMenu(),
+                    this.loadDashStats(),
+                    this.loadStopList(),
+                    this.loadIntegrationStatus(),
+                ]);
+                await this.syncDashboardChartIfVisible();
+            } catch (e) {
+                console.error(e);
+                alert('Ошибка сети');
+            } finally {
+                this.settingsMenuStopClearLoading = false;
+            }
+        },
+
+        async confirmSettingsPurgeOperational() {
+            if (this.settingsPurgeLoading) return;
+            this.settingsPurgeError = '';
+            this.settingsPurgeLoading = true;
+            try {
+                const res = await this.apiFetch('/api/admin/settings/purge-operational-data', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        confirm: true,
+                        phrase: this.settingsPurgePhrase.trim(),
+                    }),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    this.settingsPurgeError = typeof data.detail === 'string' ? data.detail : 'Ошибка';
+                    return;
+                }
+                this.settingsPurgeModalOpen = false;
+                this.settingsPurgePhrase = '';
+                this.settingsPurgeAck = false;
+                this.demoToastMessage = `Сброс: заказов ${data.orders_deleted ?? 0}, броней ${data.bookings_deleted ?? 0}, сообщений чата ${data.chat_logs_deleted ?? 0}`;
+                setTimeout(() => { this.demoToastMessage = ''; }, 5000);
+                await Promise.all([
+                    this.loadSettingsOrders(),
+                    this.loadOrders(),
+                    this.loadBookings(),
+                    this.loadDashStats(),
+                    this.loadIntegrationStatus(),
+                ]);
+                await this.syncDashboardChartIfVisible();
+            } catch (e) {
+                console.error(e);
+                this.settingsPurgeError = 'Ошибка сети';
+            } finally {
+                this.settingsPurgeLoading = false;
+            }
+        },
+
         async clearAllMenuFromDb() {
             const n = this.menuItems.length;
             if (!n || this.menuClearLoading) return;
@@ -3931,6 +4954,7 @@ function adminApp() {
                 setTimeout(() => { this.demoToastMessage = ''; }, 3200);
                 await this.loadMenu();
                 await this.loadDashStats();
+                await this.syncDashboardChartIfVisible();
             } catch (e) {
                 console.error('[admin] clearAllMenuFromDb', e);
                 alert('Ошибка сети');
@@ -4431,6 +5455,52 @@ function adminApp() {
     };
 }
 </script>
+
+    <!-- Подтверждение удаления заказа: вне flex-контейнера приложения — всегда поверх модалок заказа/брони (z-50) и шапки -->
+    <div x-show="authenticated && showOrderDeleteConfirmModal" x-cloak x-transition.opacity
+        class="fixed inset-0 z-[9999] flex items-center justify-center p-4 overflow-y-auto bg-slate-900/60 backdrop-blur-sm"
+        @click.self="closeOrderDeleteConfirm()">
+        <div class="bg-white rounded-2xl shadow-2xl border border-gray-100 w-full max-w-md overflow-hidden fade-in shrink-0 relative z-10" @click.stop role="dialog" aria-modal="true" aria-labelledby="order-delete-confirm-title">
+            <div class="h-1.5 bg-gradient-to-r from-red-600 via-rose-500 to-orange-400"></div>
+            <div class="p-6 md:p-8">
+                <div class="flex items-start gap-4 mb-5">
+                    <div class="w-12 h-12 rounded-2xl bg-red-50 border border-red-100 flex items-center justify-center shrink-0">
+                        <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                    </div>
+                    <div class="min-w-0">
+                        <h2 id="order-delete-confirm-title" class="text-lg font-bold text-gray-900" x-text="orderDeleteConfirmIds.length > 1 ? 'Удалить выбранные заказы?' : 'Удалить заказ?'"></h2>
+                        <p class="text-sm text-gray-500 mt-1.5 leading-relaxed" x-show="orderDeleteConfirmIds.length === 1">
+                            Заказ <span class="font-mono font-semibold text-red-700 bg-red-50 px-1.5 py-0.5 rounded-md" x-text="'#' + orderDeleteConfirmIds[0]"></span> будет удалён из базы. Восстановление невозможно; запись пропадёт из списков и аналитики.
+                        </p>
+                        <div x-show="orderDeleteConfirmIds.length > 1" x-cloak class="mt-2 space-y-2">
+                            <p class="text-sm text-gray-600">Будут удалены <span class="font-bold text-gray-900" x-text="orderDeleteConfirmIds.length"></span> заказов (безвозвратно).</p>
+                            <div class="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 max-h-28 overflow-y-auto text-xs font-mono text-gray-800 leading-relaxed break-all" x-text="orderDeleteConfirmIds.map((i) => '#' + i).join(', ')"></div>
+                        </div>
+                    </div>
+                </div>
+                <label class="flex items-start gap-3 cursor-pointer group mb-2">
+                    <input type="checkbox" x-model="orderDeleteConfirmAck" class="mt-1 rounded border-gray-300 text-red-600 focus:ring-red-500">
+                    <span class="text-sm text-gray-700 group-hover:text-gray-900">Я понимаю, что это действие нельзя отменить</span>
+                </label>
+                <p x-show="orderDeleteConfirmError" x-cloak class="text-sm text-red-600 mt-3" x-text="orderDeleteConfirmError"></p>
+                <div class="flex flex-col-reverse sm:flex-row gap-3 mt-8">
+                    <button type="button" @click="closeOrderDeleteConfirm()" :disabled="orderDeleteConfirmLoading"
+                        class="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 font-semibold text-sm hover:bg-gray-50 transition disabled:opacity-50">
+                        Отмена
+                    </button>
+                    <button type="button" @click="executeOrderDeleteConfirmed()"
+                        :disabled="orderDeleteConfirmLoading || !orderDeleteConfirmAck"
+                        class="flex-1 py-3 rounded-xl bg-red-600 text-white font-semibold text-sm hover:bg-red-700 shadow-lg shadow-red-600/25 transition disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+                        <span x-show="!orderDeleteConfirmLoading">Удалить навсегда</span>
+                        <span x-show="orderDeleteConfirmLoading" x-cloak class="flex items-center gap-2">
+                            <span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                            Удаляем…
+                        </span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
 
 </body>
 </html>

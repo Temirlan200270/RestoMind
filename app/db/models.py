@@ -260,6 +260,40 @@ class MenuItem(Base):
         return f"<MenuItem id={self.id} name='{self.name}' price={self.price}>"
 
 
+class KnowledgeItem(Base):
+    """
+    База знаний для AI: парковка, банкеты, часы, политики.
+    Активные записи подмешиваются в system prompt (см. knowledge_context).
+    """
+
+    __tablename__ = "knowledge_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("organizations.id"),
+        nullable=True,
+        index=True,
+        comment="NULL — общие правила для всех; иначе только для выбранной организации",
+    )
+    category: Mapped[str] = mapped_column(
+        String(120), default="", comment="Группа: Парковка, Банкеты, Общее…",
+    )
+    question: Mapped[str] = mapped_column(String(500), nullable=False, comment="Краткий заголовок / формулировка вопроса")
+    answer: Mapped[str] = mapped_column(Text, nullable=False, comment="Текст ответа (можно несколько абзацев)")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, comment="Участвует ли в контексте для Gemini")
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, comment="Порядок вывода в справочнике")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(),
+    )
+
+    def __repr__(self) -> str:
+        return f"<KnowledgeItem id={self.id} category='{self.category[:20]}'>"
+
+
 class IntegrationEvent(Base):
     """
     Журнал последних событий синхронизации (меню, стоп-листы) для админки.

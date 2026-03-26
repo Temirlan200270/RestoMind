@@ -19,8 +19,8 @@ from app.db.session import async_session_factory, redis_client
 from app.integrations.iiko_client import IikoClient
 from app.integrations.telegram import send_tg_fallback_alert
 from app.integrations.twilio_sms import send_twilio_sms_alert
-from app.integrations.whatsapp import send_message, send_template
-from app.services.ai_brain import call_gemini
+from app.integrations.whatsapp import download_media_bytes, send_message, send_template, send_voice_message
+from app.services.ai_brain import call_gemini, call_gemini_with_audio, gemini_transcribe_voice
 from app.services.dialog_mgr import (
     CANCEL_WORDS,
     CONFIRM_WORDS,
@@ -45,7 +45,15 @@ from app.services.intent_router import (
     get_or_create_user,
     route_intent,
 )
-from app.services.order_logic import build_menu_context, load_available_menu
+from app.services.knowledge_context import load_knowledge_context_block
+from app.services.order_logic import (
+    build_menu_context,
+    build_summary_text_from_stored_items,
+    detect_payment_method_from_text,
+    format_order_confirmation_summary,
+    load_available_menu,
+)
+from app.services.tts_edge import synthesize_speech_mp3
 
 logger = logging.getLogger(__name__)
 
@@ -256,10 +264,94 @@ async def handle_booking_confirmation(phone: str, message_text: str) -> str:
     return "Пожалуйста, ответьте «Да» для подтверждения или «Нет» для отмены бронирования."
 
 
-async def process_message(phone: str, message_text: str) -> None:
+_PAYMENT_LABEL_RU = {
+    "cash": "Наличные при получении",
+    "card": "Карта при получении",
+    "remote": "Удалённая оплата (перевод / ссылка)",
+}
+
+
+async def handle_order_payment_choice(phone: str, message_text: str) -> str:
+    """
+    После черновика заказа: фиксируем способ оплаты в items_json, затем переход к Да/Нет.
+    """
+    order_id = await get_pending_order(redis_client, phone)
+    if not order_id:
+        await clear_pending_order(redis_client, phone)
+        return "Заказ не найден — возможно, истекло время. Назовите блюда заново."
+
+    word = message_text.lower().strip().rstrip("!.,")
+
+    if word in CANCEL_WORDS:
+        async with async_session_factory() as db:
+            await cancel_order(db, order_id)
+            await db.commit()
+        await publish_event("order_updated", {
+            "order_id": order_id, "status": OrderStatus.CANCELLED, "phone": phone,
+        })
+        await clear_pending_order(redis_client, phone)
+        return (
+            "Заказ отменён. Вы можете:\n"
+            "  • Назвать новые блюда — я оформлю новый заказ\n"
+            "  • Написать что изменить\n"
+            "  • Или просто продолжить общение 😊"
+        )
+
+    pm = detect_payment_method_from_text(message_text)
+    if not pm:
+        return (
+            "Не разобрал способ оплаты. Напишите, пожалуйста:\n"
+            "  • **наличные**\n"
+            "  • **карта** (при получении)\n"
+            "  • **удалённо** (перевод или ссылка)\n"
+            "\nИли **отмена**, если передумали."
+        )
+
+    async with async_session_factory() as db:
+        order = await db.get(Order, order_id)
+        if not order or order.status != OrderStatus.DRAFT:
+            await clear_pending_order(redis_client, phone)
+            return "Заказ не найден или уже обработан. Начните оформление заново."
+
+        raw_json = order.items_json
+        items_json: dict[str, object] = dict(raw_json) if isinstance(raw_json, dict) else {}
+        order_meta: dict[str, object] = dict(items_json.get("order_meta") or {})
+        order_meta["payment_method"] = pm
+        items_json["order_meta"] = order_meta
+        order.items_json = items_json
+
+        summary_core = build_summary_text_from_stored_items(items_json)
+        body = format_order_confirmation_summary(items_json, summary_core)
+        pay_human = _PAYMENT_LABEL_RU.get(pm, pm)
+        reply = (
+            f"Принял способ оплаты: {pay_human}.\n\n"
+            f"📋 Ваш заказ:\n{body}\n\n"
+            "✅ Подтверждаете заказ? (Да / Нет)"
+        )
+        await db.commit()
+
+        total = float(order.total_price)
+        await publish_event("order_updated", {
+            "order_id": order.id,
+            "status": OrderStatus.DRAFT,
+            "phone": phone,
+            "total_price": total,
+            "payment_method": pm,
+        })
+
+    await set_user_state(redis_client, phone, UserState.CONFIRMING_ORDER)
+    return reply
+
+
+async def process_message(
+    phone: str,
+    message_text: str = "",
+    *,
+    voice_audio: tuple[bytes, str] | None = None,
+) -> None:
     """
     Полный цикл обработки входящего сообщения с учётом State Machine:
-    1. Проверить состояние пользователя (HUMAN_MODE, CONFIRMING_ORDER, CHATTING)
+    1. Проверить состояние пользователя (HUMAN_MODE, AWAITING_ORDER_PAYMENT, CONFIRMING_ORDER, CHATTING)
     2. Маршрутизировать по состоянию
     3. Сохранить в Redis + ChatLog
     4. Отправить ответ
@@ -270,14 +362,46 @@ async def process_message(phone: str, message_text: str) -> None:
             await send_message(phone, "Слишком много сообщений. Подождите минуту и попробуйте снова.")
             return
 
+        voice_bytes: bytes | None = None
+        voice_mime = ""
+        if voice_audio:
+            voice_bytes, voice_mime = voice_audio
+
         state = await get_user_state(redis_client, phone)
 
         async with async_session_factory() as db_u:
             u_row = await db_u.scalar(select(User).where(User.phone == phone))
             ai_paused_db = bool(u_row and getattr(u_row, "ai_paused", False))
 
+        # Голос без мультимодального чата: сначала текст (подтверждения, оператор)
+        if voice_bytes is not None and (
+            state == UserState.AWAITING_ORDER_PAYMENT
+            or state == UserState.CONFIRMING_ORDER
+            or state == UserState.CONFIRMING_BOOKING
+            or state == UserState.HUMAN_MODE
+            or ai_paused_db
+        ):
+            if not (settings.gemini_api_key or "").strip():
+                await send_message(
+                    phone,
+                    "Голосовые недоступны: задайте GEMINI_API_KEY в настройках сервера.",
+                )
+                return
+            message_text = await gemini_transcribe_voice(voice_bytes, voice_mime)
+            message_text = (message_text or "").strip()
+            if not message_text:
+                await send_message(
+                    phone,
+                    "Не разобрал голосовое. Повторите чётче или напишите текстом, пожалуйста.",
+                )
+                return
+            voice_bytes = None
+
+        user_evt = message_text if message_text.strip() else (
+            "🎤 голосовое сообщение" if voice_bytes is not None else ""
+        )
         await publish_event("new_message", {
-            "phone": phone, "role": "user", "content": message_text,
+            "phone": phone, "role": "user", "content": user_evt,
         })
 
         # ─── HUMAN_MODE / ai_paused: AI молчит, только логируем ─────────
@@ -288,6 +412,23 @@ async def process_message(phone: str, message_text: str) -> None:
                 await db.commit()
             await append_to_history(redis_client, phone, "user", message_text)
             logger.info("HUMAN_MODE: сообщение от %s сохранено, AI не вызван", phone)
+            return
+
+        # ─── AWAITING_ORDER_PAYMENT: способ оплаты → затем Да/Нет ───
+        if state == UserState.AWAITING_ORDER_PAYMENT:
+            final_reply = await handle_order_payment_choice(phone, message_text)
+
+            async with async_session_factory() as db:
+                await _save_chat_log(db, phone, message_text, final_reply)
+                await db.commit()
+
+            await append_to_history(redis_client, phone, "user", message_text)
+            await append_to_history(redis_client, phone, "assistant", final_reply)
+            await send_message(phone, final_reply)
+
+            await publish_event("new_message", {
+                "phone": phone, "role": "assistant", "content": final_reply,
+            })
             return
 
         # ─── CONFIRMING_ORDER: ждём Да/Нет ──────────────────
@@ -325,13 +466,36 @@ async def process_message(phone: str, message_text: str) -> None:
             return
 
         # ─── CHATTING: обычный AI-флоу ──────────────────────
+        had_voice = voice_bytes is not None
         history = await get_chat_history(redis_client, phone)
-        await append_to_history(redis_client, phone, "user", message_text)
+
+        if had_voice:
+            if not (settings.gemini_api_key or "").strip():
+                await send_message(
+                    phone,
+                    "Голосовые недоступны: задайте GEMINI_API_KEY в настройках сервера.",
+                )
+                return
+        else:
+            await append_to_history(redis_client, phone, "user", message_text)
 
         async with async_session_factory() as db:
             menu_items = await load_available_menu(db)
             menu_context = build_menu_context(menu_items)
-            ai_response = await call_gemini(history, message_text, menu_context)
+            u_row = await db.scalar(select(User).where(User.phone == phone))
+            org_id = u_row.organization_id if u_row else None
+            kb_context = await load_knowledge_context_block(db, org_id)
+            if had_voice:
+                if voice_bytes is None:
+                    return
+                ai_response = await call_gemini_with_audio(
+                    history, voice_bytes, voice_mime, menu_context, kb_context,
+                )
+                user_log_text = (ai_response.recognized_speech or "").strip() or "🎤 голосовое сообщение"
+                await append_to_history(redis_client, phone, "user", user_log_text)
+            else:
+                user_log_text = message_text
+                ai_response = await call_gemini(history, message_text, menu_context, kb_context)
 
             result = await route_intent(
                 db, phone, ai_response, menu_items=menu_items,
@@ -352,13 +516,13 @@ async def process_message(phone: str, message_text: str) -> None:
                 ),
             }
             await _save_chat_log(
-                db, phone, message_text, result.reply_text, assistant_meta,
+                db, phone, user_log_text, result.reply_text, assistant_meta,
             )
             if result.new_state == UserState.HUMAN_MODE:
                 db.add(
                     EscalationEvent(
                         phone=phone,
-                        user_message=(message_text or "")[:2000],
+                        user_message=(user_log_text or "")[:2000],
                         reason=(result.reply_text or "")[:2000],
                     ),
                 )
@@ -366,6 +530,17 @@ async def process_message(phone: str, message_text: str) -> None:
 
         await append_to_history(redis_client, phone, "assistant", result.reply_text)
         await send_message(phone, result.reply_text)
+
+        if had_voice and settings.whatsapp_voice_replies:
+            try:
+                mp3 = await synthesize_speech_mp3(
+                    result.reply_text,
+                    language_code=ai_response.detected_language,
+                )
+                if mp3:
+                    await send_voice_message(phone, mp3)
+            except Exception as tts_exc:
+                logger.warning("edge-tts / отправка голоса: %s", tts_exc)
 
         await publish_event("new_message", {
             "phone": phone, "role": "assistant", "content": result.reply_text,
@@ -376,15 +551,15 @@ async def process_message(phone: str, message_text: str) -> None:
             await publish_event("human_needed", {
                 "phone": phone,
                 "reason": ai_response.reply_text,
-                "user_message": (message_text or "")[:500],
+                "user_message": (user_log_text or "")[:500],
                 "intent": ai_response.intent,
             })
             try:
-                await send_tg_fallback_alert(phone, message_text, result.reply_text)
+                await send_tg_fallback_alert(phone, user_log_text, result.reply_text)
             except Exception as tg_exc:
                 logger.warning("Telegram fallback alert не отправлен: %s", tg_exc)
             try:
-                await send_twilio_sms_alert(phone, message_text, result.reply_text)
+                await send_twilio_sms_alert(phone, user_log_text, result.reply_text)
             except Exception as sms_exc:
                 logger.warning("Twilio SMS alert не отправлен: %s", sms_exc)
 
@@ -398,6 +573,41 @@ async def process_message(phone: str, message_text: str) -> None:
             await send_message(phone, "Извините, произошла ошибка. Попробуйте ещё раз чуть позже.")
         except Exception:
             logger.error("Не удалось отправить сообщение об ошибке → %s", phone)
+
+
+async def process_voice_message(phone: str, media_id: str) -> None:
+    """
+    Голосовое WhatsApp: скачать → Gemini (мультимодально в CHATTING или транскрипт в подтверждениях).
+    """
+    try:
+        if not (settings.gemini_api_key or "").strip():
+            logger.info("Голосовое от %s: GEMINI_API_KEY не задан", phone)
+            await send_message(
+                phone,
+                "Голосовые сообщения пока не настроены. Настройте GEMINI_API_KEY на сервере или напишите текстом.",
+            )
+            return
+
+        downloaded = await download_media_bytes(media_id)
+        if not downloaded:
+            await send_message(
+                phone,
+                "Не удалось получить аудио. Попробуйте ещё раз или напишите текстом.",
+            )
+            return
+
+        audio_bytes, mime_type = downloaded
+        logger.info("Голосовое от %s, mime=%s, %d байт", phone, mime_type, len(audio_bytes))
+        await process_message(phone, "", voice_audio=(audio_bytes, mime_type))
+    except Exception as exc:
+        logger.exception("Ошибка обработки голосового от %s: %s", phone, exc)
+        try:
+            await send_message(
+                phone,
+                "Произошла ошибка при обработке голосового. Напишите текстом — я на связи.",
+            )
+        except Exception:
+            logger.error("Не удалось отправить сообщение об ошибке голоса → %s", phone)
 
 
 @router.get("/webhook")
@@ -437,11 +647,18 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks) -
         if messages:
             msg = messages[0]
             phone = msg.get("from", "")
-            message_text = msg.get("text", {}).get("body", "")
+            msg_type = msg.get("type") or ""
 
-            if phone and message_text:
-                background_tasks.add_task(process_message, phone, message_text)
-                logger.info("Сообщение от %s поставлено в очередь обработки", phone)
+            if phone and msg_type == "audio":
+                media_id = (msg.get("audio") or {}).get("id") or ""
+                if media_id:
+                    background_tasks.add_task(process_voice_message, phone, media_id)
+                    logger.info("Голосовое от %s поставлено в очередь", phone)
+            elif phone:
+                message_text = (msg.get("text") or {}).get("body") or ""
+                if message_text:
+                    background_tasks.add_task(process_message, phone, message_text)
+                    logger.info("Сообщение от %s поставлено в очередь обработки", phone)
 
     except (IndexError, KeyError, TypeError) as exc:
         logger.error("Ошибка парсинга вебхука: %s", exc)

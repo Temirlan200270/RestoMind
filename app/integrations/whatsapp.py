@@ -13,11 +13,13 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+GRAPH_API_VERSION = "v21.0"
 WHATSAPP_API_URL = (
-    f"https://graph.facebook.com/v21.0/{settings.whatsapp_phone_number_id}/messages"
+    f"https://graph.facebook.com/{GRAPH_API_VERSION}/{settings.whatsapp_phone_number_id}/messages"
 )
 
 SEND_TIMEOUT = 10.0
+MEDIA_TIMEOUT = 60.0
 MAX_RETRIES = 2
 
 
@@ -133,5 +135,150 @@ async def send_template(
             )
         except (httpx.TimeoutException, httpx.HTTPError) as exc:
             logger.error("WhatsApp template error (попытка %d/%d): %s", attempt, MAX_RETRIES, exc)
+
+    return False
+
+
+async def download_media_bytes(media_id: str) -> tuple[bytes, str] | None:
+    """
+    Скачивает бинарные данные вложения WhatsApp по ID из вебхука.
+
+    Returns:
+        (bytes, mime_type) или None при ошибке.
+    """
+    token = (settings.whatsapp_api_token or "").strip()
+    if not token or not media_id:
+        logger.warning("WhatsApp media: нет токена или media_id")
+        return None
+
+    meta_url = f"https://graph.facebook.com/{GRAPH_API_VERSION}/{media_id}"
+
+    try:
+        async with httpx.AsyncClient(timeout=MEDIA_TIMEOUT) as client:
+            r = await client.get(
+                meta_url,
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if r.status_code != 200:
+                logger.error(
+                    "WhatsApp media meta: HTTP %s — %s",
+                    r.status_code,
+                    r.text[:300],
+                )
+                return None
+            payload = r.json()
+            download_url = payload.get("url")
+            mime_type = (payload.get("mime_type") or "application/octet-stream").split(";")[0].strip()
+            if not download_url:
+                logger.error("WhatsApp media meta: нет поля url")
+                return None
+
+            r2 = await client.get(
+                download_url,
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if r2.status_code != 200:
+                logger.error(
+                    "WhatsApp media download: HTTP %s",
+                    r2.status_code,
+                )
+                return None
+            return (r2.content, mime_type)
+    except httpx.HTTPError as exc:
+        logger.error("WhatsApp media: ошибка загрузки: %s", exc)
+        return None
+
+
+MEDIA_UPLOAD_URL = (
+    f"https://graph.facebook.com/{GRAPH_API_VERSION}/{settings.whatsapp_phone_number_id}/media"
+)
+
+
+async def upload_media_bytes(
+    file_bytes: bytes,
+    mime_type: str,
+    filename: str = "audio.mp3",
+) -> str | None:
+    """
+    Загружает файл в WhatsApp Cloud API, возвращает media id для отправки в сообщении.
+    """
+    token = (settings.whatsapp_api_token or "").strip()
+    if not token or not file_bytes:
+        logger.warning("upload_media: нет токена или пустой файл")
+        return None
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            async with httpx.AsyncClient(timeout=MEDIA_TIMEOUT) as client:
+                response = await client.post(
+                    MEDIA_UPLOAD_URL,
+                    headers={"Authorization": f"Bearer {token}"},
+                    files={
+                        "file": (filename, file_bytes, mime_type),
+                    },
+                    data={
+                        "messaging_product": "whatsapp",
+                        "type": mime_type,
+                    },
+                )
+            if response.status_code == 200:
+                mid = (response.json() or {}).get("id")
+                if mid:
+                    return str(mid)
+                logger.error("upload_media: нет id в ответе: %s", response.text[:200])
+                return None
+            logger.error(
+                "upload_media HTTP %s (попытка %d/%d): %s",
+                response.status_code, attempt, MAX_RETRIES, response.text[:200],
+            )
+        except (httpx.TimeoutException, httpx.HTTPError) as exc:
+            logger.error("upload_media ошибка (попытка %d/%d): %s", attempt, MAX_RETRIES, exc)
+
+    return None
+
+
+async def send_voice_message(phone: str, audio_mp3: bytes) -> bool:
+    """
+    Отправить голосовое (MP3): загрузка медиа + сообщение type=audio.
+    Без токена — только лог (режим разработки).
+    """
+    if not audio_mp3:
+        return False
+    if not settings.whatsapp_api_token:
+        logger.info("📤 [WhatsApp audio → %s]: %d байт MP3 (без токена)", phone, len(audio_mp3))
+        return True
+
+    media_id = await upload_media_bytes(audio_mp3, "audio/mpeg", "reply.mp3")
+    if not media_id:
+        return False
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            async with httpx.AsyncClient(timeout=SEND_TIMEOUT) as client:
+                response = await client.post(
+                    WHATSAPP_API_URL,
+                    headers={
+                        "Authorization": f"Bearer {settings.whatsapp_api_token}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "messaging_product": "whatsapp",
+                        "to": phone,
+                        "type": "audio",
+                        "audio": {"id": media_id},
+                    },
+                )
+            if response.status_code == 200:
+                logger.info("WhatsApp: аудио доставлено → %s", phone)
+                return True
+            logger.error(
+                "WhatsApp audio: HTTP %s (попытка %d/%d): %s",
+                response.status_code, attempt, MAX_RETRIES, response.text[:200],
+            )
+        except (httpx.TimeoutException, httpx.HTTPError) as exc:
+            logger.error(
+                "WhatsApp audio: сеть (попытка %d/%d): %s",
+                attempt, MAX_RETRIES, exc,
+            )
 
     return False

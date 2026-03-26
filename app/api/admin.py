@@ -4,11 +4,13 @@ REST-эндпоинты для просмотра заказов, диалого
 """
 
 import asyncio
+import csv
+import io
 import logging
 import secrets
 import uuid
-from datetime import date, datetime, timedelta, timezone
 from collections import defaultdict
+from datetime import date, datetime, time as dt_time, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
 from sqlalchemy import delete as sql_delete
@@ -19,7 +21,18 @@ from sqlalchemy.orm import joinedload
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
-from app.db.models import Booking, ChatLog, EscalationEvent, MenuItem, Order, OrderStatus, User
+from app.db.models import (
+    Booking,
+    ChatLog,
+    EscalationEvent,
+    IntegrationEvent,
+    IntegrationHealth,
+    KnowledgeItem,
+    MenuItem,
+    Order,
+    OrderStatus,
+    User,
+)
 from app.db.session import async_session_factory, get_db, redis_client
 from app.integrations.whatsapp import send_message
 from app.services.admin_tokens import create_admin_ws_token, parse_admin_ws_token
@@ -31,11 +44,15 @@ from app.services.integration_health import (
     record_menu_sync,
     record_stoplist_sync,
 )
+from app.services.chat_log_retention import count_chat_logs_eligible_for_purge, purge_old_chat_logs
 from app.services.dialog_mgr import (
     UserState,
     append_to_history,
+    clear_pending_order,
     get_chat_history,
+    get_pending_order,
     get_user_state,
+    purge_all_session_keys_for_phone,
     set_pending_booking,
     set_pending_order,
     set_user_state,
@@ -44,6 +61,7 @@ from app.services.events import publish_event, subscribe_events
 from app.services.booking_halls import BOOKING_HALL_KEYS, BOOKING_HALL_VIP, vip_slot_occupied
 from app.services.intent_router import confirm_order, get_or_create_user, route_intent
 from app.services.menu_sync import sync_menu_from_iiko, sync_stop_lists
+from app.services.knowledge_context import load_knowledge_context_block
 from app.services.order_logic import build_menu_context, load_available_menu
 
 logger = logging.getLogger(__name__)
@@ -508,6 +526,8 @@ async def integrations_status(db: AsyncSession = Depends(get_db)) -> dict:
         if settings.whatsapp_verify_token
         else None
     )
+    base["gemini_configured"] = bool(str(settings.gemini_api_key or "").strip())
+    base["whatsapp_voice_replies_enabled"] = bool(settings.whatsapp_voice_replies)
     return base
 
 
@@ -1060,6 +1080,123 @@ async def delete_menu_item(
     return {"ok": True, "id": item_id}
 
 
+# ─── База знаний (FAQ заведения для промпта Gemini) ──────
+
+
+def _knowledge_item_dict(row: KnowledgeItem) -> dict:
+    return {
+        "id": row.id,
+        "organization_id": row.organization_id,
+        "category": row.category or "",
+        "question": row.question,
+        "answer": row.answer,
+        "is_active": row.is_active,
+        "sort_order": row.sort_order,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+class KnowledgeItemCreateBody(BaseModel):
+    category: str = Field(default="", max_length=120)
+    question: str = Field(..., min_length=1, max_length=500)
+    answer: str = Field(..., min_length=1, max_length=50_000)
+    is_active: bool = True
+    sort_order: int = Field(0, ge=-10_000, le=10_000)
+    organization_id: int | None = Field(None, description="NULL — общая запись для всех организаций")
+
+
+class KnowledgeItemPatchBody(BaseModel):
+    category: str | None = Field(None, max_length=120)
+    question: str | None = Field(None, min_length=1, max_length=500)
+    answer: str | None = Field(None, min_length=1, max_length=50_000)
+    is_active: bool | None = None
+    sort_order: int | None = Field(None, ge=-10_000, le=10_000)
+    organization_id: int | None = None
+
+
+@router.get("/knowledge")
+async def list_knowledge_items(
+    db: AsyncSession = Depends(get_db),
+    active_only: bool = Query(False, description="Только is_active=true"),
+) -> dict:
+    """Список записей базы знаний для админки."""
+    q = select(KnowledgeItem).order_by(KnowledgeItem.sort_order, KnowledgeItem.id)
+    if active_only:
+        q = q.where(KnowledgeItem.is_active.is_(True))
+    result = await db.execute(q)
+    rows = list(result.scalars().all())
+    return {"items": [_knowledge_item_dict(r) for r in rows]}
+
+
+@router.post("/knowledge")
+async def create_knowledge_item(
+    body: KnowledgeItemCreateBody,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    row = KnowledgeItem(
+        organization_id=body.organization_id,
+        category=(body.category or "").strip(),
+        question=body.question.strip(),
+        answer=body.answer.strip(),
+        is_active=body.is_active,
+        sort_order=body.sort_order,
+    )
+    db.add(row)
+    await db.flush()
+    return {"ok": True, "item": _knowledge_item_dict(row)}
+
+
+@router.patch("/knowledge/{item_id}")
+async def patch_knowledge_item(
+    item_id: int,
+    body: KnowledgeItemPatchBody,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    row = await db.get(KnowledgeItem, item_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Запись не найдена")
+    data = body.model_dump(exclude_unset=True)
+    if "category" in data and data["category"] is not None:
+        data["category"] = data["category"].strip()
+    if "question" in data and data["question"] is not None:
+        data["question"] = data["question"].strip()
+    if "answer" in data and data["answer"] is not None:
+        data["answer"] = data["answer"].strip()
+    for key, value in data.items():
+        setattr(row, key, value)
+    await db.flush()
+    return {"ok": True, "item": _knowledge_item_dict(row)}
+
+
+@router.delete("/knowledge/{item_id}")
+async def delete_knowledge_item(
+    item_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    return await _delete_knowledge_item_impl(item_id, db)
+
+
+@router.post("/knowledge/{item_id}/delete")
+async def delete_knowledge_item_post(
+    item_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    То же, что DELETE /knowledge/{id}: часть хостингов/прокси режет метод DELETE.
+    """
+    return await _delete_knowledge_item_impl(item_id, db)
+
+
+async def _delete_knowledge_item_impl(item_id: int, db: AsyncSession) -> dict:
+    row = await db.get(KnowledgeItem, item_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Запись не найдена")
+    await db.execute(sql_delete(KnowledgeItem).where(KnowledgeItem.id == item_id))
+    await db.flush()
+    return {"ok": True, "id": item_id}
+
+
 @router.post("/menu/sync")
 async def sync_menu(
     api_login: str | None = Query(
@@ -1212,6 +1349,480 @@ async def demo_delete_post(db: AsyncSession = Depends(get_db)) -> dict:
     Нужен для сред, где HTTP DELETE режется прокси/CDN (удаление «не работает», а POST проходит).
     """
     return await _demo_delete_core(db)
+
+
+# ─── Настройки: опасные операции с БД ───────────────────
+
+SETTINGS_PURGE_PHRASE = "УДАЛИТЬ ВСЕ ДАННЫЕ"
+
+
+class PurgeOperationalBody(BaseModel):
+    """Сброс операционных данных (заказы, чаты, брони и т.д.) без удаления клиентов ``users``."""
+
+    confirm: bool = Field(False, description="Должно быть true")
+    phrase: str = Field("", description="Точная фраза подтверждения")
+
+
+class DeleteOrdersBulkBody(BaseModel):
+    """Удаление заказов по списку id (и сброс Redis pending_order при совпадении)."""
+
+    confirm: bool = Field(False, description="Должно быть true")
+    order_ids: list[int] = Field(..., min_length=1, max_length=80)
+
+
+class DeleteSingleOrderBody(BaseModel):
+    confirm: bool = Field(False, description="Должно быть true")
+
+
+def _sql_delete_rowcount(res) -> int:
+    n = res.rowcount
+    return int(n) if n is not None and n >= 0 else 0
+
+
+async def _clear_redis_pending_if_matches(phone: str | None, order_id: int) -> None:
+    """Если в Redis висит черновик этого заказа — снять, чтобы клиент не застрял на мёртвом id."""
+    if not phone:
+        return
+    try:
+        pid = await get_pending_order(redis_client, phone)
+        if pid == order_id:
+            await clear_pending_order(redis_client, phone)
+    except Exception:
+        logger.exception("Redis: не удалось сбросить pending_order для %s", phone)
+
+
+@router.post("/settings/purge-operational-data")
+async def purge_operational_data(
+    body: PurgeOperationalBody,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    Удалить **все** операционные записи: ``chat_logs``, ``orders``, ``bookings``,
+    ``escalation_events``, ``integration_events``.
+
+    Таблицы ``users``, ``menu_items``, ``organizations`` **не** трогаются.
+    Сбрасывается строка ``integration_health`` (id=1), если есть.
+    Требуются ``confirm: true`` и фраза «УДАЛИТЬ ВСЕ ДАННЫЕ».
+    """
+    if not body.confirm:
+        raise HTTPException(
+            status_code=400,
+            detail='Передайте {"confirm": true, "phrase": "УДАЛИТЬ ВСЕ ДАННЫЕ"}',
+        )
+    if (body.phrase or "").strip() != SETTINGS_PURGE_PHRASE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Введите фразу подтверждения: {SETTINGS_PURGE_PHRASE}",
+        )
+
+    r_chat = await db.execute(sql_delete(ChatLog))
+    r_ord = await db.execute(sql_delete(Order))
+    r_book = await db.execute(sql_delete(Booking))
+    r_esc = await db.execute(sql_delete(EscalationEvent))
+    r_int = await db.execute(sql_delete(IntegrationEvent))
+
+    row = await db.get(IntegrationHealth, 1)
+    if row is not None:
+        row.last_stoplist_at = None
+        row.last_stoplist_ok = False
+        row.last_stoplist_error = ""
+        row.last_menu_sync_at = None
+        row.last_menu_sync_ok = False
+        row.last_menu_sync_error = ""
+
+    await db.commit()
+    logger.warning(
+        "Админ: полный сброс операционных данных (чаты/заказы/брони/эскалации/журнал интеграций)",
+    )
+    return {
+        "ok": True,
+        "chat_logs_deleted": _sql_delete_rowcount(r_chat),
+        "orders_deleted": _sql_delete_rowcount(r_ord),
+        "bookings_deleted": _sql_delete_rowcount(r_book),
+        "escalation_events_deleted": _sql_delete_rowcount(r_esc),
+        "integration_events_deleted": _sql_delete_rowcount(r_int),
+    }
+
+
+@router.post("/settings/clear-menu-and-stop-snapshot")
+async def clear_menu_and_stop_snapshot(
+    body: ClearMenuBody,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    Удалить все строки ``menu_items`` и сбросить в UI блок «последняя синхронизация стоп-листа»
+    (поля ``integration_health`` для стопа). Отдельной таблицы стоп-листа в БД нет.
+    """
+    if not body.confirm:
+        raise HTTPException(
+            status_code=400,
+            detail='Для очистки передайте в теле JSON: {"confirm": true}',
+        )
+    cnt = await db.scalar(select(func.count()).select_from(MenuItem)) or 0
+    await db.execute(sql_delete(MenuItem))
+    row = await db.get(IntegrationHealth, 1)
+    if row is not None:
+        row.last_stoplist_at = None
+        row.last_stoplist_ok = False
+        row.last_stoplist_error = ""
+    await db.commit()
+    logger.warning(
+        "Админ: очистка menu_items и сброс снимка стоп-листа в integration_health, позиций: %d",
+        int(cnt),
+    )
+    return {"ok": True, "menu_items_deleted": int(cnt), "stop_snapshot_reset": True}
+
+
+@router.post("/orders/bulk-delete")
+async def bulk_delete_orders(
+    body: DeleteOrdersBulkBody,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Удалить заказы по списку id. Клиенты (users) не удаляются."""
+    if not body.confirm:
+        raise HTTPException(
+            status_code=400,
+            detail='Передайте {"confirm": true, "order_ids": [1, 2, ...]}',
+        )
+    ids = sorted({int(x) for x in body.order_ids if int(x) > 0})
+    if not ids:
+        raise HTTPException(status_code=400, detail="Список order_ids пуст")
+
+    # outerjoin: заказ должен удаляться даже при битом user_id (INNER JOIN давал бы «не найден»).
+    res = await db.execute(
+        select(Order, User.phone)
+        .outerjoin(User, Order.user_id == User.id)
+        .where(Order.id.in_(ids)),
+    )
+    rows = res.all()
+    found = {o.id for o, _p in rows}
+    missing = sorted(set(ids) - found)
+    if missing:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Заказы не найдены: {missing}",
+        )
+
+    for order, phone in rows:
+        await _clear_redis_pending_if_matches(phone, order.id)
+
+    r_del = await db.execute(sql_delete(Order).where(Order.id.in_(ids)))
+    await db.commit()
+    deleted = _sql_delete_rowcount(r_del)
+    for oid in ids:
+        await publish_event("order_deleted", {"order_id": oid})
+    logger.warning("Админ: удалено заказов (bulk): %s", ids)
+    return {"ok": True, "deleted": deleted, "order_ids": ids}
+
+
+@router.post("/orders/{order_id}/delete")
+async def delete_single_order(
+    order_id: int,
+    body: DeleteSingleOrderBody,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Удалить один заказ по id."""
+    if not body.confirm:
+        raise HTTPException(
+            status_code=400,
+            detail='Передайте {"confirm": true}',
+        )
+    res = await db.execute(
+        select(Order, User.phone)
+        .outerjoin(User, Order.user_id == User.id)
+        .where(Order.id == order_id),
+    )
+    row = res.one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Заказ не найден")
+    order, phone = row
+    await _clear_redis_pending_if_matches(phone, order.id)
+    await db.execute(sql_delete(Order).where(Order.id == order_id))
+    await db.commit()
+    await publish_event("order_deleted", {"order_id": order_id})
+    logger.warning("Админ: удалён заказ #%s", order_id)
+    return {"ok": True, "id": order_id}
+
+
+MAX_CSV_EXPORT_ROWS = 50_000
+
+
+def _export_range_utc(date_from: date | None, date_to: date | None) -> tuple[datetime, datetime]:
+    """
+    Полуинтервал [lo, hi) в UTC для фильтрации по created_at.
+    По умолчанию — последние 90 суток.
+    """
+    today = datetime.now(timezone.utc).date()
+    df = date_from or (today - timedelta(days=90))
+    dt_end = date_to or today
+    if df > dt_end:
+        raise HTTPException(status_code=400, detail="date_from не может быть позже date_to")
+    lo = datetime.combine(df, dt_time.min, tzinfo=timezone.utc)
+    hi_excl = datetime.combine(dt_end, dt_time.min, tzinfo=timezone.utc) + timedelta(days=1)
+    return lo, hi_excl
+
+
+class RedisPurgePhoneBody(BaseModel):
+    """Сброс ключей Redis/InMemory-сессии по номеру (без изменений в БД)."""
+
+    confirm: bool = Field(False, description="Должно быть true")
+    phone: str = Field(..., min_length=8, max_length=32, description="Телефон как в WhatsApp (E.164)")
+
+
+class RetentionRunBody(BaseModel):
+    confirm: bool = Field(True, description="Должно быть true")
+
+
+@router.get("/settings/environment")
+async def settings_environment(db: AsyncSession = Depends(get_db)) -> dict:
+    """
+    Безопасный снимок окружения для админки (без секретов и полных токенов).
+    """
+    elig = await count_chat_logs_eligible_for_purge(db)
+    integ = await build_status_payload(
+        db,
+        iiko_configured=_iiko_env_configured(),
+        whatsapp_configured=_whatsapp_env_configured(),
+    )
+    return {
+        "app_name": settings.app_name,
+        "app_version": settings.app_version,
+        "app_debug": settings.app_debug,
+        "db_mode": settings.db_mode,
+        "redis_enabled": settings.redis_enabled,
+        "redis_backend": "redis" if settings.redis_enabled else "in_memory",
+        "integrations": {
+            "iiko": {
+                "configured": _iiko_env_configured(),
+                "terminal_group_id_set": bool(str(settings.iiko_terminal_group_id or "").strip()),
+            },
+            "whatsapp": {
+                "configured": _whatsapp_env_configured(),
+                "phone_number_id_set": bool(str(settings.whatsapp_phone_number_id or "").strip()),
+            },
+            "telegram": {
+                "configured": bool(
+                    str(settings.telegram_bot_token or "").strip()
+                    and str(settings.telegram_admin_chat_id or "").strip(),
+                ),
+            },
+            "gemini": {"configured": bool(str(settings.gemini_api_key or "").strip())},
+            "public_base_url_set": bool(str(settings.public_base_url or "").strip()),
+        },
+        "integration_health": {
+            "last_stoplist": integ.get("last_stoplist"),
+            "last_menu_sync": integ.get("last_menu_sync"),
+        },
+        "chat_log_retention": {
+            "enabled": settings.chat_log_retention_days > 0,
+            "retention_days": settings.chat_log_retention_days,
+            "interval_seconds": settings.chat_log_retention_interval_seconds,
+            "eligible_for_purge_count": elig,
+        },
+    }
+
+
+@router.post("/settings/redis-purge-phone")
+async def redis_purge_phone(body: RedisPurgePhoneBody) -> dict:
+    """Удалить из Redis/in-memory ключи chat:history, user:state, pending_order/booking для номера."""
+    if not body.confirm:
+        raise HTTPException(
+            status_code=400,
+            detail='Передайте {"confirm": true, "phone": "+7700..."}',
+        )
+    phone = (body.phone or "").strip()
+    if not phone:
+        raise HTTPException(status_code=400, detail="Укажите телефон")
+    await purge_all_session_keys_for_phone(redis_client, phone)
+    logger.warning("Админ: сброшена Redis-сессия для %s", phone[:6] + "…")
+    return {"ok": True, "phone": phone}
+
+
+@router.post("/settings/chat-logs/run-retention")
+async def run_chat_log_retention_manual(
+    body: RetentionRunBody,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Разовый запуск политики ретеншна (та же, что в фоне по расписанию)."""
+    if not body.confirm:
+        raise HTTPException(status_code=400, detail='Передайте {"confirm": true}')
+    if settings.chat_log_retention_days <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Ретеншн выключен: задайте CHAT_LOG_RETENTION_DAYS > 0 в .env",
+        )
+    n = await purge_old_chat_logs(db)
+    await db.commit()
+    return {"ok": True, "deleted": n, "retention_days": settings.chat_log_retention_days}
+
+
+@router.post("/orders/bulk-cancel")
+async def bulk_cancel_orders(
+    body: DeleteOrdersBulkBody,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Перевести заказы в статус cancelled (строки в БД сохраняются)."""
+    if not body.confirm:
+        raise HTTPException(
+            status_code=400,
+            detail='Передайте {"confirm": true, "order_ids": [1, 2, ...]}',
+        )
+    ids = sorted({int(x) for x in body.order_ids if int(x) > 0})
+    if not ids:
+        raise HTTPException(status_code=400, detail="Список order_ids пуст")
+
+    res = await db.execute(
+        select(Order, User.phone)
+        .join(User, Order.user_id == User.id)
+        .where(Order.id.in_(ids)),
+    )
+    rows = res.all()
+    found = {o.id for o, _p in rows}
+    missing = sorted(set(ids) - found)
+    if missing:
+        raise HTTPException(status_code=404, detail=f"Заказы не найдены: {missing}")
+
+    cancelled = 0
+    skipped = 0
+    to_emit: list[tuple[int, str, float]] = []
+    for order, phone in rows:
+        if order.status == OrderStatus.CANCELLED.value:
+            skipped += 1
+            continue
+        order.status = OrderStatus.CANCELLED.value
+        order.iiko_last_error = None
+        await _clear_redis_pending_if_matches(phone, order.id)
+        cancelled += 1
+        to_emit.append((order.id, phone, float(order.total_price)))
+
+    await db.commit()
+    for oid, phone, total in to_emit:
+        await publish_event(
+            "order_updated",
+            {
+                "order_id": oid,
+                "status": OrderStatus.CANCELLED.value,
+                "phone": phone,
+                "total_price": total,
+                "iiko_last_error": None,
+            },
+        )
+    logger.warning("Админ: массовая отмена заказов: ids=%s, отменено=%d, уже были отменены=%d", ids, cancelled, skipped)
+    return {"ok": True, "cancelled": cancelled, "skipped_already_cancelled": skipped, "order_ids": ids}
+
+
+@router.get("/export/orders")
+async def export_orders_csv(
+    date_from: date | None = Query(None, description="Начало периода (UTC, дата)"),
+    date_to: date | None = Query(None, description="Конец периода включительно (UTC, дата)"),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """CSV заказов за период (UTF-8 с BOM для Excel)."""
+    lo, hi_excl = _export_range_utc(date_from, date_to)
+    lo_sql = _sql_dt_for_filter(lo)
+    hi_sql = _sql_dt_for_filter(hi_excl)
+
+    res = await db.execute(
+        select(Order, User.phone, User.name)
+        .join(User, Order.user_id == User.id)
+        .where(Order.created_at >= lo_sql, Order.created_at < hi_sql)
+        .order_by(Order.id.asc())
+        .limit(MAX_CSV_EXPORT_ROWS + 1),
+    )
+    rows = res.all()
+    if len(rows) > MAX_CSV_EXPORT_ROWS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Слишком много строк (> {MAX_CSV_EXPORT_ROWS}). Сузьте период.",
+        )
+
+    buf = io.StringIO()
+    w = csv.writer(buf, lineterminator="\n")
+    w.writerow(
+        [
+            "order_id",
+            "user_id",
+            "user_phone",
+            "user_name",
+            "status",
+            "total_price",
+            "order_type",
+            "created_at_utc",
+            "updated_at_utc",
+        ],
+    )
+    for o, phone, name in rows:
+        meta = _order_meta_from_items_json(o.items_json if isinstance(o.items_json, dict) else None)
+        w.writerow(
+            [
+                o.id,
+                o.user_id,
+                phone or "",
+                name or "",
+                o.status or "",
+                float(o.total_price),
+                meta.get("order_type") or "",
+                o.created_at.isoformat() if o.created_at else "",
+                o.updated_at.isoformat() if o.updated_at else "",
+            ],
+        )
+
+    return Response(
+        content=buf.getvalue().encode("utf-8-sig"),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": 'attachment; filename="restomind_orders_export.csv"',
+        },
+    )
+
+
+@router.get("/export/chats")
+async def export_chats_csv(
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """CSV сообщений chat_logs за период (роль, телефон клиента)."""
+    lo, hi_excl = _export_range_utc(date_from, date_to)
+    lo_sql = _sql_dt_for_filter(lo)
+    hi_sql = _sql_dt_for_filter(hi_excl)
+
+    res = await db.execute(
+        select(ChatLog, User.phone)
+        .join(User, ChatLog.user_id == User.id)
+        .where(ChatLog.created_at >= lo_sql, ChatLog.created_at < hi_sql)
+        .order_by(ChatLog.id.asc())
+        .limit(MAX_CSV_EXPORT_ROWS + 1),
+    )
+    rows = res.all()
+    if len(rows) > MAX_CSV_EXPORT_ROWS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Слишком много строк (> {MAX_CSV_EXPORT_ROWS}). Сузьте период.",
+        )
+
+    buf = io.StringIO()
+    w = csv.writer(buf, lineterminator="\n")
+    w.writerow(["log_id", "user_id", "user_phone", "role", "created_at_utc", "content"])
+    for cl, phone in rows:
+        w.writerow(
+            [
+                cl.id,
+                cl.user_id,
+                phone or "",
+                cl.role or "",
+                cl.created_at.isoformat() if cl.created_at else "",
+                (cl.content or "").replace("\r\n", "\n").replace("\r", "\n"),
+            ],
+        )
+
+    return Response(
+        content=buf.getvalue().encode("utf-8-sig"),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": 'attachment; filename="restomind_chats_export.csv"',
+        },
+    )
 
 
 # ─── Даты заказов (UTC) — общие для /stats и /analytics ───
@@ -1696,7 +2307,11 @@ async def test_bot(body: TextRequest) -> dict:
     Тестовый endpoint: эмулирует диалог с ботом без WhatsApp.
     Использует фиктивный номер 'test-admin', проходит полный цикл AI.
     """
-    from app.api.webhooks import handle_booking_confirmation, handle_confirmation
+    from app.api.webhooks import (
+        handle_booking_confirmation,
+        handle_confirmation,
+        handle_order_payment_choice,
+    )
 
     phone = "test-admin"
     message_text = body.text
@@ -1705,6 +2320,13 @@ async def test_bot(body: TextRequest) -> dict:
 
     if state == UserState.HUMAN_MODE:
         return {"reply": "[HUMAN_MODE — AI отключён]", "state": state.value, "intent": None}
+
+    if state == UserState.AWAITING_ORDER_PAYMENT:
+        reply = await handle_order_payment_choice(phone, message_text)
+        await append_to_history(redis_client, phone, "user", message_text)
+        await append_to_history(redis_client, phone, "assistant", reply)
+        new_state = await get_user_state(redis_client, phone)
+        return {"reply": reply, "state": new_state.value, "intent": None}
 
     if state == UserState.CONFIRMING_ORDER:
         reply = await handle_confirmation(phone, message_text)
@@ -1726,7 +2348,10 @@ async def test_bot(body: TextRequest) -> dict:
     async with async_session_factory() as db:
         menu_items = await load_available_menu(db)
         menu_context = build_menu_context(menu_items)
-        ai_response = await call_gemini(history, message_text, menu_context)
+        u_row = await db.scalar(select(User).where(User.phone == phone))
+        org_id = u_row.organization_id if u_row else None
+        kb_context = await load_knowledge_context_block(db, org_id)
+        ai_response = await call_gemini(history, message_text, menu_context, kb_context)
         result = await route_intent(
             db, phone, ai_response, menu_items=menu_items,
         )

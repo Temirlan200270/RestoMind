@@ -5,6 +5,7 @@ from datetime import date, timedelta
 import pytest
 
 from app.schemas.ai_schemas import AIBrainResponse, BookingDetails, OrderItem
+from app.services.dialog_mgr import UserState
 from app.services.intent_router import _handle_order, confirm_order, route_intent
 from app.db.models import Booking, Order
 
@@ -32,6 +33,8 @@ async def test_hall_preorder_creates_booking_and_order(db_with_menu) -> None:
     )
     r = await _handle_order(db_with_menu, "+77001234567", ai, menu_items=None)
     assert r.pending_order_id is not None
+    assert r.new_state == UserState.AWAITING_ORDER_PAYMENT
+    assert "оплат" in (r.reply_text or "").lower()
 
     oid = r.pending_order_id
     order = await db_with_menu.get(Order, oid)

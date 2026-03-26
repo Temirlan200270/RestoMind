@@ -72,7 +72,7 @@ RestoMind/
 
 ## Реализованный функционал (сводка)
 
-- Диалоги с историей в Redis, состояния: `CHATTING`, `CONFIRMING_ORDER`, `CONFIRMING_BOOKING`, `HUMAN_MODE`.
+- Диалоги с историей в Redis, состояния: `CHATTING`, `AWAITING_ORDER_PAYMENT` (выбор оплаты перед Да/Нет), `CONFIRMING_ORDER`, `CONFIRMING_BOOKING`, `HUMAN_MODE`.
 - Контекст меню для Gemini: текстовый каталог с ценами и `[id: …]` (не векторный RAG).
 - Подтверждение заказа и брони словами да/нет; отправка заказа в iiko после подтверждения (`create_delivery_order`).
 - Перехват оператором, пауза ИИ (`ai_paused`), сообщения оператора в WhatsApp; WebSocket-события для админки.
@@ -206,4 +206,48 @@ class AIBrainResponse(BaseModel):
 ### Дополнительно (вне обязательного объёма v2.0)
 
 - Векторный / семантический поиск по меню при очень большом каталоге.
-- Телефония: заготовка `app/integrations/telephony.py`.
+
+---
+
+## Дорожная карта: база знаний, голос, Twilio (MVP)
+
+Объединяет поэтапный подход (контролируемые знания → масштабирование → голос) с продуктовым выбором **WhatsApp Business (текст)** на проде и **Twilio (PSTN)** для звонков на номер. Звонки **внутри приложения WhatsApp** официально не автоматизируются тем же API, что текстовый вебхук; голос в WA — отдельно: **голосовые сообщения** в чате (медиа) vs **телефонная линия** через Twilio.
+
+### Фаза 11 — Knowledge Base (реализовано в коде)
+
+| Компонент | Статус |
+|-----------|--------|
+| Таблица `knowledge_items` (`KnowledgeItem`): `organization_id`, `category`, `question`, `answer`, `is_active`, `sort_order` | ✅ `create_all` / новая миграция при появлении Alembic-ревизий |
+| Сервис `app/services/knowledge_context.py` — сбор блока для промпта (лимит символов) | ✅ |
+| Подстановка в Gemini: `call_gemini(..., kb_context=...)` перед меню | ✅ WhatsApp + `test-bot` |
+| REST `GET/POST/PATCH/DELETE` `/api/admin/knowledge` | ✅ |
+| Админка: вкладка «База знаний» | ✅ |
+
+**Мультитенантность:** `organization_id IS NULL` — общие правила для всех; иначе подмешиваются записи организации пользователя (поле `users.organization_id`).
+
+**Следующий шаг (Фаза 11b, опционально):** Alembic-ревизия только для PostgreSQL-деплоев, если таблицу нельзя пересоздать; семантический поиск (RAG) при большом объёме текста.
+
+### Фаза 12 — Voice в WhatsApp (медиа)
+
+| Компонент | Статус |
+|-----------|--------|
+| Вебхук `POST /api/whatsapp/webhook`: `type === "audio"` → `audio.id` | ✅ |
+| Скачивание медиа Meta Graph API | ✅ `app/integrations/whatsapp.py` → `download_media_bytes` |
+| STT через Gemini (мультимодально в `CHATTING`; лёгкая расшифровка для подтверждений / оператора) | ✅ `call_gemini_with_audio`, `gemini_transcribe_voice` в `app/services/ai_brain.py` |
+| Тот же `process_message(..., voice_audio=...)` — меню + KB + Gemini | ✅ |
+| TTS бесплатно (опционально) | ✅ `edge-tts` → `app/services/tts_edge.py`, env `WHATSAPP_VOICE_REPLIES`, `EDGE_TTS_VOICE` |
+| Отправка аудио в WhatsApp | ✅ `upload_media_bytes`, `send_voice_message` в `app/integrations/whatsapp.py` |
+| Индикатор в админке «Интеграции» | ✅ `gemini_configured`, `whatsapp_voice_replies_enabled` в `/integrations/status` |
+
+**Zero-budget:** OpenAI Whisper и `OPENAI_API_KEY` убраны; голос завязан на **GEMINI_API_KEY** (бесплатный tier Google AI).
+
+**В Meta Developer:** в подписке вебхука WhatsApp должны приходить сообщения с полем `messages` (тип `audio` для голосовых).
+
+### Фаза 13 — Twilio Voice MVP
+
+- Входящий звонок на **телефонный номер** (PSTN) → Twilio Media Streams / WebSocket → STT → `call_gemini` (+ меню + KB) → TTS → стрим обратно.
+- Заготовка интерфейсов: `app/integrations/telephony.py`.
+
+### Телефония (историческая ссылка)
+
+- Ранее: заготовка `app/integrations/telephony.py` (STT/TTS абстракции).

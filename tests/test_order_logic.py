@@ -9,6 +9,8 @@ from app.schemas.ai_schemas import OrderItem
 from app.services.order_logic import (
     ValidatedOrder,
     build_menu_context,
+    build_summary_text_from_stored_items,
+    detect_payment_method_from_text,
     load_available_menu,
     validate_order,
 )
@@ -129,3 +131,35 @@ async def test_validate_with_mock_menu_fallback() -> None:
 
     assert len(result.valid_items) == 1
     assert result.total_price == 2790.0
+
+
+def test_detect_payment_cash_card_remote() -> None:
+    assert detect_payment_method_from_text("наличными") == "cash"
+    assert detect_payment_method_from_text("Картой привезите терминал") == "card"
+    assert detect_payment_method_from_text("каспи переведу") == "remote"
+    assert detect_payment_method_from_text("онлайн ссылкой") == "remote"
+    assert detect_payment_method_from_text("хммм") is None
+
+
+def test_detect_payment_multilingual() -> None:
+    assert detect_payment_method_from_text("Картамен төлеу") == "card"
+    assert detect_payment_method_from_text("By cash please") == "cash"
+    assert detect_payment_method_from_text("naqd pul") == "cash"
+    assert detect_payment_method_from_text("Payme or Kaspi") == "remote"
+    assert detect_payment_method_from_text("payment link") == "remote"
+
+
+def test_detect_payment_no_false_positive_potato() -> None:
+    """«Карт» в составе «картошка» не считаем картой."""
+    assert detect_payment_method_from_text("Добавьте картошку фри") is None
+
+
+def test_build_summary_from_stored_items() -> None:
+    j: dict = {
+        "items": [
+            {"name": "Плов", "quantity": 2, "item_total": 5580.0},
+        ],
+    }
+    s = build_summary_text_from_stored_items(j)
+    assert "Плов" in s
+    assert "5580" in s

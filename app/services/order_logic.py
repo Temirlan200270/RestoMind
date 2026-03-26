@@ -6,8 +6,10 @@ MOCK_MENU используется как fallback, если таблица пу
 """
 
 import logging
+import re
 from dataclasses import dataclass
 from difflib import get_close_matches
+from typing import Literal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +20,150 @@ from app.db.models import MenuItem
 from app.schemas.ai_schemas import AIBrainResponse, OrderItem
 
 logger = logging.getLogger(__name__)
+
+PaymentMethodKey = Literal["cash", "card", "remote"]
+
+# Фразы для эвристики (мультиязычно: ru/kk/en/uz + латиница). Порядок проверок: remote → card → cash.
+_PAYMENT_REMOTE_HINTS: tuple[str, ...] = (
+    "удалён",
+    "удален",
+    "удалённ",
+    "удаленн",
+    "перевод",
+    "переведу",
+    "онлайн",
+    "онлаин",
+    "ссылк",
+    "ссылка",
+    "kaspi",
+    "каспи",
+    "kаспи",
+    " payme",
+    "payme",
+    "пэйми",
+    "пейми",
+    "halyk",
+    "халык",
+    "haluk",
+    " qr",
+    "qr ",
+    "qr-код",
+    "qrcode",
+    " link",
+    "link ",
+    "payment link",
+    "remote",
+    "online pay",
+    "apple pay",
+    "google pay",
+    "wallet",
+    "paypal",
+    "stripe",
+    "click",  # часто переводы в СНГ
+    "bee pay",
+    "beepay",
+)
+
+_PAYMENT_CARD_HINTS: tuple[str, ...] = (
+    # Не использовать голое «карт» — ловит «картошка» и т.п.
+    "картамен",
+    "картпен",
+    "картой",
+    "картою",
+    "картасы",
+    "на карту",
+    "по карте",
+    " картой",
+    " картам",
+    "kartamen",
+    "kartpen",
+    "kartoy",
+    "card",
+    "cards",
+    "терминал",
+    "terminal",
+    "pos",
+    "безнал",
+    "visa",
+    "master",
+    "maestro",
+    "мир ",
+    " debit",
+    "debit ",
+    "credit card",
+    "tap to pay",
+    "contactless",
+    "банк карт",
+)
+
+_PAYMENT_CASH_HINTS: tuple[str, ...] = (
+    "налич",
+    "cash",
+    "налом",
+    " кэш",
+    "кэш ",
+    "by cash",
+    "with cash",
+    "pay cash",
+    "naqd",
+    "нақт",
+    "накты",
+    "naqd pul",
+    "qolma",
+    "қолма",
+    "kolma",
+    "nakit",
+    "naqdda",
+    "пулмен",  # каз.: наличными (контекст)
+    "ақшамен",
+    "akshemen",
+)
+
+
+def _normalize_payment_input(text: str) -> str:
+    """Нижний регистр, апострофы, типографика; буквы (unicode) + цифры + пробел/дефис."""
+    s = (text or "").strip().lower()
+    for ch in ("'", "'", "`", "´", "ʼ", "ʻ"):
+        s = s.replace(ch, "")
+    s = s.replace("ё", "е")
+    # \w в Python 3 — unicode-буквы; оставляем дефис для составных слов
+    s = re.sub(r"[^\w\s\-]", " ", s, flags=re.UNICODE)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def detect_payment_method_from_text(text: str) -> PaymentMethodKey | None:
+    """
+    Распознаёт ответ клиента о способе оплаты (ключ для order_meta.payment_method).
+    Эвристики по ключевым фрагментам; порядок важен (удалённая оплата — до «карты»).
+    """
+    t = _normalize_payment_input(text)
+    if not t:
+        return None
+
+    if any(h in t for h in _PAYMENT_REMOTE_HINTS):
+        return "remote"
+    if any(h in t for h in _PAYMENT_CARD_HINTS):
+        return "card"
+    if any(h in t for h in _PAYMENT_CASH_HINTS) or t in ("нал", "cash", "naqd"):
+        return "cash"
+    return None
+
+
+def build_summary_text_from_stored_items(items_json: dict[str, object]) -> str:
+    """Текстовые строки позиций из сохранённого items_json (после смены оплаты и т.п.)."""
+    items = items_json.get("items")
+    if not isinstance(items, list) or not items:
+        return ""
+    lines: list[str] = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        name = it.get("name", "—")
+        q = it.get("quantity", 1)
+        total = float(it.get("item_total", 0))
+        lines.append(f"  • {name} × {q} — {total:.0f} ₸")
+    return "\n".join(lines)
+
 
 # Fallback, если таблица menu_items пуста (меню ПловXана из app/data/plovxana_menu.py)
 MOCK_MENU: dict[str, float] = build_mock_menu_dict()
