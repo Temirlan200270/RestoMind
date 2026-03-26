@@ -3967,6 +3967,16 @@ function adminApp() {
         // ─── WebSocket ────────────────────────────────
         connectWebSocket() {
             if (!this.authenticated || !this.wsToken) return;
+            // Не держим два сокета одновременно — иначе события (order_updated/new_message) будут дублироваться.
+            try {
+                if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
+                    this.ws.onopen = null;
+                    this.ws.onclose = null;
+                    this.ws.onerror = null;
+                    this.ws.onmessage = null;
+                    this.ws.close();
+                }
+            } catch (e) { /* noop */ }
             const proto = location.protocol === 'https:' ? 'wss' : 'ws';
             const url = `${proto}://${location.host}/api/admin/ws?token=${encodeURIComponent(this.wsToken)}`;
 
@@ -3980,6 +3990,7 @@ function adminApp() {
 
             this.ws.onclose = () => {
                 this.wsConnected = false;
+                this.ws = null;
                 console.log('[WS] Disconnected');
                 this.scheduleReconnect();
             };

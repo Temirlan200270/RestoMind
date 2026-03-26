@@ -155,6 +155,15 @@ class IikoClient:
         last_exc: Exception | None = None
         for attempt in range(1, MAX_RETRIES + 1):
             try:
+                # Debug: логируем минимум про customer.phone, чтобы быстро ловить null/не тот формат.
+                try:
+                    order_obj = payload.get("order") if isinstance(payload, dict) else None
+                    customer_obj = order_obj.get("customer") if isinstance(order_obj, dict) else None
+                    phone = customer_obj.get("phone") if isinstance(customer_obj, dict) else None
+                    logger.info("iiko: deliveries/create payload customer.phone=%r", phone)
+                except Exception:
+                    pass
+
                 response = await self._http.post(
                     "/api/1/deliveries/create",
                     headers=self._auth_headers(),
