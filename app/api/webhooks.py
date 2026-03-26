@@ -58,6 +58,39 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/whatsapp", tags=["WhatsApp Webhook"])
 
+WHATSAPP_DEDUPE_TTL_SECONDS = 15 * 60
+
+
+async def _dedupe_whatsapp_message(message_id: str) -> bool:
+    """
+    Защита от дублей вебхука Meta.
+
+    Meta может доставлять одно и то же сообщение несколько раз, поэтому без идемпотентности
+    в админке появляются дубли (и расходуется Gemini).
+
+    Returns:
+        True если сообщение уже было обработано (дубликат), иначе False.
+    """
+    mid = (message_id or "").strip()
+    if not mid:
+        return False
+    key = f"wa:dedupe:{mid}"
+    try:
+        # redis.asyncio.Redis поддерживает nx/ex
+        created = await redis_client.set(key, "1", ex=WHATSAPP_DEDUPE_TTL_SECONDS, nx=True)  # type: ignore[arg-type]
+        return not bool(created)
+    except TypeError:
+        # InMemoryRedis не поддерживает nx — делаем простой get/set
+        existing = await redis_client.get(key)
+        if existing:
+            return True
+        try:
+            await redis_client.setex(key, WHATSAPP_DEDUPE_TTL_SECONDS, "1")
+        except Exception:
+            await redis_client.set(key, "1", ex=WHATSAPP_DEDUPE_TTL_SECONDS)
+        return False
+
+
 
 async def _save_chat_log(
     db: AsyncSession,
@@ -637,19 +670,28 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks) -
         entry = body.get("entry", [{}])[0]
         changes = entry.get("changes", [{}])[0]
         value = changes.get("value", {})
-        messages = value.get("messages", [])
+        messages = value.get("messages", []) or []
 
-        if messages:
-            msg = messages[0]
-            phone = msg.get("from", "")
-            msg_type = msg.get("type") or ""
+        for msg in messages:
+            if not isinstance(msg, dict):
+                continue
+            phone = (msg.get("from") or "").strip()
+            msg_type = (msg.get("type") or "").strip().lower()
+            message_id = (msg.get("id") or "").strip()
 
-            if phone and msg_type == "audio":
+            if not phone:
+                continue
+
+            if message_id and await _dedupe_whatsapp_message(message_id):
+                logger.info("Дубликат WhatsApp message_id=%s от %s — пропущен", message_id, phone)
+                continue
+
+            if msg_type == "audio":
                 media_id = (msg.get("audio") or {}).get("id") or ""
                 if media_id:
                     background_tasks.add_task(process_voice_message, phone, media_id)
                     logger.info("Голосовое от %s поставлено в очередь", phone)
-            elif phone:
+            else:
                 message_text = (msg.get("text") or {}).get("body") or ""
                 if message_text:
                     background_tasks.add_task(process_message, phone, message_text)

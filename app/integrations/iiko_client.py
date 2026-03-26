@@ -160,6 +160,17 @@ class IikoClient:
                     headers=self._auth_headers(),
                     json=payload,
                 )
+                if response.status_code >= 400:
+                    # iiko почти всегда возвращает полезные validationErrors в теле ответа.
+                    # Без этого в логах остаётся только "400 Bad Request" без причины.
+                    body_preview = (response.text or "")[:2000]
+                    logger.error(
+                        "iiko: deliveries/create HTTP %s (попытка %d/%d). body=%s",
+                        response.status_code,
+                        attempt,
+                        MAX_RETRIES,
+                        body_preview,
+                    )
                 response.raise_for_status()
                 result = response.json()
 
@@ -174,6 +185,11 @@ class IikoClient:
                     attempt, MAX_RETRIES, exc,
                 )
                 if attempt < MAX_RETRIES:
+                    await asyncio.sleep(RETRY_DELAY * attempt)
+            except httpx.HTTPStatusError as exc:
+                # 4xx/5xx — не ретраим бесконечно, но сохраним контекст.
+                last_exc = exc
+                if attempt < MAX_RETRIES and (exc.response is not None) and exc.response.status_code >= 500:
                     await asyncio.sleep(RETRY_DELAY * attempt)
 
         raise last_exc or RuntimeError("iiko: не удалось создать заказ")
