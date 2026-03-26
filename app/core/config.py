@@ -118,6 +118,19 @@ class Settings(BaseSettings):
         default="",
         validation_alias=AliasChoices("IIKO_ORDER_TYPE_ID", "iiko_order_type_id"),
     )
+    # Раздельные типы (опционально): если заданы — имеют приоритет над IIKO_ORDER_TYPE_ID.
+    iiko_order_type_id_delivery: str = Field(
+        default="",
+        validation_alias=AliasChoices("IIKO_ORDER_TYPE_ID_DELIVERY", "iiko_order_type_id_delivery"),
+    )
+    iiko_order_type_id_pickup: str = Field(
+        default="",
+        validation_alias=AliasChoices("IIKO_ORDER_TYPE_ID_PICKUP", "iiko_order_type_id_pickup"),
+    )
+    iiko_order_type_id_hall: str = Field(
+        default="",
+        validation_alias=AliasChoices("IIKO_ORDER_TYPE_ID_HALL", "iiko_order_type_id_hall"),
+    )
     # Синхронизация меню: только позиции с type Dish/Good (отсекает модификаторы и пр.; при False — все продукты)
     iiko_menu_sync_only_dish_good: bool = Field(
         default=False,

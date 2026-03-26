@@ -193,9 +193,22 @@ async def _send_order_to_iiko(
         comment = " · ".join(comment_bits)
 
         terminal_group = (settings.iiko_terminal_group_id or "").strip()
-        order_type_id = (settings.iiko_order_type_id or "").strip()
+        ot = (meta.get("order_type") or "").strip().lower()
+        if ot == "delivery":
+            order_type_id = (settings.iiko_order_type_id_delivery or "").strip()
+        elif ot == "pickup":
+            order_type_id = (settings.iiko_order_type_id_pickup or "").strip()
+        elif ot == "hall":
+            order_type_id = (settings.iiko_order_type_id_hall or "").strip()
+        else:
+            order_type_id = ""
         if not order_type_id:
-            msg = "IIKO_ORDER_TYPE_ID не задан — iiko deliveries/create требует orderTypeId или orderServiceType"
+            order_type_id = (settings.iiko_order_type_id or "").strip()
+        if not order_type_id:
+            msg = (
+                "Не задан orderTypeId для iiko. Укажите IIKO_ORDER_TYPE_ID "
+                "или раздельные IIKO_ORDER_TYPE_ID_DELIVERY/PICKUP/HALL"
+            )
             logger.warning("Заказ #%d: %s", order_id, msg)
             return False, msg
         phone_e164 = _normalize_phone_e164(phone)
