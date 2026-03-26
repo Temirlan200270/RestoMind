@@ -7,6 +7,7 @@
 import logging
 from typing import Any
 
+import re
 from fastapi import APIRouter, BackgroundTasks, Query, Request, Response
 
 from sqlalchemy import select
@@ -89,6 +90,27 @@ async def _dedupe_whatsapp_message(message_id: str) -> bool:
         except Exception:
             await redis_client.set(key, "1", ex=WHATSAPP_DEDUPE_TTL_SECONDS)
         return False
+
+
+def _normalize_phone_e164(phone: str) -> str:
+    """
+    iiko deliveries/create строго валидирует customer.phone.
+    В БД/вебхуке у нас телефон обычно хранится как '7705...' (без '+').
+    Приводим к E.164: '+7705...'.
+    """
+    raw = (phone or "").strip()
+    if raw.startswith("+"):
+        return raw
+    digits = re.sub(r"\D+", "", raw)
+    if not digits:
+        return ""
+    # Казахстан/Россия: +7XXXXXXXXXX (11 цифр)
+    if len(digits) == 11 and digits.startswith("7"):
+        return f"+{digits}"
+    # Если дали 10 цифр без кода страны — попробуем трактовать как KZ/RU
+    if len(digits) == 10:
+        return f"+7{digits}"
+    return f"+{digits}"
 
 
 
@@ -176,11 +198,16 @@ async def _send_order_to_iiko(
             msg = "IIKO_ORDER_TYPE_ID не задан — iiko deliveries/create требует orderTypeId или orderServiceType"
             logger.warning("Заказ #%d: %s", order_id, msg)
             return False, msg
+        phone_e164 = _normalize_phone_e164(phone)
+        if not phone_e164:
+            msg = "Телефон клиента пустой — iiko deliveries/create требует customer.phone"
+            logger.warning("Заказ #%d: %s", order_id, msg)
+            return False, msg
         async with IikoClient(api_login=settings.iiko_api_login) as client:
             await client.create_delivery_order(
                 organization_id=settings.iiko_organization_id,
                 order_data={
-                    "customer": {"phone": phone},
+                    "customer": {"phone": phone_e164},
                     "items": iiko_items,
                     "comment": comment[:1000],
                     "orderTypeId": order_type_id,
