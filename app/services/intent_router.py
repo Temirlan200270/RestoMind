@@ -149,17 +149,45 @@ async def _handle_order(
     if validated.unknown_items:
         reply += "\n\nНе нашёл в меню некоторые позиции. Уточните, пожалуйста."
 
-    reply += (
-        "\n\n💳 **Как удобнее оплатить заказ?**\n"
-        "  • наличными при получении\n"
-        "  • картой при получении (терминал)\n"
-        "  • удалённо (перевод / ссылка на оплату)\n"
-        "\nНапишите один вариант — после этого я пришлю итог и спрошу финальное подтверждение."
-    )
+    # Если клиент уже указал оплату в сообщении, не переспрашиваем — сразу просим подтверждение.
+    # Также, если для самовывоза не указано время, сначала уточняем время (коротко).
+    ot = (ai_response.order_type or "").strip().lower()
+    pm = (ai_response.payment_method or "").strip().lower()
+    pickup_note = (ai_response.pickup_time_note or "").strip()
+    delivery_addr = (ai_response.delivery_address or "").strip()
+
+    missing_bits: list[str] = []
+    if ot == "delivery" and not delivery_addr:
+        missing_bits.append("адрес доставки")
+    if ot == "pickup" and not pickup_note:
+        missing_bits.append("к какому времени удобно забрать")
+
+    if not pm:
+        reply += (
+            "\n\n💳 **Как удобнее оплатить заказ?**\n"
+            "  • наличными при получении\n"
+            "  • картой при получении (терминал)\n"
+            "  • удалённо (перевод / ссылка на оплату)\n"
+            "\nНапишите один вариант."
+        )
+        next_state = UserState.AWAITING_ORDER_PAYMENT
+        log_hint = "ждём способ оплаты"
+    elif missing_bits:
+        # Оплата есть, но не хватает контекста (время/адрес) — спрашиваем только недостающее.
+        if ot == "delivery" and not delivery_addr:
+            reply += "\n\n📍 Подскажите адрес доставки (улица, дом/кв)."
+        elif ot == "pickup" and not pickup_note:
+            reply += "\n\n🕐 К какому времени вам удобно забрать заказ?"
+        next_state = UserState.CHATTING
+        log_hint = "уточняем детали получения"
+    else:
+        reply += "\n\n✅ Подтверждаете заказ? (Да / Нет)"
+        next_state = UserState.CONFIRMING_ORDER
+        log_hint = "ждём подтверждение"
 
     logger.info(
-        "Заказ #%d (DRAFT): %d позиций блюд, %.2f ₸ — ждём способ оплаты",
-        order.id, len(validated.valid_items), grand_total,
+        "Заказ #%d (DRAFT): %d позиций блюд, %.2f ₸ — %s",
+        order.id, len(validated.valid_items), grand_total, log_hint,
     )
 
     await publish_event("order_updated", {
@@ -174,7 +202,7 @@ async def _handle_order(
     return RouteResult(
         reply_text=reply,
         pending_order_id=order.id,
-        new_state=UserState.AWAITING_ORDER_PAYMENT,
+        new_state=next_state,
     )
 
 

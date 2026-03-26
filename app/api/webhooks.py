@@ -221,6 +221,9 @@ async def _send_order_to_iiko(
                 organization_id=settings.iiko_organization_id,
                 order_data={
                     "customer": {"phone": phone_e164},
+                    # Некоторые конфигурации iiko валидируют телефон на верхнем уровне заказа.
+                    # Дублируем, чтобы избежать 400 "Parameter 'phone'" при корректном customer.phone.
+                    "phone": phone_e164,
                     "items": iiko_items,
                     "comment": comment[:1000],
                     "orderTypeId": order_type_id,
