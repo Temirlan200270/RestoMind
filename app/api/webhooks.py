@@ -268,9 +268,8 @@ async def handle_confirmation(phone: str, message_text: str) -> str:
         })
 
         await clear_pending_order(redis_client, phone)
-
         return (
-            f"Отлично! Заказ #{order.id} на сумму {float(order.total_price):.0f} ₸ принят. "
+            f"Отлично! Заказ #{order.id} на сумму {float(order.total_price):.0f} ₸ подтверждён. "
             "Оператор проверит детали и отправит заказ на кухню — при необходимости с вами свяжутся. 👨‍💼"
         )
 
