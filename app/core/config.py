@@ -65,6 +65,26 @@ class Settings(BaseSettings):
         default="", validation_alias=AliasChoices("TELEGRAM_ADMIN_CHAT_ID", "telegram_admin_chat_id"),
     )
 
+    # --- Twilio (SMS оповещения для MVP; WhatsApp не используем) ---
+    twilio_account_sid: str = Field(
+        default="",
+        validation_alias=AliasChoices("TWILIO_ACCOUNT_SID", "twilio_account_sid"),
+    )
+    twilio_auth_token: str = Field(
+        default="",
+        validation_alias=AliasChoices("TWILIO_AUTH_TOKEN", "twilio_auth_token"),
+    )
+    # Номер-отправитель Twilio (E.164), например: +1234567890
+    twilio_from: str = Field(
+        default="",
+        validation_alias=AliasChoices("TWILIO_FROM", "TWILIO_PHONE_FROM", "twilio_from"),
+    )
+    # Номер администратора/оператора для SMS (E.164)
+    twilio_admin_to: str = Field(
+        default="",
+        validation_alias=AliasChoices("TWILIO_ADMIN_TO", "TWILIO_TO", "twilio_admin_to"),
+    )
+
     # --- iiko Cloud API ---
     iiko_api_login: str = Field(
         default="",

@@ -18,6 +18,7 @@ from app.db.models import ChatLog, EscalationEvent, Order, OrderStatus, User
 from app.db.session import async_session_factory, redis_client
 from app.integrations.iiko_client import IikoClient
 from app.integrations.telegram import send_tg_fallback_alert
+from app.integrations.twilio_sms import send_twilio_sms_alert
 from app.integrations.whatsapp import send_message, send_template
 from app.services.ai_brain import call_gemini
 from app.services.dialog_mgr import (
@@ -382,6 +383,10 @@ async def process_message(phone: str, message_text: str) -> None:
                 await send_tg_fallback_alert(phone, message_text, result.reply_text)
             except Exception as tg_exc:
                 logger.warning("Telegram fallback alert не отправлен: %s", tg_exc)
+            try:
+                await send_twilio_sms_alert(phone, message_text, result.reply_text)
+            except Exception as sms_exc:
+                logger.warning("Twilio SMS alert не отправлен: %s", sms_exc)
 
         logger.info(
             "Сообщение обработано: phone=%s, intent=%s, state=%s",

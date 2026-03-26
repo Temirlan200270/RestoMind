@@ -24,6 +24,7 @@
 5. В интерфейсе Render задайте переменные с **sync: false** (если мастер их запросит):
    - `GEMINI_API_KEY`
    - `ADMIN_PASSWORD` (и при желании смените `ADMIN_USERNAME` в Environment)
+   - `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM`, `TWILIO_ADMIN_TO` — если хотите SMS-алерты при эскалации на оператора (MVP)
    - токены WhatsApp (`WHATSAPP_*`), когда подключите бота.
 6. Дождитесь сборки и деплоя. Логи: сервис → **Logs**.
 
