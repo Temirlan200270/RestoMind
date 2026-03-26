@@ -193,7 +193,8 @@ async def _send_order_to_iiko(
         comment = " · ".join(comment_bits)
 
         terminal_group = (settings.iiko_terminal_group_id or "").strip()
-        ot = (meta.get("order_type") or "").strip().lower()
+        ot_raw = (meta.get("order_type") or "").strip().lower()
+        ot = "hall" if settings.iiko_force_hall_for_ai_orders else ot_raw
         if ot == "delivery":
             order_type_id = (settings.iiko_order_type_id_delivery or "").strip()
         elif ot == "pickup":
@@ -224,6 +225,8 @@ async def _send_order_to_iiko(
                     # Некоторые конфигурации iiko валидируют телефон на верхнем уровне заказа.
                     # Дублируем, чтобы избежать 400 "Parameter 'phone'" при корректном customer.phone.
                     "phone": phone_e164,
+                    # Стабильный номер для поиска в iiko (например, "1456").
+                    "externalNumber": str(order_id),
                     "items": iiko_items,
                     "comment": comment[:1000],
                     "orderTypeId": order_type_id,
@@ -240,7 +243,7 @@ async def _send_order_to_iiko(
 async def handle_confirmation(phone: str, message_text: str) -> str:
     """
     Обработка ответа на подтверждение заказа.
-    При «Да» → подтверждаем + пытаемся отправить в iiko.
+    При «Да» → подтверждаем.
     При «Нет» → отменяем.
     """
     word = message_text.lower().strip().rstrip("!.,")

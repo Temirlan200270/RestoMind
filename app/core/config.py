@@ -131,6 +131,12 @@ class Settings(BaseSettings):
         default="",
         validation_alias=AliasChoices("IIKO_ORDER_TYPE_ID_HALL", "iiko_order_type_id_hall"),
     )
+    # Принудительно отправлять ВСЕ заказы из ИИ-агента как "в зале",
+    # чтобы они попадали в общий операционный поток iikoFront (чекница/касса по залу).
+    iiko_force_hall_for_ai_orders: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("IIKO_FORCE_HALL_FOR_AI_ORDERS", "iiko_force_hall_for_ai_orders"),
+    )
     # Синхронизация меню: только позиции с type Dish/Good (отсекает модификаторы и пр.; при False — все продукты)
     iiko_menu_sync_only_dish_good: bool = Field(
         default=False,
