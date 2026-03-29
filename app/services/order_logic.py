@@ -184,10 +184,11 @@ class ValidatedOrder:
 
 @dataclass
 class MenuEntry:
-    """Запись справочника меню: цена + iiko UUID."""
+    """Запись справочника меню: цена + iiko UUID + категория (для тарифов упаковки)."""
 
     price: float
     iiko_id: str | None
+    category: str = ""
 
 
 async def load_available_menu(db: AsyncSession) -> list[MenuItem]:
@@ -207,14 +208,14 @@ def _build_menu_lookup(
     if not db_items:
         logger.warning("Таблица menu_items пуста — используется MOCK_MENU")
         return {
-            name: MenuEntry(price=price, iiko_id=None)
+            name: MenuEntry(price=price, iiko_id=None, category="")
             for name, price in MOCK_MENU.items()
         }
 
     lookup: dict[str, MenuEntry] = {}
     for mi in db_items:
         lookup[mi.name.lower().strip()] = MenuEntry(
-            price=float(mi.price), iiko_id=mi.iiko_id,
+            price=float(mi.price), iiko_id=mi.iiko_id, category=(mi.category or ""),
         )
     return lookup
 
@@ -261,6 +262,8 @@ async def validate_order(
                 "price_per_unit": entry.price,
                 "item_total": item_total,
                 "iiko_id": entry.iiko_id,
+                "category": entry.category,
+                "packaging_plov_1kg": (item.packaging_plov_1kg or "").strip(),
                 "exclude_ingredients": item.exclude_ingredients,
             })
         else:
@@ -317,11 +320,40 @@ def build_menu_context(db_items: list[MenuItem]) -> str:
     return "\n".join(lines)
 
 
-def _container_unit_price(order_type: str) -> float:
-    """Цена одного контейнера в зависимости от типа получения заказа."""
-    if order_type == "hall":
-        return float(settings.pricing_container_hall)
-    return float(settings.pricing_container_delivery_pickup)
+def _norm_txt(s: str) -> str:
+    t = (s or "").lower().replace("ё", "е").strip()
+    return " ".join(t.split())
+
+
+PackagingKind = Literal["manty", "plov_half", "plov_1kg", "none"]
+
+
+def classify_packaging_kind(name: str, category: str) -> PackagingKind:
+    """
+    Классификация строки заказа для тарифов упаковки (манты / плов 0.5 / плов 1кг).
+    Узнаёт по названию и категории из меню.
+    """
+    n = _norm_txt(name).replace(" ", "")
+    c_raw = _norm_txt(category)
+    c = c_raw.replace(" ", "")
+    if "мант" in name.lower() or "мант" in c_raw:
+        return "manty"
+    if "плов" in name.lower() or "плов" in c_raw:
+        if "0,5" in n or "0.5" in name.lower() or "500г" in n or "500г" in c or "полкг" in n:
+            return "plov_half"
+        if (
+            "1кг" in n
+            or "1кг" in c
+            or "1 кг" in name.lower()
+            or "1000г" in n
+            or "1000г" in c
+        ):
+            return "plov_1kg"
+        if "0,5" in c or "0.5" in c_raw:
+            return "plov_half"
+        if "1кг" in c or "1 kg" in c_raw:
+            return "plov_1kg"
+    return "none"
 
 
 def compute_fee_lines(
@@ -330,41 +362,67 @@ def compute_fee_lines(
     order_type: str,
 ) -> tuple[list[dict], float]:
     """
-    Контейнеры (на каждую порцию блюд) и доставка (если сумма блюд ниже порога).
-    Возвращает (список fee_lines, сумма наценок).
+    Упаковка по спец. правилам (манты / плов 0.5 / плов 1кг) + доставка при необходимости.
+    Плов 1кг: в строке должно быть packaging_plov_1kg tabak|foil_kazan (валидация раньше в intent_router).
     """
     fee_lines: list[dict] = []
     extras_total = 0.0
 
-    qty_portions = sum(int(x.get("quantity", 1)) for x in food_lines)
-    container_count = int(qty_portions * float(settings.pricing_containers_per_main_unit))
-    unit = _container_unit_price(order_type)
-
-    if container_count > 0:
-        c_total = container_count * unit
-        if order_type == "hall":
-            container_iiko = (
-                settings.iiko_product_id_container_hall.strip()
-                or settings.iiko_product_id_container.strip()
-                or None
-            )
-            container_label = "Контейнер (зал)"
-        else:
-            container_iiko = (
-                settings.iiko_product_id_container_delivery_pickup.strip()
-                or settings.iiko_product_id_container.strip()
-                or None
-            )
-            container_label = "Контейнер (доставка/самовывоз)"
-        fee_lines.append({
-            "kind": "container",
-            "name": container_label,
-            "quantity": container_count,
-            "unit_price": unit,
-            "item_total": c_total,
-            "iiko_id": container_iiko,
-        })
-        extras_total += c_total
+    for line in food_lines:
+        if not isinstance(line, dict):
+            continue
+        qty = int(line.get("quantity", 1))
+        if qty < 1:
+            qty = 1
+        kind = classify_packaging_kind(str(line.get("name", "")), str(line.get("category", "")))
+        if kind == "manty":
+            unit = float(settings.packaging_manty_unit_price)
+            total = unit * qty
+            fee_lines.append({
+                "kind": "packaging_manty",
+                "name": "Контейнер для мант",
+                "quantity": qty,
+                "unit_price": unit,
+                "item_total": total,
+                "iiko_id": settings.iiko_product_id_packaging_manty.strip() or None,
+            })
+            extras_total += total
+        elif kind == "plov_half":
+            unit = float(settings.packaging_plov_half_unit_price)
+            total = unit * qty
+            fee_lines.append({
+                "kind": "packaging_plov_half",
+                "name": "Контейнер средний (плов 0.5)",
+                "quantity": qty,
+                "unit_price": unit,
+                "item_total": total,
+                "iiko_id": settings.iiko_product_id_packaging_plov_half.strip() or None,
+            })
+            extras_total += total
+        elif kind == "plov_1kg":
+            choice = (line.get("packaging_plov_1kg") or "").strip()
+            if choice == "tabak":
+                unit = float(settings.packaging_plov_1kg_tabak_unit_price)
+                label = "Контейнер-табак (плов 1 кг)"
+                iiko_pid = settings.iiko_product_id_packaging_plov_tabak.strip() or None
+                fk: str = "packaging_plov_1kg_tabak"
+            elif choice == "foil_kazan":
+                unit = float(settings.packaging_plov_1kg_foil_unit_price)
+                label = "Фольгированный казан (плов 1 кг)"
+                iiko_pid = settings.iiko_product_id_packaging_plov_foil.strip() or None
+                fk = "packaging_plov_1kg_foil"
+            else:
+                continue
+            total = unit * qty
+            fee_lines.append({
+                "kind": fk,
+                "name": label,
+                "quantity": qty,
+                "unit_price": unit,
+                "item_total": total,
+                "iiko_id": iiko_pid,
+            })
+            extras_total += total
 
     if order_type == "delivery" and foods_subtotal < float(settings.pricing_delivery_free_threshold):
         d_fee = float(settings.pricing_delivery_fee)
@@ -381,6 +439,21 @@ def compute_fee_lines(
     return fee_lines, extras_total
 
 
+def validate_mixed_payment_total(ai: AIBrainResponse, grand_total: float, *, tol: float = 1.0) -> str | None:
+    """При payment_mode=mixed сумма cash+card+remote должна совпадать с итогом заказа."""
+    if ai.payment_mode != "mixed":
+        return None
+    ps = ai.payment_split
+    s = float(ps.cash) + float(ps.card) + float(ps.remote)
+    if s <= 0:
+        return "Укажите ненулевые суммы в payment_split (cash / card / remote)."
+    if abs(s - grand_total) > tol:
+        return (
+            f"Сумма частей оплаты ({s:.0f} ₸) не совпадает с итогом заказа ({grand_total:.0f} ₸)."
+        )
+    return None
+
+
 def build_order_items_json(
     validated: ValidatedOrder,
     ai: AIBrainResponse,
@@ -393,13 +466,30 @@ def build_order_items_json(
     fee_lines, extras = compute_fee_lines(foods, foods_subtotal, ai.order_type)
     grand_total = foods_subtotal + extras
 
+    requires_order_prepayment = grand_total >= float(settings.order_prepayment_threshold_kzt)
+
+    if ai.payment_mode == "mixed":
+        pay_details: dict[str, object] = {
+            "type": "mixed",
+            "split": {
+                "cash": float(ai.payment_split.cash),
+                "card": float(ai.payment_split.card),
+                "remote": float(ai.payment_split.remote),
+            },
+        }
+    else:
+        pay_details = {"type": "single", "method": ai.payment_method}
+
     order_meta = {
         "order_type": ai.order_type,
         "payment_method": ai.payment_method,
+        "payment_mode": ai.payment_mode,
         "is_preorder": ai.is_preorder,
         "booking_time": ai.booking_time,
         "delivery_address": (ai.delivery_address or "").strip(),
         "pickup_time_note": (ai.pickup_time_note or "").strip(),
+        "payment_details": pay_details,
+        "requires_order_prepayment": requires_order_prepayment,
     }
     if ai.booking_details:
         order_meta["booking_snapshot"] = {
@@ -474,7 +564,26 @@ def format_order_confirmation_summary(
             g_ = snap.get("guests", "")
             h_ = snap.get("hall", "")
             lines.append(f"📅 Бронь: {d_} в {t_}, гостей: {g_}, зал: {h_}")
-        lines.append(f"💳 Оплата: {pay_ru}")
+        pd = meta.get("payment_details")
+        if isinstance(pd, dict) and pd.get("type") == "mixed":
+            sp = pd.get("split")
+            if isinstance(sp, dict):
+                lines.append("")
+                lines.append("💳 Смешанная оплата:")
+                if float(sp.get("remote") or 0) > 0:
+                    lines.append(f"  • Удалённо: {float(sp['remote']):.0f} ₸")
+                if float(sp.get("card") or 0) > 0:
+                    lines.append(f"  • Карта при получении: {float(sp['card']):.0f} ₸")
+                if float(sp.get("cash") or 0) > 0:
+                    lines.append(f"  • Наличными: {float(sp['cash']):.0f} ₸")
+        else:
+            lines.append(f"💳 Оплата: {pay_ru}")
+        if meta.get("requires_order_prepayment"):
+            lines.append("")
+            lines.append(
+                f"⚠️ Заказ от **{int(settings.order_prepayment_threshold_kzt):,}** ₸ — нужна предоплата; "
+                "подтверждение возможно после оплаты (оператор пришлёт реквизиты/ссылку)."
+            )
 
     return "\n".join(lines)
 

@@ -182,6 +182,49 @@ class Settings(BaseSettings):
         description="Сколько контейнеров на 1 порцию основного блюда (обычно 1)",
     )
 
+    # Предоплата заказа (не бронь): сумма >= порога — клиент не может подтвердить «Да» до оплаты (статус в админке).
+    order_prepayment_threshold_kzt: float = Field(
+        default=15_000.0,
+        validation_alias=AliasChoices(
+            "ORDER_PREPAYMENT_THRESHOLD_KZT",
+            "order_prepayment_threshold_kzt",
+        ),
+    )
+
+    # --- Упаковка (спец. номенклатура): цены в ₸ и UUID товаров iiko для строк заказа ---
+    packaging_manty_unit_price: float = Field(
+        default=200.0,
+        validation_alias=AliasChoices("PACKAGING_MANTY_UNIT_PRICE", "packaging_manty_unit_price"),
+    )
+    packaging_plov_half_unit_price: float = Field(
+        default=300.0,
+        validation_alias=AliasChoices("PACKAGING_PLOV_HALF_UNIT_PRICE", "packaging_plov_half_unit_price"),
+    )
+    packaging_plov_1kg_tabak_unit_price: float = Field(
+        default=800.0,
+        validation_alias=AliasChoices("PACKAGING_PLOV_1KG_TABAK_UNIT_PRICE", "packaging_plov_1kg_tabak_unit_price"),
+    )
+    packaging_plov_1kg_foil_unit_price: float = Field(
+        default=650.0,
+        validation_alias=AliasChoices("PACKAGING_PLOV_1KG_FOIL_UNIT_PRICE", "packaging_plov_1kg_foil_unit_price"),
+    )
+    iiko_product_id_packaging_manty: str = Field(
+        default="",
+        validation_alias=AliasChoices("IIKO_PRODUCT_ID_PACKAGING_MANTY", "iiko_product_id_packaging_manty"),
+    )
+    iiko_product_id_packaging_plov_half: str = Field(
+        default="",
+        validation_alias=AliasChoices("IIKO_PRODUCT_ID_PACKAGING_PLOV_HALF", "iiko_product_id_packaging_plov_half"),
+    )
+    iiko_product_id_packaging_plov_tabak: str = Field(
+        default="",
+        validation_alias=AliasChoices("IIKO_PRODUCT_ID_PACKAGING_PLOV_TABAK", "iiko_product_id_packaging_plov_tabak"),
+    )
+    iiko_product_id_packaging_plov_foil: str = Field(
+        default="",
+        validation_alias=AliasChoices("IIKO_PRODUCT_ID_PACKAGING_PLOV_FOIL", "iiko_product_id_packaging_plov_foil"),
+    )
+
     # --- Админ-панель ---
     admin_username: str = "admin"
     admin_password: str = "restomind"

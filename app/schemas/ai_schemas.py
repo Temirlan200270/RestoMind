@@ -5,10 +5,13 @@ Pydantic-схемы для структурированных ответов AI 
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # Язык ответа клиенту (для мультиязычности и выбора голоса TTS)
 DetectedReplyLanguage = Literal["ru", "kk", "en", "uz"]
+
+
+PackagingPlov1Kg = Literal["", "tabak", "foil_kazan"]
 
 
 class OrderItem(BaseModel):
@@ -20,6 +23,14 @@ class OrderItem(BaseModel):
     iiko_item_id: str = Field(
         default="",
         description="UUID продукта из iiko (из контекста меню, поле [id: ...]). Если ID неизвестен — оставить пустым.",
+    )
+    packaging_plov_1kg: PackagingPlov1Kg = Field(
+        default="",
+        description=(
+            "Только для позиции «плов 1 кг»: tabak — контейнер-табак (800 ₸), "
+            "foil_kazan — фольгированный казан (650 ₸). Для остальных блюд — пустая строка. "
+            "Пока клиент не выбрал — оставь пустым и спроси в reply_text."
+        ),
     )
     quantity: int = Field(
         default=1, ge=1, description="Количество порций"
@@ -56,6 +67,14 @@ class BookingDetails(BaseModel):
     comment: str = Field(
         default="", description="Дополнительные пожелания клиента (у окна, детский стул и т.д.)"
     )
+
+
+class PaymentSplit(BaseModel):
+    """Суммы по способам при смешанной оплате (все в тенге, неотрицательные)."""
+
+    cash: float = Field(default=0.0, ge=0, description="Наличными при получении")
+    card: float = Field(default=0.0, ge=0, description="Картой при получении")
+    remote: float = Field(default=0.0, ge=0, description="Удалённо: Каспи / перевод / ссылка")
 
 
 class AIBrainResponse(BaseModel):
@@ -117,7 +136,15 @@ class AIBrainResponse(BaseModel):
     )
     payment_method: Literal["cash", "card", "remote"] = Field(
         default="cash",
-        description="Способ оплаты: cash — наличные, card — карта при получении, remote — перевод/ссылка",
+        description="При payment_mode=single: способ оплаты. При mixed — ориентир (как платят первую часть) или remote.",
+    )
+    payment_mode: Literal["single", "mixed"] = Field(
+        default="single",
+        description="single — один способ (payment_method); mixed — точные суммы в payment_split, сумма = итог заказа",
+    )
+    payment_split: PaymentSplit = Field(
+        default_factory=PaymentSplit,
+        description="При payment_mode=mixed: сколько наличными / картой / удалённо (сумма трёх полей = итог)",
     )
     is_preorder: bool = Field(
         default=False,
@@ -142,3 +169,9 @@ class AIBrainResponse(BaseModel):
             "В обычном текстовом чате — null (не заполнять)."
         ),
     )
+
+    @model_validator(mode="after")
+    def _normalize_payment(self) -> "AIBrainResponse":
+        if self.payment_mode != "mixed":
+            object.__setattr__(self, "payment_split", PaymentSplit())
+        return self

@@ -661,9 +661,7 @@
                                 <div class="kanban-card rounded-xl p-4 cursor-grab active:cursor-grabbing transition"
                                     draggable="true"
                                     @dragstart.stop="kanbanDragStart($event, order)"
-                                    :class="order.iiko_last_error
-                                        ? 'bg-gradient-to-br from-rose-50 via-white to-red-50/40 border-2 border-red-400 border-l-[5px] border-l-red-600 shadow-md ring-2 ring-red-200/90 ring-offset-1 ring-offset-white'
-                                        : 'bg-white shadow-sm border border-gray-100'"
+                                    :class="kanbanOrderSurfaceClass(order, 'bg-white shadow-sm border border-gray-100')"
                                     @click="selectedOrder = order; showOrderModal = true">
                                     <div class="flex items-center justify-between mb-2">
                                         <span class="font-bold text-brand-600 text-sm" x-text="'#' + order.id"></span>
@@ -672,6 +670,8 @@
                                     <div class="flex flex-wrap gap-1 mb-1 items-center">
                                         <span x-show="order.order_type" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-800 border border-indigo-100" x-text="orderTypeBadge(order)"></span>
                                         <span :class="paymentKanbanBadgeClass(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded border tracking-wide" x-text="paymentMethodShort(order)"></span>
+                                        <span x-show="orderAwaitingOrderPrepay(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-400">ПРЕДОПЛАТА</span>
+                                        <span x-show="orderPlov1kgHint(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-50 text-violet-800 border border-violet-200 truncate max-w-[10rem]" x-text="orderPlov1kgHint(order)"></span>
                                     </div>
                                     <div class="text-xs font-mono text-gray-600 mb-1 truncate" x-show="order.user_phone" x-text="order.user_phone"></div>
                                     <div class="text-xs text-gray-500 mb-2" x-text="(order.items?.items?.length || 0) + ' позиций'"></div>
@@ -707,9 +707,7 @@
                                 <div class="kanban-card rounded-xl p-4 cursor-grab active:cursor-grabbing transition"
                                     draggable="true"
                                     @dragstart.stop="kanbanDragStart($event, order)"
-                                    :class="order.iiko_last_error
-                                        ? 'bg-gradient-to-br from-rose-50 via-white to-red-50/40 border-2 border-red-400 border-l-[5px] border-l-red-600 shadow-md ring-2 ring-red-200/90 ring-offset-1 ring-offset-white'
-                                        : 'bg-white shadow-sm border border-blue-100'"
+                                    :class="kanbanOrderSurfaceClass(order, 'bg-white shadow-sm border border-blue-100')"
                                     @click="selectedOrder = order; showOrderModal = true">
                                     <div class="flex items-center justify-between mb-2">
                                         <span class="font-bold text-brand-600 text-sm" x-text="'#' + order.id"></span>
@@ -718,6 +716,8 @@
                                     <div class="flex flex-wrap gap-1 mb-1 items-center">
                                         <span x-show="order.order_type" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-800 border border-indigo-100" x-text="orderTypeBadge(order)"></span>
                                         <span :class="paymentKanbanBadgeClass(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded border tracking-wide" x-text="paymentMethodShort(order)"></span>
+                                        <span x-show="orderAwaitingOrderPrepay(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-400">ПРЕДОПЛАТА</span>
+                                        <span x-show="orderPlov1kgHint(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-50 text-violet-800 border border-violet-200 truncate max-w-[10rem]" x-text="orderPlov1kgHint(order)"></span>
                                     </div>
                                     <div class="text-xs font-mono text-gray-600 mb-1 truncate" x-show="order.user_phone" x-text="order.user_phone"></div>
                                     <div class="text-xs text-gray-500 mb-2" x-text="(order.items?.items?.length || 0) + ' позиций'"></div>
@@ -753,9 +753,7 @@
                                 <div class="kanban-card rounded-xl p-4 cursor-grab active:cursor-grabbing transition"
                                     draggable="true"
                                     @dragstart.stop="kanbanDragStart($event, order)"
-                                    :class="order.iiko_last_error
-                                        ? 'bg-gradient-to-br from-rose-50 via-white to-red-50/40 border-2 border-red-400 border-l-[5px] border-l-red-600 shadow-md ring-2 ring-red-200/90 ring-offset-1 ring-offset-white'
-                                        : 'bg-white shadow-sm border border-emerald-100'"
+                                    :class="kanbanOrderSurfaceClass(order, 'bg-white shadow-sm border border-emerald-100')"
                                     @click="selectedOrder = order; showOrderModal = true">
                                     <div class="flex items-center justify-between mb-2">
                                         <span class="font-bold text-brand-600 text-sm" x-text="'#' + order.id"></span>
@@ -764,6 +762,8 @@
                                     <div class="flex flex-wrap gap-1 mb-1 items-center">
                                         <span x-show="order.order_type" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-800 border border-indigo-100" x-text="orderTypeBadge(order)"></span>
                                         <span :class="paymentKanbanBadgeClass(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded border tracking-wide" x-text="paymentMethodShort(order)"></span>
+                                        <span x-show="orderAwaitingOrderPrepay(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-400">ПРЕДОПЛАТА</span>
+                                        <span x-show="orderPlov1kgHint(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-50 text-violet-800 border border-violet-200 truncate max-w-[10rem]" x-text="orderPlov1kgHint(order)"></span>
                                     </div>
                                     <div class="text-xs font-mono text-gray-600 mb-1 truncate" x-show="order.user_phone" x-text="order.user_phone"></div>
                                     <div class="text-xs text-gray-500 mb-2" x-text="(order.items?.items?.length || 0) + ' позиций'"></div>
@@ -3004,6 +3004,31 @@ function adminApp() {
             return `${h} ч в ${lab}`;
         },
 
+        orderAwaitingOrderPrepay(order) {
+            const meta = order?.items?.order_meta;
+            return !!(meta && meta.requires_order_prepayment && (order.prepayment_status || '') === 'pending');
+        },
+
+        orderPlov1kgHint(order) {
+            const fees = order?.items?.fee_lines;
+            if (!Array.isArray(fees)) return '';
+            const hit = fees.find((f) => f && String(f.kind || '').startsWith('packaging_plov_1kg'));
+            if (!hit) return '';
+            const n = (hit.name || '').trim();
+            return n.length > 24 ? n.slice(0, 22) + '…' : n;
+        },
+
+        kanbanOrderSurfaceClass(order, normalClass) {
+            if (order?.iiko_last_error) {
+                return 'bg-gradient-to-br from-rose-50 via-white to-red-50/40 border-2 border-red-400 border-l-[5px] border-l-red-600 shadow-md ring-2 ring-red-200/90 ring-offset-1 ring-offset-white';
+            }
+            let c = normalClass;
+            if (this.orderAwaitingOrderPrepay(order)) {
+                c += ' ring-2 ring-amber-400 ring-offset-2 ring-offset-white border-amber-400';
+            }
+            return c;
+        },
+
         orderTypeBadge(order) {
             if (!order || !order.order_type) return '';
             const m = { delivery: 'ДОСТАВКА', pickup: 'САМОВЫВОЗ', hall: 'В ЗАЛЕ' };
@@ -3027,14 +3052,20 @@ function adminApp() {
         },
 
         paymentMethodShort(order) {
+            const pd = order?.items?.order_meta?.payment_details;
+            if (pd && pd.type === 'mixed') return 'MIX';
             const pm = order?.payment_method || 'cash';
             const m = { cash: 'НАЛИЧНЫЕ', card: 'КАРТА', remote: 'ОНЛАЙН' };
             return m[pm] || String(pm).toUpperCase();
         },
 
         paymentKanbanBadgeClass(order) {
-            const pm = order?.payment_method || 'cash';
+            const pd = order?.items?.order_meta?.payment_details;
             const base = 'uppercase';
+            if (pd && pd.type === 'mixed') {
+                return base + ' bg-gradient-to-r from-fuchsia-100 to-purple-100 text-purple-950 border-purple-400';
+            }
+            const pm = order?.payment_method || 'cash';
             if (pm === 'card') return base + ' bg-blue-50 text-blue-800 border-blue-200';
             if (pm === 'remote') return base + ' bg-gradient-to-r from-amber-100 to-orange-100 text-amber-950 border-amber-400';
             return base + ' bg-gray-100 text-gray-700 border-gray-300';

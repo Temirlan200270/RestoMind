@@ -183,10 +183,15 @@ async def _send_order_to_iiko(
             return False, msg
 
         meta = items_json.get("order_meta") if items_json else {}
+        pd = meta.get("payment_details")
+        pay_note = meta.get("payment_method", "?")
+        if isinstance(pd, dict) and pd.get("type") == "mixed":
+            sp = pd.get("split") or {}
+            pay_note = f"mixed remote={sp.get('remote', 0)} card={sp.get('card', 0)} cash={sp.get('cash', 0)}"
         comment_bits = [
             f"Заказ #{order_id} · RestoMind · WhatsApp",
             f"тип: {meta.get('order_type', '?')}",
-            f"оплата: {meta.get('payment_method', '?')}",
+            f"оплата: {pay_note}",
         ]
         if meta.get("delivery_address"):
             comment_bits.append(f"адрес: {meta['delivery_address'][:200]}")
@@ -255,6 +260,18 @@ async def handle_confirmation(phone: str, message_text: str) -> str:
 
     if word in CONFIRM_WORDS:
         async with async_session_factory() as db:
+            order_row = await db.get(Order, order_id)
+            if order_row and order_row.items_json:
+                om = (order_row.items_json.get("order_meta") or {})
+                if om.get("requires_order_prepayment"):
+                    pst = (order_row.prepayment_status or "").strip().lower()
+                    if pst not in ("paid", "waived"):
+                        return (
+                            "По сумме заказа нужна **предоплата**. Пока платёж не отмечен оператором, "
+                            "подтвердить заказ нельзя — как только оплатите, оператор отметит в системе, "
+                            "и вы сможете ответить «Да» ещё раз."
+                        )
+
             order = await confirm_order(db, order_id)
             await db.commit()
 
@@ -273,7 +290,7 @@ async def handle_confirmation(phone: str, message_text: str) -> str:
         await clear_pending_order(redis_client, phone)
         return (
             f"Отлично! Заказ #{order.id} на сумму {float(order.total_price):.0f} ₸ подтверждён. "
-            "Оператор проверит детали и отправит заказ на кухню — при необходимости с вами свяжутся. 👨‍💼"
+            "Оператор проверит детали и отправит заказ в iiko — при необходимости с вами свяжутся. 👨‍💼"
         )
 
     if word in CANCEL_WORDS:
@@ -414,6 +431,10 @@ async def handle_order_payment_choice(phone: str, message_text: str) -> str:
         await db.commit()
 
         total = float(order.total_price)
+        meta_after = (order.items_json or {}).get("order_meta") or {}
+        needs_prepay = bool(meta_after.get("requires_order_prepayment"))
+        prep_st = (order.prepayment_status or "").strip().lower()
+
         await publish_event("order_updated", {
             "order_id": order.id,
             "status": OrderStatus.DRAFT,
@@ -421,6 +442,15 @@ async def handle_order_payment_choice(phone: str, message_text: str) -> str:
             "total_price": total,
             "payment_method": pm,
         })
+
+    if needs_prepay and prep_st not in ("paid", "waived"):
+        await set_user_state(redis_client, phone, UserState.CHATTING)
+        return (
+            f"Принял способ оплаты: {pay_human}.\n\n"
+            f"📋 Ваш заказ:\n{body}\n\n"
+            f"💳 Сумма от **{int(settings.order_prepayment_threshold_kzt):,}** ₸ — нужна предоплата. "
+            "Оператор пришлёт реквизиты или ссылку. После оплаты вы сможете подтвердить заказ ответом «Да»."
+        )
 
     await set_user_state(redis_client, phone, UserState.CONFIRMING_ORDER)
     return reply

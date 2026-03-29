@@ -33,8 +33,9 @@ async def test_hall_preorder_creates_booking_and_order(db_with_menu) -> None:
     )
     r = await _handle_order(db_with_menu, "+77001234567", ai, menu_items=None)
     assert r.pending_order_id is not None
-    assert r.new_state == UserState.AWAITING_ORDER_PAYMENT
-    assert "оплат" in (r.reply_text or "").lower()
+    # Оплата уже указана (cash) — сразу запрос подтверждения заказа.
+    assert r.new_state == UserState.CONFIRMING_ORDER
+    assert "подтверждаете" in (r.reply_text or "").lower() or "да" in (r.reply_text or "").lower()
 
     oid = r.pending_order_id
     order = await db_with_menu.get(Order, oid)

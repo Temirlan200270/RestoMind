@@ -13,6 +13,7 @@ from datetime import date, time
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.db.models import Booking, MenuItem, Order, OrderStatus, User
 from app.services.booking_halls import (
     BOOKING_HALL_VIP,
@@ -25,8 +26,10 @@ from app.services.dialog_mgr import UserState
 from app.services.events import publish_event
 from app.services.order_logic import (
     build_order_items_json,
+    classify_packaging_kind,
     format_order_confirmation_summary,
     merge_total_into_items_json,
+    validate_mixed_payment_total,
     validate_order,
 )
 
@@ -85,6 +88,23 @@ async def _handle_order(
 
     user = await get_or_create_user(db, phone)
 
+    for vi in validated.valid_items:
+        pk = classify_packaging_kind(str(vi.get("name", "")), str(vi.get("category", "")))
+        if pk == "plov_1kg":
+            ch = (vi.get("packaging_plov_1kg") or "").strip()
+            if ch not in ("tabak", "foil_kazan"):
+                return RouteResult(
+                    reply_text=(
+                        f"{ai_response.reply_text}\n\n"
+                        "⚠️ Для **плова 1 кг** уточните упаковку:\n"
+                        "  • **табак** (традиционный контейнер) — "
+                        f"{int(settings.packaging_plov_1kg_tabak_unit_price)} ₸\n"
+                        "  • **казан** / фольгированный казан — "
+                        f"{int(settings.packaging_plov_1kg_foil_unit_price)} ₸\n"
+                        "Напишите, что выбираете (одним сообщением можно дополнить заказ)."
+                    ),
+                )
+
     booking_row: Booking | None = None
     if ai_response.order_type == "hall" and ai_response.is_preorder:
         if not ai_response.booking_details:
@@ -130,7 +150,19 @@ async def _handle_order(
         await db.flush()
 
     payload, grand_total = build_order_items_json(validated, ai_response)
+    mix_err = validate_mixed_payment_total(ai_response, grand_total)
+    if mix_err:
+        return RouteResult(
+            reply_text=f"{ai_response.reply_text}\n\n⚠️ {mix_err}",
+        )
+
     items_json = merge_total_into_items_json(payload, grand_total)
+    requires_big_order_prepay = bool(
+        (items_json.get("order_meta") or {}).get("requires_order_prepayment"),
+    )
+    prepayment_status = (
+        "pending" if (booking_row or requires_big_order_prepay) else "not_required"
+    )
 
     order = Order(
         user_id=user.id,
@@ -138,7 +170,7 @@ async def _handle_order(
         items_json=items_json,
         total_price=grand_total,
         booking_id=booking_row.id if booking_row else None,
-        prepayment_status="pending" if booking_row else "not_required",
+        prepayment_status=prepayment_status,
     )
     db.add(order)
     await db.flush()
@@ -152,6 +184,7 @@ async def _handle_order(
     # Если клиент уже указал оплату в сообщении, не переспрашиваем — сразу просим подтверждение.
     # Также, если для самовывоза не указано время, сначала уточняем время (коротко).
     ot = (ai_response.order_type or "").strip().lower()
+    is_mixed = ai_response.payment_mode == "mixed"
     pm = (ai_response.payment_method or "").strip().lower()
     pickup_note = (ai_response.pickup_time_note or "").strip()
     delivery_addr = (ai_response.delivery_address or "").strip()
@@ -162,7 +195,7 @@ async def _handle_order(
     if ot == "pickup" and not pickup_note:
         missing_bits.append("к какому времени удобно забрать")
 
-    if not pm:
+    if not is_mixed and not pm:
         reply += (
             "\n\n💳 **Как удобнее оплатить заказ?**\n"
             "  • наличными при получении\n"
@@ -180,6 +213,15 @@ async def _handle_order(
             reply += "\n\n🕐 К какому времени вам удобно забрать заказ?"
         next_state = UserState.CHATTING
         log_hint = "уточняем детали получения"
+    elif requires_big_order_prepay:
+        reply += (
+            "\n\n"
+            f"💳 Сумма заказа от **{int(settings.order_prepayment_threshold_kzt):,}** ₸ — "
+            "нужна **предоплата** (полная или частичная). Оператор пришлёт реквизиты или ссылку. "
+            "После оплаты вы сможете подтвердить заказ ответом «Да»."
+        )
+        next_state = UserState.CHATTING
+        log_hint = "ожидание предоплаты (крупный заказ)"
     else:
         reply += "\n\n✅ Подтверждаете заказ? (Да / Нет)"
         next_state = UserState.CONFIRMING_ORDER
