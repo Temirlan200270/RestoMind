@@ -1,9 +1,10 @@
 """
 Конвертация аудио Twilio Media Streams (G.711 μ-law, 8 kHz, моно) в WAV PCM для Gemini.
-Использует пакет audioop-lts (stdlib audioop удалён в Python 3.13+).
+Python 3.11–3.12: stdlib `audioop`. Python 3.13+: пакет `audioop-lts` (см. requirements.txt).
 """
 
 import io
+import sys
 import wave
 
 try:
@@ -15,7 +16,10 @@ except ImportError:
 def mulaw_to_linear_pcm16(mulaw_data: bytes) -> bytes:
     """Поток μ-law → little-endian int16 (ширина сэмпла 2 байта)."""
     if audioop is None:
-        raise RuntimeError("Установите пакет audioop-lts: pip install audioop-lts")
+        raise RuntimeError(
+            "Нет модуля audioop: для Python 3.13+ установите audioop-lts "
+            f"(текущая версия интерпретатора: {sys.version_info.major}.{sys.version_info.minor})."
+        )
     return audioop.ulaw2lin(mulaw_data, 2)
 
 
