@@ -118,8 +118,8 @@
 
         <div class="px-4 py-4 border-t border-white/10">
             <div class="flex items-center gap-2 text-xs text-blue-300">
-                <span class="w-2 h-2 rounded-full ws-dot" :class="wsConnected ? 'bg-green-400 animate-pulse' : 'bg-red-400'"></span>
-                <span x-text="wsConnected ? 'Live-соединение активно' : 'Переподключение...'"></span>
+                <span class="w-2 h-2 rounded-full shrink-0 ws-dot" :class="wsIndicatorClass()"></span>
+                <span x-text="wsIndicatorText()" class="leading-tight"></span>
             </div>
         </div>
     </aside>
@@ -2483,9 +2483,13 @@ function adminApp() {
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25zm.75-12h9v9h-9v-9z"/></svg>' },
         ],
 
-        // WebSocket
+        // WebSocket (статус в сайдбаре: readyState + ws_ready с сервера)
         ws: null,
-        wsConnected: false,
+        /** Канал событий реально подписан (после кадра ws_ready от бэкенда). */
+        wsChannelReady: false,
+        _wsReadyTimer: null,
+        /** Счётчик для перерисовки индикатора (readyState WebSocket не реактивен в Alpine). */
+        wsEpoch: 0,
         wsReconnectDelay: 1000,
 
         // Алерты
@@ -3496,7 +3500,8 @@ function adminApp() {
                 this.clearAdminDataAfterAuthLoss();
                 this.authenticated = false;
                 this.wsToken = '';
-                this.wsConnected = false;
+                this.wsChannelReady = false;
+                this._clearWsReadyTimer();
                 try {
                     if (this.ws) {
                         this.ws.close();
@@ -3610,7 +3615,8 @@ function adminApp() {
             } catch { /* ignore */ }
             this.authenticated = false;
             this.wsToken = '';
-            this.wsConnected = false;
+            this.wsChannelReady = false;
+            this._clearWsReadyTimer();
             this.hasDemoData = false;
         },
 
@@ -3995,9 +4001,44 @@ function adminApp() {
             }
         },
 
+        _clearWsReadyTimer() {
+            if (this._wsReadyTimer) {
+                clearTimeout(this._wsReadyTimer);
+                this._wsReadyTimer = null;
+            }
+        },
+
+        /** Цвет точки: серый (не вошли), жёлтый (коннект/ожидание ws_ready), зелёный (канал готов), красный (нет сокета). */
+        wsIndicatorClass() {
+            void this.wsEpoch;
+            if (!this.authenticated) return 'bg-gray-400';
+            const w = this.ws;
+            if (!w) return 'bg-red-400';
+            if (w.readyState === WebSocket.CONNECTING) return 'bg-amber-400 animate-pulse';
+            if (w.readyState === WebSocket.OPEN) {
+                return this.wsChannelReady ? 'bg-green-400 animate-pulse' : 'bg-amber-400 animate-pulse';
+            }
+            return 'bg-red-400';
+        },
+
+        wsIndicatorText() {
+            void this.wsEpoch;
+            if (!this.authenticated) return 'Войдите — для push-уведомлений';
+            const w = this.ws;
+            if (!w) return 'Нет соединения, переподключение…';
+            if (w.readyState === WebSocket.CONNECTING) return 'Подключение…';
+            if (w.readyState === WebSocket.OPEN) {
+                if (this.wsChannelReady) return 'Уведомления в реальном времени';
+                return 'Синхронизация канала…';
+            }
+            return 'Переподключение…';
+        },
+
         // ─── WebSocket ────────────────────────────────
         connectWebSocket() {
             if (!this.authenticated || !this.wsToken) return;
+            this._clearWsReadyTimer();
+            this.wsChannelReady = false;
             // Не держим два сокета одновременно — иначе события (order_updated/new_message) будут дублироваться.
             try {
                 if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
@@ -4012,22 +4053,36 @@ function adminApp() {
             const url = `${proto}://${location.host}/api/admin/ws?token=${encodeURIComponent(this.wsToken)}`;
 
             try { this.ws = new WebSocket(url); } catch { return this.scheduleReconnect(); }
+            this.wsEpoch++;
 
             this.ws.onopen = () => {
-                this.wsConnected = true;
                 this.wsReconnectDelay = 1000;
-                console.log('[WS] Connected');
+                this.wsChannelReady = false;
+                this.wsEpoch++;
+                this._clearWsReadyTimer();
+                // Старые бэкенды без type=ws_ready: через 3 с считаем канал готовым.
+                this._wsReadyTimer = setTimeout(() => {
+                    this._wsReadyTimer = null;
+                    if (this.ws && this.ws.readyState === WebSocket.OPEN && !this.wsChannelReady) {
+                        this.wsChannelReady = true;
+                        this.wsEpoch++;
+                    }
+                }, 3000);
+                console.log('[WS] Socket open, ждём ws_ready…');
             };
 
             this.ws.onclose = () => {
-                this.wsConnected = false;
+                this._clearWsReadyTimer();
+                this.wsChannelReady = false;
                 this.ws = null;
+                this.wsEpoch++;
                 console.log('[WS] Disconnected');
                 this.scheduleReconnect();
             };
 
             this.ws.onerror = () => {
-                this.wsConnected = false;
+                this.wsChannelReady = false;
+                this.wsEpoch++;
             };
 
             this.ws.onmessage = (event) => {
@@ -4048,6 +4103,13 @@ function adminApp() {
 
         handleWsEvent(msg) {
             const { type, data } = msg;
+
+            if (type === 'ws_ready') {
+                this._clearWsReadyTimer();
+                this.wsChannelReady = true;
+                this.wsEpoch++;
+                return;
+            }
 
             if (type === 'new_message') {
                 this.onNewMessage(data);

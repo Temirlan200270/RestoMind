@@ -6,6 +6,7 @@ REST-эндпоинты для просмотра заказов, диалого
 import asyncio
 import csv
 import io
+import json
 import logging
 import secrets
 import uuid
@@ -166,6 +167,11 @@ async def admin_websocket(ws: WebSocket, token: str = "") -> None:
         return
     await ws.accept()
     logger.info("Admin WebSocket подключён")
+    # Сигнал клиенту: сокет принят, дальше — цикл подписки (Redis / in-memory).
+    try:
+        await ws.send_text(json.dumps({"type": "ws_ready", "v": 1}, ensure_ascii=False))
+    except Exception:
+        return
     try:
         async for event_json in subscribe_events():
             await ws.send_text(event_json)

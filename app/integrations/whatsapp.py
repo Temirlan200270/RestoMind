@@ -30,22 +30,13 @@ def _digits_only(phone: str) -> str:
 
 def _whatsapp_to_candidates(phone: str) -> list[str]:
     """
-    Возвращает кандидатов 'to' для Meta API.
+    Поле `to` для Cloud API: только цифры, **ровно как в вебхуке** (`messages[].from`).
 
-    Базово: только цифры (как в webhook 'from').
-    Workaround для тестового режима Meta: иногда для KZ (+7...) UI сохраняет получателя как 787...,
-    в то время как вебхук приходит как 770...; это ломает allowlist (131030).
-    Поэтому добавляем второй кандидат: 78 + оставшаяся часть 7xxxxxxxxxx.
+    Раньше добавлялся второй кандидат `78…` для KZ — это давало номер вроде 787051310837
+    и ломало доставку (403/131005), хотя Meta присылает уже корректный 7705….
     """
     d = _digits_only(phone)
-    if not d:
-        return []
-    out = [d]
-    if len(d) == 11 and d.startswith("77"):
-        alt = "78" + d[1:]
-        if alt not in out:
-            out.append(alt)
-    return out
+    return [d] if d else []
 
 
 def _is_recipient_not_allowed(resp: httpx.Response) -> bool:
