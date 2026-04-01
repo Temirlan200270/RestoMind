@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from app.core.config import settings
 from app.schemas.ai_schemas import AIBrainResponse
+from app.services.order_logic import format_draft_order_context_for_prompt
 from app.services.prompts import RESTAURANT_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -58,12 +59,18 @@ def normalize_audio_mime(mime: str) -> str:
     return base
 
 
-def _system_prompt_with_context(menu_context: str, kb_context: str) -> str:
+def _system_prompt_with_context(
+    menu_context: str,
+    kb_context: str,
+    draft_order_context: str = "",
+) -> str:
     system_prompt = RESTAURANT_SYSTEM_PROMPT
     if kb_context:
         system_prompt += f"\n\n# Справочник заведения (база знаний)\n{kb_context}"
     if menu_context:
         system_prompt += f"\n\n# Актуальное меню ресторана\n{menu_context}"
+    if (draft_order_context or "").strip():
+        system_prompt += f"\n\n{draft_order_context.strip()}"
     return system_prompt
 
 
@@ -91,6 +98,7 @@ async def call_gemini(
     user_text: str,
     menu_context: str = "",
     kb_context: str = "",
+    draft_order_context: str = "",
 ) -> AIBrainResponse:
     """
     Отправляет контекст диалога в Gemini и получает структурированный ответ.
@@ -101,11 +109,12 @@ async def call_gemini(
         user_text: Новое сообщение от пользователя.
         menu_context: Текстовое описание актуального меню с ценами.
         kb_context: Блок базы знаний (справочник заведения).
+        draft_order_context: Текущий DRAFT заказа (из БД), для дельт `order_actions`.
 
     Returns:
         AIBrainResponse — Pydantic-объект с intent, reply_text, items, booking_details.
     """
-    system_prompt = _system_prompt_with_context(menu_context, kb_context)
+    system_prompt = _system_prompt_with_context(menu_context, kb_context, draft_order_context)
     contents = _history_to_gemini_contents(history)
     contents.append({"role": "user", "parts": [{"text": user_text}]})
 
@@ -209,9 +218,10 @@ async def call_gemini_with_audio(
     audio_mime: str,
     menu_context: str = "",
     kb_context: str = "",
+    draft_order_context: str = "",
 ) -> AIBrainResponse:
     """Диалог + голосовое в одном запросе (structured output)."""
-    system_prompt = _system_prompt_with_context(menu_context, kb_context)
+    system_prompt = _system_prompt_with_context(menu_context, kb_context, draft_order_context)
     mime = normalize_audio_mime(audio_mime)
 
     gemini_contents: list[Any] = []

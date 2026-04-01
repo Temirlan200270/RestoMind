@@ -7,6 +7,8 @@ MOCK_MENU используется как fallback, если таблица пу
 
 import logging
 import re
+import uuid
+from copy import deepcopy
 from dataclasses import dataclass
 from difflib import get_close_matches
 from typing import Literal
@@ -17,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.data.plovxana_menu import build_mock_menu_dict
 from app.db.models import MenuItem
-from app.schemas.ai_schemas import AIBrainResponse, OrderItem
+from app.schemas.ai_schemas import AIBrainResponse, OrderAction, OrderItem
 
 logger = logging.getLogger(__name__)
 
@@ -296,6 +298,279 @@ async def validate_order(
         total_price=total_price,
         summary_text=summary,
     )
+
+
+def looks_like_iiko_uuid(value: str) -> bool:
+    """True, если строка похожа на UUID из контекста меню [id: …]."""
+    s = (value or "").strip()
+    if len(s) < 32:
+        return False
+    try:
+        uuid.UUID(s)
+    except ValueError:
+        return False
+    return True
+
+
+def _internal_merge_key_from_food_line(line: dict) -> str:
+    """Стабильный ключ строки еды в черновике (iiko_id приоритетнее имени)."""
+    iid = str(line.get("iiko_id") or "").strip()
+    if iid:
+        return f"i:{iid.lower()}"
+    return f"n:{_norm_txt(str(line.get('name', '')))}"
+
+
+def _new_internal_key_from_item_id(item_id: str) -> str:
+    tid = item_id.strip()
+    if looks_like_iiko_uuid(tid):
+        return f"i:{tid.lower()}"
+    return f"n:{_norm_txt(tid)}"
+
+
+def _resolve_merge_key(cart: dict[str, dict], item_id: str) -> str | None:
+    """Сопоставляет item_id из ответа ИИ с ключом слияния."""
+    tid = item_id.strip()
+    if not tid:
+        return None
+    cand = _new_internal_key_from_item_id(tid)
+    if cand in cart:
+        return cand
+    if looks_like_iiko_uuid(tid):
+        u = tid.lower()
+        for k, line in cart.items():
+            if str(line.get("iiko_id") or "").strip().lower() == u:
+                return k
+    # Любой iiko_id из БД/меню (в т.ч. не-UUID в тестах и старых данных)
+    tl = tid.lower()
+    for k, line in cart.items():
+        if str(line.get("iiko_id") or "").strip().lower() == tl:
+            return k
+    nu = _norm_txt(tid)
+    for k, line in cart.items():
+        if _norm_txt(str(line.get("name", ""))) == nu:
+            return k
+    return None
+
+
+def _stub_food_line(item_id: str) -> dict:
+    """
+    Новая строка до валидации по меню: цены обновит validate_order.
+    Для UUID имя пустое — заполнит enrich_merged_items_from_menu.
+    """
+    tid = item_id.strip()
+    if looks_like_iiko_uuid(tid):
+        return {
+            "name": "",
+            "quantity": 0,
+            "price_per_unit": 0.0,
+            "item_total": 0.0,
+            "iiko_id": tid,
+            "category": "",
+            "packaging_plov_1kg": "",
+            "exclude_ingredients": [],
+        }
+    return {
+        "name": tid,
+        "quantity": 0,
+        "price_per_unit": 0.0,
+        "item_total": 0.0,
+        "iiko_id": None,
+        "category": "",
+        "packaging_plov_1kg": "",
+        "exclude_ingredients": [],
+    }
+
+
+def merge_cart_actions(
+    current_items: list[dict],
+    actions: list[OrderAction],
+) -> list[dict]:
+    """
+    Сливает сохранённые позиции еды (items_json['items']) с дельтами от ИИ.
+
+    После вызова обязательно: enrich_merged_items_from_menu (если есть UUID без имени),
+    draft_food_lines_to_order_items → validate_order → finalize_order_draft / build_order_items_json.
+    """
+    order_keys: list[str] = []
+    cart: dict[str, dict] = {}
+
+    for raw in current_items:
+        if not isinstance(raw, dict):
+            continue
+        line = deepcopy(raw)
+        k = _internal_merge_key_from_food_line(line)
+        if k not in cart:
+            order_keys.append(k)
+            cart[k] = line
+        else:
+            cart[k]["quantity"] = int(cart[k].get("quantity", 1)) + int(line.get("quantity", 1))
+
+    for act in actions:
+        tid = act.item_id.strip()
+        if not tid:
+            continue
+        target = _resolve_merge_key(cart, tid)
+
+        if act.action == "add":
+            if target is None:
+                nk = _new_internal_key_from_item_id(tid)
+                if nk not in cart:
+                    order_keys.append(nk)
+                    cart[nk] = _stub_food_line(tid)
+                target = nk
+            cart[target]["quantity"] = int(cart[target].get("quantity", 0)) + int(act.quantity)
+
+        elif act.action == "remove":
+            if target is None:
+                continue
+            prev_q = int(cart[target].get("quantity", 0))
+            new_q = prev_q - int(act.quantity)
+            if new_q <= 0:
+                del cart[target]
+                order_keys = [x for x in order_keys if x != target]
+            else:
+                cart[target]["quantity"] = new_q
+
+        elif act.action == "set_quantity":
+            qset = int(act.quantity)
+            if target is None:
+                if qset > 0:
+                    nk = _new_internal_key_from_item_id(tid)
+                    if nk not in cart:
+                        order_keys.append(nk)
+                        cart[nk] = _stub_food_line(tid)
+                    cart[nk]["quantity"] = qset
+                continue
+            if qset <= 0:
+                del cart[target]
+                order_keys = [x for x in order_keys if x != target]
+            else:
+                cart[target]["quantity"] = qset
+
+    return [deepcopy(cart[k]) for k in order_keys if k in cart]
+
+
+# Синоним для документации / ТЗ (транзакционный merge — одна реализация)
+apply_order_merge = merge_cart_actions
+
+
+def enrich_merged_items_from_menu(
+    items: list[dict],
+    menu_items: list[MenuItem] | None,
+) -> list[dict]:
+    """
+    Подставляет name/category по iiko_id, если строка пришла только с UUID (после merge).
+    """
+    if not menu_items:
+        return [deepcopy(x) if isinstance(x, dict) else x for x in items]
+    by_iiko: dict[str, MenuItem] = {}
+    for m in menu_items:
+        iid = (m.iiko_id or "").strip()
+        if iid:
+            by_iiko[iid.lower()] = m
+    out: list[dict] = []
+    for raw in items:
+        if not isinstance(raw, dict):
+            continue
+        d = deepcopy(raw)
+        iid = str(d.get("iiko_id") or "").strip()
+        nm = str(d.get("name") or "").strip()
+        confused_name = bool(nm and looks_like_iiko_uuid(nm))
+        if iid and (not nm or confused_name):
+            mi = by_iiko.get(iid.lower())
+            if mi:
+                d["name"] = mi.name
+                d["category"] = mi.category or ""
+        out.append(d)
+    return out
+
+
+def draft_food_lines_to_order_items(items: list[dict]) -> list[OrderItem]:
+    """Преобразует словари еды из items_json в OrderItem для validate_order."""
+    result: list[OrderItem] = []
+    for d in items:
+        if not isinstance(d, dict):
+            continue
+        name = str(d.get("name") or "").strip()
+        iiko = str(d.get("iiko_id") or "").strip()
+        qty = int(d.get("quantity", 0))
+        if qty < 1:
+            continue
+        if not name and not iiko:
+            continue
+        result.append(
+            OrderItem(
+                name=name or iiko,
+                iiko_item_id=iiko,
+                quantity=qty,
+                packaging_plov_1kg=str(d.get("packaging_plov_1kg") or "").strip(),
+                exclude_ingredients=list(d.get("exclude_ingredients") or []),
+            )
+        )
+    return result
+
+
+def format_draft_order_context_for_prompt(items_json: dict | None) -> str:
+    """
+    Текст для system prompt: текущий DRAFT из БД (Phase 18 — дельты к корзине).
+    Пустая строка, если черновика нет или позиций нет.
+    """
+    if not items_json or not isinstance(items_json, dict):
+        return ""
+    items = items_json.get("items")
+    if not isinstance(items, list) or not items:
+        return ""
+    lines: list[str] = [
+        "## Текущий черновик заказа (уже в системе)",
+        "Клиент правит существующий заказ. Для изменений используй `order_actions` "
+        "(add/remove/set_quantity) с `item_id` из меню; либо полный список `items`, если пересобираешь заказ целиком.",
+        "",
+    ]
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        name = it.get("name") or "—"
+        q = it.get("quantity", 1)
+        pk = (it.get("packaging_plov_1kg") or "").strip()
+        extra = f", упаковка 1кг: {pk}" if pk else ""
+        lines.append(f"- {name} × {q}{extra}")
+    meta = items_json.get("order_meta") if isinstance(items_json.get("order_meta"), dict) else {}
+    bits: list[str] = []
+    ot = meta.get("order_type")
+    if ot:
+        bits.append(f"получение: {ot}")
+    if meta.get("delivery_address"):
+        bits.append(f"адрес: {meta['delivery_address']}")
+    if meta.get("pickup_time_note"):
+        bits.append(f"самовывоз: {meta['pickup_time_note']}")
+    if bits:
+        lines.extend(["", "; ".join(bits)])
+    total = items_json.get("total_price")
+    if total is not None:
+        try:
+            lines.append(f"\nПоследний итог сессии: **{float(total):.0f} ₸** (после правок сумма пересчитается на сервере).")
+        except (TypeError, ValueError):
+            pass
+    return "\n".join(lines)
+
+
+async def calculate_total_and_fees(
+    food_items: list[dict],
+    ai: AIBrainResponse,
+    *,
+    menu_items: list[MenuItem] | None = None,
+    db: AsyncSession | None = None,
+) -> tuple[ValidatedOrder, dict[str, object], float]:
+    """
+    Единая точка расчёта: цены и номенклатура из БД, упаковка и доставка через compute_fee_lines.
+
+    Не дублирует бизнес-правила — оборачивает validate_order + finalize_order_draft.
+    """
+    enriched = enrich_merged_items_from_menu(food_items, menu_items)
+    order_items = draft_food_lines_to_order_items(enriched)
+    validated = await validate_order(order_items, menu_items=menu_items, db=db)
+    payload, grand_total = finalize_order_draft(validated, ai)
+    return validated, payload, grand_total
 
 
 def build_menu_context(db_items: list[MenuItem]) -> str:

@@ -10,7 +10,7 @@
 import logging
 from dataclasses import dataclass
 from datetime import date, time
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -21,19 +21,89 @@ from app.services.booking_halls import (
     normalize_hall_key,
     vip_slot_occupied,
 )
-from app.schemas.ai_schemas import AIBrainResponse
+from app.schemas.ai_schemas import AIBrainResponse, PaymentSplit
 from app.services.dialog_mgr import UserState
 from app.services.events import publish_event
 from app.services.order_logic import (
+    ValidatedOrder,
     build_order_items_json,
     classify_packaging_kind,
+    draft_food_lines_to_order_items,
+    enrich_merged_items_from_menu,
     format_order_confirmation_summary,
+    load_available_menu,
+    merge_cart_actions,
     merge_total_into_items_json,
     validate_mixed_payment_total,
     validate_order,
 )
 
 logger = logging.getLogger(__name__)
+
+
+async def get_open_draft_order(db: AsyncSession, phone: str) -> Order | None:
+    """Последний заказ пользователя в статусе DRAFT (для merge и обновления корзины)."""
+    result = await db.execute(select(User).where(User.phone == phone))
+    user = result.scalar_one_or_none()
+    if user is None:
+        return None
+    q = await db.execute(
+        select(Order)
+        .where(Order.user_id == user.id, Order.status == OrderStatus.DRAFT)
+        .order_by(Order.id.desc())
+        .limit(1)
+    )
+    return q.scalar_one_or_none()
+
+
+def _blend_ai_with_stored_order_meta(ai: AIBrainResponse, meta: dict | None) -> AIBrainResponse:
+    """
+    При дельтах к корзине подставляем из черновика тип получения, оплату, адрес —
+    если модель их не продублировала в сообщении.
+    """
+    if not meta or not isinstance(meta, dict):
+        return ai
+    pm_mode = str(meta.get("payment_mode") or ai.payment_mode)
+    pm_meth = str(meta.get("payment_method") or ai.payment_method)
+    ps = PaymentSplit()
+    if pm_mode == "mixed":
+        pd = meta.get("payment_details") if isinstance(meta.get("payment_details"), dict) else {}
+        sp = pd.get("split") if isinstance(pd.get("split"), dict) else {}
+        ps = PaymentSplit(
+            cash=float(sp.get("cash") or 0),
+            card=float(sp.get("card") or 0),
+            remote=float(sp.get("remote") or 0),
+        )
+    ot = str(meta.get("order_type") or ai.order_type)
+    da = (ai.delivery_address or "").strip() or str(meta.get("delivery_address") or "")
+    pu = (ai.pickup_time_note or "").strip() or str(meta.get("pickup_time_note") or "")
+    bt = ai.booking_time
+    if bt is None and meta.get("booking_time"):
+        bt = str(meta.get("booking_time"))
+    ip = bool(meta.get("is_preorder", ai.is_preorder))
+
+    out = ai.model_copy(
+        update={
+            "order_type": ot,
+            "payment_mode": pm_mode,
+            "payment_method": pm_meth,
+            "payment_split": ps,
+            "delivery_address": da,
+            "pickup_time_note": pu,
+            "booking_time": bt,
+            "is_preorder": ip,
+        }
+    )
+    mix_sum = float(ai.payment_split.cash) + float(ai.payment_split.card) + float(ai.payment_split.remote)
+    if ai.payment_mode == "mixed" and mix_sum > 0.5:
+        out = out.model_copy(
+            update={"payment_mode": "mixed", "payment_split": ai.payment_split},
+        )
+    if (ai.delivery_address or "").strip():
+        out = out.model_copy(update={"delivery_address": ai.delivery_address.strip()})
+    if (ai.pickup_time_note or "").strip():
+        out = out.model_copy(update={"pickup_time_note": ai.pickup_time_note.strip()})
+    return out
 
 
 @dataclass
@@ -68,13 +138,59 @@ async def _handle_order(
 ) -> RouteResult:
     """
     Обработка intent='order':
-    Валидация → создание DRAFT → запрос подтверждения у клиента.
-    Заказ НЕ отправляется в iiko сразу — ждёт подтверждения.
+    Валидация → создание или обновление DRAFT → запрос подтверждения у клиента.
+    При активном черновике и непустом order_actions — merge с items_json (Phase 18).
     """
-    if not ai_response.items:
-        return RouteResult(reply_text=ai_response.reply_text)
+    if menu_items is None:
+        menu_items = await load_available_menu(db)
 
-    validated = await validate_order(ai_response.items, menu_items=menu_items, db=db)
+    existing_draft = await get_open_draft_order(db, phone)
+    use_merge = bool(ai_response.order_actions) and existing_draft is not None
+
+    ai_eff: AIBrainResponse
+    validated: ValidatedOrder
+
+    if use_merge:
+        raw_list = (existing_draft.items_json or {}).get("items")
+        current_items = [x for x in (raw_list or []) if isinstance(x, dict)]
+        merged = merge_cart_actions(current_items, ai_response.order_actions)
+        if not merged:
+            return RouteResult(
+                reply_text=(
+                    f"{ai_response.reply_text}\n\n"
+                    "⚠️ После изменений в заказе не осталось ни одной позиции. "
+                    "Назовите блюда, которые оставляем, или соберите заказ заново."
+                ),
+            )
+        meta = (existing_draft.items_json or {}).get("order_meta")
+        ai_eff = _blend_ai_with_stored_order_meta(
+            ai_response, meta if isinstance(meta, dict) else None,
+        )
+        enriched = enrich_merged_items_from_menu(merged, menu_items)
+        order_items = draft_food_lines_to_order_items(enriched)
+        validated = await validate_order(order_items, menu_items=menu_items, db=db)
+    elif ai_response.items:
+        ai_eff = ai_response
+        validated = await validate_order(ai_response.items, menu_items=menu_items, db=db)
+        if not validated.valid_items:
+            unknown_list = ", ".join(validated.unknown_items) if validated.unknown_items else "—"
+            return RouteResult(
+                reply_text=(
+                    f"{ai_response.reply_text}\n\n"
+                    f"⚠️ К сожалению, не нашёл в меню: {unknown_list}.\n"
+                    "Попробуйте назвать блюда по-другому или спросите, что есть в меню."
+                )
+            )
+    else:
+        if ai_response.order_actions and not existing_draft:
+            return RouteResult(
+                reply_text=(
+                    f"{ai_response.reply_text}\n\n"
+                    "⚠️ Нет активного заказа для изменения. Сначала выберите блюда — "
+                    "или опишите заказ целиком списком в `items`."
+                ),
+            )
+        return RouteResult(reply_text=ai_response.reply_text)
 
     if not validated.valid_items:
         unknown_list = ", ".join(validated.unknown_items) if validated.unknown_items else "—"
@@ -106,8 +222,10 @@ async def _handle_order(
                 )
 
     booking_row: Booking | None = None
-    if ai_response.order_type == "hall" and ai_response.is_preorder:
-        if not ai_response.booking_details:
+    if existing_draft and existing_draft.booking_id:
+        booking_row = await db.get(Booking, existing_draft.booking_id)
+    elif ai_eff.order_type == "hall" and ai_eff.is_preorder:
+        if not ai_eff.booking_details:
             return RouteResult(
                 reply_text=(
                     f"{ai_response.reply_text}\n\n"
@@ -115,7 +233,7 @@ async def _handle_order(
                     "**время визита** и **сколько гостей** — например: «завтра в 19:00, нас четверо, зал 1»."
                 ),
             )
-        bd = ai_response.booking_details
+        bd = ai_eff.booking_details
         try:
             booking_date = date.fromisoformat(bd.date)
             booking_time = time.fromisoformat(bd.time)
@@ -149,8 +267,8 @@ async def _handle_order(
         db.add(booking_row)
         await db.flush()
 
-    payload, grand_total = build_order_items_json(validated, ai_response)
-    mix_err = validate_mixed_payment_total(ai_response, grand_total)
+    payload, grand_total = build_order_items_json(validated, ai_eff)
+    mix_err = validate_mixed_payment_total(ai_eff, grand_total)
     if mix_err:
         return RouteResult(
             reply_text=f"{ai_response.reply_text}\n\n⚠️ {mix_err}",
@@ -164,16 +282,53 @@ async def _handle_order(
         "pending" if (booking_row or requires_big_order_prepay) else "not_required"
     )
 
-    order = Order(
-        user_id=user.id,
-        status=OrderStatus.DRAFT,
-        items_json=items_json,
-        total_price=grand_total,
-        booking_id=booking_row.id if booking_row else None,
-        prepayment_status=prepayment_status,
-    )
-    db.add(order)
-    await db.flush()
+    if existing_draft and (use_merge or ai_response.items):
+        expected_ver = int(existing_draft.row_version)
+        new_booking_id = booking_row.id if booking_row is not None else existing_draft.booking_id
+        upd = (
+            await db.execute(
+                update(Order)
+                .where(
+                    Order.id == existing_draft.id,
+                    Order.status == OrderStatus.DRAFT.value,
+                    Order.row_version == expected_ver,
+                )
+                .values(
+                    items_json=items_json,
+                    total_price=grand_total,
+                    prepayment_status=prepayment_status,
+                    booking_id=new_booking_id,
+                    row_version=Order.row_version + 1,
+                )
+            )
+        ).rowcount
+        if upd != 1:
+            logger.warning(
+                "Optimistic lock: заказ id=%s версия=%s не обновлён (гонка)",
+                existing_draft.id,
+                expected_ver,
+            )
+            return RouteResult(
+                reply_text=(
+                    f"{ai_response.reply_text}\n\n"
+                    "⚠️ Заказ только что изменился параллельно. Напишите ещё раз одним сообщением — "
+                    "я пересчитаю состав."
+                ),
+            )
+        await db.refresh(existing_draft)
+        order = existing_draft
+    else:
+        order = Order(
+            user_id=user.id,
+            status=OrderStatus.DRAFT,
+            items_json=items_json,
+            total_price=grand_total,
+            booking_id=booking_row.id if booking_row else None,
+            prepayment_status=prepayment_status,
+            row_version=1,
+        )
+        db.add(order)
+        await db.flush()
 
     body_text = format_order_confirmation_summary(items_json, validated.summary_text)
     reply = ai_response.reply_text + "\n\n📋 Ваш заказ:\n" + body_text
@@ -183,11 +338,11 @@ async def _handle_order(
 
     # Если клиент уже указал оплату в сообщении, не переспрашиваем — сразу просим подтверждение.
     # Также, если для самовывоза не указано время, сначала уточняем время (коротко).
-    ot = (ai_response.order_type or "").strip().lower()
-    is_mixed = ai_response.payment_mode == "mixed"
-    pm = (ai_response.payment_method or "").strip().lower()
-    pickup_note = (ai_response.pickup_time_note or "").strip()
-    delivery_addr = (ai_response.delivery_address or "").strip()
+    ot = (ai_eff.order_type or "").strip().lower()
+    is_mixed = ai_eff.payment_mode == "mixed"
+    pm = (ai_eff.payment_method or "").strip().lower()
+    pickup_note = (ai_eff.pickup_time_note or "").strip()
+    delivery_addr = (ai_eff.delivery_address or "").strip()
 
     missing_bits: list[str] = []
     if ot == "delivery" and not delivery_addr:
@@ -236,8 +391,8 @@ async def _handle_order(
         "order_id": order.id, "status": OrderStatus.DRAFT,
         "phone": phone, "total_price": grand_total,
         "items": validated.valid_items,
-        "order_type": ai_response.order_type,
-        "payment_method": ai_response.payment_method,
+        "order_type": ai_eff.order_type,
+        "payment_method": ai_eff.payment_method,
         "booking_id": booking_row.id if booking_row else None,
     })
 

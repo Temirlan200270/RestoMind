@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Any
 
 from app.core.config import settings
+from app.db.session import redis_connection_kwargs, redis_pubsub_available
 
 logger = logging.getLogger(__name__)
 
@@ -34,10 +35,10 @@ async def publish_event(event_type: str, data: dict[str, Any]) -> None:
         ensure_ascii=False,
     )
 
-    if settings.redis_enabled:
+    if redis_pubsub_available():
         try:
             from redis.asyncio import Redis
-            pub_client = Redis.from_url(settings.redis_url, decode_responses=True)
+            pub_client = Redis.from_url(settings.redis_url, **redis_connection_kwargs())
             try:
                 await pub_client.publish(CHANNEL_NAME, payload)
             finally:
@@ -69,9 +70,14 @@ async def subscribe_events() -> AsyncGenerator[str, None]:
     При Redis — подписка на канал Pub/Sub.
     Без Redis — asyncio.Queue broadcast.
     """
-    if settings.redis_enabled:
-        async for event in _subscribe_redis():
-            yield event
+    if redis_pubsub_available():
+        try:
+            async for event in _subscribe_redis():
+                yield event
+        except Exception as exc:
+            logger.error("Redis subscribe error: %s — переключение на in-memory", exc)
+            async for event in _subscribe_memory():
+                yield event
     else:
         async for event in _subscribe_memory():
             yield event
@@ -81,7 +87,7 @@ async def _subscribe_redis() -> AsyncGenerator[str, None]:
     """Подписка на Redis Pub/Sub канал."""
     from redis.asyncio import Redis
 
-    sub_client = Redis.from_url(settings.redis_url, decode_responses=True)
+    sub_client = Redis.from_url(settings.redis_url, **redis_connection_kwargs())
     try:
         pubsub = sub_client.pubsub()
         await pubsub.subscribe(CHANNEL_NAME)

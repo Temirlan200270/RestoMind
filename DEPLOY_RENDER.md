@@ -60,7 +60,13 @@
 
 ### Redis (опционально)
 
-Сейчас в Blueprint **`REDIS_ENABLED=false`** — сессии/события работают в in-memory в рамках одного инстанса. Для нескольких инстансов или устойчивости добавьте **Render Key Value (Redis)** и переменные `REDIS_ENABLED=true`, `REDIS_HOST`, `REDIS_PORT` из дашборда.
+Сейчас в Blueprint **`REDIS_ENABLED=false`** — сессии/события работают в in-memory в рамках одного инстанса. Для нескольких инстансов или устойчивости включите Redis и задайте URL.
+
+- **Render Key Value:** `REDIS_ENABLED=true` и внутренний хост/порт (или одна строка **`REDIS_URL`**, если Render отдаёт полный URL).
+- **Upstash:** в Dashboard скопируйте **Redis Connect** (`rediss://default:ПАРОЛЬ@….upstash.io:6379`) → в Render добавьте секрет **`REDIS_URL`** (значение целиком) и **`REDIS_ENABLED=true`**.  
+  **Не** используйте для этого проекта только Upstash **REST** (HTTPS + отдельный токен): у него нет Pub/Sub, а живые события админки идут через `redis.publish` / `subscribe`.
+
+При ошибках TLS к облачному Redis можно временно выставить **`REDIS_SSL_SKIP_VERIFY=true`** (хуже для безопасности; в идеале разобраться с CA).
 
 ---
 

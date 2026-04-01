@@ -5,7 +5,7 @@ Pydantic-схемы для структурированных ответов AI 
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # Язык ответа клиенту (для мультиязычности и выбора голоса TTS)
 DetectedReplyLanguage = Literal["ru", "kk", "en", "uz"]
@@ -77,6 +77,45 @@ class PaymentSplit(BaseModel):
     remote: float = Field(default=0.0, ge=0, description="Удалённо: Каспи / перевод / ссылка")
 
 
+OrderActionKind = Literal["add", "remove", "set_quantity"]
+
+
+class OrderAction(BaseModel):
+    """
+    Одна дельта к корзине (Phase 18).
+    item_id — UUID из контекста меню [id: …] или каноничное название блюда, как в меню.
+    """
+
+    item_id: str = Field(
+        ...,
+        min_length=1,
+        description="ID блюда из контекста меню (UUID iiko) или точное/узнаваемое название позиции",
+    )
+    action: OrderActionKind = Field(
+        ...,
+        description=(
+            "add — прибавить quantity к текущему количеству; "
+            "remove — вычесть quantity (до 0 — строка удаляется); "
+            "set_quantity — жёстко установить количество (0 — удалить строку)"
+        ),
+    )
+    quantity: int = Field(default=1, ge=0, description="Количество порций для операции")
+    reasoning: str | None = Field(
+        default=None,
+        description="Краткое обоснование, если действие связано с рекомендацией бота",
+    )
+
+    @field_validator("item_id", mode="before")
+    @classmethod
+    def _strip_item_id(cls, v: object) -> object:
+        if isinstance(v, str):
+            s = v.strip()
+            if not s:
+                raise ValueError("item_id не может быть пустым")
+            return s
+        return v
+
+
 class AIBrainResponse(BaseModel):
     """
     Структурированный ответ от ИИ (Gemini Structured Output).
@@ -115,7 +154,27 @@ class AIBrainResponse(BaseModel):
     )
     items: list[OrderItem] = Field(
         default_factory=list,
-        description="Список позиций заказа (заполняется только при intent='order')",
+        description=(
+            "Полный список позиций заказа при intent='order'. "
+            "Если order_actions не пуст — бэкенд мержит дельты с DRAFT; "
+            "пустой order_actions сохраняет прежнюю семантику «весь заказ из items»."
+        ),
+    )
+    order_actions: list[OrderAction] = Field(
+        default_factory=list,
+        description="Инкрементальные правки корзины (add/remove/set_quantity); см. Phase 18",
+    )
+    is_recommendation: bool = Field(
+        default=False,
+        description="True, если ответ в значительной степени про совет/допродажу, а не только подтверждение",
+    )
+    upsell_offered: str | None = Field(
+        default=None,
+        description="Название или краткий идентификатор блюда, которое бот предложил",
+    )
+    upsell_reasoning: str | None = Field(
+        default=None,
+        description="Почему бот предложил это (вкус, сочетание, популярность) — для логов и админки",
     )
     booking_details: BookingDetails | None = Field(
         default=None,

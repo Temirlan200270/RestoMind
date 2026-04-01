@@ -198,6 +198,7 @@ RestoMind/
 | `DB_MODE` | `postgres` | PostgreSQL (продакшен) |
 | `REDIS_ENABLED` | `false` | In-memory заглушка для сессий/событий |
 | `REDIS_ENABLED` | `true` | Redis сервер |
+| `REDIS_URL` | *(пусто)* | Если задан — полный URL подключения (приоритет над `REDIS_HOST`/`PORT`). Для Upstash: строка **Redis Connect** `rediss://…` (нужен TCP для Pub/Sub), не REST API |
 
 ## Разработка
 

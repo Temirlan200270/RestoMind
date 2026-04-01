@@ -5,8 +5,10 @@
 
 import json
 import logging
+import ssl
 from collections.abc import AsyncGenerator
 from typing import Any
+from urllib.parse import urlparse, urlunparse
 
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -139,18 +141,91 @@ class InMemoryPipeline:
         return results
 
 
+def redacted_redis_url_for_logs(url: str) -> str:
+    """URL для логов без пароля (rediss://default:secret@host → rediss://***@host:6379)."""
+    try:
+        p = urlparse(url)
+        if not p.scheme:
+            return "(redis)"
+        host = p.hostname or ""
+        port = f":{p.port}" if p.port else ""
+        if p.username is not None or p.password is not None:
+            netloc = f"***@{host}{port}"
+        else:
+            netloc = f"{host}{port}" if host or port else p.netloc
+        return urlunparse((p.scheme, netloc, p.path or "", "", p.query, p.fragment))
+    except Exception:
+        return "(redis)"
+
+
+def redis_connection_kwargs() -> dict[str, Any]:
+    """
+    Параметры redis.asyncio для облачного TLS (Upstash и др.).
+    REST Upstash (HTTPS + токен) Pub/Sub не поддерживает — нужен rediss:// и redis-py.
+    """
+    url = settings.redis_url
+    kw: dict[str, Any] = {
+        "decode_responses": True,
+        "socket_connect_timeout": 5.0,
+        "socket_timeout": 5.0,
+        "retry_on_timeout": True,
+    }
+    if url.startswith("rediss://") and settings.redis_ssl_skip_verify:
+        kw["ssl_cert_reqs"] = ssl.CERT_NONE
+    return kw
+
+
 def _create_redis_client() -> Any:
     """Создаёт Redis-клиент или in-memory заглушку."""
     if settings.redis_enabled:
         from redis.asyncio import Redis
-        logger.info("Redis включён: %s", settings.redis_url)
-        return Redis.from_url(settings.redis_url, decode_responses=True)
+
+        logger.info("Redis включён: %s", redacted_redis_url_for_logs(settings.redis_url))
+        return Redis.from_url(settings.redis_url, **redis_connection_kwargs())
 
     logger.info("Redis отключён — используется in-memory хранилище")
     return InMemoryRedis()
 
 
 redis_client = _create_redis_client()
+
+
+def redis_pubsub_available() -> bool:
+    """
+    True — реальный TCP Redis (Pub/Sub, ZSET для rate limit).
+    False — REDIS выключен или откат на InMemoryRedis после ошибки подключения.
+    """
+    if not settings.redis_enabled:
+        return False
+    return not isinstance(redis_client, InMemoryRedis)
+
+
+async def init_redis_or_fallback() -> None:
+    """
+    Проверка соединения при старте. Если REDIS_ENABLED=true, а хост недоступен
+    (типично: на Render забыли REDIS_URL → остаётся localhost:6379), переключаемся на InMemoryRedis.
+    """
+    global redis_client
+    if not settings.redis_enabled:
+        logger.info("Redis отключён в настройках — in-memory")
+        return
+    if isinstance(redis_client, InMemoryRedis):
+        return
+    try:
+        await redis_client.ping()
+        logger.info("Redis подключён: %s", redacted_redis_url_for_logs(settings.redis_url))
+    except Exception as exc:
+        logger.error(
+            "REDIS_ENABLED=true, но подключение к Redis не удалось: %s. "
+            "Задайте REDIS_URL (Upstash: rediss://default:ПАРОЛЬ@…upstash.io:6379) "
+            "или установите REDIS_ENABLED=false. Временно используется in-memory.",
+            exc,
+        )
+        try:
+            await redis_client.aclose()
+        except Exception:
+            pass
+        redis_client = InMemoryRedis()
 
 
 async def get_redis() -> Any:

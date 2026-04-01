@@ -67,6 +67,9 @@ RestoMind/
 4. **Тонкие роутеры** — в `app/api/` только приём запроса и вызов сервисов; ветвление — в `app/services/`.
 5. **Цены и номенклатура** — из БД / контекста меню (`build_menu_context` в `order_logic.py`); модель не придумывает цены.
 6. **UUID iiko** — в заказах использовать привязку к `MenuItem.iiko_id` там, где это реализовано в `intent_router` / `order_logic` (см. код).
+7. **Консистентность данных (versioning):** обновление активного черновика заказа из чата — через **optimistic locking**: колонка `orders.version` (ORM `Order.row_version`), `UPDATE … WHERE id = ? AND version = ?`, при конфликте — понятный ответ клиенту «напишите ещё раз».
+8. **Идемпотентность входящих сообщений:** вебхук Meta может дублировать доставку — **Redis** (`wa:dedupe:{message_id}`) + таблица **`whatsapp_inbound_dedupe`** (первичный ключ `message_id`) с `ON CONFLICT DO NOTHING`; резервация в отдельной короткой транзакции до основной обработки.
+9. **Redis ≠ источник истины:** заказ и состав — в **PostgreSQL** (`orders.items_json`); Redis — сессия чата и кэш. При потере Redis восстановление сценария — из **`chat_logs`** и последнего **DRAFT** заказа пользователя (полная автоматика восстановления state — в roadmap v3).
 
 ---
 
@@ -243,15 +246,21 @@ class AIBrainResponse(BaseModel):
     # ... существующие поля (intent, reply_text, order_items, ...)
     order_actions: List[OrderAction] = Field(default_factory=list)
     is_recommendation: bool = False  # Ответ в основном как совет, не финальное изменение корзины
+    # Опционально для аналитики / админки (дублируют reasoning в order_actions при простом upsell):
+    upsell_offered: Optional[str] = None   # Название или id предложенной позиции
+    upsell_reasoning: Optional[str] = None   # Краткое «почему» для логов и §4.8
 ```
 
 **Совместимость:** на переходном этапе допустимо: пустой `order_actions` → прежняя семантика «полная замена списка из `order_items`»; при непустом `order_actions` — **merge** в `intent_router` / `order_logic`.
 
 #### 4.4. Интеллектуальное управление корзиной
 
-- [ ] **Incremental updates:** команды «добавь / убери / ещё N порций» без сброса всего заказа; применение к `DRAFT` в БД.
+- [ ] **State sync в промпте:** в состоянии `ORDERING` (и родственных) в запрос к Gemini подмешивать **актуальный состав** из БД: `orders.items_json` / человекочитаемая сводка + при необходимости `order_meta` (упаковка плова 1кг и т.д.), чтобы модель правила **дельты**, а не «угадывала» корзину с нуля.
+- [ ] **Incremental updates:** команды «добавь / убери / ещё N порций» без сброса всего заказа; применение к `DRAFT` в БД через **merge** (`order_actions`), а не только полная перезапись `order_items`.
+- [ ] **Re-calculation:** после любого успешного merge — тот же пайплайн, что и сейчас: пересчёт **fee_lines**, упаковки (в т.ч. **плов 1кг → табак/казан**), доставки по порогу; при удалении позиции, давшей триггер упаковки, соответствующие строки должны **исчезнуть** (например убрали плов 1кг — не остаётся «висящий» казан/табак).
 - [ ] **Validation:** запрос убрать позицию, которой нет — вежливое уточнение состава (*«В заказе сейчас нет колы — убрать что-то другое?»*).
-- [ ] **Замена одного на другое:** семантика «убери X, вместо него Y» как последовательность или атомарный `replace` (продуктово уточнить в промпте).
+- [ ] **Замена одного на другое:** семантика «убери X, вместо него Y» как последовательность `remove` + `add` / `set_quantity` или отдельный `replace` в схеме (продуктово уточнить в промпте).
+- [ ] **Natural language CRUD (цель UX):** поддержка формулировок вроде «замени X на Y», «убери всё, кроме Z», «добавь ещё один» — через корректные `order_actions` + валидацию на бэкенде.
 
 #### 4.5. Блок «Активные продажи» (Upselling)
 
@@ -283,6 +292,148 @@ class AIBrainResponse(BaseModel):
 
 Данные можно класть в `order_meta.recommendation_trace` (список событий) или отдельную таблицу `order_suggestion_events`.
 
+**Зависимость:** админку §4.8 имеет смысл подключать, когда в ответах модели **стабильно** заполняются `is_recommendation`, `reasoning` / `upsell_reasoning` и есть предсказуемая запись в `order_meta` (иначе нечего показывать оператору).
+
+---
+
+#### 4.9. Приоритет фаз (16 / 17 / 18) и что делаем дальше
+
+**Уже в продукте (v2.0 «логистика + деньги»):** упаковка и доставка, mixed payment + валидатор, предоплата по порогу, промпт ORDER_RULES, канбан с бейджами.
+
+**Остаётся по дорожной карте v2.0:**
+
+| Область | Суть |
+|--------|------|
+| **Phase 16 (добить)** | Расширить модалку заказа: детальный split, явная работа с предоплатой там, где ещё неудобно. |
+| **Phase 17** | Mapping упаковки в БД + админка; при правках заказа оператором — **повторная** проверка mixed (или жёсткое правило «не ломать split» без пересборки). |
+| **Phase 18 (§4)** | Инкрементальная корзина (`order_actions`, merge с `DRAFT`), теги в `menu_context`, upsell в промпте, few-shot, тесты; затем админка — трасса рекомендаций (§4.8). |
+| **Деньги «вперёд»** | Webhook оплаты, таблица `payment_events`, уведомления клиенту — не блокируют текущий поток чата, но в плане как цель. |
+| **Фаза 13.1** | Latency PSTN: streaming TTS, filler-фразы, метрики этапов. |
+
+**Рекомендуемый порядок следующего спринта (по умолчанию): Phase 18 → Phase 17.**
+
+- **Почему сначала 18:** фундамент для §4 и upsell; без merge с `DRAFT` «добавь/убери» и советы легко рассинхронизируют `items_json` с диалогом. Измеримый эффект **без** Twilio и эквайринга; меньше внешних зависимостей, чем у Phase 17 (схема БД + UI).
+- **Когда сначала 17:** если боль №1 у кухни/операций — **править упаковку без деплоя**; тогда в одном спринте можно зафиксировать порядок **17 → 18** явно в задачах.
+
+**Параллельно малыми коммитами:** few-shot и блок персоны «гастро-эксперт» в `prompts.py` + черновик `tags` в контексте меню — можно класть рядом с CRUD, не дожидаясь админки по рекомендациям.
+
+---
+
+#### 4.10. План реализации Phase 18 (технически)
+
+Цель: функция уровня **`merge_cart_actions(current_items, actions) → new_items`** в `app/services/order_logic.py` (или рядом), вызываемая из **`intent_router`** после ответа модели, если есть `order_actions` и активен `DRAFT`.
+
+1. **Инвариант после merge:** всегда прогонять существующий расчёт итога — **`compute_fee_lines` / тарификация упаковки и доставки** — чтобы при удалении/добавлении позиций автоматически обновлялись контейнеры, плов 1кг, порог доставки и т.д. Не дублировать бизнес-правила в «сыром» JSON от модели.
+2. **Контекст для Gemini:** перед вызовом `call_gemini` подставлять текущий состав заказа из БД (и при необходимости краткое резюме fee), чтобы дельты были согласованы с реальностью.
+3. **Схема:** расширить `AIBrainResponse` (`order_actions`, `is_recommendation`, опционально `upsell_offered` / `upsell_reasoning`) согласованно с парсером в `ai_brain`; переходный режим: пустой `order_actions` → старое поведение «полный список из `order_items`».
+4. **Промпт:** блок правил для дельт («убери то, чего нет» → модель не выдумывает remove; клиент просит убрать отсутствующее → уточнение в `reply_text`); блок **RECOMMENDATION_ENGINE** / сочетаемость; few-shot из §4.6.
+5. **Тесты:** `tests/` — цепочки add → remove часть → set_quantity → проверка итога и fee_lines; кейс «убрали плов 1кг — нет строки казана/табака»; см. §4.7.
+
+**Опционально «бесплатный» первый шаг:** усилить системный промпт (персона эксперта + 1–2 few-shot) **до** merge в коде — быстрый выигрыш в тоне; устойчивость корзины всё равно требует шагов 1–3.
+
+#### 4.11. Phase 18.1 — надёжный merge и доставка сообщений (частично в коде)
+
+| Задача | Статус |
+|--------|--------|
+| Колонка **`orders.version`** + optimistic update при правке **существующего** DRAFT из чата (`intent_router`) | ✅ |
+| Таблица **`whatsapp_inbound_dedupe`** + `try_claim_whatsapp_inbound_in_db` + вызов из `process_message` | ✅ |
+| Alembic-ревизия `alembic/versions/20260401_order_version_whatsapp_dedupe.py` + `ALTER` в `main.py` для SQLite/совместимости | ✅ |
+| **action_id** на каждую дельту (расширение схемы / дедуп на уровне действий) | запланировано |
+| Один атомарный `BEGIN … merge + fee + commit` без промежуточных flush (упростить транзакцию) | запланировано |
+| Повторная валидация **mixed** после `PATCH` заказа в админке | см. Phase 17 |
+
+---
+
+## RestoMind v3 — Conversational Commerce Platform (blueprint)
+
+Цель: зафиксировать **продакшен-уровень** для SaaS: деньги, нестабильность ИИ, масштабирование, отказоустойчивость, продукт. Это **не** обязательный объём следующего спринта — дорожная карта на несколько кварталов.
+
+### 0. Главный принцип
+
+**STATE → EVENTS → LOGIC → AI → UI**
+
+- **STATE (БД)** — единственный источник истины по заказу и оплате.
+- **EVENTS** — всё значимое фиксируется для аудита, аналитики, ретраев и интеграций.
+- **LOGIC** — детерминированные правила (тарифы, валидация split, блокировки).
+- **AI** — парсер намерений и генератор текста, **без** прямого управления деньгами.
+- **UI** — отображение и действия оператора.
+
+### 1. Слои и домены (явное разделение)
+
+- **Слои:** API (FastAPI) → Application (`app/services`) → при росте — выделение **domain**-чистых модулей (pricing, payment) → Infrastructure (DB, Redis, внешние API).
+- **Домены:** Conversation (state/history/intent), Order (items/pricing/packaging/delivery), Payment (split/validation/prepayment/**payment_events**), AI (parse/recommend), Admin.
+
+### 2. Event-driven ядро (апгрейд)
+
+События доменного уровня (лог + опционально очередь): `MessageReceived`, `AIResponseParsed`, `OrderUpdated`, `PaymentValidated`, `OrderConfirmed`, `OrderSentToIiko`. Минимум: **структурированные логи** + существующий **Redis pub/sub** для админки; максимум: запись в таблицу **`domain_events`** (audit).
+
+### 3. Очереди вместо только `BackgroundTasks`
+
+Сейчас: FastAPI **BackgroundTasks** для `process_message`. Цель v3: **Redis Queue / RQ / Celery** (или аналог) — `Webhook → enqueue → worker → process_message` с **retry** (Gemini/iiko 5xx), масштабированием воркеров и переживанием рестарта процесса API.
+
+### 4. STATE: БД vs Redis
+
+- **Истина:** `orders`, при необходимости явная **`conversation_state`** в БД (user_id, state, last_order_id, updated_at).
+- **Redis:** кэш, быстрый state, история чата; при сбое — восстановление из БД (частично ручное/операторское на ранних этапах).
+
+### 5. Order Engine
+
+- Ядро **`merge_cart_actions`** (есть) + **версионирование** (есть для обновления DRAFT) + в перспективе **idempotency key** на уровне действий (`action_id`).
+- После каждого изменения: пересчёт total, packaging, delivery, валидация payment (уже в пайплайне).
+
+### 6. Payment (уровень финтеха)
+
+- Таблица **`payment_events`**: order_id, provider, amount, status, external_payment_id, raw payload, created_at; **идемпотентность** по `external_payment_id`.
+- Поток: провайдер → webhook → `payment_events` → обновление `prepayment_status` / блокировки подтверждения «Да».
+- **Инварианты:** нельзя подтвердить заказ при обязательной предоплате без `paid`/`waived`; нельзя менять сумму заказа без пересчёта **mixed** (см. Phase 17).
+
+### 7. AI: контроль
+
+- Цепочка: **AI → JSON → Pydantic → validate → apply** (уже по сути).
+- Разделение модулей: parser (intent/actions) / generator (`reply_text`) / recommender (upsell) — рефакторинг `ai_brain` по мере роста.
+
+### 8. Recommendation engine
+
+- Правила (нет напитка / сумма &lt; X) + AI reasoning + **`recommendation_trace`** в `order_meta` или отдельная таблица — для аналитики и A/B.
+
+### 9. Observability
+
+- Structured logs (JSON): intent, `order_actions`, результат merge, платежи; метрики latency (AI, STT, TTS), конверсия, upsell.
+
+### 10. Fault tolerance
+
+- AI: fallback `escalate` / шаблон (есть).
+- Redis: деградация in-memory / восстановление из БД.
+- iiko: retry + `iiko_last_error` + статус в админке (есть).
+
+### 11. Voice
+
+- Pipeline audio → STT → text → AI → TTS → audio; Phase 13.1 (streaming TTS, filler, метрики).
+
+### 12. Security & multi-tenancy
+
+- `organization_id` на сущностях (частично есть); rate limiting (есть); audit logs (события v3).
+
+### 13. Feature flags
+
+- Примеры: `ENABLE_UPSELL`, `ENABLE_VOICE`, `STRICT_AI_MODE` — безопасный rollout.
+
+### 14. Roadmap v3 (порядок)
+
+1. **Ядро:** merge + versioning + idempotency сообщений — **в работе / частично готово**.
+2. **Очередь + conversation_state в БД.**
+3. **payment_events + webhook оплаты.**
+4. **Разделение AI-модулей.**
+5. **Recommendation trace + аналитика.**
+6. **Полноценный event bus + масштабирование воркеров.**
+
+### 15. Чек-лист инфраструктуры и голоса (v3)
+
+- [x] **Cloud Infra:** Upstash Redis через TCP `REDIS_URL` (`rediss://`), не REST-only.
+- [x] **Consistency:** версионирование заказов (`orders.version` / `Order.row_version`, optimistic update в чате).
+- [x] **Voice (Twilio MVP):** `POST /api/whatsapp/voice/incoming` (TwiML) + `WebSocket /api/whatsapp/voice/stream` (Media Streams, μ-law → WAV → Gemini → ответ через TwiML `Say` при заданных `TWILIO_*`).
+- [x] **Idempotency (WhatsApp):** `message_id` + Redis + таблица `whatsapp_inbound_dedupe` (Twilio turn — отдельный префикс `twilio:CallSid:uuid` в `process_message`).
+
 ---
 
 ### Следующие шаги разработки
@@ -293,7 +444,8 @@ class AIBrainResponse(BaseModel):
 | **Phase 15** | `AIBrainResponse`: `packaging_plov_1kg`, `payment_mode`, `payment_split`; `order_meta.payment_details` | ✅ сделано |
 | **Phase 16** | Кнопка «Отправить в iiko» / канбан `sent_to_iiko`, детализация тарифов в **модалке** заказа (таблица split, кнопка «предоплата получена») | частично (канбан есть; модалку расширить при необходимости) |
 | **Phase 17** | Mapping упаковки в БД + админка; при необходимости **повторная валидация mixed** после правок заказа оператором | запланировано |
-| **Phase 18** | **Chat CRUD:** `order_actions`, merge с `DRAFT`; теги меню + upsell в промпте; **админка:** трасса рекомендаций / принятие клиентом (§4) | запланировано |
+| **Phase 18** | **Chat CRUD:** `order_actions`, merge с `DRAFT`; теги меню + upsell в промпте; **админка:** трасса рекомендаций — §4.1–4.8, §4.9–4.10 | ✅ основной поток; трасса/теги — дальше |
+| **Phase 18.1** | Версия заказа + БД-дедуп WhatsApp `message_id` — §4.11 | ✅ |
 
 ### Совет по развитию
 
@@ -375,8 +527,10 @@ class AIBrainResponse(BaseModel):
 
 ### Фаза 13 — Twilio Voice MVP
 
-- Входящий звонок на **телефонный номер** (PSTN) → Twilio Media Streams / WebSocket → STT → `call_gemini` (+ меню + KB) → TTS → стрим обратно.
-- Заготовка интерфейсов: `app/integrations/telephony.py` (endpoint `/voice/stream` из комментария в файле — **пока не подключён**).
+- Входящий PSTN → **Twilio Console** «A CALL COMES IN» = `POST https://<PUBLIC_BASE_URL>/api/whatsapp/voice/incoming` → TwiML (`Say` + `<Connect><Stream url="wss://…/api/whatsapp/voice/stream"/>`).
+- WebSocket принимает **Media Streams** (μ-law 8 kHz), накапливает буфер (`TWILIO_VOICE_BUFFER_BYTES`, по умолчанию ~3 с), конвертирует в **WAV** (`audioop-lts`), **STT** через `gemini_transcribe_voice`, далее тот же **`process_message`**, что WhatsApp.
+- Ответ абоненту: **TwiML `Say` (Polly ru-RU)** через REST `Calls.update` — при активном одностороннем stream возможны ограничения Twilio; для «идеального» PSTN см. bidirectional stream / Фаза 13.1.
+- Секреты: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` (подпись вебхука, если токен задан). Заготовка абстракций: `app/integrations/telephony.py`.
 
 ### Фаза 13.1 — Оптимизация latency (задержки)
 

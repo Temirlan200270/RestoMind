@@ -88,14 +88,7 @@ class TelephonyRouter:
         return audio_response
 
 
-# ─── Twilio WebSocket endpoint (для будущего подключения) ────────
-# В main.py или отдельном роутере:
-#
-# @app.websocket("/voice/stream")
-# async def voice_stream(ws: WebSocket):
-#     session = CallSession(call_sid="...", phone="...")
-#     router = TelephonyRouter(stt=DeepgramSTT(), tts=ElevenLabsTTS())
-#     async for chunk in ws.iter_bytes():
-#         response = await router.handle_audio_stream(session, chunk)
-#         if response:
-#             await ws.send_bytes(response)
+# ─── Twilio (реализовано в app/api/webhooks.py) ───────────────────
+# POST /api/whatsapp/voice/incoming — TwiML + привязка CallSid → From (Redis или память).
+# WebSocket /api/whatsapp/voice/stream — Twilio Media Streams → μ-law → WAV → Gemini STT → process_message.
+# Ответ в трубку: TwiML Say через app/integrations/twilio_client.py (см. customer_reply + TWILIO_* в .env).

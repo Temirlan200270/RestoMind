@@ -148,6 +148,20 @@ class Order(Base):
         nullable=True,
         comment="Ссылка на оплату; заполняет оператор или платёжный webhook",
     )
+    # Optimistic locking: SQLAlchemy увеличивает при UPDATE; при конфликте — StaleDataError
+    row_version: Mapped[int] = mapped_column(
+        "version",
+        Integer,
+        nullable=False,
+        default=1,
+        server_default="1",
+        comment="Версия строки заказа для защиты от гонок при merge/правках",
+    )
+
+    @property
+    def version(self) -> int:
+        """Алиас к row_version (колонка в БД — version, optimistic locking)."""
+        return int(self.row_version)
 
     # Связи
     user: Mapped["User"] = relationship(back_populates="orders")
@@ -185,6 +199,24 @@ class ChatLog(Base):
 
     def __repr__(self) -> str:
         return f"<ChatLog id={self.id} role={self.role}>"
+
+
+class WhatsappInboundDedupe(Base):
+    """
+    Идемпотентность входящих сообщений WhatsApp по message_id от Meta.
+    Дополняет Redis TTL-дедуп: переживает сброс кэша и даёт аудит.
+    """
+
+    __tablename__ = "whatsapp_inbound_dedupe"
+
+    message_id: Mapped[str] = mapped_column(String(128), primary_key=True, comment="id сообщения из вебхука Meta")
+    phone: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    def __repr__(self) -> str:
+        return f"<WhatsappInboundDedupe message_id={self.message_id!r}>"
 
 
 class Booking(Base):

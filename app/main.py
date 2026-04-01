@@ -24,7 +24,14 @@ from app.api.admin import ws_router as admin_ws_router
 from app.api.webhooks import router as webhooks_router
 from app.core.config import settings
 from app.db.models import Base
-from app.db.session import async_engine, async_session_factory, redis_client
+from app.db.session import (
+    InMemoryRedis,
+    async_engine,
+    async_session_factory,
+    init_redis_or_fallback,
+    redis_client,
+    redis_pubsub_available,
+)
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
@@ -225,6 +232,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception:
         pass
 
+    # Заказ: optimistic locking (версия строки)
+    try:
+        async with async_engine.begin() as conn:
+            if settings.db_mode == "sqlite":
+                await conn.execute(
+                    text("ALTER TABLE orders ADD COLUMN version INTEGER NOT NULL DEFAULT 1"),
+                )
+            else:
+                await conn.execute(
+                    text(
+                        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1",
+                    ),
+                )
+    except Exception:
+        pass
+
     # Заказ: связь с бронью (предзаказ в зале) и поля предоплаты
     for sql_sqlite, sql_pg in (
         ("ALTER TABLE orders ADD COLUMN booking_id INTEGER", "ALTER TABLE orders ADD COLUMN IF NOT EXISTS booking_id INTEGER"),
@@ -246,11 +269,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception:
             pass
 
-    try:
-        await redis_client.ping()
-        logger.info("Redis подключён")
-    except Exception:
-        logger.info("Redis не используется — in-memory режим")
+    await init_redis_or_fallback()
 
     stop_list_task = asyncio.create_task(_stop_list_sync_loop())
     chat_retention_task = asyncio.create_task(_chat_log_retention_loop())
@@ -324,6 +343,10 @@ async def deep_health_check() -> dict:
 
     try:
         await redis_client.ping()
+        if settings.redis_enabled and not redis_pubsub_available():
+            health["redis"] = "ok (in-memory fallback — задайте REDIS_URL или REDIS_ENABLED=false)"
+        elif isinstance(redis_client, InMemoryRedis):
+            health["redis"] = "ok (in-memory)"
     except Exception as exc:
         health["redis"] = f"error: {exc!s}"
         health["status"] = "error"

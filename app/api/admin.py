@@ -59,10 +59,19 @@ from app.services.dialog_mgr import (
 )
 from app.services.events import publish_event, subscribe_events
 from app.services.booking_halls import BOOKING_HALL_KEYS, BOOKING_HALL_VIP, vip_slot_occupied
-from app.services.intent_router import confirm_order, get_or_create_user, route_intent
+from app.services.intent_router import (
+    confirm_order,
+    get_open_draft_order,
+    get_or_create_user,
+    route_intent,
+)
 from app.services.menu_sync import sync_menu_from_iiko, sync_stop_lists
 from app.services.knowledge_context import load_knowledge_context_block
-from app.services.order_logic import build_menu_context, load_available_menu
+from app.services.order_logic import (
+    build_menu_context,
+    format_draft_order_context_for_prompt,
+    load_available_menu,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -2351,7 +2360,17 @@ async def test_bot(body: TextRequest) -> dict:
         u_row = await db.scalar(select(User).where(User.phone == phone))
         org_id = u_row.organization_id if u_row else None
         kb_context = await load_knowledge_context_block(db, org_id)
-        ai_response = await call_gemini(history, message_text, menu_context, kb_context)
+        draft_row = await get_open_draft_order(db, phone)
+        draft_ctx = format_draft_order_context_for_prompt(
+            draft_row.items_json if draft_row else None,
+        )
+        ai_response = await call_gemini(
+            history,
+            message_text,
+            menu_context,
+            kb_context,
+            draft_order_context=draft_ctx,
+        )
         result = await route_intent(
             db, phone, ai_response, menu_items=menu_items,
         )

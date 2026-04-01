@@ -4,11 +4,15 @@
 а обработку передаёт в BackgroundTasks.
 """
 
+import base64
+import json
 import logging
+import uuid
 from typing import Any
 
 import re
-from fastapi import APIRouter, BackgroundTasks, Query, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Query, Request, Response, WebSocket
+from starlette.websockets import WebSocketDisconnect
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,8 +23,15 @@ from app.db.models import ChatLog, EscalationEvent, Order, OrderStatus, User
 from app.db.session import async_session_factory, redis_client
 from app.integrations.iiko_client import IikoClient
 from app.integrations.telegram import send_tg_fallback_alert
-from app.integrations.whatsapp import download_media_bytes, send_message, send_template, send_voice_message
+from app.integrations.twilio_client import verify_twilio_signature
+from app.integrations.twilio_media import mulaw_8k_to_wav
+from app.integrations.whatsapp import download_media_bytes, send_template, send_voice_message
 from app.services.ai_brain import call_gemini, call_gemini_with_audio, gemini_transcribe_voice
+from app.services.customer_reply import (
+    reset_twilio_call_context,
+    send_customer_text,
+    twilio_call_context,
+)
 from app.services.dialog_mgr import (
     CANCEL_WORDS,
     CONFIRM_WORDS,
@@ -42,6 +53,7 @@ from app.services.intent_router import (
     cancel_order,
     confirm_booking,
     confirm_order,
+    get_open_draft_order,
     get_or_create_user,
     route_intent,
 )
@@ -50,9 +62,11 @@ from app.services.order_logic import (
     build_menu_context,
     build_summary_text_from_stored_items,
     detect_payment_method_from_text,
+    format_draft_order_context_for_prompt,
     format_order_confirmation_summary,
     load_available_menu,
 )
+from app.services.whatsapp_idempotency import try_claim_whatsapp_inbound_in_db
 from app.services.tts_edge import synthesize_speech_mp3
 
 logger = logging.getLogger(__name__)
@@ -60,6 +74,50 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/whatsapp", tags=["WhatsApp Webhook"])
 
 WHATSAPP_DEDUPE_TTL_SECONDS = 15 * 60
+
+# Twilio CallSid → From (E.164), если Redis выключен — только один инстанс
+_twilio_caller_memory: dict[str, str] = {}
+
+
+def _twilio_stream_wss_url() -> str:
+    """WSS URL для <Stream> (нужен PUBLIC_BASE_URL с https)."""
+    base = (settings.public_base_url or "").strip().rstrip("/")
+    if not base:
+        return ""
+    if base.startswith("https://"):
+        rest = base[len("https://") :]
+        return f"wss://{rest}/api/whatsapp/voice/stream"
+    if base.startswith("http://"):
+        rest = base[len("http://") :]
+        return f"ws://{rest}/api/whatsapp/voice/stream"
+    return f"wss://{base}/api/whatsapp/voice/stream"
+
+
+async def _store_twilio_caller(call_sid: str, phone: str) -> None:
+    if not call_sid or not phone:
+        return
+    key = f"twilio:caller:{call_sid}"
+    if settings.redis_enabled:
+        try:
+            await redis_client.setex(key, 600, phone)
+            return
+        except Exception as exc:
+            logger.warning("Redis twilio caller cache: %s", exc)
+    _twilio_caller_memory[call_sid] = phone
+
+
+async def _get_twilio_caller(call_sid: str) -> str:
+    if not call_sid:
+        return ""
+    key = f"twilio:caller:{call_sid}"
+    if settings.redis_enabled:
+        try:
+            raw = await redis_client.get(key)
+            if raw:
+                return str(raw).strip()
+        except Exception:
+            pass
+    return (_twilio_caller_memory.get(call_sid) or "").strip()
 
 
 async def _dedupe_whatsapp_message(message_id: str) -> bool:
@@ -460,6 +518,7 @@ async def process_message(
     phone: str,
     message_text: str = "",
     *,
+    whatsapp_message_id: str = "",
     voice_audio: tuple[bytes, str] | None = None,
 ) -> None:
     """
@@ -472,8 +531,18 @@ async def process_message(
     try:
         if not await check_rate_limit(phone):
             logger.warning("Rate limit: %s заблокирован", phone)
-            await send_message(phone, "Слишком много сообщений. Подождите минуту и попробуйте снова.")
+            await send_customer_text(phone, "Слишком много сообщений. Подождите минуту и попробуйте снова.")
             return
+
+        wmid = (whatsapp_message_id or "").strip()
+        if wmid:
+            async with async_session_factory() as dedupe_db:
+                if not await try_claim_whatsapp_inbound_in_db(
+                    dedupe_db, message_id=wmid, phone=phone,
+                ):
+                    logger.info("Повтор message_id=%s (БД) — обработка не запускается", wmid)
+                    return
+                await dedupe_db.commit()
 
         voice_bytes: bytes | None = None
         voice_mime = ""
@@ -495,7 +564,7 @@ async def process_message(
             or ai_paused_db
         ):
             if not (settings.gemini_api_key or "").strip():
-                await send_message(
+                await send_customer_text(
                     phone,
                     "Голосовые недоступны: задайте GEMINI_API_KEY в настройках сервера.",
                 )
@@ -503,7 +572,7 @@ async def process_message(
             message_text = await gemini_transcribe_voice(voice_bytes, voice_mime)
             message_text = (message_text or "").strip()
             if not message_text:
-                await send_message(
+                await send_customer_text(
                     phone,
                     "Не разобрал голосовое. Повторите чётче или напишите текстом, пожалуйста.",
                 )
@@ -537,7 +606,7 @@ async def process_message(
 
             await append_to_history(redis_client, phone, "user", message_text)
             await append_to_history(redis_client, phone, "assistant", final_reply)
-            await send_message(phone, final_reply)
+            await send_customer_text(phone, final_reply)
 
             await publish_event("new_message", {
                 "phone": phone, "role": "assistant", "content": final_reply,
@@ -554,7 +623,7 @@ async def process_message(
 
             await append_to_history(redis_client, phone, "user", message_text)
             await append_to_history(redis_client, phone, "assistant", final_reply)
-            await send_message(phone, final_reply)
+            await send_customer_text(phone, final_reply)
 
             await publish_event("new_message", {
                 "phone": phone, "role": "assistant", "content": final_reply,
@@ -571,7 +640,7 @@ async def process_message(
 
             await append_to_history(redis_client, phone, "user", message_text)
             await append_to_history(redis_client, phone, "assistant", final_reply)
-            await send_message(phone, final_reply)
+            await send_customer_text(phone, final_reply)
 
             await publish_event("new_message", {
                 "phone": phone, "role": "assistant", "content": final_reply,
@@ -584,7 +653,7 @@ async def process_message(
 
         if had_voice:
             if not (settings.gemini_api_key or "").strip():
-                await send_message(
+                await send_customer_text(
                     phone,
                     "Голосовые недоступны: задайте GEMINI_API_KEY в настройках сервера.",
                 )
@@ -598,17 +667,32 @@ async def process_message(
             u_row = await db.scalar(select(User).where(User.phone == phone))
             org_id = u_row.organization_id if u_row else None
             kb_context = await load_knowledge_context_block(db, org_id)
+            draft_row = await get_open_draft_order(db, phone)
+            draft_ctx = format_draft_order_context_for_prompt(
+                draft_row.items_json if draft_row else None,
+            )
             if had_voice:
                 if voice_bytes is None:
                     return
                 ai_response = await call_gemini_with_audio(
-                    history, voice_bytes, voice_mime, menu_context, kb_context,
+                    history,
+                    voice_bytes,
+                    voice_mime,
+                    menu_context,
+                    kb_context,
+                    draft_order_context=draft_ctx,
                 )
                 user_log_text = (ai_response.recognized_speech or "").strip() or "🎤 голосовое сообщение"
                 await append_to_history(redis_client, phone, "user", user_log_text)
             else:
                 user_log_text = message_text
-                ai_response = await call_gemini(history, message_text, menu_context, kb_context)
+                ai_response = await call_gemini(
+                    history,
+                    message_text,
+                    menu_context,
+                    kb_context,
+                    draft_order_context=draft_ctx,
+                )
 
             result = await route_intent(
                 db, phone, ai_response, menu_items=menu_items,
@@ -642,7 +726,7 @@ async def process_message(
             await db.commit()
 
         await append_to_history(redis_client, phone, "assistant", result.reply_text)
-        await send_message(phone, result.reply_text)
+        await send_customer_text(phone, result.reply_text)
 
         if had_voice and settings.whatsapp_voice_replies:
             try:
@@ -679,19 +763,24 @@ async def process_message(
     except Exception as exc:
         logger.error("Ошибка обработки сообщения от %s: %s", phone, exc, exc_info=True)
         try:
-            await send_message(phone, "Извините, произошла ошибка. Попробуйте ещё раз чуть позже.")
+            await send_customer_text(phone, "Извините, произошла ошибка. Попробуйте ещё раз чуть позже.")
         except Exception:
             logger.error("Не удалось отправить сообщение об ошибке → %s", phone)
 
 
-async def process_voice_message(phone: str, media_id: str) -> None:
+async def process_voice_message(
+    phone: str,
+    media_id: str,
+    *,
+    whatsapp_message_id: str = "",
+) -> None:
     """
     Голосовое WhatsApp: скачать → Gemini (мультимодально в CHATTING или транскрипт в подтверждениях).
     """
     try:
         if not (settings.gemini_api_key or "").strip():
             logger.info("Голосовое от %s: GEMINI_API_KEY не задан", phone)
-            await send_message(
+            await send_customer_text(
                 phone,
                 "Голосовые сообщения пока не настроены. Настройте GEMINI_API_KEY на сервере или напишите текстом.",
             )
@@ -699,7 +788,7 @@ async def process_voice_message(phone: str, media_id: str) -> None:
 
         downloaded = await download_media_bytes(media_id)
         if not downloaded:
-            await send_message(
+            await send_customer_text(
                 phone,
                 "Не удалось получить аудио. Попробуйте ещё раз или напишите текстом.",
             )
@@ -707,16 +796,153 @@ async def process_voice_message(phone: str, media_id: str) -> None:
 
         audio_bytes, mime_type = downloaded
         logger.info("Голосовое от %s, mime=%s, %d байт", phone, mime_type, len(audio_bytes))
-        await process_message(phone, "", voice_audio=(audio_bytes, mime_type))
+        await process_message(
+            phone,
+            "",
+            whatsapp_message_id=whatsapp_message_id,
+            voice_audio=(audio_bytes, mime_type),
+        )
     except Exception as exc:
         logger.exception("Ошибка обработки голосового от %s: %s", phone, exc)
         try:
-            await send_message(
+            await send_customer_text(
                 phone,
                 "Произошла ошибка при обработке голосового. Напишите текстом — я на связи.",
             )
         except Exception:
             logger.error("Не удалось отправить сообщение об ошибке голоса → %s", phone)
+
+
+async def _flush_twilio_voice_chunk(phone: str, call_sid: str, mulaw: bytes) -> None:
+    """
+    μ-law → WAV → Gemini STT → тот же пайплайн, что WhatsApp (process_message).
+    Ответ уходит в TwiML Say, если задан контекст CallSid.
+    """
+    if not mulaw or not phone or not call_sid:
+        return
+    if not (settings.gemini_api_key or "").strip():
+        logger.warning("Twilio voice: нет GEMINI_API_KEY")
+        return
+    wav = mulaw_8k_to_wav(mulaw)
+    text = await gemini_transcribe_voice(wav, "audio/wav")
+    text = (text or "").strip()
+    if not text:
+        return
+    mid = f"twilio:{call_sid}:{uuid.uuid4().hex}"
+    tok = twilio_call_context(call_sid)
+    try:
+        await process_message(phone, text, whatsapp_message_id=mid)
+    finally:
+        reset_twilio_call_context(tok)
+
+
+@router.post("/voice/incoming")
+async def twilio_voice_incoming(request: Request) -> Response:
+    """
+    Twilio Voice: «A CALL COMES IN» → этот URL.
+    Возвращает TwiML: приветствие + <Stream> на WebSocket (нужен PUBLIC_BASE_URL).
+    """
+    form = await request.form()
+    params: dict[str, str] = {str(k): str(v) for k, v in form.items()}
+    token = (settings.twilio_auth_token or "").strip()
+    if token:
+        sig = request.headers.get("X-Twilio-Signature")
+        if not verify_twilio_signature(str(request.url), params, sig, token):
+            logger.warning("Twilio signature verification failed")
+            return Response(content="Forbidden", status_code=403)
+
+    call_sid = (params.get("CallSid") or "").strip()
+    from_phone = (params.get("From") or "").strip()
+    if call_sid and from_phone:
+        await _store_twilio_caller(call_sid, from_phone)
+
+    wss = _twilio_stream_wss_url()
+    if not wss:
+        twiml = """<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say language="ru-RU">Сервер не настроен. Укажите PUBLIC_BASE_URL с адресом сайта по протоколу HTTPS.</Say>
+    <Hangup/>
+</Response>"""
+        return Response(content=twiml.strip(), media_type="application/xml")
+
+    twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say language="ru-RU" voice="Polly.Tatyana">Здравствуйте! Слушаю ваш запрос.</Say>
+    <Connect>
+        <Stream url="{wss}" />
+    </Connect>
+</Response>"""
+    return Response(content=twiml.strip(), media_type="application/xml")
+
+
+@router.websocket("/voice/stream")
+async def twilio_voice_stream(websocket: WebSocket) -> None:
+    """
+    Twilio Media Streams (входящий μ-law 8 kHz).
+    Накопление буфера → транскрипт Gemini → process_message → Twilio Say (см. customer_reply).
+    """
+    await websocket.accept()
+    buf = bytearray()
+    call_sid = ""
+    phone = ""
+    processing = False
+    threshold = int(settings.twilio_voice_buffer_bytes)
+
+    async def maybe_flush(force: bool = False) -> None:
+        nonlocal buf, processing
+        if processing or not phone or not call_sid:
+            return
+        if not force and len(buf) < threshold:
+            return
+        if not buf:
+            return
+        processing = True
+        chunk = bytes(buf)
+        buf.clear()
+        try:
+            await _flush_twilio_voice_chunk(phone, call_sid, chunk)
+        finally:
+            processing = False
+
+    try:
+        while True:
+            try:
+                raw = await websocket.receive_text()
+            except WebSocketDisconnect:
+                break
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            ev = data.get("event")
+            if ev == "connected":
+                continue
+            if ev == "start":
+                st = data.get("start") or {}
+                call_sid = (st.get("callSid") or data.get("callSid") or "").strip()
+                phone = await _get_twilio_caller(call_sid) if call_sid else ""
+                logger.info(
+                    "Twilio stream start callSid=%s phone=%s",
+                    (call_sid[:16] + "…") if len(call_sid) > 16 else call_sid,
+                    phone,
+                )
+                continue
+            if ev == "media":
+                media = data.get("media") or {}
+                b64 = media.get("payload") or ""
+                if b64:
+                    try:
+                        buf.extend(base64.b64decode(b64))
+                    except Exception:
+                        pass
+                await maybe_flush(force=False)
+                continue
+            if ev == "stop":
+                await maybe_flush(force=True)
+                break
+    finally:
+        if phone and call_sid and buf and not processing:
+            await _flush_twilio_voice_chunk(phone, call_sid, bytes(buf))
 
 
 @router.get("/webhook")
@@ -770,12 +996,22 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks) -
             if msg_type == "audio":
                 media_id = (msg.get("audio") or {}).get("id") or ""
                 if media_id:
-                    background_tasks.add_task(process_voice_message, phone, media_id)
+                    background_tasks.add_task(
+                        process_voice_message,
+                        phone,
+                        media_id,
+                        whatsapp_message_id=message_id,
+                    )
                     logger.info("Голосовое от %s поставлено в очередь", phone)
             else:
                 message_text = (msg.get("text") or {}).get("body") or ""
                 if message_text:
-                    background_tasks.add_task(process_message, phone, message_text)
+                    background_tasks.add_task(
+                        process_message,
+                        phone,
+                        message_text,
+                        whatsapp_message_id=message_id,
+                    )
                     logger.info("Сообщение от %s поставлено в очередь обработки", phone)
 
     except (IndexError, KeyError, TypeError) as exc:

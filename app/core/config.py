@@ -42,10 +42,21 @@ class Settings(BaseSettings):
     postgres_db: str = "restomind_db"
 
     # --- Redis (опционально) ---
+    # Если задан REDIS_URL (например rediss://default:TOKEN@host:6379 от Upstash) — он имеет приоритет над REDIS_HOST/PORT/DB.
+    # Для Pub/Sub в админке нужен TCP-клиент (redis-py), не Upstash REST API.
+    redis_url_dsn: str = Field(
+        default="",
+        validation_alias=AliasChoices("REDIS_URL", "redis_url_dsn"),
+    )
     redis_host: str = "localhost"
     redis_port: int = 6379
     redis_db: int = 0
     redis_enabled: bool = False
+    # Только если TLS к Redis падает на проверке сертификата (редко; в проде по возможности false)
+    redis_ssl_skip_verify: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("REDIS_SSL_SKIP_VERIFY", "redis_ssl_skip_verify"),
+    )
 
     # --- Gemini (Google AI) ---
     gemini_api_key: str = ""
@@ -54,6 +65,21 @@ class Settings(BaseSettings):
     whatsapp_api_token: str = ""
     whatsapp_verify_token: str = ""
     whatsapp_phone_number_id: str = ""
+    # Twilio Voice (PSTN): для подписи вебхука и TwiML Say через REST (секреты только из env)
+    twilio_account_sid: str = Field(
+        default="",
+        validation_alias=AliasChoices("TWILIO_ACCOUNT_SID", "twilio_account_sid"),
+    )
+    twilio_auth_token: str = Field(
+        default="",
+        validation_alias=AliasChoices("TWILIO_AUTH_TOKEN", "twilio_auth_token"),
+    )
+    # Накопление μ-law от Media Stream перед отправкой в Gemini (~8000 байт/сек моно)
+    twilio_voice_buffer_bytes: int = Field(
+        default=24_000,
+        ge=4000,
+        validation_alias=AliasChoices("TWILIO_VOICE_BUFFER_BYTES", "twilio_voice_buffer_bytes"),
+    )
     # Публичный URL сайта (https://your-domain.com) — для подсказки URL вебхука в админке
     public_base_url: str = Field(default="", validation_alias=AliasChoices("PUBLIC_BASE_URL", "public_base_url"))
     # Дублировать ответ бота голосом (edge-tts, бесплатно) после текста — только если клиент прислал голос
@@ -296,7 +322,10 @@ class Settings(BaseSettings):
 
     @property
     def redis_url(self) -> str:
-        """URL для подключения к Redis."""
+        """URL для подключения к Redis (локально или managed: Render KV, Upstash rediss://, и т.д.)."""
+        raw = self.redis_url_dsn.strip()
+        if raw:
+            return raw
         return f"redis://{self.redis_host}:{self.redis_port}/{self.redis_db}"
 
 

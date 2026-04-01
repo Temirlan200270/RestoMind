@@ -9,6 +9,7 @@ import time
 from collections import defaultdict
 
 from app.core.config import settings
+from app.db.session import redis_pubsub_available
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,7 @@ async def check_rate_limit(key: str) -> bool:
     Returns:
         True — запрос разрешён, False — заблокирован.
     """
-    if settings.redis_enabled:
+    if settings.redis_enabled and redis_pubsub_available():
         return await _check_redis(key)
     return await _check_memory(key)
 

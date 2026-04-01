@@ -5,13 +5,17 @@
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.schemas.ai_schemas import OrderItem
+from app.db.models import MenuItem
+from app.schemas.ai_schemas import AIBrainResponse, OrderAction, OrderItem
 from app.services.order_logic import (
-    ValidatedOrder,
     build_menu_context,
     build_summary_text_from_stored_items,
+    calculate_total_and_fees,
     detect_payment_method_from_text,
+    draft_food_lines_to_order_items,
+    enrich_merged_items_from_menu,
     load_available_menu,
+    merge_cart_actions,
     validate_order,
 )
 
@@ -163,3 +167,124 @@ def test_build_summary_from_stored_items() -> None:
     s = build_summary_text_from_stored_items(j)
     assert "Плов" in s
     assert "5580" in s
+
+
+def test_merge_cart_actions_add_remove_set() -> None:
+    base = [
+        {
+            "name": "Плов",
+            "quantity": 2,
+            "price_per_unit": 2790.0,
+            "item_total": 5580.0,
+            "iiko_id": "uuid-plov",
+            "category": "Горячее",
+            "packaging_plov_1kg": "",
+            "exclude_ingredients": [],
+        },
+    ]
+    out = merge_cart_actions(
+        base,
+        [
+            OrderAction(item_id="Плов", action="remove", quantity=1),
+            OrderAction(item_id="Капучино", action="add", quantity=1),
+        ],
+    )
+    assert len(out) == 2
+    names_q = {(x["name"], x["quantity"]) for x in out}
+    assert ("Плов", 1) in names_q
+    cap = next(x for x in out if x["name"] == "Капучино")
+    assert cap["quantity"] == 1
+
+    cleared = merge_cart_actions(out, [OrderAction(item_id="Капучино", action="set_quantity", quantity=0)])
+    assert len(cleared) == 1
+    assert cleared[0]["name"] == "Плов"
+
+
+def test_merge_cart_actions_resolve_by_iiko_id_string() -> None:
+    """Сопоставление по iiko_id даже если это не UUID (как в тестовом меню)."""
+    base = [
+        {
+            "name": "Лагман",
+            "quantity": 1,
+            "price_per_unit": 1990.0,
+            "item_total": 1990.0,
+            "iiko_id": "uuid-lagman",
+            "category": "Первое",
+            "packaging_plov_1kg": "",
+            "exclude_ingredients": [],
+        },
+    ]
+    out = merge_cart_actions(base, [OrderAction(item_id="uuid-lagman", action="add", quantity=2)])
+    assert len(out) == 1
+    assert out[0]["quantity"] == 3
+
+
+def test_merge_cart_actions_real_uuid_stub_then_enrich() -> None:
+    uid = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+    menu = [
+        MenuItem(
+            name="Блюдо UUID",
+            category="Тест",
+            price=500.0,
+            is_available=True,
+            iiko_id=uid,
+        )
+    ]
+    merged = merge_cart_actions([], [OrderAction(item_id=uid, action="add", quantity=2)])
+    assert merged[0].get("name") == ""
+    enriched = enrich_merged_items_from_menu(merged, menu)
+    assert enriched[0]["name"] == "Блюдо UUID"
+    assert enriched[0]["quantity"] == 2
+    oi = draft_food_lines_to_order_items(enriched)
+    assert len(oi) == 1
+    assert oi[0].name == "Блюдо UUID"
+    assert oi[0].quantity == 2
+
+
+@pytest.mark.asyncio
+async def test_calculate_total_and_fees_wraps_validate_and_finalize(db_with_menu: AsyncSession) -> None:
+    """calculate_total_and_fees — обёртка validate_order + finalize_order_draft."""
+    menu = await load_available_menu(db_with_menu)
+    food = [
+        {
+            "name": "Плов",
+            "quantity": 1,
+            "price_per_unit": 2790.0,
+            "item_total": 2790.0,
+            "iiko_id": "uuid-plov",
+            "category": "Горячее",
+            "packaging_plov_1kg": "",
+            "exclude_ingredients": [],
+        },
+    ]
+    ai = AIBrainResponse(
+        intent="order",
+        reply_text="тест",
+        items=[],
+        order_type="delivery",
+        payment_method="cash",
+    )
+    validated, items_json, total = await calculate_total_and_fees(
+        food, ai, menu_items=menu, db=db_with_menu,
+    )
+    assert len(validated.valid_items) == 1
+    assert "fee_lines" in items_json
+    assert total > 0
+
+
+def test_merge_remove_plov_line_packaging_field_preserved_until_revalidate() -> None:
+    """После remove строка исчезает — пересчёт fee_lines делает не merge, а пайплайн заказа."""
+    base = [
+        {
+            "name": "Плов 1кг баранина",
+            "quantity": 1,
+            "iiko_id": "p1",
+            "category": "Горячее",
+            "packaging_plov_1kg": "foil_kazan",
+            "price_per_unit": 5000.0,
+            "item_total": 5000.0,
+            "exclude_ingredients": [],
+        },
+    ]
+    out = merge_cart_actions(base, [OrderAction(item_id="Плов 1кг баранина", action="remove", quantity=1)])
+    assert out == []
