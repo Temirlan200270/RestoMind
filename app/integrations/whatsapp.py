@@ -30,13 +30,22 @@ def _digits_only(phone: str) -> str:
 
 def _whatsapp_to_candidates(phone: str) -> list[str]:
     """
-    Поле `to` для Cloud API: только цифры, **ровно как в вебхуке** (`messages[].from`).
+    Кандидаты для поля `to` (только цифры).
 
-    Раньше добавлялся второй кандидат `78…` для KZ — это давало номер вроде 787051310837
-    и ломало доставку (403/131005), хотя Meta присылает уже корректный 7705….
+    1) Как в вебхуке — корректный E.164 для KZ: 7705… (11 цифр).
+    2) Запасной `78705…`: в панели Meta тестовый список получателей иногда сохраняет
+       номер как «+7 8 (705)…» → allow list совпадает только с 12-значным `78…`.
+       При 131030 send_* переключается на следующего кандидата (см. break в циклах).
     """
     d = _digits_only(phone)
-    return [d] if d else []
+    if not d:
+        return []
+    out: list[str] = [d]
+    if len(d) == 11 and d.startswith("77"):
+        alt = "78" + d[1:]
+        if alt not in out:
+            out.append(alt)
+    return out
 
 
 def _is_recipient_not_allowed(resp: httpx.Response) -> bool:
