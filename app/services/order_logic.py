@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.data.plovxana_menu import build_mock_menu_dict
-from app.db.models import MenuItem
+from app.db.models import MenuItem, PackagingRule
 from app.schemas.ai_schemas import AIBrainResponse, OrderAction, OrderItem
 
 logger = logging.getLogger(__name__)
@@ -512,7 +512,8 @@ def draft_food_lines_to_order_items(items: list[dict]) -> list[OrderItem]:
 
 def format_draft_order_context_for_prompt(items_json: dict | None) -> str:
     """
-    Текст для system prompt: текущий DRAFT из БД (Phase 18 — дельты к корзине).
+    Текст для system instruction: актуальный DRAFT из БД (Phase 18 — state injection для Gemini).
+    Совпадает с конвенцией меню `[id: …]` — чтобы модель заполняла `order_actions.item_id` тем же UUID.
     Пустая строка, если черновика нет или позиций нет.
     """
     if not items_json or not isinstance(items_json, dict):
@@ -522,8 +523,9 @@ def format_draft_order_context_for_prompt(items_json: dict | None) -> str:
         return ""
     lines: list[str] = [
         "## Текущий черновик заказа (уже в системе)",
-        "Клиент правит существующий заказ. Для изменений используй `order_actions` "
-        "(add/remove/set_quantity) с `item_id` из меню; либо полный список `items`, если пересобираешь заказ целиком.",
+        "Ниже — фактический состав из базы. Не выдумывай позиции: опирайся на этот список при ответах и при `order_actions`.",
+        "Для изменений используй `order_actions` (add / remove / set_quantity); в `item_id` указывай **тот же** `[id: …]`, что в строке, или узнаваемое имя из меню.",
+        "Если клиент просит убрать то, чего нет в списке — вежливо уточни состав.",
         "",
     ]
     for it in items:
@@ -533,7 +535,14 @@ def format_draft_order_context_for_prompt(items_json: dict | None) -> str:
         q = it.get("quantity", 1)
         pk = (it.get("packaging_plov_1kg") or "").strip()
         extra = f", упаковка 1кг: {pk}" if pk else ""
-        lines.append(f"- {name} × {q}{extra}")
+        cat = str(it.get("category") or "").strip()
+        cat_bit = f" ({cat})" if cat else ""
+        iiko = str(it.get("iiko_id") or "").strip()
+        id_bit = f" [id: {iiko}]" if iiko else ""
+        excl = it.get("exclude_ingredients")
+        if isinstance(excl, list) and excl:
+            extra += f", без: {', '.join(str(x) for x in excl)}"
+        lines.append(f"- {name}{cat_bit} × {q}{id_bit}{extra}")
     meta = items_json.get("order_meta") if isinstance(items_json.get("order_meta"), dict) else {}
     bits: list[str] = []
     ot = meta.get("order_type")
@@ -560,16 +569,17 @@ async def calculate_total_and_fees(
     *,
     menu_items: list[MenuItem] | None = None,
     db: AsyncSession | None = None,
+    packaging_rules: list[PackagingRule] | None = None,
 ) -> tuple[ValidatedOrder, dict[str, object], float]:
     """
     Единая точка расчёта: цены и номенклатура из БД, упаковка и доставка через compute_fee_lines.
-
-    Не дублирует бизнес-правила — оборачивает validate_order + finalize_order_draft.
     """
+    if packaging_rules is None and db is not None:
+        packaging_rules = await load_packaging_rules(db)
     enriched = enrich_merged_items_from_menu(food_items, menu_items)
     order_items = draft_food_lines_to_order_items(enriched)
     validated = await validate_order(order_items, menu_items=menu_items, db=db)
-    payload, grand_total = finalize_order_draft(validated, ai)
+    payload, grand_total = finalize_order_draft(validated, ai, packaging_rules=packaging_rules)
     return validated, payload, grand_total
 
 
@@ -598,6 +608,90 @@ def build_menu_context(db_items: list[MenuItem]) -> str:
 def _norm_txt(s: str) -> str:
     t = (s or "").lower().replace("ё", "е").strip()
     return " ".join(t.split())
+
+
+PACKAGING_SEED: list[dict[str, object]] = [
+    {"kind": "manty", "name": "Контейнер для мант", "price": 200, "keywords": "мант", "sort_order": 100},
+    {"kind": "shashlik", "name": "Контейнер для шашлыка", "price": 200, "keywords": "шашлык,шашлик", "sort_order": 100},
+    {"kind": "plov_half", "name": "Контейнер средний (плов 0.5)", "price": 300, "keywords": "плов+0.5,плов+0,5,плов+500г,плов+полкг", "sort_order": 95},
+    {"kind": "plov_1kg_tabak", "name": "Табак (плов 1 кг)", "price": 800, "keywords": "плов+1кг,плов+1 кг,плов+1000г", "option_key": "tabak", "sort_order": 90},
+    {"kind": "plov_1kg_foil", "name": "Фольгированный казан (плов 1 кг)", "price": 650, "keywords": "плов+1кг,плов+1 кг,плов+1000г", "option_key": "foil_kazan", "sort_order": 90},
+    {"kind": "fries", "name": "Соусница (фри)", "price": 50, "keywords": "фри,fries", "sort_order": 80},
+    {"kind": "standard", "name": "Контейнер (ланч-бокс)", "price": 150, "keywords": "", "sort_order": 0},
+    {"kind": "delivery", "name": "Доставка", "price": 700, "keywords": "", "sort_order": 0},
+]
+
+
+async def load_packaging_rules(db: AsyncSession) -> list[PackagingRule]:
+    """Загрузить активные правила упаковки. При пустой таблице — создать сиды."""
+    result = await db.execute(
+        select(PackagingRule)
+        .where(PackagingRule.is_active.is_(True))
+        .order_by(PackagingRule.sort_order.desc(), PackagingRule.id)
+    )
+    rules = list(result.scalars().all())
+    if rules:
+        return rules
+    for seed in PACKAGING_SEED:
+        db.add(PackagingRule(**seed))
+    await db.flush()
+    result2 = await db.execute(
+        select(PackagingRule)
+        .where(PackagingRule.is_active.is_(True))
+        .order_by(PackagingRule.sort_order.desc(), PackagingRule.id)
+    )
+    return list(result2.scalars().all())
+
+
+def _keywords_match(keywords_csv: str, item_name_lower: str, item_category_lower: str) -> bool:
+    """
+    Проверяет совпадение ключевых слов.
+    Формат: 'мант,шашлык+говядина' → ('мант') ИЛИ ('шашлык' И 'говядина').
+    """
+    raw = (keywords_csv or "").strip()
+    if not raw:
+        return False
+    text = item_name_lower + " " + item_category_lower
+    for phrase in raw.split(","):
+        phrase = phrase.strip()
+        if not phrase:
+            continue
+        tokens = [t.strip() for t in phrase.split("+") if t.strip()]
+        if tokens and all(tok in text for tok in tokens):
+            return True
+    return False
+
+
+def match_packaging_rule(
+    item_name: str,
+    item_category: str,
+    rules: list[PackagingRule],
+    packaging_choice: str = "",
+) -> PackagingRule | None:
+    """
+    Находит подходящее правило упаковки для позиции.
+    Rules должны быть отсортированы по sort_order DESC (specific → default).
+    """
+    nl = _norm_txt(item_name)
+    cl = _norm_txt(item_category)
+    default_rule: PackagingRule | None = None
+
+    for rule in rules:
+        kw = (rule.keywords or "").strip()
+        if not kw:
+            if rule.kind == "standard" and default_rule is None:
+                default_rule = rule
+            continue
+        if not _keywords_match(kw, nl, cl):
+            continue
+        opt = (rule.option_key or "").strip()
+        if opt:
+            if packaging_choice == opt:
+                return rule
+            continue
+        return rule
+
+    return default_rule
 
 
 PackagingKind = Literal["manty", "shashlik", "plov_half", "plov_1kg", "fries", "standard"]
@@ -640,11 +734,81 @@ def compute_fee_lines(
     food_lines: list[dict],
     foods_subtotal: float,
     order_type: str,
+    packaging_rules: list[PackagingRule] | None = None,
 ) -> tuple[list[dict], float]:
     """
-    Упаковка по спец. правилам (манты / плов 0.5 / плов 1кг) + доставка при необходимости.
-    Плов 1кг: в строке должно быть packaging_plov_1kg tabak|foil_kazan (валидация раньше в intent_router).
+    Упаковка + доставка.
+    Если packaging_rules переданы — цены и названия берутся из БД.
+    Иначе — fallback на settings (для тестов и обратной совместимости).
     """
+    if packaging_rules is not None:
+        return _compute_fee_lines_from_rules(food_lines, foods_subtotal, order_type, packaging_rules)
+    return _compute_fee_lines_legacy(food_lines, foods_subtotal, order_type)
+
+
+def _compute_fee_lines_from_rules(
+    food_lines: list[dict],
+    foods_subtotal: float,
+    order_type: str,
+    rules: list[PackagingRule],
+) -> tuple[list[dict], float]:
+    fee_lines: list[dict] = []
+    extras_total = 0.0
+    needs_packaging = order_type in ("delivery", "pickup")
+    rules_by_kind: dict[str, PackagingRule] = {r.kind: r for r in rules}
+
+    if needs_packaging:
+        for line in food_lines:
+            if not isinstance(line, dict):
+                continue
+            qty = int(line.get("quantity", 1))
+            if qty < 1:
+                qty = 1
+            choice = (line.get("packaging_plov_1kg") or "").strip()
+            rule = match_packaging_rule(
+                str(line.get("name", "")),
+                str(line.get("category", "")),
+                rules,
+                packaging_choice=choice,
+            )
+            if rule is None or float(rule.price) <= 0:
+                continue
+            unit = float(rule.price)
+            total = unit * qty
+            fee_lines.append({
+                "kind": f"packaging_{rule.kind}",
+                "name": rule.name,
+                "quantity": qty,
+                "unit_price": unit,
+                "item_total": total,
+                "iiko_id": (rule.iiko_product_id or "").strip() or None,
+            })
+            extras_total += total
+
+    if order_type == "delivery" and foods_subtotal < float(settings.pricing_delivery_free_threshold):
+        dr = rules_by_kind.get("delivery")
+        d_fee = float(dr.price) if dr else float(settings.pricing_delivery_fee)
+        d_name = dr.name if dr else "Доставка"
+        d_iiko = ((dr.iiko_product_id or "").strip() or None) if dr else (settings.iiko_product_id_delivery.strip() or None)
+        fee_lines.append({
+            "kind": "delivery",
+            "name": d_name,
+            "quantity": 1,
+            "unit_price": d_fee,
+            "item_total": d_fee,
+            "iiko_id": d_iiko,
+        })
+        extras_total += d_fee
+
+    return fee_lines, extras_total
+
+
+def _compute_fee_lines_legacy(
+    food_lines: list[dict],
+    foods_subtotal: float,
+    order_type: str,
+) -> tuple[list[dict], float]:
+    """Fallback: цены из settings (для тестов без БД)."""
     fee_lines: list[dict] = []
     extras_total = 0.0
     needs_packaging = order_type in ("delivery", "pickup")
@@ -661,99 +825,44 @@ def compute_fee_lines(
         if kind == "manty":
             unit = float(settings.packaging_manty_unit_price)
             total = unit * qty
-            fee_lines.append({
-                "kind": "packaging_manty",
-                "name": "Контейнер для мант",
-                "quantity": qty,
-                "unit_price": unit,
-                "item_total": total,
-                "iiko_id": settings.iiko_product_id_packaging_manty.strip() or None,
-            })
+            fee_lines.append({"kind": "packaging_manty", "name": "Контейнер для мант", "quantity": qty, "unit_price": unit, "item_total": total, "iiko_id": settings.iiko_product_id_packaging_manty.strip() or None})
             extras_total += total
         elif kind == "shashlik":
             unit = float(settings.packaging_shashlik_unit_price)
             total = unit * qty
-            fee_lines.append({
-                "kind": "packaging_shashlik",
-                "name": "Контейнер для шашлыка",
-                "quantity": qty,
-                "unit_price": unit,
-                "item_total": total,
-                "iiko_id": None,
-            })
+            fee_lines.append({"kind": "packaging_shashlik", "name": "Контейнер для шашлыка", "quantity": qty, "unit_price": unit, "item_total": total, "iiko_id": None})
             extras_total += total
         elif kind == "plov_half":
             unit = float(settings.packaging_plov_half_unit_price)
             total = unit * qty
-            fee_lines.append({
-                "kind": "packaging_plov_half",
-                "name": "Контейнер средний (плов 0.5)",
-                "quantity": qty,
-                "unit_price": unit,
-                "item_total": total,
-                "iiko_id": settings.iiko_product_id_packaging_plov_half.strip() or None,
-            })
+            fee_lines.append({"kind": "packaging_plov_half", "name": "Контейнер средний (плов 0.5)", "quantity": qty, "unit_price": unit, "item_total": total, "iiko_id": settings.iiko_product_id_packaging_plov_half.strip() or None})
             extras_total += total
         elif kind == "plov_1kg":
             choice = (line.get("packaging_plov_1kg") or "").strip()
             if choice == "tabak":
                 unit = float(settings.packaging_plov_1kg_tabak_unit_price)
-                label = "Контейнер-табак (плов 1 кг)"
-                iiko_pid = settings.iiko_product_id_packaging_plov_tabak.strip() or None
-                fk: str = "packaging_plov_1kg_tabak"
+                fee_lines.append({"kind": "packaging_plov_1kg_tabak", "name": "Контейнер-табак (плов 1 кг)", "quantity": qty, "unit_price": unit, "item_total": unit * qty, "iiko_id": settings.iiko_product_id_packaging_plov_tabak.strip() or None})
             elif choice == "foil_kazan":
                 unit = float(settings.packaging_plov_1kg_foil_unit_price)
-                label = "Фольгированный казан (плов 1 кг)"
-                iiko_pid = settings.iiko_product_id_packaging_plov_foil.strip() or None
-                fk = "packaging_plov_1kg_foil"
+                fee_lines.append({"kind": "packaging_plov_1kg_foil", "name": "Фольгированный казан (плов 1 кг)", "quantity": qty, "unit_price": unit, "item_total": unit * qty, "iiko_id": settings.iiko_product_id_packaging_plov_foil.strip() or None})
             else:
                 continue
-            total = unit * qty
-            fee_lines.append({
-                "kind": fk,
-                "name": label,
-                "quantity": qty,
-                "unit_price": unit,
-                "item_total": total,
-                "iiko_id": iiko_pid,
-            })
-            extras_total += total
+            extras_total += unit * qty
         elif kind == "fries":
             unit = float(settings.packaging_fries_unit_price)
             total = unit * qty
-            fee_lines.append({
-                "kind": "packaging_fries",
-                "name": "Соусница (фри)",
-                "quantity": qty,
-                "unit_price": unit,
-                "item_total": total,
-                "iiko_id": None,
-            })
+            fee_lines.append({"kind": "packaging_fries", "name": "Соусница (фри)", "quantity": qty, "unit_price": unit, "item_total": total, "iiko_id": None})
             extras_total += total
         elif kind == "standard":
             unit = float(settings.packaging_standard_unit_price)
             if unit > 0:
                 total = unit * qty
-                fee_lines.append({
-                    "kind": "packaging_standard",
-                    "name": "Контейнер (ланч-бокс)",
-                    "quantity": qty,
-                    "unit_price": unit,
-                    "item_total": total,
-                    "iiko_id": None,
-                })
+                fee_lines.append({"kind": "packaging_standard", "name": "Контейнер (ланч-бокс)", "quantity": qty, "unit_price": unit, "item_total": total, "iiko_id": None})
                 extras_total += total
 
     if order_type == "delivery" and foods_subtotal < float(settings.pricing_delivery_free_threshold):
         d_fee = float(settings.pricing_delivery_fee)
-        fee_lines.append({
-            "kind": "delivery",
-            "name": "Доставка",
-            "quantity": 1,
-            "unit_price": d_fee,
-            "item_total": d_fee,
-            "iiko_id": settings.iiko_product_id_delivery.strip() or None,
-        })
+        fee_lines.append({"kind": "delivery", "name": "Доставка", "quantity": 1, "unit_price": d_fee, "item_total": d_fee, "iiko_id": settings.iiko_product_id_delivery.strip() or None})
         extras_total += d_fee
 
     return fee_lines, extras_total
@@ -777,13 +886,14 @@ def validate_mixed_payment_total(ai: AIBrainResponse, grand_total: float, *, tol
 def build_order_items_json(
     validated: ValidatedOrder,
     ai: AIBrainResponse,
+    packaging_rules: list[PackagingRule] | None = None,
 ) -> tuple[dict[str, object], float]:
     """
     Собирает items_json для БД: блюда, наценки, метаданные заказа, итоговая сумма.
     """
     foods = validated.valid_items
     foods_subtotal = float(validated.total_price)
-    fee_lines, extras = compute_fee_lines(foods, foods_subtotal, ai.order_type)
+    fee_lines, extras = compute_fee_lines(foods, foods_subtotal, ai.order_type, packaging_rules=packaging_rules)
     grand_total = foods_subtotal + extras
 
     requires_order_prepayment = grand_total >= float(settings.order_prepayment_threshold_kzt)
@@ -914,12 +1024,12 @@ def merge_total_into_items_json(items_json: dict[str, object], total_price: floa
 def finalize_order_draft(
     validated: ValidatedOrder,
     ai: AIBrainResponse,
+    packaging_rules: list[PackagingRule] | None = None,
 ) -> tuple[dict[str, object], float]:
     """
     Финальный ``items_json`` и сумма по ТЗ: блюда + контейнеры + доставка (см. ``compute_fee_lines``).
-    Обёртка над ``build_order_items_json`` и ``merge_total_into_items_json``.
     """
-    payload, grand_total = build_order_items_json(validated, ai)
+    payload, grand_total = build_order_items_json(validated, ai, packaging_rules=packaging_rules)
     merged = merge_total_into_items_json(payload, grand_total)
     return merged, grand_total
 

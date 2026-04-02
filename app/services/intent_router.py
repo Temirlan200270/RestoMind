@@ -14,6 +14,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.pipeline_log import log_pipeline_stage
 from app.db.models import Booking, MenuItem, Order, OrderStatus, User
 from app.services.booking_halls import (
     BOOKING_HALL_VIP,
@@ -26,14 +27,14 @@ from app.services.dialog_mgr import UserState
 from app.services.events import publish_event
 from app.services.order_logic import (
     ValidatedOrder,
-    build_order_items_json,
     classify_packaging_kind,
     draft_food_lines_to_order_items,
     enrich_merged_items_from_menu,
+    finalize_order_draft,
     format_order_confirmation_summary,
     load_available_menu,
+    load_packaging_rules,
     merge_cart_actions,
-    merge_total_into_items_json,
     validate_mixed_payment_total,
     validate_order,
 )
@@ -103,6 +104,35 @@ def _blend_ai_with_stored_order_meta(ai: AIBrainResponse, meta: dict | None) -> 
         out = out.model_copy(update={"delivery_address": ai.delivery_address.strip()})
     if (ai.pickup_time_note or "").strip():
         out = out.model_copy(update={"pickup_time_note": ai.pickup_time_note.strip()})
+    return out
+
+
+def _merge_recommendation_into_order_meta(
+    items_json: dict[str, object],
+    ai: AIBrainResponse,
+) -> dict[str, object]:
+    """
+    Сохраняет upsell в order_meta для админки / аналитики (Phase 18).
+    Не вызывать, если заказ не будет сохранён (ошибка валидации оплаты и т.д.).
+    """
+    if not ai.is_recommendation and not (ai.upsell_offered or "").strip() and not (ai.upsell_reasoning or "").strip():
+        return items_json
+    meta = items_json.get("order_meta")
+    meta = dict(meta) if isinstance(meta, dict) else {}
+    rec: dict[str, object] = {"is_recommendation": bool(ai.is_recommendation)}
+    off = (ai.upsell_offered or "").strip()
+    if off:
+        rec["offered"] = off
+    reason = (ai.upsell_reasoning or "").strip()
+    if reason:
+        rec["reason"] = reason
+    meta["recommendation"] = rec
+    prev_trace = meta.get("recommendation_trace")
+    trace: list[object] = list(prev_trace) if isinstance(prev_trace, list) else []
+    trace.append(dict(rec))
+    meta["recommendation_trace"] = trace[-15:]
+    out = dict(items_json)
+    out["order_meta"] = meta
     return out
 
 
@@ -267,14 +297,20 @@ async def _handle_order(
         db.add(booking_row)
         await db.flush()
 
-    payload, grand_total = build_order_items_json(validated, ai_eff)
+    packaging_rules = await load_packaging_rules(db)
+    items_json, grand_total = finalize_order_draft(validated, ai_eff, packaging_rules=packaging_rules)
     mix_err = validate_mixed_payment_total(ai_eff, grand_total)
     if mix_err:
         return RouteResult(
             reply_text=f"{ai_response.reply_text}\n\n⚠️ {mix_err}",
         )
 
-    items_json = merge_total_into_items_json(payload, grand_total)
+    items_json = _merge_recommendation_into_order_meta(items_json, ai_eff)
+    log_pipeline_stage(
+        "merge_ok",
+        phone=phone,
+        extra={"grand_total": grand_total, "draft_id": existing_draft.id if existing_draft else None},
+    )
     requires_big_order_prepay = bool(
         (items_json.get("order_meta") or {}).get("requires_order_prepayment"),
     )

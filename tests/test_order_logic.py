@@ -14,6 +14,7 @@ from app.services.order_logic import (
     detect_payment_method_from_text,
     draft_food_lines_to_order_items,
     enrich_merged_items_from_menu,
+    format_draft_order_context_for_prompt,
     load_available_menu,
     merge_cart_actions,
     validate_order,
@@ -167,6 +168,32 @@ def test_build_summary_from_stored_items() -> None:
     s = build_summary_text_from_stored_items(j)
     assert "Плов" in s
     assert "5580" in s
+
+
+def test_format_draft_order_context_for_prompt_includes_ids() -> None:
+    """Phase 18: снимок DRAFT для system prompt — id строк для order_actions."""
+    assert format_draft_order_context_for_prompt(None) == ""
+    assert format_draft_order_context_for_prompt({"items": []}) == ""
+    uid = "11111111-2222-3333-4444-555555555555"
+    text = format_draft_order_context_for_prompt({
+        "items": [
+            {
+                "name": "Манты",
+                "quantity": 2,
+                "iiko_id": uid,
+                "category": "Горячее",
+                "packaging_plov_1kg": "",
+                "exclude_ingredients": ["лук"],
+            },
+        ],
+        "total_price": 4000.0,
+        "order_meta": {"order_type": "delivery", "delivery_address": "ул. Абая, 1"},
+    })
+    assert "Текущий черновик заказа" in text
+    assert f"[id: {uid}]" in text
+    assert "Манты (Горячее)" in text
+    assert "лук" in text
+    assert "ул. Абая" in text
 
 
 def test_merge_cart_actions_add_remove_set() -> None:

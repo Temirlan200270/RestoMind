@@ -1,6 +1,9 @@
 """
 Менеджер диалогов — управляет памятью разговора и состоянием пользователя через Redis.
 Каждый диалог привязан к номеру телефона и живёт 24 часа.
+
+State Recovery: при каждом изменении состояния дублируем его в User (БД).
+Если Redis потерял ключ (eviction / перезапуск), восстанавливаем из БД.
 """
 
 import json
@@ -26,7 +29,6 @@ class UserState(StrEnum):
     """Состояния пользователя в диалоге."""
 
     CHATTING = "chatting"
-    # Черновик заказа создан; ждём явный выбор оплаты — затем CONFIRMING_ORDER
     AWAITING_ORDER_PAYMENT = "awaiting_order_payment"
     CONFIRMING_ORDER = "confirming_order"
     CONFIRMING_BOOKING = "confirming_booking"
@@ -34,7 +36,6 @@ class UserState(StrEnum):
 
 
 def _history_key(phone: str) -> str:
-    """Redis-ключ для истории диалога конкретного пользователя."""
     return f"chat:history:{phone}"
 
 
@@ -50,57 +51,164 @@ def _pending_booking_key(phone: str) -> str:
     return f"user:pending_booking:{phone}"
 
 
+# ─── DB sync (best-effort) ────────────────────────────────
+
+async def _db_sync(phone: str, **fields: Any) -> None:
+    """Best-effort: зеркалируем сессионные поля в User для восстановления после потери Redis."""
+    if not fields:
+        return
+    try:
+        from sqlalchemy import update as sa_update
+
+        from app.db.models import User
+        from app.db.session import async_session_factory
+
+        async with async_session_factory() as db:
+            await db.execute(sa_update(User).where(User.phone == phone).values(**fields))
+            await db.commit()
+    except Exception as exc:
+        logger.warning("DB session sync for %s: %s", phone, exc)
+
+
+async def _db_recover_session(phone: str, redis: Any) -> UserState:
+    """
+    Полное восстановление сессии из БД при Redis miss.
+    Возвращает UserState и восстанавливает все ключи Redis.
+    """
+    try:
+        from sqlalchemy import select as sa_select
+
+        from app.db.models import User
+        from app.db.session import async_session_factory
+
+        async with async_session_factory() as db:
+            user = await db.scalar(sa_select(User).where(User.phone == phone))
+            if not user:
+                return UserState.CHATTING
+
+            state_raw = getattr(user, "current_state", None) or "chatting"
+            try:
+                state = UserState(state_raw)
+            except ValueError:
+                state = UserState.CHATTING
+
+            await redis.set(_state_key(phone), state.value, ex=STATE_TTL)
+
+            pending_oid: int | None = getattr(user, "current_pending_order_id", None)
+            if pending_oid is not None:
+                await redis.set(_pending_order_key(phone), str(pending_oid), ex=STATE_TTL)
+
+            pending_bid: int | None = getattr(user, "current_pending_booking_id", None)
+            if pending_bid is not None:
+                await redis.set(_pending_booking_key(phone), str(pending_bid), ex=STATE_TTL)
+
+            if state != UserState.CHATTING or pending_oid or pending_bid:
+                logger.info(
+                    "Session recovered from DB: %s state=%s order=%s booking=%s",
+                    phone, state.value, pending_oid, pending_bid,
+                )
+            return state
+    except Exception as exc:
+        logger.warning("DB session recovery for %s: %s", phone, exc)
+        return UserState.CHATTING
+
+
+async def _db_recover_pending_order(phone: str) -> int | None:
+    """Точечное восстановление pending_order_id из БД."""
+    try:
+        from sqlalchemy import select as sa_select
+
+        from app.db.models import User
+        from app.db.session import async_session_factory
+
+        async with async_session_factory() as db:
+            user = await db.scalar(sa_select(User).where(User.phone == phone))
+            return getattr(user, "current_pending_order_id", None) if user else None
+    except Exception:
+        return None
+
+
+async def _db_recover_pending_booking(phone: str) -> int | None:
+    """Точечное восстановление pending_booking_id из БД."""
+    try:
+        from sqlalchemy import select as sa_select
+
+        from app.db.models import User
+        from app.db.session import async_session_factory
+
+        async with async_session_factory() as db:
+            user = await db.scalar(sa_select(User).where(User.phone == phone))
+            return getattr(user, "current_pending_booking_id", None) if user else None
+    except Exception:
+        return None
+
+
 # ─── Управление состоянием пользователя ──────────────────
 
 async def get_user_state(redis: Any, phone: str) -> UserState:
-    """Получить текущее состояние пользователя. По умолчанию — CHATTING."""
+    """Получить состояние. При Redis miss — восстановление из БД."""
     raw = await redis.get(_state_key(phone))
-    if raw is None:
-        return UserState.CHATTING
-    try:
-        return UserState(raw)
-    except ValueError:
-        return UserState.CHATTING
+    if raw is not None:
+        try:
+            return UserState(raw)
+        except ValueError:
+            return UserState.CHATTING
+    return await _db_recover_session(phone, redis)
 
 
 async def set_user_state(redis: Any, phone: str, state: UserState) -> None:
-    """Установить состояние пользователя с TTL 24 часа."""
+    """Установить состояние с TTL 24 ч + зеркало в БД."""
     await redis.set(_state_key(phone), state.value, ex=STATE_TTL)
     logger.info("Состояние %s → %s", phone, state.value)
+    await _db_sync(phone, current_state=state.value)
 
 
 async def set_pending_order(redis: Any, phone: str, order_id: int) -> None:
     """Сохранить ID заказа, ожидающего подтверждения."""
     await redis.set(_pending_order_key(phone), str(order_id), ex=STATE_TTL)
+    await _db_sync(phone, current_pending_order_id=order_id)
 
 
 async def get_pending_order(redis: Any, phone: str) -> int | None:
-    """Получить ID заказа, ожидающего подтверждения."""
+    """Получить ID pending-заказа. При Redis miss — из БД."""
     raw = await redis.get(_pending_order_key(phone))
-    return int(raw) if raw else None
+    if raw:
+        return int(raw)
+    val = await _db_recover_pending_order(phone)
+    if val is not None:
+        await redis.set(_pending_order_key(phone), str(val), ex=STATE_TTL)
+    return val
 
 
 async def clear_pending_order(redis: Any, phone: str) -> None:
     """Очистить ожидающий заказ и вернуть состояние в CHATTING."""
     await redis.delete(_pending_order_key(phone))
     await set_user_state(redis, phone, UserState.CHATTING)
+    await _db_sync(phone, current_pending_order_id=None)
 
 
 async def set_pending_booking(redis: Any, phone: str, booking_id: int) -> None:
     """Сохранить ID бронирования, ожидающего подтверждения."""
     await redis.set(_pending_booking_key(phone), str(booking_id), ex=STATE_TTL)
+    await _db_sync(phone, current_pending_booking_id=booking_id)
 
 
 async def get_pending_booking(redis: Any, phone: str) -> int | None:
-    """Получить ID бронирования, ожидающего подтверждения."""
+    """Получить ID pending-бронирования. При Redis miss — из БД."""
     raw = await redis.get(_pending_booking_key(phone))
-    return int(raw) if raw else None
+    if raw:
+        return int(raw)
+    val = await _db_recover_pending_booking(phone)
+    if val is not None:
+        await redis.set(_pending_booking_key(phone), str(val), ex=STATE_TTL)
+    return val
 
 
 async def clear_pending_booking(redis: Any, phone: str) -> None:
     """Очистить ожидающее бронирование и вернуть состояние в CHATTING."""
     await redis.delete(_pending_booking_key(phone))
     await set_user_state(redis, phone, UserState.CHATTING)
+    await _db_sync(phone, current_pending_booking_id=None)
 
 
 async def get_chat_history(redis: Any, phone: str) -> list[dict[str, str]]:

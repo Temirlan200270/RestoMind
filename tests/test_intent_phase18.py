@@ -50,5 +50,36 @@ async def test_route_intent_merge_updates_same_draft(db_with_menu: AsyncSession)
 
 
 @pytest.mark.asyncio
+async def test_route_intent_saves_upsell_in_order_meta(db_with_menu: AsyncSession) -> None:
+    """Рекомендация бота попадает в order_meta для админки."""
+    phone = "+77008887766"
+    menu = await load_available_menu(db_with_menu)
+    ai = AIBrainResponse(
+        intent="order",
+        reply_text="Добавил плов. К нему советую ачичук.",
+        items=[OrderItem(name="Плов", quantity=1, iiko_item_id="uuid-plov")],
+        order_type="delivery",
+        payment_method="cash",
+        delivery_address="ул. Тест 1",
+        is_recommendation=True,
+        upsell_offered="Ачичук",
+        upsell_reasoning="Свежие овощи к насыщенному плову",
+    )
+    r = await route_intent(db_with_menu, phone, ai, menu_items=menu)
+    await db_with_menu.commit()
+    assert r.pending_order_id is not None
+    order = await db_with_menu.get(Order, r.pending_order_id)
+    assert order is not None
+    meta = (order.items_json or {}).get("order_meta") or {}
+    assert isinstance(meta, dict)
+    rec = meta.get("recommendation")
+    assert isinstance(rec, dict)
+    assert rec.get("offered") == "Ачичук"
+    assert (rec.get("reason") or "") == "Свежие овощи к насыщенному плову"
+    trace = meta.get("recommendation_trace")
+    assert isinstance(trace, list) and len(trace) >= 1
+
+
+@pytest.mark.asyncio
 async def test_get_open_draft_order_none_for_new_phone(db_with_menu: AsyncSession) -> None:
     assert await get_open_draft_order(db_with_menu, "+77000000001") is None

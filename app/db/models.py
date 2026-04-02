@@ -79,6 +79,18 @@ class User(Base):
         default=False,
         comment="ИИ отключён для этого клиента (персистентно; дублирует смысл HUMAN_MODE)",
     )
+    current_state: Mapped[str] = mapped_column(
+        String(50), default="chatting", server_default="chatting",
+        comment="Состояние диалога (backup для Redis при eviction)",
+    )
+    current_pending_order_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, default=None,
+        comment="ID заказа, ожидающего подтверждения (backup для Redis)",
+    )
+    current_pending_booking_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, default=None,
+        comment="ID бронирования, ожидающего подтверждения (backup для Redis)",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -326,6 +338,46 @@ class KnowledgeItem(Base):
         return f"<KnowledgeItem id={self.id} category='{self.category[:20]}'>"
 
 
+class PackagingRule(Base):
+    """
+    Правило упаковки: связь «тип блюда → контейнер → цена».
+    Вместо хардкода в .env: правится в админке без деплоя.
+    """
+
+    __tablename__ = "packaging_rules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("organizations.id"), nullable=True, index=True,
+    )
+    kind: Mapped[str] = mapped_column(
+        String(60), nullable=False, unique=True,
+        comment="Ключ правила: manty, shashlik, plov_half, plov_1kg_tabak, plov_1kg_foil, fries, standard, delivery",
+    )
+    name: Mapped[str] = mapped_column(String(200), nullable=False, comment="Отображаемое название контейнера/услуги")
+    price: Mapped[float] = mapped_column(Numeric(10, 2), default=0, comment="Цена за единицу, ₸")
+    iiko_product_id: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, comment="UUID номенклатуры iiko для строки заказа",
+    )
+    keywords: Mapped[str] = mapped_column(
+        Text, default="", server_default="",
+        comment="Ключевые слова для авто-сопоставления: 'мант,манты' (запятая=ИЛИ, + =И). Пусто=дефолт.",
+    )
+    option_key: Mapped[str] = mapped_column(
+        String(60), default="", server_default="",
+        comment="Для блюд с выбором упаковки: tabak / foil_kazan. Пусто — без выбора.",
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, comment="Активно ли правило")
+    sort_order: Mapped[int] = mapped_column(
+        Integer, default=0, comment="Приоритет: больше = проверяется раньше",
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    def __repr__(self) -> str:
+        return f"<PackagingRule id={self.id} kind='{self.kind}' price={self.price}>"
+
+
 class IntegrationEvent(Base):
     """
     Журнал последних событий синхронизации (меню, стоп-листы) для админки.
@@ -357,6 +409,53 @@ class EscalationEvent(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True,
     )
+
+
+class FailedTask(Base):
+    """
+    Сообщения, которые не удалось обработать после нескольких попыток.
+    Для ручного retry или диагностики в админке.
+    """
+
+    __tablename__ = "failed_tasks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    phone: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    message_text: Mapped[str] = mapped_column(Text, default="")
+    error: Mapped[str] = mapped_column(Text, default="", comment="Текст последней ошибки")
+    attempts: Mapped[int] = mapped_column(Integer, default=3, comment="Сколько попыток было сделано")
+    resolved: Mapped[bool] = mapped_column(Boolean, default=False, comment="Отмечено как решённое")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    def __repr__(self) -> str:
+        return f"<FailedTask id={self.id} phone={self.phone} resolved={self.resolved}>"
+
+
+class PaymentEvent(Base):
+    """
+    Аудит оплат: каждое изменение prepayment_status записывается сюда.
+    Подготовка к будущим вебхукам от платёжных систем.
+    """
+
+    __tablename__ = "payment_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    order_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("orders.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    event_type: Mapped[str] = mapped_column(
+        String(50), nullable=False,
+        comment="prepayment_confirmed | prepayment_waived | webhook_paid | manual_reset",
+    )
+    actor: Mapped[str] = mapped_column(
+        String(100), default="admin", comment="Кто инициировал: admin / webhook / system",
+    )
+    amount: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True, comment="Сумма, если релевантно")
+    note: Mapped[str] = mapped_column(Text, default="", comment="Комментарий или ID транзакции")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    def __repr__(self) -> str:
+        return f"<PaymentEvent id={self.id} order={self.order_id} type={self.event_type}>"
 
 
 class IntegrationHealth(Base):

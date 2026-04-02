@@ -109,7 +109,8 @@ async def call_gemini(
         user_text: Новое сообщение от пользователя.
         menu_context: Текстовое описание актуального меню с ценами.
         kb_context: Блок базы знаний (справочник заведения).
-        draft_order_context: Текущий DRAFT заказа (из БД), для дельт `order_actions`.
+        draft_order_context: «Память корзины»: текстовый снимок активного DRAFT из БД
+            (`format_draft_order_context_for_prompt` в `webhooks` / test-bot). Нужен для дельт `order_actions`.
 
     Returns:
         AIBrainResponse — Pydantic-объект с intent, reply_text, items, booking_details.

@@ -166,15 +166,17 @@ class AIBrainResponse(BaseModel):
     )
     is_recommendation: bool = Field(
         default=False,
-        description="True, если ответ в значительной степени про совет/допродажу, а не только подтверждение",
+        description=(
+            "True, если в этом ответе бот сам предложил доп. позицию (совет/допродажа), а не только подтвердил заказ"
+        ),
     )
     upsell_offered: str | None = Field(
         default=None,
-        description="Название или краткий идентификатор блюда, которое бот предложил",
+        description="Название предложенного блюда или напитка (как в меню)",
     )
     upsell_reasoning: str | None = Field(
         default=None,
-        description="Почему бот предложил это (вкус, сочетание, популярность) — для логов и админки",
+        description="Короткий аргумент: вкус, сочетаемость с заказом, традиция заведения — для логов и админки",
     )
     booking_details: BookingDetails | None = Field(
         default=None,

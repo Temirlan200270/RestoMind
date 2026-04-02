@@ -269,6 +269,30 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception:
             pass
 
+    # State Recovery: поля сессии в User для восстановления после потери Redis
+    for sql_sqlite, sql_pg in (
+        (
+            "ALTER TABLE users ADD COLUMN current_state VARCHAR(50) DEFAULT 'chatting'",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS current_state VARCHAR(50) DEFAULT 'chatting'",
+        ),
+        (
+            "ALTER TABLE users ADD COLUMN current_pending_order_id INTEGER",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS current_pending_order_id INTEGER",
+        ),
+        (
+            "ALTER TABLE users ADD COLUMN current_pending_booking_id INTEGER",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS current_pending_booking_id INTEGER",
+        ),
+    ):
+        try:
+            async with async_engine.begin() as conn:
+                if settings.db_mode == "sqlite":
+                    await conn.execute(text(sql_sqlite))
+                else:
+                    await conn.execute(text(sql_pg))
+        except Exception:
+            pass
+
     await init_redis_or_fallback()
 
     stop_list_task = asyncio.create_task(_stop_list_sync_loop())

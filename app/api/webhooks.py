@@ -4,6 +4,7 @@
 а обработку передаёт в BackgroundTasks.
 """
 
+import asyncio
 import base64
 import json
 import logging
@@ -18,8 +19,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.pipeline_log import log_pipeline_stage
 from app.core.rate_limiter import check_rate_limit
-from app.db.models import ChatLog, EscalationEvent, Order, OrderStatus, User
+from app.db.models import ChatLog, EscalationEvent, FailedTask, Order, OrderStatus, User
 from app.db.session import async_session_factory, redis_client
 from app.integrations.iiko_client import IikoClient
 from app.integrations.telegram import send_tg_fallback_alert
@@ -207,6 +209,7 @@ async def _send_order_to_iiko(
     """
     if not settings.iiko_api_login or not settings.iiko_organization_id:
         logger.info("iiko не настроен — заказ сохранён только в БД")
+        log_pipeline_stage("iiko_skip", phone=phone, extra={"order_id": order_id, "reason": "not_configured"})
         return False, None
 
     try:
@@ -296,10 +299,16 @@ async def _send_order_to_iiko(
                 },
                 terminal_group_id=terminal_group or None,
             )
+        log_pipeline_stage("iiko_ok", phone=phone, extra={"order_id": order_id})
         return True, None
     except Exception as exc:
         logger.error("Ошибка отправки заказа #%d в iiko: %s", order_id, exc, exc_info=True)
         msg = str(exc).strip() or type(exc).__name__
+        log_pipeline_stage(
+            "iiko_err",
+            phone=phone,
+            extra={"order_id": order_id, "error": msg[:500]},
+        )
         return False, msg[:500]
 
 
@@ -509,6 +518,60 @@ async def handle_order_payment_choice(phone: str, message_text: str) -> str | No
     return reply
 
 
+MAX_RETRIES = 3
+
+
+async def _save_failed_task(phone: str, text: str, error: str, attempts: int) -> None:
+    """Best-effort: сохранить необработанное сообщение для диагностики."""
+    try:
+        async with async_session_factory() as db:
+            db.add(FailedTask(phone=phone, message_text=text[:4000], error=error[:2000], attempts=attempts))
+            await db.commit()
+    except Exception as exc:
+        logger.error("Не удалось сохранить FailedTask для %s: %s", phone, exc)
+
+
+async def process_with_retry(
+    phone: str,
+    message_text: str = "",
+    *,
+    whatsapp_message_id: str = "",
+    voice_audio: tuple[bytes, str] | None = None,
+) -> None:
+    """
+    Обёртка с retry + exponential backoff.
+    После MAX_RETRIES неудач → сохраняет в FailedTask и извиняется перед клиентом.
+    """
+    last_exc: BaseException | None = None
+    for attempt in range(MAX_RETRIES):
+        try:
+            await process_message(
+                phone, message_text,
+                whatsapp_message_id=whatsapp_message_id,
+                voice_audio=voice_audio,
+            )
+            return
+        except Exception as exc:
+            last_exc = exc
+            logger.warning(
+                "Retry %d/%d для %s: %s", attempt + 1, MAX_RETRIES, phone, exc,
+            )
+            if attempt < MAX_RETRIES - 1:
+                await asyncio.sleep(2 ** attempt)
+
+    logger.error("Все %d попыток исчерпаны для %s: %s", MAX_RETRIES, phone, last_exc)
+    log_pipeline_stage(
+        "failed_queue",
+        phone=phone,
+        extra={"error": str(last_exc)[:500] if last_exc else "", "attempts": MAX_RETRIES},
+    )
+    await _save_failed_task(phone, message_text, str(last_exc), MAX_RETRIES)
+    try:
+        await send_customer_text(phone, "Извините, произошла техническая ошибка. Мы уже работаем над ней — попробуйте написать чуть позже.")
+    except Exception:
+        pass
+
+
 async def process_message(
     phone: str,
     message_text: str = "",
@@ -517,11 +580,7 @@ async def process_message(
     voice_audio: tuple[bytes, str] | None = None,
 ) -> None:
     """
-    Полный цикл обработки входящего сообщения с учётом State Machine:
-    1. Проверить состояние пользователя (HUMAN_MODE, AWAITING_ORDER_PAYMENT, CONFIRMING_ORDER, CHATTING)
-    2. Маршрутизировать по состоянию
-    3. Сохранить в Redis + ChatLog
-    4. Отправить ответ
+    Полный цикл обработки входящего сообщения с учётом State Machine.
     """
     try:
         if not await check_rate_limit(phone):
@@ -572,6 +631,7 @@ async def process_message(
                     "Не разобрал голосовое. Повторите чётче или напишите текстом, пожалуйста.",
                 )
                 return
+            log_pipeline_stage("stt_ok", phone=phone, extra={"len": len(message_text)})
             voice_bytes = None
 
         user_evt = message_text if message_text.strip() else (
@@ -697,8 +757,21 @@ async def process_message(
                     draft_order_context=draft_ctx,
                 )
 
+            log_pipeline_stage(
+                "llm_ok",
+                phone=phone,
+                extra={"intent": ai_response.intent, "voice": had_voice},
+            )
             result = await route_intent(
                 db, phone, ai_response, menu_items=menu_items,
+            )
+            log_pipeline_stage(
+                "route_ok",
+                phone=phone,
+                extra={
+                    "intent": ai_response.intent,
+                    "pending_order_id": result.pending_order_id,
+                },
             )
 
             if result.new_state:
@@ -799,7 +872,7 @@ async def process_voice_message(
 
         audio_bytes, mime_type = downloaded
         logger.info("Голосовое от %s, mime=%s, %d байт", phone, mime_type, len(audio_bytes))
-        await process_message(
+        await process_with_retry(
             phone,
             "",
             whatsapp_message_id=whatsapp_message_id,
@@ -1010,7 +1083,7 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks) -
                 message_text = (msg.get("text") or {}).get("body") or ""
                 if message_text:
                     background_tasks.add_task(
-                        process_message,
+                        process_with_retry,
                         phone,
                         message_text,
                         whatsapp_message_id=message_id,

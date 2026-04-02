@@ -112,6 +112,9 @@
                     <span x-show="item.id === 'integrations' && integrationErrorBadge() > 0"
                         class="absolute right-3 top-2 min-w-[1.25rem] h-5 px-1 bg-amber-500 rounded-full text-[10px] font-bold flex items-center justify-center"
                         x-text="integrationErrorBadge()"></span>
+                    <span x-show="item.id === 'operator_queue' && (dashStats.failed_tasks_open || 0) > 0"
+                        class="absolute right-3 top-2 min-w-[1.25rem] h-5 px-1 bg-red-500 rounded-full text-[10px] font-bold flex items-center justify-center"
+                        x-text="dashStats.failed_tasks_open"></span>
                 </button>
             </template>
         </nav>
@@ -286,6 +289,36 @@
                             </div>
                         </div>
                         <p class="mt-4 text-sm text-gray-400">Каталог для ИИ и гостей</p>
+                    </div>
+                </div>
+
+                <!-- Наблюдаемость: очередь, upsell, iiko (сегодня, UTC) -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8">
+                    <div class="bg-white rounded-2xl p-6 border border-gray-100 shadow-[0_2px_10px_-3px_rgba(220,38,38,0.12)]">
+                        <p class="text-sm font-medium text-gray-500 mb-1">Очередь ошибок бота</p>
+                        <h3 class="text-3xl font-bold" :class="(dashStats.failed_tasks_open || 0) > 0 ? 'text-red-600' : 'text-gray-900'"
+                            x-text="dashStats.failed_tasks_open ?? 0"></h3>
+                        <p class="mt-3 text-xs text-gray-400">Неразрешённые failed_tasks (retry исчерпан)</p>
+                    </div>
+                    <div class="bg-white rounded-2xl p-6 border border-gray-100 shadow-[0_2px_10px_-3px_rgba(37,99,235,0.12)]">
+                        <p class="text-sm font-medium text-gray-500 mb-1">Upsell сегодня</p>
+                        <h3 class="text-3xl font-bold text-gray-900">
+                            <span x-text="dashStats.upsell_accepted_today ?? 0"></span>
+                            <span class="text-lg font-semibold text-gray-400">/</span>
+                            <span x-text="dashStats.upsell_offered_today ?? 0"></span>
+                        </h3>
+                        <p class="mt-3 text-xs text-gray-500">
+                            В заказе / предложено
+                            <template x-if="dashStats.upsell_conversion_pct != null">
+                                <span> · конверсия <span class="font-semibold text-brand-600" x-text="dashStats.upsell_conversion_pct + '%'"></span></span>
+                            </template>
+                        </p>
+                    </div>
+                    <div class="bg-white rounded-2xl p-6 border border-gray-100 shadow-[0_2px_10px_-3px_rgba(225,29,72,0.12)]">
+                        <p class="text-sm font-medium text-gray-500 mb-1">Ошибки iiko сегодня</p>
+                        <h3 class="text-3xl font-bold" :class="(dashStats.iiko_errors_today || 0) > 0 ? 'text-rose-600' : 'text-gray-900'"
+                            x-text="dashStats.iiko_errors_today ?? 0"></h3>
+                        <p class="mt-3 text-xs text-gray-400">Заказы с непустым iiko_last_error за сегодня (UTC)</p>
                     </div>
                 </div>
 
@@ -672,6 +705,7 @@
                                         <span :class="paymentKanbanBadgeClass(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded border tracking-wide" x-text="paymentMethodShort(order)"></span>
                                         <span x-show="orderAwaitingOrderPrepay(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-400">ПРЕДОПЛАТА</span>
                                         <span x-show="orderPlov1kgHint(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-50 text-violet-800 border border-violet-200 truncate max-w-[10rem]" x-text="orderPlov1kgHint(order)"></span>
+                                        <span x-show="orderHasUpsell(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200" title="Бот сделал допродажу">UPSELL</span>
                                     </div>
                                     <div class="text-xs font-mono text-gray-600 mb-1 truncate" x-show="order.user_phone" x-text="order.user_phone"></div>
                                     <div class="text-xs text-gray-500 mb-2" x-text="(order.items?.items?.length || 0) + ' позиций'"></div>
@@ -718,6 +752,7 @@
                                         <span :class="paymentKanbanBadgeClass(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded border tracking-wide" x-text="paymentMethodShort(order)"></span>
                                         <span x-show="orderAwaitingOrderPrepay(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-400">ПРЕДОПЛАТА</span>
                                         <span x-show="orderPlov1kgHint(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-50 text-violet-800 border border-violet-200 truncate max-w-[10rem]" x-text="orderPlov1kgHint(order)"></span>
+                                        <span x-show="orderHasUpsell(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200" title="Бот сделал допродажу">UPSELL</span>
                                     </div>
                                     <div class="text-xs font-mono text-gray-600 mb-1 truncate" x-show="order.user_phone" x-text="order.user_phone"></div>
                                     <div class="text-xs text-gray-500 mb-2" x-text="(order.items?.items?.length || 0) + ' позиций'"></div>
@@ -764,6 +799,7 @@
                                         <span :class="paymentKanbanBadgeClass(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded border tracking-wide" x-text="paymentMethodShort(order)"></span>
                                         <span x-show="orderAwaitingOrderPrepay(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-400">ПРЕДОПЛАТА</span>
                                         <span x-show="orderPlov1kgHint(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-50 text-violet-800 border border-violet-200 truncate max-w-[10rem]" x-text="orderPlov1kgHint(order)"></span>
+                                        <span x-show="orderHasUpsell(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200" title="Бот сделал допродажу">UPSELL</span>
                                     </div>
                                     <div class="text-xs font-mono text-gray-600 mb-1 truncate" x-show="order.user_phone" x-text="order.user_phone"></div>
                                     <div class="text-xs text-gray-500 mb-2" x-text="(order.items?.items?.length || 0) + ' позиций'"></div>
@@ -825,8 +861,11 @@
                                             <div class="text-xs text-gray-500 truncate max-w-[14rem]" x-show="order.user_name" x-text="order.user_name"></div>
                                         </td>
                                         <td class="px-5 py-4">
-                                            <span x-show="order.order_type" class="inline-block text-[10px] font-black px-2 py-0.5 rounded-lg bg-indigo-50 text-indigo-800 border border-indigo-100" x-text="orderTypeBadge(order)"></span>
-                                            <span x-show="!order.order_type" class="text-gray-300">—</span>
+                                            <div class="flex flex-wrap gap-1 items-center">
+                                                <span x-show="order.order_type" class="inline-block text-[10px] font-black px-2 py-0.5 rounded-lg bg-indigo-50 text-indigo-800 border border-indigo-100" x-text="orderTypeBadge(order)"></span>
+                                                <span x-show="orderHasUpsell(order)" class="inline-block text-[9px] font-black px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200" title="Бот сделал допродажу">UPSELL</span>
+                                                <span x-show="!order.order_type && !orderHasUpsell(order)" class="text-gray-300">—</span>
+                                            </div>
                                         </td>
                                         <td class="px-5 py-4">
                                             <span x-text="order.items_count != null ? order.items_count : (order.items?.items?.length || 0)" class="text-gray-600"></span>
@@ -868,11 +907,74 @@
                                 <div class="flex flex-wrap items-center gap-2">
                                     <span :class="statusConfig[order.status]?.class || 'bg-gray-100 text-gray-600'" x-text="statusConfig[order.status]?.label || order.status" class="px-2 py-0.5 rounded-full text-[10px] font-medium"></span>
                                     <span x-show="order.order_type" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-800" x-text="orderTypeBadge(order)"></span>
+                                    <span x-show="orderHasUpsell(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200" title="Upsell">UPSELL</span>
                                     <span class="text-[10px] text-gray-400" x-text="fmt.date(order.created_at)"></span>
                                 </div>
                             </button>
                         </template>
                     </div>
+                </div>
+            </div>
+
+            <!-- ========== ОЧЕРЕДЬ ОШИБОК (failed_tasks) ========== -->
+            <div x-show="currentTab === 'operator_queue'" x-cloak class="fade-in">
+                <div class="flex flex-wrap items-end gap-4 mb-6">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Статус</label>
+                        <select x-model="failedTasksFilter" @change="loadFailedTasks()"
+                            class="text-sm border border-gray-200 rounded-xl px-3 py-2 bg-white min-w-[11rem]">
+                            <option value="open">Неразрешённые</option>
+                            <option value="resolved">Разрешённые</option>
+                            <option value="all">Все</option>
+                        </select>
+                    </div>
+                    <div class="flex-1 min-w-[200px] max-w-md">
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Телефон</label>
+                        <input type="search" x-model="failedTasksPhone" @input.debounce.400ms="loadFailedTasks()"
+                            placeholder="Фильтр по номеру"
+                            class="w-full text-sm border border-gray-200 rounded-xl px-3 py-2 bg-white">
+                    </div>
+                    <button type="button" @click="loadFailedTasks()"
+                        class="px-4 py-2 rounded-xl text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700">Обновить</button>
+                </div>
+                <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                    <div x-show="failedTasksLoading" class="p-8 text-center text-gray-400 text-sm">Загрузка…</div>
+                    <div x-show="!failedTasksLoading && failedTasks.length === 0" class="p-12 text-center text-gray-400">
+                        Нет записей
+                    </div>
+                    <table x-show="!failedTasksLoading && failedTasks.length > 0" class="w-full text-sm">
+                        <thead class="bg-gray-50 text-left text-gray-500 border-b border-gray-100">
+                            <tr>
+                                <th class="px-4 py-3 font-medium">Время</th>
+                                <th class="px-4 py-3 font-medium">Телефон</th>
+                                <th class="px-4 py-3 font-medium">Ошибка</th>
+                                <th class="px-4 py-3 font-medium w-32">Действие</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="t in failedTasks" :key="'ft-' + t.id">
+                                <tr class="border-b border-gray-50 hover:bg-gray-50/80 align-top">
+                                    <td class="px-4 py-3 text-gray-500 whitespace-nowrap" x-text="fmt.date(t.created_at)"></td>
+                                    <td class="px-4 py-3 font-mono text-xs" x-text="t.phone"></td>
+                                    <td class="px-4 py-3">
+                                        <p class="text-gray-800 line-clamp-3" x-text="t.error"></p>
+                                        <p class="text-xs text-gray-400 mt-1 line-clamp-2" x-text="t.message_text"></p>
+                                    </td>
+                                    <td class="px-4 py-3">
+                                        <button type="button" x-show="!t.resolved"
+                                            @click="setFailedTaskResolved(t, true)"
+                                            class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100">Resolved</button>
+                                        <button type="button" x-show="t.resolved"
+                                            @click="setFailedTaskResolved(t, false)"
+                                            class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 border border-gray-200">Открыть</button>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                    <p class="px-4 py-3 text-xs text-gray-400 border-t border-gray-100" x-show="failedTasksTotal > 0">
+                        Показано <span x-text="failedTasks.length"></span> из <span x-text="failedTasksTotal"></span>
+                    </p>
                 </div>
             </div>
 
@@ -1738,6 +1840,84 @@
                 </div>
             </div>
 
+            <!-- ========== УПАКОВКА ========== -->
+            <div x-show="currentTab === 'packaging'" x-cloak class="fade-in max-w-4xl space-y-6 pb-16">
+                <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-4">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                        <h3 class="text-base font-bold text-gray-900">Правила упаковки</h3>
+                        <button type="button" @click="packagingAddNew()"
+                            class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">+ Добавить</button>
+                    </div>
+                    <p class="text-xs text-gray-500">Цены и контейнеры для доставки и самовывоза. <strong>keywords</strong>: запятая = ИЛИ, <code class="bg-gray-100 px-1 rounded">+</code> = И (пример: <code class="bg-gray-100 px-1 rounded">плов+1кг,плов+1 кг</code>). Пустые keywords = дефолтное правило.</p>
+
+                    <div x-show="packagingLoading" class="text-sm text-gray-400 py-6 text-center">Загрузка…</div>
+
+                    <div x-show="!packagingLoading && packagingRules.length" x-cloak class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead>
+                                <tr class="text-left text-xs text-gray-500 border-b border-gray-100">
+                                    <th class="py-2 px-2 font-medium">kind</th>
+                                    <th class="py-2 px-2 font-medium">Название</th>
+                                    <th class="py-2 px-2 font-medium">Цена, ₸</th>
+                                    <th class="py-2 px-2 font-medium">keywords</th>
+                                    <th class="py-2 px-2 font-medium">option_key</th>
+                                    <th class="py-2 px-2 font-medium">iiko ID</th>
+                                    <th class="py-2 px-2 font-medium text-center">Вкл</th>
+                                    <th class="py-2 px-2 font-medium">Приор.</th>
+                                    <th class="py-2 px-2"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="rule in packagingRules" :key="rule.id">
+                                    <tr class="border-b border-gray-50 hover:bg-gray-50/50">
+                                        <td class="py-2 px-2">
+                                            <input type="text" x-model="rule.kind" @change="packagingSave(rule)"
+                                                class="w-28 rounded border border-gray-200 px-2 py-1 text-xs font-mono" :disabled="rule._saving">
+                                        </td>
+                                        <td class="py-2 px-2">
+                                            <input type="text" x-model="rule.name" @change="packagingSave(rule)"
+                                                class="w-44 rounded border border-gray-200 px-2 py-1 text-xs" :disabled="rule._saving">
+                                        </td>
+                                        <td class="py-2 px-2">
+                                            <input type="number" x-model.number="rule.price" @change="packagingSave(rule)" step="1" min="0"
+                                                class="w-20 rounded border border-gray-200 px-2 py-1 text-xs text-right" :disabled="rule._saving">
+                                        </td>
+                                        <td class="py-2 px-2">
+                                            <input type="text" x-model="rule.keywords" @change="packagingSave(rule)"
+                                                class="w-40 rounded border border-gray-200 px-2 py-1 text-xs font-mono" :disabled="rule._saving">
+                                        </td>
+                                        <td class="py-2 px-2">
+                                            <input type="text" x-model="rule.option_key" @change="packagingSave(rule)"
+                                                class="w-24 rounded border border-gray-200 px-2 py-1 text-xs font-mono" :disabled="rule._saving">
+                                        </td>
+                                        <td class="py-2 px-2">
+                                            <input type="text" x-model="rule.iiko_product_id" @change="packagingSave(rule)"
+                                                class="w-28 rounded border border-gray-200 px-2 py-1 text-xs font-mono" :disabled="rule._saving">
+                                        </td>
+                                        <td class="py-2 px-2 text-center">
+                                            <input type="checkbox" x-model="rule.is_active" @change="packagingSave(rule)"
+                                                class="rounded border-gray-300" :disabled="rule._saving">
+                                        </td>
+                                        <td class="py-2 px-2">
+                                            <input type="number" x-model.number="rule.sort_order" @change="packagingSave(rule)" step="1"
+                                                class="w-16 rounded border border-gray-200 px-2 py-1 text-xs text-right" :disabled="rule._saving">
+                                        </td>
+                                        <td class="py-2 px-2">
+                                            <button type="button" @click="packagingDelete(rule)"
+                                                class="text-red-400 hover:text-red-600 text-xs" :disabled="rule._saving" title="Удалить">✕</button>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div x-show="!packagingLoading && !packagingRules.length" x-cloak class="text-sm text-gray-400 py-4 text-center">
+                        Нет правил. Нажмите «+ Добавить» или перезагрузите вкладку — сиды создадутся автоматически.
+                    </div>
+                </div>
+            </div>
+
             <!-- ========== НАСТРОЙКИ ========== -->
             <div x-show="currentTab === 'settings'" x-cloak class="fade-in max-w-3xl space-y-6 pb-16">
                 <div class="rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-950">
@@ -2150,6 +2330,23 @@
                                     <span x-text="paymentMethodTitle(selectedOrder)"></span>
                                 </span>
                             </p>
+                            <!-- Разбивка смешанной оплаты -->
+                            <template x-if="paymentMixedSplit(selectedOrder)">
+                                <div class="mt-2 ml-0.5 flex flex-wrap gap-2">
+                                    <template x-for="part in paymentMixedSplit(selectedOrder)" :key="part.label">
+                                        <span class="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-md bg-purple-50 text-purple-800 border border-purple-200">
+                                            <span x-text="part.icon"></span>
+                                            <span x-text="part.label"></span>
+                                            <span x-text="fmt.money(part.amount)"></span>
+                                        </span>
+                                    </template>
+                                </div>
+                            </template>
+                            <template x-if="selectedOrder?.payment_split_warning">
+                                <div class="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                                    ⚠️ <span x-text="selectedOrder.payment_split_warning"></span>
+                                </div>
+                            </template>
                         </div>
                         <button type="button" @click="showOrderModal = false" class="text-gray-400 hover:text-gray-600 text-xl shrink-0 leading-none" aria-label="Закрыть">&times;</button>
                     </div>
@@ -2196,6 +2393,33 @@
                             <p class="text-sm text-red-900 font-semibold leading-snug break-words mt-1" x-text="selectedOrder?.iiko_last_error"></p>
                         </div>
                     </div>
+                    <template x-if="selectedOrder?.items?.order_meta?.recommendation">
+                        <div class="mb-4 rounded-xl border border-blue-200 bg-blue-50/50 p-4 shadow-sm relative overflow-hidden">
+                            <div class="absolute -right-4 -top-4 w-16 h-16 bg-blue-100 rounded-full opacity-50 blur-lg"></div>
+                            <div class="flex items-start gap-3 relative z-10">
+                                <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-100 text-blue-600 shadow-sm border border-blue-200">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                                </div>
+                                <div class="min-w-0 flex-1">
+                                    <p class="text-xs font-bold uppercase tracking-wider text-blue-800 mb-1">Рекомендация бота (Upsell)</p>
+                                    <p class="text-sm font-semibold text-gray-900 leading-snug" x-text="selectedOrder.items.order_meta.recommendation.offered || 'Предложено блюдо'"></p>
+                                    <p class="text-xs text-gray-600 mt-1 italic" x-text="selectedOrder.items.order_meta.recommendation.reason || 'Без обоснования'"></p>
+                                </div>
+                            </div>
+                            <template x-if="selectedOrder.items.order_meta.recommendation_trace?.length > 1">
+                                <div class="mt-3 pt-3 border-t border-blue-100">
+                                    <details class="text-xs text-blue-700 cursor-pointer outline-none">
+                                        <summary class="font-medium hover:text-blue-900">Показать историю предложений (<span x-text="selectedOrder.items.order_meta.recommendation_trace.length"></span>)</summary>
+                                        <ul class="mt-2 pl-4 list-disc space-y-1 text-gray-600">
+                                            <template x-for="(trace, tidx) in selectedOrder.items.order_meta.recommendation_trace" :key="'rec-' + tidx">
+                                                <li x-text="(trace.offered || '—') + (trace.reason ? ' (' + trace.reason + ')' : '')"></li>
+                                            </template>
+                                        </ul>
+                                    </details>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
                     <template x-if="selectedOrder.items?.items">
                         <div class="space-y-3">
                             <template x-for="(item, idx) in selectedOrder.items.items" :key="idx">
@@ -2225,6 +2449,28 @@
                                 <span class="font-semibold text-gray-600">Итого:</span>
                                 <span class="text-xl font-bold text-brand-600" x-text="fmt.money(selectedOrder?.total_price)"></span>
                             </div>
+                            <details class="rounded-xl border border-slate-200 bg-slate-50/80 mb-3" x-show="selectedOrder?.status === 'draft'">
+                                <summary @click="initOrderRebuildFromSelected()" class="px-4 py-3 cursor-pointer text-sm font-semibold text-slate-800 list-none">
+                                    Пересобрать позиции (оператор)
+                                </summary>
+                                <div class="px-4 pb-4 space-y-2 border-t border-slate-100 pt-3">
+                                    <p class="text-xs text-gray-500 leading-relaxed">
+                                        JSON-массив <code class="bg-white px-1 rounded">food_lines</code>:
+                                        <code class="bg-white px-1 rounded">name</code>, <code class="bg-white px-1 rounded">quantity</code>,
+                                        опционально <code class="bg-white px-1 rounded">iiko_item_id</code>, <code class="bg-white px-1 rounded">packaging_plov_1kg</code> (tabak / foil_kazan),
+                                        <code class="bg-white px-1 rounded">exclude_ingredients</code>.
+                                        После сохранения пересчитаются контейнеры, доставка и <span class="font-medium">payment_details</span> для смешанной оплаты.
+                                    </p>
+                                    <textarea x-model="orderRebuildDraftJson" rows="8"
+                                        class="w-full font-mono text-xs border border-gray-200 rounded-lg p-2 bg-white"></textarea>
+                                    <p x-show="orderRebuildError" class="text-xs text-red-600" x-text="orderRebuildError"></p>
+                                    <button type="button" @click="submitOrderRebuildDraft()" :disabled="orderRebuildLoading"
+                                        class="w-full py-2.5 rounded-xl text-sm font-bold bg-slate-800 text-white hover:bg-slate-900 disabled:opacity-50">
+                                        <span x-show="!orderRebuildLoading">Пересчитать и сохранить</span>
+                                        <span x-show="orderRebuildLoading" x-cloak>Сохранение…</span>
+                                    </button>
+                                </div>
+                            </details>
                             <div x-show="selectedOrder?.delivery_address" class="text-xs text-gray-600 bg-gray-50 rounded-lg px-3 py-2 border border-gray-100">
                                 <span class="font-semibold text-gray-500">Адрес:</span>
                                 <span x-text="selectedOrder?.delivery_address"></span>
@@ -2451,6 +2697,9 @@ function adminApp() {
         settingsBulkCancelLoading: false,
         settingsRetentionRunLoading: false,
 
+        packagingRules: [],
+        packagingLoading: false,
+
         knowledgeItems: [],
         knowledgeLoading: false,
         knowledgeSaveLoading: false,
@@ -2474,6 +2723,8 @@ function adminApp() {
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/></svg>' },
             { id: 'orders', label: 'Заказы', desc: 'По этапам (черновик → подтверждён → кухня) или общий список',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z"/></svg>' },
+            { id: 'operator_queue', label: 'Очередь ошибок', desc: 'Сообщения после исчерпания retry',
+              icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>' },
             { id: 'bookings', label: 'Бронирования', desc: 'Столики и резервации',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/></svg>' },
             { id: 'chats', label: 'Диалоги', desc: 'Live-чаты с клиентами',
@@ -2484,6 +2735,8 @@ function adminApp() {
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>' },
             { id: 'integrations', label: 'Интеграции', desc: 'iiko, WhatsApp и принудительная синхронизация',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m4.95-4.95l1.757-1.757a4.5 4.5 0 016.364 6.364l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757"/></svg>' },
+            { id: 'packaging', label: 'Упаковка', desc: 'Правила и цены контейнеров для доставки и самовывоза',
+              icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5m8.25 3v6.75m0 0l-3-3m3 3l3-3M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z"/></svg>' },
             { id: 'knowledge', label: 'База знаний', desc: 'Справочник для AI: парковка, банкеты, правила',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v15.128A9 9 0 009 18c0 1.518.39 2.948 1.082 4.192m3-16.15V18c0 1.518-.39 2.948-1.082 4.192M15 6.042a8.967 8.967 0 014.5 2.292v15.128A9 9 0 0015 18c0-1.518-.39-2.948-1.082-4.192"/></svg>' },
             { id: 'settings', label: 'Настройки', desc: 'Опасная зона: сброс данных и удаление заказов',
@@ -2528,6 +2781,15 @@ function adminApp() {
         orderDeleteConfirmAck: false,
         orderDeleteConfirmLoading: false,
         orderDeleteConfirmError: '',
+
+        failedTasks: [],
+        failedTasksTotal: 0,
+        failedTasksFilter: 'open',
+        failedTasksPhone: '',
+        failedTasksLoading: false,
+        orderRebuildDraftJson: '',
+        orderRebuildError: '',
+        orderRebuildLoading: false,
 
         showBookingModal: false,
         selectedBooking: null,
@@ -2925,17 +3187,20 @@ function adminApp() {
             }
         },
 
-        /** Текст ошибки FastAPI (detail строка или массив validation errors). */
-        formatApiDetail(detail) {
-            if (detail == null) return '';
-            if (typeof detail === 'string') return detail;
-            if (Array.isArray(detail)) {
-                return detail
-                    .map((e) => (e && typeof e.msg === 'string' ? e.msg : JSON.stringify(e)))
-                    .join('; ');
+        /** Универсальный форматтер ошибок FastAPI: принимает detail (строка/массив/объект) или весь response body. */
+        formatApiError(detailOrBody, fallback) {
+            const raw = detailOrBody != null && typeof detailOrBody === 'object' && 'detail' in detailOrBody
+                ? detailOrBody.detail
+                : detailOrBody;
+            if (raw == null) return fallback || 'Ошибка запроса';
+            if (typeof raw === 'string') return raw || fallback || 'Ошибка запроса';
+            if (Array.isArray(raw)) {
+                const msg = raw.map((e) => (e && typeof e === 'object' && e.msg != null ? String(e.msg) : JSON.stringify(e))).join('; ');
+                return msg || fallback || 'Ошибка запроса';
             }
-            if (typeof detail === 'object' && typeof detail.message === 'string') return detail.message;
-            return 'Ошибка запроса';
+            if (typeof raw === 'object' && typeof raw.message === 'string') return raw.message;
+            if (typeof raw === 'object') return JSON.stringify(raw);
+            return String(raw) || fallback || 'Ошибка запроса';
         },
 
         /** Стрелка сортировки для заголовка таблицы. */
@@ -3031,6 +3296,12 @@ function adminApp() {
             return n.length > 24 ? n.slice(0, 22) + '…' : n;
         },
 
+        orderHasUpsell(order) {
+            const meta = order?.items?.order_meta;
+            const r = meta && meta.recommendation;
+            return !!(r && (r.offered || r.reason));
+        },
+
         kanbanOrderSurfaceClass(order, normalClass) {
             if (order?.iiko_last_error) {
                 return 'bg-gradient-to-br from-rose-50 via-white to-red-50/40 border-2 border-red-400 border-l-[5px] border-l-red-600 shadow-md ring-2 ring-red-200/90 ring-offset-1 ring-offset-white';
@@ -3049,12 +3320,16 @@ function adminApp() {
         },
 
         paymentIcon(order) {
+            const pd = order?.items?.order_meta?.payment_details;
+            if (pd && pd.type === 'mixed') return '🔀';
             if (!order || !order.payment_method) return '💵';
             const m = { cash: '💵', card: '💳', remote: '🔗' };
             return m[order.payment_method] || '💵';
         },
 
         paymentMethodTitle(order) {
+            const pd = order?.items?.order_meta?.payment_details;
+            if (pd && pd.type === 'mixed') return 'Смешанная оплата';
             if (!order || !order.payment_method) return 'Наличные';
             const m = {
                 cash: 'Наличные',
@@ -3062,6 +3337,17 @@ function adminApp() {
                 remote: 'Удалённо (Kaspi, Payme, ссылка…)',
             };
             return m[order.payment_method] || order.payment_method;
+        },
+
+        paymentMixedSplit(order) {
+            const pd = order?.items?.order_meta?.payment_details;
+            if (!pd || pd.type !== 'mixed' || !pd.split) return null;
+            const s = pd.split;
+            const parts = [];
+            if (Number(s.cash) > 0) parts.push({ label: 'Наличные', amount: Number(s.cash), icon: '💵' });
+            if (Number(s.card) > 0) parts.push({ label: 'Карта', amount: Number(s.card), icon: '💳' });
+            if (Number(s.remote) > 0) parts.push({ label: 'Удалённо', amount: Number(s.remote), icon: '🔗' });
+            return parts.length ? parts : null;
         },
 
         paymentMethodShort(order) {
@@ -3085,6 +3371,8 @@ function adminApp() {
         },
 
         paymentModalPayClass(order) {
+            const pd = order?.items?.order_meta?.payment_details;
+            if (pd && pd.type === 'mixed') return 'text-purple-800';
             const pm = order?.payment_method || 'cash';
             if (pm === 'card') return 'text-blue-700';
             if (pm === 'remote') return 'text-amber-800';
@@ -3132,7 +3420,7 @@ function adminApp() {
                 });
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) {
-                    alert(this.formatApiDetail(data.detail) || 'Не удалось обновить статус');
+                    alert(this.formatApiError(data.detail) || 'Не удалось обновить статус');
                     return false;
                 }
                 await this.loadOrders();
@@ -3192,19 +3480,7 @@ function adminApp() {
             this.orderDeleteConfirmError = '';
         },
 
-        /** Текст ошибки из тела FastAPI (detail строка, массив validation errors или объект). */
-        formatHttpDetail(data) {
-            const raw = data && data.detail != null ? data.detail : null;
-            if (raw == null) return 'Ошибка запроса';
-            if (typeof raw === 'string') return raw;
-            if (Array.isArray(raw)) {
-                return raw
-                    .map((e) => (e && typeof e === 'object' && e.msg != null ? String(e.msg) : JSON.stringify(e)))
-                    .join('; ');
-            }
-            if (typeof raw === 'object') return JSON.stringify(raw);
-            return String(raw);
-        },
+        // formatHttpDetail удалён — все вызовы перенесены на formatApiError.
 
         async executeOrderDeleteConfirmed() {
             if (!this.orderDeleteConfirmAck || this.orderDeleteConfirmLoading) return;
@@ -3223,7 +3499,7 @@ function adminApp() {
                     });
                     const data = await res.json().catch(() => ({}));
                     if (!res.ok) {
-                        this.orderDeleteConfirmError = this.formatHttpDetail(data);
+                        this.orderDeleteConfirmError = this.formatApiError(data);
                         return;
                     }
                     if (src === 'modal') {
@@ -3240,7 +3516,7 @@ function adminApp() {
                     });
                     const data = await res.json().catch(() => ({}));
                     if (!res.ok) {
-                        this.orderDeleteConfirmError = this.formatHttpDetail(data);
+                        this.orderDeleteConfirmError = this.formatApiError(data);
                         return;
                     }
                     this.demoToastMessage = `Удалено заказов: ${data.deleted ?? ids.length}`;
@@ -3391,7 +3667,7 @@ function adminApp() {
                         if (field === 'hall') this.bookings[ix].hall = prev;
                         else this.bookings[ix].status = prev;
                     }
-                    alert(this.formatApiDetail(data.detail) || 'Не удалось сохранить');
+                    alert(this.formatApiError(data.detail) || 'Не удалось сохранить');
                     return;
                 }
                 const ix = this.bookings.findIndex((x) => x.id === b.id);
@@ -3465,7 +3741,7 @@ function adminApp() {
                     if (ix >= 0) this.chatList[ix].state = next ? 'human_mode' : 'chatting';
                 } else {
                     const data = await res.json().catch(() => ({}));
-                    alert(this.formatApiDetail(data.detail) || 'Не удалось изменить режим');
+                    alert(this.formatApiError(data.detail) || 'Не удалось изменить режим');
                 }
             } catch {
                 alert('Ошибка сети');
@@ -3806,12 +4082,76 @@ function adminApp() {
                 if (res.ok) await this.loadKnowledgeBase();
                 else {
                     const data = await res.json().catch(() => ({}));
-                    alert(this.formatHttpDetail(data));
+                    alert(this.formatApiError(data));
                 }
             } catch (e) {
                 console.error('[admin] deleteKnowledgeItem', e);
                 alert('Ошибка сети');
             }
+        },
+
+        // ─── Packaging Rules ────────────────────────
+        async loadPackagingRules() {
+            this.packagingLoading = true;
+            try {
+                const res = await this.apiFetch('/api/admin/packaging-rules');
+                const data = await res.json().catch(() => ({}));
+                this.packagingRules = Array.isArray(data.items) ? data.items.map(r => ({ ...r, _saving: false })) : [];
+            } catch (e) {
+                console.error('[admin] loadPackagingRules', e);
+                this.packagingRules = [];
+            } finally {
+                this.packagingLoading = false;
+            }
+        },
+        async packagingSave(rule) {
+            rule._saving = true;
+            try {
+                const res = await this.apiFetch(`/api/admin/packaging-rules/${rule.id}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        kind: rule.kind, name: rule.name, price: rule.price,
+                        iiko_product_id: rule.iiko_product_id || '',
+                        keywords: rule.keywords || '', option_key: rule.option_key || '',
+                        is_active: rule.is_active, sort_order: rule.sort_order,
+                    }),
+                });
+                if (!res.ok) {
+                    const d = await res.json().catch(() => ({}));
+                    alert(this.formatApiError(d));
+                }
+            } catch (e) { console.error('[admin] packagingSave', e); }
+            finally { rule._saving = false; }
+        },
+        async packagingDelete(rule) {
+            if (!confirm(`Удалить правило «${rule.name}»?`)) return;
+            rule._saving = true;
+            try {
+                const res = await this.apiFetch(`/api/admin/packaging-rules/${rule.id}`, { method: 'DELETE' });
+                if (res.ok) this.packagingRules = this.packagingRules.filter(r => r.id !== rule.id);
+                else {
+                    const d = await res.json().catch(() => ({}));
+                    alert(this.formatApiError(d));
+                }
+            } catch (e) { console.error('[admin] packagingDelete', e); }
+            finally { rule._saving = false; }
+        },
+        async packagingAddNew() {
+            const kind = prompt('kind (уникальный ключ, например "dessert"):');
+            if (!kind) return;
+            try {
+                const res = await this.apiFetch('/api/admin/packaging-rules', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ kind: kind.trim(), name: 'Новое правило', price: 0, keywords: '', is_active: true, sort_order: 0 }),
+                });
+                if (res.ok) await this.loadPackagingRules();
+                else {
+                    const d = await res.json().catch(() => ({}));
+                    alert(this.formatApiError(d));
+                }
+            } catch (e) { console.error('[admin] packagingAddNew', e); }
         },
 
         async loadIntegrationStatus() {
@@ -3833,7 +4173,7 @@ function adminApp() {
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) {
                     console.error('[admin] POST /integrations/sync', res.status, data);
-                    alert(this.formatApiDetail(data.detail) || 'Синхронизация не удалась');
+                    alert(this.formatApiError(data.detail) || 'Синхронизация не удалась');
                     return;
                 }
                 if (data.status) {
@@ -3881,7 +4221,7 @@ function adminApp() {
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) {
                     console.error('[admin] POST /stop-lists/sync', res.status, data);
-                    alert(this.formatApiDetail(data.detail) || 'Синхронизация стоп-листа не удалась');
+                    alert(this.formatApiError(data.detail) || 'Синхронизация стоп-листа не удалась');
                     return;
                 }
                 if (data.integration_status) {
@@ -3915,7 +4255,7 @@ function adminApp() {
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) {
                     this.stopListItems = [];
-                    this.stopListLoadError = this.formatApiDetail(data.detail) || 'Не удалось загрузить стоп-лист';
+                    this.stopListLoadError = this.formatApiError(data.detail) || 'Не удалось загрузить стоп-лист';
                     return;
                 }
                 this.stopListItems = data.items || [];
@@ -3940,7 +4280,7 @@ function adminApp() {
                     this.menuViewRevision += 1;
                     await this.loadMenu();
                 } else {
-                    alert(this.formatApiDetail(data.detail) || 'Синхронизация меню не удалась');
+                    alert(this.formatApiError(data.detail) || 'Синхронизация меню не удалась');
                 }
             } catch {
                 alert('Ошибка сети');
@@ -3972,7 +4312,7 @@ function adminApp() {
                         console.error('loadTabData после демо', e);
                     }
                 } else {
-                    alert(this.formatApiDetail(data.detail) || 'Не удалось загрузить демо');
+                    alert(this.formatApiError(data.detail) || 'Не удалось загрузить демо');
                 }
             } catch {
                 alert('Ошибка сети');
@@ -4015,7 +4355,7 @@ function adminApp() {
                     await this.refreshDemoStatus();
                     await this.loadTabData();
                 } else {
-                    const msg = this.formatApiDetail(data.detail);
+                    const msg = this.formatApiError(data.detail);
                     this.demoDeleteError = msg || 'Не удалось удалить демо-данные';
                 }
             } catch {
@@ -4577,6 +4917,8 @@ function adminApp() {
                     await this.loadAnalytics();
                 } else if (this.currentTab === 'orders') {
                     await this.loadOrders();
+                } else if (this.currentTab === 'operator_queue') {
+                    await Promise.all([this.loadFailedTasks(), this.loadDashStats()]);
                 } else if (this.currentTab === 'bookings') {
                     await this.loadBookings();
                 } else if (this.currentTab === 'menu') {
@@ -4587,6 +4929,8 @@ function adminApp() {
                     await this.loadIntegrationStatus();
                 } else if (this.currentTab === 'knowledge') {
                     await this.loadKnowledgeBase();
+                } else if (this.currentTab === 'packaging') {
+                    await this.loadPackagingRules();
                 } else if (this.currentTab === 'settings') {
                     await Promise.all([this.loadSettingsOrders(), this.loadSettingsEnvironment()]);
                 } else if (this.currentTab === 'chats') {
@@ -4756,6 +5100,109 @@ function adminApp() {
                 return;
             }
             this.orders = data.orders || [];
+        },
+
+        async loadFailedTasks() {
+            this.failedTasksLoading = true;
+            try {
+                const q = new URLSearchParams();
+                if (this.failedTasksFilter === 'open') q.set('resolved', 'false');
+                else if (this.failedTasksFilter === 'resolved') q.set('resolved', 'true');
+                const ph = (this.failedTasksPhone || '').trim();
+                if (ph) q.set('phone', ph);
+                const res = await this.apiFetch(`/api/admin/failed-tasks?${q.toString()}`);
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    console.warn('[admin] loadFailedTasks', res.status, data);
+                    return;
+                }
+                this.failedTasks = data.tasks || [];
+                this.failedTasksTotal = data.total ?? (data.tasks || []).length;
+            } finally {
+                this.failedTasksLoading = false;
+            }
+        },
+
+        async setFailedTaskResolved(task, resolved) {
+            try {
+                const res = await this.apiFetch(`/api/admin/failed-tasks/${task.id}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ resolved }),
+                });
+                if (res.ok) {
+                    await this.loadFailedTasks();
+                    await this.loadDashStats();
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        },
+
+        initOrderRebuildFromSelected() {
+            this.orderRebuildError = '';
+            const items = this.selectedOrder?.items?.items;
+            if (!Array.isArray(items) || items.length === 0) {
+                this.orderRebuildDraftJson = '[]';
+                return;
+            }
+            const lines = items.map((it) => ({
+                name: it.name,
+                quantity: it.quantity,
+                iiko_item_id: it.iiko_id || '',
+                packaging_plov_1kg: it.packaging_plov_1kg || '',
+                exclude_ingredients: it.exclude_ingredients || [],
+            }));
+            this.orderRebuildDraftJson = JSON.stringify(lines, null, 2);
+        },
+
+        async submitOrderRebuildDraft() {
+            if (!this.selectedOrder || this.selectedOrder.status !== 'draft') return;
+            this.orderRebuildLoading = true;
+            this.orderRebuildError = '';
+            let food_lines;
+            try {
+                food_lines = JSON.parse(this.orderRebuildDraftJson || '[]');
+            } catch {
+                this.orderRebuildError = 'Некорректный JSON';
+                this.orderRebuildLoading = false;
+                return;
+            }
+            if (!Array.isArray(food_lines) || food_lines.length === 0) {
+                this.orderRebuildError = 'Нужен непустой массив позиций';
+                this.orderRebuildLoading = false;
+                return;
+            }
+            try {
+                const res = await this.apiFetch(`/api/admin/orders/${this.selectedOrder.id}/rebuild-draft`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        food_lines,
+                        expected_version: this.selectedOrder.row_version,
+                    }),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    const d = data.detail;
+                    this.orderRebuildError = typeof d === 'string' ? d : JSON.stringify(d || data);
+                    return;
+                }
+                if (data.payment_split_warning) {
+                    this.orderRebuildError = '';
+                }
+                await this.loadOrders();
+                const updated = this.orders.find((o) => o.id === this.selectedOrder.id);
+                if (updated) {
+                    this.selectedOrder = updated;
+                    this.initOrderRebuildFromSelected();
+                }
+                await this.loadDashStats();
+            } catch {
+                this.orderRebuildError = 'Ошибка сети';
+            } finally {
+                this.orderRebuildLoading = false;
+            }
         },
 
         async loadBookings() {
