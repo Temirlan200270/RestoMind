@@ -344,13 +344,11 @@ async def _handle_order(
     pickup_note = (ai_eff.pickup_time_note or "").strip()
     delivery_addr = (ai_eff.delivery_address or "").strip()
 
-    missing_bits: list[str] = []
-    if ot == "delivery" and not delivery_addr:
-        missing_bits.append("адрес доставки")
-    if ot == "pickup" and not pickup_note:
-        missing_bits.append("к какому времени удобно забрать")
-
-    if not is_mixed and not pm:
+    if not ot:
+        reply += "\n\nКак удобнее получить заказ — **доставка**, **самовывоз** или **в зале**?"
+        next_state = UserState.CHATTING
+        log_hint = "уточняем тип получения"
+    elif not is_mixed and not pm:
         reply += (
             "\n\n💳 **Как удобнее оплатить заказ?**\n"
             "  • наличными при получении\n"
@@ -360,14 +358,14 @@ async def _handle_order(
         )
         next_state = UserState.AWAITING_ORDER_PAYMENT
         log_hint = "ждём способ оплаты"
-    elif missing_bits:
-        # Оплата есть, но не хватает контекста (время/адрес) — спрашиваем только недостающее.
-        if ot == "delivery" and not delivery_addr:
-            reply += "\n\n📍 Подскажите адрес доставки (улица, дом/кв)."
-        elif ot == "pickup" and not pickup_note:
-            reply += "\n\n🕐 К какому времени вам удобно забрать заказ?"
+    elif ot == "delivery" and not delivery_addr:
+        reply += "\n\n📍 Подскажите адрес доставки (улица, дом/кв)."
         next_state = UserState.CHATTING
-        log_hint = "уточняем детали получения"
+        log_hint = "уточняем адрес доставки"
+    elif ot == "pickup" and not pickup_note:
+        reply += "\n\n🕐 К какому времени вам удобно забрать заказ?"
+        next_state = UserState.CHATTING
+        log_hint = "уточняем время самовывоза"
     elif requires_big_order_prepay:
         reply += (
             "\n\n"

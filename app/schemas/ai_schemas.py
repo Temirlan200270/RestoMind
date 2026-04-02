@@ -185,17 +185,18 @@ class AIBrainResponse(BaseModel):
         ),
     )
     # --- Логистика и оплата (v2.0) — для intent='order' ---
-    order_type: Literal["delivery", "pickup", "hall"] = Field(
-        default="delivery",
+    order_type: Literal["delivery", "pickup", "hall", ""] = Field(
+        default="",
         description=(
             "Как клиент получит заказ: delivery — доставка (нужен адрес), "
             "pickup — самовывоз (время получения), "
-            "hall — в зале ресторана (может сочетаться с бронью / предзаказом)"
+            "hall — в зале ресторана (может сочетаться с бронью / предзаказом). "
+            "Пустая строка — клиент ещё не указал, нужно спросить."
         ),
     )
-    payment_method: Literal["cash", "card", "remote"] = Field(
-        default="cash",
-        description="При payment_mode=single: способ оплаты. При mixed — ориентир (как платят первую часть) или remote.",
+    payment_method: Literal["cash", "card", "remote", ""] = Field(
+        default="",
+        description="При payment_mode=single: способ оплаты. Пустая строка — клиент ещё не указал.",
     )
     payment_mode: Literal["single", "mixed"] = Field(
         default="single",

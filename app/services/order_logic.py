@@ -600,26 +600,29 @@ def _norm_txt(s: str) -> str:
     return " ".join(t.split())
 
 
-PackagingKind = Literal["manty", "plov_half", "plov_1kg", "none"]
+PackagingKind = Literal["manty", "shashlik", "plov_half", "plov_1kg", "fries", "standard"]
 
 
 def classify_packaging_kind(name: str, category: str) -> PackagingKind:
     """
-    Классификация строки заказа для тарифов упаковки (манты / плов 0.5 / плов 1кг).
-    Узнаёт по названию и категории из меню.
+    Классификация строки заказа для тарифов упаковки.
+    Приоритет: манты → шашлык → плов (0.5 / 1кг) → фри → стандарт.
     """
     n = _norm_txt(name).replace(" ", "")
+    nl = name.lower()
     c_raw = _norm_txt(category)
     c = c_raw.replace(" ", "")
-    if "мант" in name.lower() or "мант" in c_raw:
+    if "мант" in nl or "мант" in c_raw:
         return "manty"
-    if "плов" in name.lower() or "плов" in c_raw:
-        if "0,5" in n or "0.5" in name.lower() or "500г" in n or "500г" in c or "полкг" in n:
+    if "шашлык" in nl or "шашлык" in c_raw or "шашлик" in nl or "шашлик" in c_raw:
+        return "shashlik"
+    if "плов" in nl or "плов" in c_raw:
+        if "0,5" in n or "0.5" in nl or "500г" in n or "500г" in c or "полкг" in n:
             return "plov_half"
         if (
             "1кг" in n
             or "1кг" in c
-            or "1 кг" in name.lower()
+            or "1 кг" in nl
             or "1000г" in n
             or "1000г" in c
         ):
@@ -628,7 +631,9 @@ def classify_packaging_kind(name: str, category: str) -> PackagingKind:
             return "plov_half"
         if "1кг" in c or "1 kg" in c_raw:
             return "plov_1kg"
-    return "none"
+    if "фри" in nl or "fries" in nl or "фри" in c_raw:
+        return "fries"
+    return "standard"
 
 
 def compute_fee_lines(
@@ -642,9 +647,12 @@ def compute_fee_lines(
     """
     fee_lines: list[dict] = []
     extras_total = 0.0
+    needs_packaging = order_type in ("delivery", "pickup")
 
     for line in food_lines:
         if not isinstance(line, dict):
+            continue
+        if not needs_packaging:
             continue
         qty = int(line.get("quantity", 1))
         if qty < 1:
@@ -660,6 +668,18 @@ def compute_fee_lines(
                 "unit_price": unit,
                 "item_total": total,
                 "iiko_id": settings.iiko_product_id_packaging_manty.strip() or None,
+            })
+            extras_total += total
+        elif kind == "shashlik":
+            unit = float(settings.packaging_shashlik_unit_price)
+            total = unit * qty
+            fee_lines.append({
+                "kind": "packaging_shashlik",
+                "name": "Контейнер для шашлыка",
+                "quantity": qty,
+                "unit_price": unit,
+                "item_total": total,
+                "iiko_id": None,
             })
             extras_total += total
         elif kind == "plov_half":
@@ -698,6 +718,31 @@ def compute_fee_lines(
                 "iiko_id": iiko_pid,
             })
             extras_total += total
+        elif kind == "fries":
+            unit = float(settings.packaging_fries_unit_price)
+            total = unit * qty
+            fee_lines.append({
+                "kind": "packaging_fries",
+                "name": "Соусница (фри)",
+                "quantity": qty,
+                "unit_price": unit,
+                "item_total": total,
+                "iiko_id": None,
+            })
+            extras_total += total
+        elif kind == "standard":
+            unit = float(settings.packaging_standard_unit_price)
+            if unit > 0:
+                total = unit * qty
+                fee_lines.append({
+                    "kind": "packaging_standard",
+                    "name": "Контейнер (ланч-бокс)",
+                    "quantity": qty,
+                    "unit_price": unit,
+                    "item_total": total,
+                    "iiko_id": None,
+                })
+                extras_total += total
 
     if order_type == "delivery" and foods_subtotal < float(settings.pricing_delivery_free_threshold):
         d_fee = float(settings.pricing_delivery_fee)
@@ -853,12 +898,8 @@ def format_order_confirmation_summary(
                     lines.append(f"  • Наличными: {float(sp['cash']):.0f} ₸")
         else:
             lines.append(f"💳 Оплата: {pay_ru}")
-        if meta.get("requires_order_prepayment"):
-            lines.append("")
-            lines.append(
-                f"⚠️ Заказ от **{int(settings.order_prepayment_threshold_kzt):,}** ₸ — нужна предоплата; "
-                "подтверждение возможно после оплаты (оператор пришлёт реквизиты/ссылку)."
-            )
+        # Предупреждение о предоплате добавляется один раз в intent_router,
+        # здесь не дублируем — иначе клиент получает 2-3 одинаковых предупреждения.
 
     return "\n".join(lines)
 

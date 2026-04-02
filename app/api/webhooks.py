@@ -303,11 +303,11 @@ async def _send_order_to_iiko(
         return False, msg[:500]
 
 
-async def handle_confirmation(phone: str, message_text: str) -> str:
+async def handle_confirmation(phone: str, message_text: str) -> str | None:
     """
     Обработка ответа на подтверждение заказа.
-    При «Да» → подтверждаем.
-    При «Нет» → отменяем.
+    При «Да» → подтверждаем. При «Нет» → отменяем.
+    Иначе → None (клиент хочет изменить заказ — process_message перенаправит в Gemini).
     """
     word = message_text.lower().strip().rstrip("!.,")
     order_id = await get_pending_order(redis_client, phone)
@@ -368,7 +368,7 @@ async def handle_confirmation(phone: str, message_text: str) -> str:
             "  • Или просто продолжить общение 😊"
         )
 
-    return "Пожалуйста, ответьте «Да» для подтверждения или «Нет» для отмены заказа."
+    return None  # не «Да» и не «Нет» — вернём None, process_message пропустит через Gemini
 
 
 async def handle_booking_confirmation(phone: str, message_text: str) -> str:
@@ -429,9 +429,10 @@ _PAYMENT_LABEL_RU = {
 }
 
 
-async def handle_order_payment_choice(phone: str, message_text: str) -> str:
+async def handle_order_payment_choice(phone: str, message_text: str) -> str | None:
     """
     После черновика заказа: фиксируем способ оплаты в items_json, затем переход к Да/Нет.
+    None → текст не распознан как оплата/отмена — process_message перенаправит в Gemini.
     """
     order_id = await get_pending_order(redis_client, phone)
     if not order_id:
@@ -457,13 +458,7 @@ async def handle_order_payment_choice(phone: str, message_text: str) -> str:
 
     pm = detect_payment_method_from_text(message_text)
     if not pm:
-        return (
-            "Не разобрал способ оплаты. Напишите, пожалуйста:\n"
-            "  • **наличные**\n"
-            "  • **карта** (при получении)\n"
-            "  • **удалённо** (перевод или ссылка)\n"
-            "\nИли **отмена**, если передумали."
-        )
+        return None  # не способ оплаты и не отмена — вернём None, process_message пропустит через Gemini
 
     async with async_session_factory() as db:
         order = await db.get(Order, order_id)
@@ -596,39 +591,47 @@ async def process_message(
             logger.info("HUMAN_MODE: сообщение от %s сохранено, AI не вызван", phone)
             return
 
-        # ─── AWAITING_ORDER_PAYMENT: способ оплаты → затем Да/Нет ───
+        # ─── AWAITING_ORDER_PAYMENT: способ оплаты, правка заказа или Да/Нет ───
         if state == UserState.AWAITING_ORDER_PAYMENT:
             final_reply = await handle_order_payment_choice(phone, message_text)
 
-            async with async_session_factory() as db:
-                await _save_chat_log(db, phone, message_text, final_reply)
-                await db.commit()
+            if final_reply is not None:
+                async with async_session_factory() as db:
+                    await _save_chat_log(db, phone, message_text, final_reply)
+                    await db.commit()
 
-            await append_to_history(redis_client, phone, "user", message_text)
-            await append_to_history(redis_client, phone, "assistant", final_reply)
-            await send_customer_text(phone, final_reply)
+                await append_to_history(redis_client, phone, "user", message_text)
+                await append_to_history(redis_client, phone, "assistant", final_reply)
+                await send_customer_text(phone, final_reply)
 
-            await publish_event("new_message", {
-                "phone": phone, "role": "assistant", "content": final_reply,
-            })
-            return
+                await publish_event("new_message", {
+                    "phone": phone, "role": "assistant", "content": final_reply,
+                })
+                return
+            # None → клиент хочет изменить заказ; переключаем в CHATTING и идём в Gemini
+            await set_user_state(redis_client, phone, UserState.CHATTING)
+            state = UserState.CHATTING
 
-        # ─── CONFIRMING_ORDER: ждём Да/Нет ──────────────────
+        # ─── CONFIRMING_ORDER: ждём Да/Нет или правку заказа ──────
         if state == UserState.CONFIRMING_ORDER:
             final_reply = await handle_confirmation(phone, message_text)
 
-            async with async_session_factory() as db:
-                await _save_chat_log(db, phone, message_text, final_reply)
-                await db.commit()
+            if final_reply is not None:
+                async with async_session_factory() as db:
+                    await _save_chat_log(db, phone, message_text, final_reply)
+                    await db.commit()
 
-            await append_to_history(redis_client, phone, "user", message_text)
-            await append_to_history(redis_client, phone, "assistant", final_reply)
-            await send_customer_text(phone, final_reply)
+                await append_to_history(redis_client, phone, "user", message_text)
+                await append_to_history(redis_client, phone, "assistant", final_reply)
+                await send_customer_text(phone, final_reply)
 
-            await publish_event("new_message", {
-                "phone": phone, "role": "assistant", "content": final_reply,
-            })
-            return
+                await publish_event("new_message", {
+                    "phone": phone, "role": "assistant", "content": final_reply,
+                })
+                return
+            # None → клиент хочет изменить заказ; переключаем в CHATTING и идём в Gemini
+            await set_user_state(redis_client, phone, UserState.CHATTING)
+            state = UserState.CHATTING
 
         # ─── CONFIRMING_BOOKING: ждём Да/Нет ─────────────────
         if state == UserState.CONFIRMING_BOOKING:

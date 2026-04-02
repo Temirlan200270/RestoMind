@@ -234,6 +234,18 @@ class Settings(BaseSettings):
         default=650.0,
         validation_alias=AliasChoices("PACKAGING_PLOV_1KG_FOIL_UNIT_PRICE", "packaging_plov_1kg_foil_unit_price"),
     )
+    packaging_shashlik_unit_price: float = Field(
+        default=200.0,
+        validation_alias=AliasChoices("PACKAGING_SHASHLIK_UNIT_PRICE", "packaging_shashlik_unit_price"),
+    )
+    packaging_fries_unit_price: float = Field(
+        default=50.0,
+        validation_alias=AliasChoices("PACKAGING_FRIES_UNIT_PRICE", "packaging_fries_unit_price"),
+    )
+    packaging_standard_unit_price: float = Field(
+        default=150.0,
+        validation_alias=AliasChoices("PACKAGING_STANDARD_UNIT_PRICE", "packaging_standard_unit_price"),
+    )
     iiko_product_id_packaging_manty: str = Field(
         default="",
         validation_alias=AliasChoices("IIKO_PRODUCT_ID_PACKAGING_MANTY", "iiko_product_id_packaging_manty"),

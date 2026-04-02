@@ -2175,6 +2175,15 @@
                         <div class="text-xs font-bold text-emerald-800 uppercase tracking-wide mb-1">Ссылка на оплату</div>
                         <a :href="selectedOrder?.payment_link_url" target="_blank" rel="noopener noreferrer" class="text-emerald-700 font-mono text-xs break-all underline" x-text="selectedOrder?.payment_link_url"></a>
                     </div>
+                    <div class="mb-4" x-show="selectedOrder?.prepayment_status === 'pending'">
+                        <button type="button"
+                            @click="confirmPrepayment()"
+                            class="w-full py-3 rounded-xl text-sm font-bold border-2 border-emerald-300 text-emerald-900 bg-emerald-50 hover:bg-emerald-100 transition flex items-center justify-center gap-2">
+                            <span>✅</span>
+                            <span>Подтвердить предоплату</span>
+                        </button>
+                        <p class="text-[11px] text-gray-400 text-center mt-1.5">Клиент сможет подтвердить заказ после нажатия</p>
+                    </div>
                     <div class="mb-4 rounded-xl bg-gray-50 border border-gray-100 px-4 py-3 text-sm" x-show="selectedOrder?.user_phone || selectedOrder?.user_name">
                         <div class="text-xs text-gray-500 mb-0.5">Клиент (WhatsApp)</div>
                         <div class="font-mono text-gray-900" x-text="selectedOrder?.user_phone || '—'"></div>
@@ -3134,6 +3143,21 @@ function adminApp() {
                 alert('Ошибка сети');
                 return false;
             }
+        },
+
+        async confirmPrepayment() {
+            if (!this.selectedOrder) return;
+            const id = this.selectedOrder.id;
+            try {
+                const res = await this.apiFetch(`/api/admin/orders/${id}/payment`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prepayment_status: 'paid' }),
+                });
+                if (!res.ok) { alert('Ошибка: ' + (await res.text())); return; }
+                this.selectedOrder.prepayment_status = 'paid';
+                await this.loadOrders();
+            } catch { alert('Ошибка сети'); }
         },
 
         async confirmSendToIiko() {
