@@ -41,6 +41,7 @@ async def db_with_menu(db_session: AsyncSession) -> AsyncSession:
         MenuItem(name="Плов", category="Горячее", price=2790.0, is_available=True, iiko_id="uuid-plov"),
         MenuItem(name="Лагман", category="Первое", price=1990.0, is_available=True, iiko_id="uuid-lagman"),
         MenuItem(name="Капучино", category="Кофе", price=1190.0, is_available=True, iiko_id="uuid-cappuccino"),
+        MenuItem(name="Плов 1 кг", category="Горячее", price=4500.0, is_available=True, iiko_id="uuid-plov-1kg"),
         MenuItem(name="Самса с говядиной", category="Выпечка", price=790.0, is_available=True, iiko_id="uuid-samsa"),
         MenuItem(name="Маргарита", category="Пицца", price=2690.0, is_available=False, iiko_id="uuid-margherita"),
     ]

@@ -115,7 +115,12 @@ def _merge_recommendation_into_order_meta(
     Сохраняет upsell в order_meta для админки / аналитики (Phase 18).
     Не вызывать, если заказ не будет сохранён (ошибка валидации оплаты и т.д.).
     """
-    if not ai.is_recommendation and not (ai.upsell_offered or "").strip() and not (ai.upsell_reasoning or "").strip():
+    if (
+        not ai.is_recommendation
+        and not (ai.upsell_offered or "").strip()
+        and not (ai.upsell_reasoning or "").strip()
+        and not (ai.upsell_offered_id or "").strip()
+    ):
         return items_json
     meta = items_json.get("order_meta")
     meta = dict(meta) if isinstance(meta, dict) else {}
@@ -123,6 +128,9 @@ def _merge_recommendation_into_order_meta(
     off = (ai.upsell_offered or "").strip()
     if off:
         rec["offered"] = off
+    oid = (ai.upsell_offered_id or "").strip()
+    if oid:
+        rec["offered_iiko_id"] = oid
     reason = (ai.upsell_reasoning or "").strip()
     if reason:
         rec["reason"] = reason

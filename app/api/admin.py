@@ -82,6 +82,7 @@ from app.services.order_logic import (
     validate_mixed_payment_total,
     validate_order,
 )
+from app.services.sales_strategy import build_sales_strategy, format_strategy_for_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -2694,12 +2695,25 @@ async def test_bot(body: TextRequest) -> dict:
         draft_ctx = format_draft_order_context_for_prompt(
             draft_row.items_json if draft_row else None,
         )
+        strategy_ctx = ""
+        if draft_row and isinstance(draft_row.items_json, dict):
+            cart = [
+                x for x in (draft_row.items_json.get("items") or [])
+                if isinstance(x, dict)
+            ]
+            om = draft_row.items_json.get("order_meta")
+            meta_d = om if isinstance(om, dict) else {}
+            total = float(draft_row.total_price or 0)
+            strategy_ctx = format_strategy_for_prompt(
+                build_sales_strategy(cart, total, meta_d, menu_items),
+            )
         ai_response = await call_gemini(
             history,
             message_text,
             menu_context,
             kb_context,
             draft_order_context=draft_ctx,
+            sales_strategy_context=strategy_ctx,
         )
         result = await route_intent(
             db, phone, ai_response, menu_items=menu_items,

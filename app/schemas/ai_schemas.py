@@ -174,6 +174,10 @@ class AIBrainResponse(BaseModel):
         default=None,
         description="Название предложенного блюда или напитка (как в меню)",
     )
+    upsell_offered_id: str | None = Field(
+        default=None,
+        description="UUID позиции из меню (iiko), если рекомендация привязана к конкретной строке каталога — для аналитики",
+    )
     upsell_reasoning: str | None = Field(
         default=None,
         description="Короткий аргумент: вкус, сочетаемость с заказом, традиция заведения — для логов и админки",

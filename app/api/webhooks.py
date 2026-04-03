@@ -68,6 +68,7 @@ from app.services.order_logic import (
     format_order_confirmation_summary,
     load_available_menu,
 )
+from app.services.sales_strategy import build_sales_strategy, format_strategy_for_prompt
 from app.services.whatsapp_idempotency import try_claim_whatsapp_inbound_in_db
 from app.services.tts_edge import synthesize_speech_mp3
 
@@ -734,6 +735,18 @@ async def process_message(
             draft_ctx = format_draft_order_context_for_prompt(
                 draft_row.items_json if draft_row else None,
             )
+            strategy_ctx = ""
+            if draft_row and isinstance(draft_row.items_json, dict):
+                cart = [
+                    x for x in (draft_row.items_json.get("items") or [])
+                    if isinstance(x, dict)
+                ]
+                om = draft_row.items_json.get("order_meta")
+                meta_d = om if isinstance(om, dict) else {}
+                total = float(draft_row.total_price or 0)
+                strategy_ctx = format_strategy_for_prompt(
+                    build_sales_strategy(cart, total, meta_d, menu_items),
+                )
             if had_voice:
                 if voice_bytes is None:
                     return
@@ -744,6 +757,7 @@ async def process_message(
                     menu_context,
                     kb_context,
                     draft_order_context=draft_ctx,
+                    sales_strategy_context=strategy_ctx,
                 )
                 user_log_text = (ai_response.recognized_speech or "").strip() or "🎤 голосовое сообщение"
                 await append_to_history(redis_client, phone, "user", user_log_text)
@@ -755,6 +769,7 @@ async def process_message(
                     menu_context,
                     kb_context,
                     draft_order_context=draft_ctx,
+                    sales_strategy_context=strategy_ctx,
                 )
 
             log_pipeline_stage(

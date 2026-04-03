@@ -196,6 +196,25 @@ def test_format_draft_order_context_for_prompt_includes_ids() -> None:
     assert "ул. Абая" in text
 
 
+def test_format_draft_order_context_includes_fee_lines_summary() -> None:
+    """Phase 18 §4.10: в контекст для Gemini попадают последние fee_lines и foods_subtotal."""
+    text = format_draft_order_context_for_prompt({
+        "items": [{"name": "Лагман", "quantity": 1, "iiko_id": "uuid-lagman", "category": "Первое"}],
+        "foods_subtotal": 1990.0,
+        "fee_lines": [
+            {"kind": "packaging_standard", "name": "Контейнер", "quantity": 1, "item_total": 150.0},
+            {"kind": "delivery", "name": "Доставка", "quantity": 1, "item_total": 700.0},
+        ],
+        "total_price": 2840.0,
+        "order_meta": {"order_type": "delivery"},
+    })
+    assert "Сумма по блюдам" in text
+    assert "1990" in text
+    assert "Доставка" in text
+    assert "Контейнер" in text
+    assert "compute_fee_lines" in text
+
+
 def test_merge_cart_actions_add_remove_set() -> None:
     base = [
         {

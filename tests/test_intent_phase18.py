@@ -11,6 +11,17 @@ from app.services.intent_router import get_open_draft_order, route_intent
 from app.services.order_logic import load_available_menu
 
 
+def _fee_kinds(items_json: dict) -> list[str]:
+    fl = items_json.get("fee_lines") or []
+    if not isinstance(fl, list):
+        return []
+    out = []
+    for x in fl:
+        if isinstance(x, dict) and x.get("kind"):
+            out.append(str(x["kind"]))
+    return out
+
+
 @pytest.mark.asyncio
 async def test_route_intent_merge_updates_same_draft(db_with_menu: AsyncSession) -> None:
     phone = "+77009998877"
@@ -83,3 +94,149 @@ async def test_route_intent_saves_upsell_in_order_meta(db_with_menu: AsyncSessio
 @pytest.mark.asyncio
 async def test_get_open_draft_order_none_for_new_phone(db_with_menu: AsyncSession) -> None:
     assert await get_open_draft_order(db_with_menu, "+77000000001") is None
+
+
+@pytest.mark.asyncio
+async def test_route_intent_merge_chain_add_remove_set_quantity_recomputes_fees(
+    db_with_menu: AsyncSession,
+) -> None:
+    """
+    §4.10: цепочка order_actions — итог и fee_lines пересчитываются через finalize_order_draft
+    (compute_fee_lines), а не из сырого JSON модели.
+    """
+    phone = "+77001112233"
+    menu = await load_available_menu(db_with_menu)
+
+    r1 = await route_intent(
+        db_with_menu,
+        phone,
+        AIBrainResponse(
+            intent="order",
+            reply_text="ок",
+            items=[
+                OrderItem(name="Лагман", quantity=2, iiko_item_id="uuid-lagman"),
+            ],
+            order_type="delivery",
+            payment_method="cash",
+            delivery_address="ул. Тест 10",
+        ),
+        menu_items=menu,
+    )
+    await db_with_menu.commit()
+    oid = r1.pending_order_id
+    assert oid is not None
+
+    await route_intent(
+        db_with_menu,
+        phone,
+        AIBrainResponse(
+            intent="order",
+            reply_text="добавил",
+            items=[],
+            order_actions=[OrderAction(item_id="uuid-cappuccino", action="add", quantity=1)],
+            order_type="delivery",
+            payment_method="cash",
+        ),
+        menu_items=menu,
+    )
+    await db_with_menu.commit()
+
+    await route_intent(
+        db_with_menu,
+        phone,
+        AIBrainResponse(
+            intent="order",
+            reply_text="убрал один лагман",
+            items=[],
+            order_actions=[OrderAction(item_id="uuid-lagman", action="remove", quantity=1)],
+            order_type="delivery",
+            payment_method="cash",
+        ),
+        menu_items=menu,
+    )
+    await db_with_menu.commit()
+
+    await route_intent(
+        db_with_menu,
+        phone,
+        AIBrainResponse(
+            intent="order",
+            reply_text="два капучино",
+            items=[],
+            order_actions=[OrderAction(item_id="Капучино", action="set_quantity", quantity=2)],
+            order_type="delivery",
+            payment_method="cash",
+        ),
+        menu_items=menu,
+    )
+    await db_with_menu.commit()
+
+    order = await db_with_menu.get(Order, oid)
+    assert order is not None
+    ij = order.items_json or {}
+    names = {(x.get("name"), x.get("quantity")) for x in ij.get("items", []) if isinstance(x, dict)}
+    assert ("Лагман", 1) in names
+    assert ("Капучино", 2) in names
+    assert isinstance(ij.get("fee_lines"), list)
+    assert len(ij["fee_lines"]) >= 1
+    assert float(order.total_price) > 0
+
+
+@pytest.mark.asyncio
+async def test_route_intent_remove_plov_1kg_drops_plov_packaging_fee_lines(
+    db_with_menu: AsyncSession,
+) -> None:
+    """После удаления плова 1 кг не остаётся строк упаковки tabak/foil для этой позиции."""
+    phone = "+77002223344"
+    menu = await load_available_menu(db_with_menu)
+
+    r1 = await route_intent(
+        db_with_menu,
+        phone,
+        AIBrainResponse(
+            intent="order",
+            reply_text="ок",
+            items=[
+                OrderItem(
+                    name="Плов 1 кг",
+                    quantity=1,
+                    iiko_item_id="uuid-plov-1kg",
+                    packaging_plov_1kg="tabak",
+                ),
+                OrderItem(name="Лагман", quantity=1, iiko_item_id="uuid-lagman"),
+            ],
+            order_type="delivery",
+            payment_method="cash",
+            delivery_address="ул. Плов 1",
+        ),
+        menu_items=menu,
+    )
+    await db_with_menu.commit()
+    oid = r1.pending_order_id
+    order = await db_with_menu.get(Order, oid)
+    ij0 = order.items_json or {}
+    kinds_before = _fee_kinds(ij0)
+    assert any("plov_1kg" in k for k in kinds_before)
+
+    await route_intent(
+        db_with_menu,
+        phone,
+        AIBrainResponse(
+            intent="order",
+            reply_text="убрал плов",
+            items=[],
+            order_actions=[OrderAction(item_id="uuid-plov-1kg", action="remove", quantity=1)],
+            order_type="delivery",
+            payment_method="cash",
+        ),
+        menu_items=menu,
+    )
+    await db_with_menu.commit()
+
+    order2 = await db_with_menu.get(Order, oid)
+    ij1 = order2.items_json or {}
+    kinds_after = _fee_kinds(ij1)
+    assert not any("plov_1kg" in k for k in kinds_after)
+    names = {x.get("name") for x in ij1.get("items", []) if isinstance(x, dict)}
+    assert "Плов 1 кг" not in names
+    assert "Лагман" in names

@@ -554,10 +554,33 @@ def format_draft_order_context_for_prompt(items_json: dict | None) -> str:
         bits.append(f"самовывоз: {meta['pickup_time_note']}")
     if bits:
         lines.extend(["", "; ".join(bits)])
+    fs = items_json.get("foods_subtotal")
+    if fs is not None:
+        try:
+            lines.append(f"\nСумма по блюдам (последний расчёт сервера): **{float(fs):.0f} ₸**.")
+        except (TypeError, ValueError):
+            pass
+    fee_lines = items_json.get("fee_lines")
+    if isinstance(fee_lines, list) and fee_lines:
+        lines.append("")
+        lines.append(
+            "Строки доп. сборов (контейнеры, доставка — **факт** последнего пересчёта; "
+            "при правках через `order_actions` бэкенд пересчитает заново, не копируй эти суммы как «истину» в JSON модели).",
+        )
+        for fl in fee_lines:
+            if not isinstance(fl, dict):
+                continue
+            nm = str(fl.get("name") or fl.get("kind") or "—")
+            q = fl.get("quantity", 1)
+            try:
+                it = float(fl.get("item_total") or 0)
+            except (TypeError, ValueError):
+                it = 0.0
+            lines.append(f"- {nm} × {q} — {it:.0f} ₸")
     total = items_json.get("total_price")
     if total is not None:
         try:
-            lines.append(f"\nПоследний итог сессии: **{float(total):.0f} ₸** (после правок сумма пересчитается на сервере).")
+            lines.append(f"\n**Итого к оплате (последний расчёт): {float(total):.0f} ₸** — после изменений состава пересчитает сервер (`compute_fee_lines`).")
         except (TypeError, ValueError):
             pass
     return "\n".join(lines)
