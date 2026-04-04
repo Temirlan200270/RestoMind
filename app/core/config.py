@@ -95,6 +95,11 @@ class Settings(BaseSettings):
     )
     # Публичный URL сайта (https://your-domain.com) — для подсказки URL вебхука в админке
     public_base_url: str = Field(default="", validation_alias=AliasChoices("PUBLIC_BASE_URL", "public_base_url"))
+    # Публичная ссылка на меню/сайт — бот отдаёт её в FAQ при запросе «меню», «ссылка» и т.п.
+    menu_public_url: str = Field(
+        default="https://luniq.net/plovxana_pvl_1",
+        validation_alias=AliasChoices("MENU_PUBLIC_URL", "menu_public_url"),
+    )
     # Дублировать ответ бота голосом (edge-tts, бесплатно) после текста — только если клиент прислал голос
     whatsapp_voice_replies: bool = Field(
         default=False,

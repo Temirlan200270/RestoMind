@@ -144,6 +144,123 @@ def _merge_recommendation_into_order_meta(
     return out
 
 
+def _iiko_qty_map_from_food_lines(lines: list[dict]) -> dict[str, float]:
+    """Суммарное количество по UUID iiko (нижний регистр) для строк корзины."""
+    out: dict[str, float] = {}
+    for line in lines:
+        if not isinstance(line, dict):
+            continue
+        raw = str(line.get("iiko_id") or line.get("iiko_item_id") or "").strip().lower()
+        if not raw:
+            continue
+        q = float(line.get("quantity") or 1)
+        out[raw] = out.get(raw, 0.0) + q
+    return out
+
+
+def _revenue_delta_for_iiko(
+    iiko_key: str,
+    prev_q: dict[str, float],
+    new_q: dict[str, float],
+    new_lines: list[dict],
+) -> float:
+    """Оценка выручки по приросту количества для позиции (для §4.8)."""
+    pq = prev_q.get(iiko_key, 0.0)
+    nq = new_q.get(iiko_key, 0.0)
+    delta = nq - pq
+    if delta <= 0:
+        return 0.0
+    for line in new_lines:
+        if not isinstance(line, dict):
+            continue
+        rid = str(line.get("iiko_id") or line.get("iiko_item_id") or "").strip().lower()
+        if rid != iiko_key:
+            continue
+        qty = float(line.get("quantity") or 1)
+        total = float(line.get("item_total") or 0)
+        unit = total / max(qty, 1e-9)
+        return round(unit * delta, 2)
+    return 0.0
+
+
+def _inject_recommendation_meta_from_draft(
+    items_json: dict[str, object],
+    draft_items_json: dict[str, object] | None,
+) -> dict[str, object]:
+    """
+    Переносит накопленную аналитику допродаж из черновика: иначе finalize_order_draft
+    каждый раз собирает «чистый» order_meta и теряет recommendation_trace между сообщениями.
+    """
+    if not draft_items_json or not isinstance(draft_items_json, dict):
+        return items_json
+    old_meta = draft_items_json.get("order_meta")
+    if not isinstance(old_meta, dict):
+        return items_json
+    new_meta = items_json.get("order_meta")
+    new_meta = dict(new_meta) if isinstance(new_meta, dict) else {}
+    if isinstance(old_meta.get("recommendation_trace"), list):
+        new_meta["recommendation_trace"] = [
+            dict(x) if isinstance(x, dict) else x for x in old_meta["recommendation_trace"]
+        ]
+    if isinstance(old_meta.get("upsell_rejected_iiko_ids"), list):
+        new_meta["upsell_rejected_iiko_ids"] = list(old_meta["upsell_rejected_iiko_ids"])
+    if isinstance(old_meta.get("recommendation"), dict):
+        new_meta["recommendation"] = dict(old_meta["recommendation"])
+    out = dict(items_json)
+    out["order_meta"] = new_meta
+    return out
+
+
+def _mark_recommendation_accepted_in_trace(
+    items_json: dict[str, object],
+    prev_lines: list[dict],
+    new_lines: list[dict],
+) -> dict[str, object]:
+    """
+    Помечает в recommendation_trace accepted/revenue, если после совета выросло количество
+    по offered_iiko_id (по сравнению с предыдущим черновиком).
+    """
+    meta = items_json.get("order_meta")
+    if not isinstance(meta, dict):
+        return items_json
+    trace = meta.get("recommendation_trace")
+    if not isinstance(trace, list) or not trace:
+        return items_json
+    prev_q = _iiko_qty_map_from_food_lines(prev_lines)
+    new_q = _iiko_qty_map_from_food_lines(new_lines)
+    meta = dict(meta)
+    new_trace: list[object] = []
+    for raw_ev in trace:
+        ev = dict(raw_ev) if isinstance(raw_ev, dict) else {}
+        oid = str(ev.get("offered_iiko_id") or "").strip().lower()
+        if oid and ev.get("accepted") is not True:
+            pq = prev_q.get(oid, 0.0)
+            nq = new_q.get(oid, 0.0)
+            if nq > pq:
+                ev["accepted"] = True
+                rev = _revenue_delta_for_iiko(oid, prev_q, new_q, new_lines)
+                if rev > 0:
+                    ev["accepted_revenue_kzt"] = rev
+        new_trace.append(ev)
+    meta["recommendation_trace"] = new_trace
+    last_rec = meta.get("recommendation")
+    if isinstance(last_rec, dict):
+        lr = dict(last_rec)
+        oid = str(lr.get("offered_iiko_id") or "").strip().lower()
+        if oid and lr.get("accepted") is not True:
+            pq = prev_q.get(oid, 0.0)
+            nq = new_q.get(oid, 0.0)
+            if nq > pq:
+                lr["accepted"] = True
+                rev = _revenue_delta_for_iiko(oid, prev_q, new_q, new_lines)
+                if rev > 0:
+                    lr["accepted_revenue_kzt"] = rev
+        meta["recommendation"] = lr
+    out = dict(items_json)
+    out["order_meta"] = meta
+    return out
+
+
 def _merge_rejected_upsell_into_order_meta(
     items_json: dict[str, object],
     ai: AIBrainResponse,
@@ -339,8 +456,23 @@ async def _handle_order(
             reply_text=f"{ai_response.reply_text}\n\n⚠️ {mix_err}",
         )
 
+    prev_items_list: list[dict] = []
+    if existing_draft and isinstance(existing_draft.items_json, dict):
+        raw_prev = existing_draft.items_json.get("items")
+        if isinstance(raw_prev, list):
+            prev_items_list = [x for x in raw_prev if isinstance(x, dict)]
+
+    items_json = _inject_recommendation_meta_from_draft(
+        items_json,
+        existing_draft.items_json if existing_draft else None,
+    )
     items_json = _merge_recommendation_into_order_meta(items_json, ai_eff)
     items_json = _merge_rejected_upsell_into_order_meta(items_json, ai_eff)
+    items_json = _mark_recommendation_accepted_in_trace(
+        items_json,
+        prev_items_list,
+        validated.valid_items,
+    )
     log_pipeline_stage(
         "merge_ok",
         phone=phone,

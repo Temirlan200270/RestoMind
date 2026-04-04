@@ -194,4 +194,19 @@ def _pricing_suffix() -> str:
     )
 
 
-RESTAURANT_SYSTEM_PROMPT = _RESTAURANT_SYSTEM_PROMPT_RAW + _pricing_suffix()
+def _menu_public_url_suffix() -> str:
+    """Ссылка на онлайн-меню для клиентов (из .env)."""
+    from app.core.config import settings
+
+    u = (settings.menu_public_url or "").strip()
+    if not u:
+        return ""
+    return (
+        "\n\n# Публичное меню (ссылка для клиента)\n"
+        f"Если клиент просит **меню**, «где посмотреть блюда», каталог, сайт или ссылку на цены — "
+        f"ответь с `intent=faq` и в `reply_text` дай **только эту** ссылку (можно одной строкой с коротким пояснением): {u}\n"
+        f"Не выдумывай другие URL и не подставляй адреса из головы.\n"
+    )
+
+
+RESTAURANT_SYSTEM_PROMPT = _RESTAURANT_SYSTEM_PROMPT_RAW + _pricing_suffix() + _menu_public_url_suffix()

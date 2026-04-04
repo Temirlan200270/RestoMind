@@ -863,10 +863,9 @@ async def process_message(
         )
     except Exception as exc:
         logger.error("Ошибка обработки сообщения от %s: %s", phone, exc, exc_info=True)
-        try:
-            await send_customer_text(phone, "Извините, произошла ошибка. Попробуйте ещё раз чуть позже.")
-        except Exception:
-            logger.error("Не удалось отправить сообщение об ошибке → %s", phone)
+        # Не глотаем исключение: иначе process_with_retry не сможет записать FailedTask и сделать backoff.
+        # Сообщение клиенту после исчерпания попыток отправляет process_with_retry.
+        raise
 
 
 async def process_voice_message(
