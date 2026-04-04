@@ -512,7 +512,7 @@ def draft_food_lines_to_order_items(items: list[dict]) -> list[OrderItem]:
 
 def format_draft_order_context_for_prompt(items_json: dict | None) -> str:
     """
-    Текст для system instruction: актуальный DRAFT из БД (Phase 18 — state injection для Gemini).
+    Текст для system instruction: актуальный DRAFT из БД (Phase 18 — state injection для LLM).
     Совпадает с конвенцией меню `[id: …]` — чтобы модель заполняла `order_actions.item_id` тем же UUID.
     Пустая строка, если черновика нет или позиций нет.
     """

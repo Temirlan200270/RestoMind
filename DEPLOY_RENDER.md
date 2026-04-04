@@ -22,7 +22,7 @@
 3. Укажите репозиторий и корень с `render.yaml`.
 4. Подтвердите создание ресурсов: **Web Service** `restomind` + **PostgreSQL** `restomind-db`.
 5. В интерфейсе Render задайте переменные с **sync: false** (если мастер их запросит):
-   - `GEMINI_API_KEY`
+   - `OPENAI_API_KEY`
    - `ADMIN_PASSWORD` (и при желании смените `ADMIN_USERNAME` в Environment)
    - токены WhatsApp (`WHATSAPP_*`), когда подключите бота.
 6. Дождитесь сборки и деплоя. Логи: сервис → **Logs**.
@@ -39,7 +39,7 @@
    - `DATABASE_URL` = вставьте URL из шага 1 (или соберите из полей, как в `.env.example`).
    - `APP_DEBUG=false`, `DB_MODE=postgres`, `REDIS_ENABLED=false` (или подключите Redis позже).
    - `SESSION_SECRET` — случайная длинная строка (`openssl rand -hex 32`).
-   - `GEMINI_API_KEY`, `ADMIN_PASSWORD`, при необходимости WhatsApp/iiko.
+   - `OPENAI_API_KEY`, `ADMIN_PASSWORD`, при необходимости WhatsApp/iiko.
 4. В настройках сервиса укажите **Pre-Deploy Command**: `alembic upgrade head`.
 5. **Start Command** оставьте из Dockerfile (uvicorn с `$PORT`) или пусто, если используется только `CMD` образа.
 

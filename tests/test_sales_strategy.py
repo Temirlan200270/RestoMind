@@ -1,4 +1,4 @@
-"""Strategy Engine: правила до Gemini, без смены схемы intent."""
+"""Strategy Engine: правила до LLM, без смены схемы intent."""
 
 from app.db.models import MenuItem
 from app.services.sales_strategy import (

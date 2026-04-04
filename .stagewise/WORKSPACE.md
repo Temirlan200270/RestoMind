@@ -13,9 +13,9 @@
 
 ## ARCHITECTURE OVERVIEW
 
-Monolithic FastAPI application: WhatsApp chatbot operator for restaurant (orders, bookings, FAQ). Multi-tenant foundation, AI-driven (Gemini), menu sync (iiko), payment prepayment, admin dashboard (Jinja2 + Alpine.js).
+Monolithic FastAPI application: WhatsApp chatbot operator for restaurant (orders, bookings, FAQ). Multi-tenant foundation, AI-driven (ChatGPT / OpenAI API), menu sync (iiko), payment prepayment, admin dashboard (Jinja2 + Alpine.js).
 
-**Integrations:** WhatsApp (Meta API) → Gemini LLM → iiko POS → Redis (optional)
+**Integrations:** WhatsApp (Meta API) → ChatGPT (OpenAI) → iiko POS → Redis (optional)
 
 ---
 
@@ -25,7 +25,7 @@ This is a single-package project:
 
 | name | path | type | deps | usedBy | role |
 |------|------|------|------|--------|------|
-| restomind | `w13fb/` | app | google-genai, fastapi, sqlalchemy, redis | standalone | AI-powered restaurant WhatsApp bot + admin |
+| restomind | `w13fb/` | app | openai, fastapi, sqlalchemy, redis | standalone | AI-powered restaurant WhatsApp bot + admin |
 
 ---
 
@@ -47,7 +47,7 @@ None (single package).
 **auth:** Session-based (admin login) + WhatsApp phone number as user identifier  
 **build:** Alembic migrations (PostgreSQL), Tailwind CSS compiler  
 **services:**
-- `ai_brain.py` → Gemini API call with structured output (AIBrainResponse)
+- `ai_brain.py` → OpenAI Chat Completions API call with structured output (AIBrainResponse)
 - `intent_router.py` → map AI intent (order, book, faq, escalate) → business logic
 - `dialog_mgr.py` → user conversation state (Redis/in-memory, history, pending actions)
 - `order_logic.py` → order validation, pricing (container, delivery fee), JSON serialization
@@ -88,7 +88,7 @@ None (single package).
 - db: SQLite (aiosqlite) | PostgreSQL (asyncpg)
 - auth: SessionMiddleware (cookie-based), phone number identity
 - migrations: Alembic
-- ai: Gemini 2.5 Flash (structured output)
+- ai: OpenAI Chat Completions / Whisper (ChatGPT API, structured output)
 - http-client: httpx 0.28+
 - validation: Pydantic 2.10+, Pydantic Settings
 - templates: Jinja2 3.1+
@@ -108,7 +108,7 @@ None (single package).
 - **errors:** Pydantic ValidationError caught in services, logged to file/console + Sentry
 - **async:** Async/await throughout (no blocking I/O); FastAPI dependency injection (Depends)
 - **state:** Dialog/order state stored in Redis (chat history, pending items) with TTL; fallback to in-memory
-- **testing:** pytest fixtures (conftest.py), mock Gemini/iiko; unit tests on business logic
+- **testing:** pytest fixtures (conftest.py), mock OpenAI/iiko; unit tests on business logic
 - **logging:** Rotation (10MB restomind.log, 5MB errors.log); DEBUG if APP_DEBUG=true
 - **patterns:** Service layer (intent_router, order_logic) decoupled from routes; factory pattern (redis_client)
 
@@ -147,7 +147,7 @@ High-signal directories:
 - `DB_` (db_mode, database_url_dsn)
 - `POSTGRES_` (user, password, host, port, db)
 - `REDIS_` (enabled, host, port, db)
-- `GEMINI_` (api_key)
+- `OPENAI_` (api_key, model, base_url)
 - `WHATSAPP_` (api_token, verify_token, phone_number_id, public_base_url)
 - `TELEGRAM_` (bot_token, admin_chat_id)
 - `IIKO_` (api_login, organization_id, terminal_group_id, product_ids, menu_sync_only_dish_good)
@@ -201,7 +201,7 @@ Map tasks to authoritative files:
 | `app/db/session.py` | db-init | async engine, session factory, Redis client (or in-memory fallback), dependency injection | DB connection pooling, how to add new dependency |
 | `app/api/webhooks.py` | routes | WhatsApp webhook endpoint (`POST /api/whatsapp/webhook`), message parsing, rate limiting, background task dispatch | WhatsApp message flow, how to route intents |
 | `app/api/admin.py` | routes | 30+ admin endpoints (orders, bookings, menu, integrations, sync, demo, websocket) | admin CRUD operations, WebSocket broadcasting |
-| `app/services/ai_brain.py` | ai | call Gemini API with structured output (AIBrainResponse), retry logic, fallback on error | how to modify AI prompt, how to add fields to response |
+| `app/services/ai_brain.py` | ai | call OpenAI API with structured output (AIBrainResponse), retry logic, fallback on error | how to modify AI prompt, how to add fields to response |
 | `app/services/intent_router.py` | logic | dispatch AI intent → order/book/faq/escalate logic, validation, DB writes, event publish | how to add new intent, how to modify order/booking flow |
 | `app/services/dialog_mgr.py` | state | user conversation state (Redis/in-memory), chat history, pending order/booking, HUMAN_MODE flag | how conversation context is stored, state machine |
 | `app/services/order_logic.py` | logic | order validation against menu, pricing (container, delivery, threshold), JSON serialization | pricing calculation, order items format, validation rules |
@@ -285,7 +285,7 @@ Map tasks to authoritative files:
 Run: `pytest tests/ -v`
 
 Test files:
-- `test_ai_brain.py` → Gemini API mock, response validation
+- `test_ai_brain.py` → OpenAI API mock, response validation
 - `test_order_logic.py` → order validation, pricing calculation
 - `test_pricing.py` → delivery fee logic, container pricing
 - `test_booking_preorder.py` → booking + order linking

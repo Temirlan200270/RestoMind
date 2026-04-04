@@ -95,7 +95,7 @@
 
 ## Ядро (AI + диалог)
 
-- AI на Google Gemini 2.5 Flash с Structured Outputs (Pydantic-схема)
+- AI на ChatGPT (OpenAI API, `gpt-4o-mini`) с Structured Outputs (Pydantic-схема)
 - System Prompt, RAG — меню из БД в контексте
 - История в Redis (до 20 сообщений, TTL 24 ч)
 - Intents: `order`, `book`, `faq`, `escalate`
@@ -171,7 +171,7 @@
 ## Тесты
 
 - `tests/test_order_logic.py` — `validate_order`, меню, контекст
-- `tests/test_ai_brain.py` — мок Gemini, fallback, retry
+- `tests/test_ai_brain.py` — мок OpenAI, fallback, retry
 - `tests/test_rate_limiter.py` — лимиты
 - Фикстуры: SQLite in-memory, `db_with_menu`
 

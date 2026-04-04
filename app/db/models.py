@@ -325,7 +325,7 @@ class KnowledgeItem(Base):
     )
     question: Mapped[str] = mapped_column(String(500), nullable=False, comment="Краткий заголовок / формулировка вопроса")
     answer: Mapped[str] = mapped_column(Text, nullable=False, comment="Текст ответа (можно несколько абзацев)")
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, comment="Участвует ли в контексте для Gemini")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, comment="Участвует ли в контексте для LLM")
     sort_order: Mapped[int] = mapped_column(Integer, default=0, comment="Порядок вывода в справочнике")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(),

@@ -1,5 +1,5 @@
 """
-Pydantic-схемы для структурированных ответов AI (Gemini).
+Pydantic-схемы для структурированных ответов AI (OpenAI JSON mode).
 Используются как response_json_schema для гарантированного Structured Output.
 """
 
@@ -118,7 +118,7 @@ class OrderAction(BaseModel):
 
 class AIBrainResponse(BaseModel):
     """
-    Структурированный ответ от ИИ (Gemini Structured Output).
+    Структурированный ответ от ИИ (JSON по контракту; парсинг на бэкенде).
 
     Соответствие формулировкам ТЗ (одна схема, без дублирования полей):
     тип заказа и оплата — order_type, payment_method;

@@ -72,12 +72,12 @@ class TelephonyRouter:
 
         logger.info("STT [%s]: %s", session.phone, transcript)
 
-        from app.services.ai_brain import call_gemini
+        from app.services.ai_brain import call_openai
         from app.services.dialog_mgr import get_chat_history, append_to_history
         from app.db.session import redis_client
 
         history = await get_chat_history(redis_client, session.phone)
-        ai_response = await call_gemini(history, transcript)
+        ai_response = await call_openai(history, transcript)
 
         await append_to_history(redis_client, session.phone, "user", transcript)
         await append_to_history(redis_client, session.phone, "assistant", ai_response.reply_text)
@@ -90,5 +90,5 @@ class TelephonyRouter:
 
 # ─── Twilio (реализовано в app/api/webhooks.py) ───────────────────
 # POST /api/whatsapp/voice/incoming — TwiML + привязка CallSid → From (Redis или память).
-# WebSocket /api/whatsapp/voice/stream — Twilio Media Streams → μ-law → WAV → Gemini STT → process_message.
+# WebSocket /api/whatsapp/voice/stream — Twilio Media Streams → μ-law → WAV → Whisper → process_message.
 # Ответ в трубку: TwiML Say через app/integrations/twilio_client.py (см. customer_reply + TWILIO_* в .env).

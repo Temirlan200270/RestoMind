@@ -1,6 +1,6 @@
 # RestoMind
 
-AI-оператор для ресторана: принимает заказы и бронирует столики через WhatsApp, используя **Google Gemini** (Structured Outputs) для понимания естественной речи. Интегрируется с **iiko** для синхронизации меню и отправки заказов на кухню.
+AI-оператор для ресторана: принимает заказы и бронирует столики через WhatsApp, используя **OpenAI** (чат + JSON по схеме `AIBrainResponse`) для понимания естественной речи. Интегрируется с **iiko** для синхронизации меню и отправки заказов на кухню.
 
 Подробный список изменений и возможностей — в [CHANGELOG.md](CHANGELOG.md). Архитектура, соглашения по коду и идеи развития — в [plan.md](plan.md).
 
@@ -22,7 +22,7 @@ AI-оператор для ресторана: принимает заказы �
 | Backend | Python 3.11+, FastAPI |
 | Database | PostgreSQL / SQLite (dev), SQLAlchemy 2.0, **Alembic** |
 | Cache | Redis (опционально, есть in-memory fallback) |
-| AI | Google Gemini 2.5 Flash (Structured Outputs) |
+| AI | OpenAI (gpt-4o-mini по умолчанию; JSON mode + Whisper для голоса) |
 | Интеграции | Meta WhatsApp API, iiko Cloud API |
 | Админка | Jinja2 + Alpine.js + Tailwind CSS + Chart.js |
 | Тесты | pytest, pytest-asyncio (`tests/`, ~25 тестов) |
@@ -47,7 +47,7 @@ pip install -r requirements.txt
 copy .env.example .env
 ```
 
-**Обязательно для локальной работы:** `GEMINI_API_KEY`.  
+**Обязательно для локальной работы:** `OPENAI_API_KEY`.  
 **Админка:** `ADMIN_USERNAME`, `ADMIN_PASSWORD`; для cookie и подписи WebSocket-токена задайте **`SESSION_SECRET`** (случайная строка, в проде — не пустая).  
 Остальное — по необходимости (WhatsApp, iiko, Redis, `SENTRY_DSN`, `RATE_LIMIT_PER_MINUTE` — см. [.env.example](.env.example)).
 
@@ -109,7 +109,7 @@ curl -b cookies.txt -X POST http://localhost:8000/api/admin/test-bot \
 
 Автоматически задеплоить в ваш аккаунт нельзя — нужен ваш git-репозиторий и вход в Render. Плагины Vercel/Render в IDE только помогают связать проект; шаги — в таблице выше.
 
-Кратко для продакшена: `APP_DEBUG=false`, PostgreSQL, секреты `GEMINI_API_KEY`, админка, `SESSION_SECRET` / `generateValue` на Render, токены WhatsApp; Redis на Render опционально (см. DEPLOY_RENDER).
+Кратко для продакшена: `APP_DEBUG=false`, PostgreSQL, секреты `OPENAI_API_KEY`, админка, `SESSION_SECRET` / `generateValue` на Render, токены WhatsApp; Redis на Render опционально (см. DEPLOY_RENDER).
 
 ## Структура проекта
 
@@ -131,7 +131,7 @@ RestoMind/
 │   ├── schemas/
 │   │   └── ai_schemas.py
 │   ├── services/
-│   │   ├── ai_brain.py        # Gemini
+│   │   ├── ai_brain.py        # OpenAI (чат + Whisper)
 │   │   ├── dialog_mgr.py      # состояния, история, подтверждения
 │   │   ├── intent_router.py
 │   │   ├── order_logic.py

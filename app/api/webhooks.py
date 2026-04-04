@@ -28,7 +28,7 @@ from app.integrations.telegram import send_tg_fallback_alert
 from app.integrations.twilio_client import verify_twilio_signature
 from app.integrations.twilio_media import mulaw_8k_to_wav
 from app.integrations.whatsapp import download_media_bytes, send_template, send_voice_message
-from app.services.ai_brain import call_gemini, call_gemini_with_audio, gemini_transcribe_voice
+from app.services.ai_brain import call_openai, call_openai_with_audio, openai_transcribe_voice
 from app.services.customer_reply import (
     reset_twilio_call_context,
     send_customer_text,
@@ -128,7 +128,7 @@ async def _dedupe_whatsapp_message(message_id: str) -> bool:
     Защита от дублей вебхука Meta.
 
     Meta может доставлять одно и то же сообщение несколько раз, поэтому без идемпотентности
-    в админке появляются дубли (и расходуется Gemini).
+    в админке появляются дубли (и расходуется LLM).
 
     Returns:
         True если сообщение уже было обработано (дубликат), иначе False.
@@ -317,7 +317,7 @@ async def handle_confirmation(phone: str, message_text: str) -> str | None:
     """
     Обработка ответа на подтверждение заказа.
     При «Да» → подтверждаем. При «Нет» → отменяем.
-    Иначе → None (клиент хочет изменить заказ — process_message перенаправит в Gemini).
+    Иначе → None (клиент хочет изменить заказ — process_message перенаправит в LLM).
     """
     word = message_text.lower().strip().rstrip("!.,")
     order_id = await get_pending_order(redis_client, phone)
@@ -378,7 +378,7 @@ async def handle_confirmation(phone: str, message_text: str) -> str | None:
             "  • Или просто продолжить общение 😊"
         )
 
-    return None  # не «Да» и не «Нет» — вернём None, process_message пропустит через Gemini
+    return None  # не «Да» и не «Нет» — вернём None, process_message пропустит через LLM
 
 
 async def handle_booking_confirmation(phone: str, message_text: str) -> str:
@@ -442,7 +442,7 @@ _PAYMENT_LABEL_RU = {
 async def handle_order_payment_choice(phone: str, message_text: str) -> str | None:
     """
     После черновика заказа: фиксируем способ оплаты в items_json, затем переход к Да/Нет.
-    None → текст не распознан как оплата/отмена — process_message перенаправит в Gemini.
+    None → текст не распознан как оплата/отмена — process_message перенаправит в LLM.
     """
     order_id = await get_pending_order(redis_client, phone)
     if not order_id:
@@ -468,7 +468,7 @@ async def handle_order_payment_choice(phone: str, message_text: str) -> str | No
 
     pm = detect_payment_method_from_text(message_text)
     if not pm:
-        return None  # не способ оплаты и не отмена — вернём None, process_message пропустит через Gemini
+        return None  # не способ оплаты и не отмена — вернём None, process_message пропустит через LLM
 
     async with async_session_factory() as db:
         order = await db.get(Order, order_id)
@@ -618,13 +618,13 @@ async def process_message(
             or state == UserState.HUMAN_MODE
             or ai_paused_db
         ):
-            if not (settings.gemini_api_key or "").strip():
+            if not (settings.openai_api_key or "").strip():
                 await send_customer_text(
                     phone,
-                    "Голосовые недоступны: задайте GEMINI_API_KEY в настройках сервера.",
+                    "Голосовые недоступны: задайте OPENAI_API_KEY в настройках сервера.",
                 )
                 return
-            message_text = await gemini_transcribe_voice(voice_bytes, voice_mime)
+            message_text = await openai_transcribe_voice(voice_bytes, voice_mime)
             message_text = (message_text or "").strip()
             if not message_text:
                 await send_customer_text(
@@ -643,7 +643,7 @@ async def process_message(
         })
 
         # ─── HUMAN_MODE / ai_paused: AI молчит, только логируем ─────────
-        # Состояние в Redis: ключ user:state:{phone} (см. dialog_mgr.get_user_state), не вызываем Gemini.
+        # Состояние в Redis: ключ user:state:{phone} (см. dialog_mgr.get_user_state), не вызываем LLM.
         if state == UserState.HUMAN_MODE or ai_paused_db:
             async with async_session_factory() as db:
                 await _save_chat_log(db, phone, message_text, "[HUMAN_MODE — AI отключён]")
@@ -669,7 +669,7 @@ async def process_message(
                     "phone": phone, "role": "assistant", "content": final_reply,
                 })
                 return
-            # None → клиент хочет изменить заказ; переключаем в CHATTING и идём в Gemini
+            # None → клиент хочет изменить заказ; переключаем в CHATTING и идём в LLM
             await set_user_state(redis_client, phone, UserState.CHATTING)
             state = UserState.CHATTING
 
@@ -690,7 +690,7 @@ async def process_message(
                     "phone": phone, "role": "assistant", "content": final_reply,
                 })
                 return
-            # None → клиент хочет изменить заказ; переключаем в CHATTING и идём в Gemini
+            # None → клиент хочет изменить заказ; переключаем в CHATTING и идём в LLM
             await set_user_state(redis_client, phone, UserState.CHATTING)
             state = UserState.CHATTING
 
@@ -716,10 +716,10 @@ async def process_message(
         history = await get_chat_history(redis_client, phone)
 
         if had_voice:
-            if not (settings.gemini_api_key or "").strip():
+            if not (settings.openai_api_key or "").strip():
                 await send_customer_text(
                     phone,
-                    "Голосовые недоступны: задайте GEMINI_API_KEY в настройках сервера.",
+                    "Голосовые недоступны: задайте OPENAI_API_KEY в настройках сервера.",
                 )
                 return
         else:
@@ -750,7 +750,7 @@ async def process_message(
             if had_voice:
                 if voice_bytes is None:
                     return
-                ai_response = await call_gemini_with_audio(
+                ai_response = await call_openai_with_audio(
                     history,
                     voice_bytes,
                     voice_mime,
@@ -763,7 +763,7 @@ async def process_message(
                 await append_to_history(redis_client, phone, "user", user_log_text)
             else:
                 user_log_text = message_text
-                ai_response = await call_gemini(
+                ai_response = await call_openai(
                     history,
                     message_text,
                     menu_context,
@@ -800,7 +800,7 @@ async def process_message(
                 "intent": ai_response.intent,
                 "monologue": (
                     f"Распознан интент: {ai_response.intent}. "
-                    "Ответ сформирован моделью (Gemini)."
+                    "Ответ сформирован моделью (OpenAI)."
                 ),
             }
             await _save_chat_log(
@@ -866,14 +866,14 @@ async def process_voice_message(
     whatsapp_message_id: str = "",
 ) -> None:
     """
-    Голосовое WhatsApp: скачать → Gemini (мультимодально в CHATTING или транскрипт в подтверждениях).
+    Голосовое WhatsApp: скачать → Whisper (STT) + чат LLM в CHATTING или транскрипт в подтверждениях.
     """
     try:
-        if not (settings.gemini_api_key or "").strip():
-            logger.info("Голосовое от %s: GEMINI_API_KEY не задан", phone)
+        if not (settings.openai_api_key or "").strip():
+            logger.info("Голосовое от %s: OPENAI_API_KEY не задан", phone)
             await send_customer_text(
                 phone,
-                "Голосовые сообщения пока не настроены. Настройте GEMINI_API_KEY на сервере или напишите текстом.",
+                "Голосовые сообщения пока не настроены. Настройте OPENAI_API_KEY на сервере или напишите текстом.",
             )
             return
 
@@ -906,16 +906,16 @@ async def process_voice_message(
 
 async def _flush_twilio_voice_chunk(phone: str, call_sid: str, mulaw: bytes) -> None:
     """
-    μ-law → WAV → Gemini STT → тот же пайплайн, что WhatsApp (process_message).
+    μ-law → WAV → Whisper STT → тот же пайплайн, что WhatsApp (process_message).
     Ответ уходит в TwiML Say, если задан контекст CallSid.
     """
     if not mulaw or not phone or not call_sid:
         return
-    if not (settings.gemini_api_key or "").strip():
-        logger.warning("Twilio voice: нет GEMINI_API_KEY")
+    if not (settings.openai_api_key or "").strip():
+        logger.warning("Twilio voice: нет OPENAI_API_KEY")
         return
     wav = mulaw_8k_to_wav(mulaw)
-    text = await gemini_transcribe_voice(wav, "audio/wav")
+    text = await openai_transcribe_voice(wav, "audio/wav")
     text = (text or "").strip()
     if not text:
         return
@@ -970,7 +970,7 @@ async def twilio_voice_incoming(request: Request) -> Response:
 async def twilio_voice_stream(websocket: WebSocket) -> None:
     """
     Twilio Media Streams (входящий μ-law 8 kHz).
-    Накопление буфера → транскрипт Gemini → process_message → Twilio Say (см. customer_reply).
+    Накопление буфера → Whisper → process_message → Twilio Say (см. customer_reply).
     """
     await websocket.accept()
     buf = bytearray()

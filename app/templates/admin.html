@@ -1697,7 +1697,7 @@
                                 <p class="text-sm text-gray-600 mt-1" x-text="integrationStatus.whatsapp_configured ? 'Токен и Phone Number ID заданы — исходящие сообщения включены.' : 'Задайте WHATSAPP_API_TOKEN и WHATSAPP_PHONE_NUMBER_ID для реальной отправки.'"></p>
                                 <p class="text-xs text-gray-500 mt-2">
                                     <span class="font-medium text-gray-700">Голосовые в чате:</span>
-                                    <span x-text="integrationStatus.gemini_configured ? ('Распознавание через Gemini (GEMINI_API_KEY). ' + (integrationStatus.whatsapp_voice_replies_enabled ? 'Ответ дублируется голосом (edge-tts).' : 'Ответ текстом; для голоса ответа задайте WHATSAPP_VOICE_REPLIES=true.')) : 'Задайте GEMINI_API_KEY — нужен для текста и для голосовых.'"></span>
+                                    <span x-text="integrationStatus.openai_configured ? ('Модель OpenAI (OPENAI_API_KEY). ' + (integrationStatus.whatsapp_voice_replies_enabled ? 'Ответ дублируется голосом (edge-tts).' : 'Ответ текстом; для голоса ответа задайте WHATSAPP_VOICE_REPLIES=true.')) : 'Задайте OPENAI_API_KEY — нужен для текста и для голосовых (Whisper + чат).'"></span>
                                 </p>
                             </div>
                         </div>
@@ -1756,7 +1756,7 @@
                     <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
                         <div>
                             <h3 class="text-lg font-bold text-gray-900">База знаний</h3>
-                            <p class="text-sm text-gray-500 mt-1">Активные записи подставляются в промпт Gemini (раздел «Справочник заведения») для WhatsApp и теста бота. Цены и блюда по-прежнему только из меню.</p>
+                            <p class="text-sm text-gray-500 mt-1">Активные записи подставляются в системный промпт (раздел «Справочник заведения») для WhatsApp и теста бота. Цены и блюда по-прежнему только из меню.</p>
                         </div>
                         <button type="button" @click="openKnowledgeCreate()"
                             class="shrink-0 px-4 py-2.5 rounded-xl bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 shadow-sm">
@@ -1944,7 +1944,7 @@
                                 <li>iiko: <span x-text="settingsEnv.integrations.iiko?.configured ? 'да' : 'нет'"></span>, terminal_group: <span x-text="settingsEnv.integrations.iiko?.terminal_group_id_set ? 'задан' : '—'"></span></li>
                                 <li>whatsapp: <span x-text="settingsEnv.integrations.whatsapp?.configured ? 'да' : 'нет'"></span></li>
                                 <li>telegram: <span x-text="settingsEnv.integrations.telegram?.configured ? 'да' : 'нет'"></span></li>
-                                <li>gemini: <span x-text="settingsEnv.integrations.gemini?.configured ? 'да' : 'нет'"></span></li>
+                                <li>openai: <span x-text="settingsEnv.integrations.openai?.configured ? 'да' : 'нет'"></span></li>
                                 <li>public_base_url: <span x-text="settingsEnv.integrations.public_base_url_set ? 'задан' : 'нет'"></span></li>
                             </ul>
                         </template>
@@ -2164,7 +2164,7 @@
                             Как работает тест
                         </summary>
                         <div class="text-sm text-amber-800 mt-2 pl-5 border-l-2 border-amber-300 leading-relaxed">
-                            Сообщения отправляются напрямую в Gemini AI через ваш бэкенд.
+                            Сообщения отправляются в OpenAI через ваш бэкенд.
                             Бот определит намерение (заказ, бронь, вопрос) и ответит структурированно.
                         </div>
                     </details>
@@ -2449,32 +2449,6 @@
                                 <span class="font-semibold text-gray-600">Итого:</span>
                                 <span class="text-xl font-bold text-brand-600" x-text="fmt.money(selectedOrder?.total_price)"></span>
                             </div>
-                            <details class="rounded-xl border border-slate-200 bg-slate-50/80 mb-3" x-show="selectedOrder?.status === 'draft'">
-                                <summary @click="initOrderRebuildFromSelected()" class="px-4 py-3 cursor-pointer text-sm font-semibold text-slate-800 list-none">
-                                    Правка состава вручную
-                                </summary>
-                                <div class="px-4 pb-4 space-y-3 border-t border-slate-100 pt-3">
-                                    <p class="text-sm text-gray-600 leading-relaxed">
-                                        Обычно состав заказа меняется через диалог с клиентом в WhatsApp. Этот блок — для согласованных правок с кухней или администратором. Если не уверены, не меняйте данные здесь.
-                                    </p>
-                                    <details class="rounded-lg border border-slate-200 bg-white">
-                                        <summary class="px-3 py-2 cursor-pointer text-xs font-semibold text-slate-600">Техническое редактирование (JSON)</summary>
-                                        <div class="px-3 pb-3 space-y-2 border-t border-slate-100 pt-2">
-                                            <p class="text-[11px] text-gray-500 leading-relaxed">
-                                                Массив позиций: название, количество, при необходимости UUID из меню и упаковка плова 1 кг. После сохранения сервер пересчитает суммы и доставку.
-                                            </p>
-                                            <textarea x-model="orderRebuildDraftJson" rows="8"
-                                                class="w-full font-mono text-xs border border-gray-200 rounded-lg p-2 bg-gray-50"></textarea>
-                                        </div>
-                                    </details>
-                                    <p x-show="orderRebuildError" class="text-xs text-red-600" x-text="orderRebuildError"></p>
-                                    <button type="button" @click="submitOrderRebuildDraft()" :disabled="orderRebuildLoading"
-                                        class="w-full py-2.5 rounded-xl text-sm font-bold bg-slate-800 text-white hover:bg-slate-900 disabled:opacity-50">
-                                        <span x-show="!orderRebuildLoading">Пересчитать и сохранить</span>
-                                        <span x-show="orderRebuildLoading" x-cloak>Сохранение…</span>
-                                    </button>
-                                </div>
-                            </details>
                             <div x-show="selectedOrder?.delivery_address" class="text-xs text-gray-600 bg-gray-50 rounded-lg px-3 py-2 border border-gray-100">
                                 <span class="font-semibold text-gray-500">Адрес:</span>
                                 <span x-text="selectedOrder?.delivery_address"></span>
@@ -2593,9 +2567,10 @@
             </template>
         </div>
 
-        <!-- Подтверждение удаления заказа: внутри main, выше модалок заказа/брони (z-50) -->
+        <!-- Подтверждение удаления заказа -->
         <div x-show="authenticated && showOrderDeleteConfirmModal" x-cloak x-transition.opacity
-            class="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto bg-slate-900/60 backdrop-blur-sm"
+            style="z-index: 9999;"
+            class="fixed inset-0 flex items-center justify-center p-4 overflow-y-auto bg-slate-900/60 backdrop-blur-sm"
             @click.self="closeOrderDeleteConfirm()">
             <div class="bg-white rounded-2xl shadow-2xl border border-gray-100 w-full max-w-md overflow-hidden fade-in shrink-0 relative z-10" @click.stop role="dialog" aria-modal="true" aria-labelledby="order-delete-confirm-title">
                 <div class="h-1.5 bg-gradient-to-r from-red-600 via-rose-500 to-orange-400"></div>
@@ -2703,7 +2678,7 @@ function defaultIntegrationStatus() {
     return {
         iiko_configured: false,
         whatsapp_configured: false,
-        gemini_configured: false,
+        openai_configured: false,
         whatsapp_voice_replies_enabled: false,
         webhook_url: '',
         whatsapp_verify_token_hint: '',

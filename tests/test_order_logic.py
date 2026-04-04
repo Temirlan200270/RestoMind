@@ -197,7 +197,7 @@ def test_format_draft_order_context_for_prompt_includes_ids() -> None:
 
 
 def test_format_draft_order_context_includes_fee_lines_summary() -> None:
-    """Phase 18 §4.10: в контекст для Gemini попадают последние fee_lines и foods_subtotal."""
+    """Phase 18 §4.10: в контекст для LLM попадают последние fee_lines и foods_subtotal."""
     text = format_draft_order_context_for_prompt({
         "items": [{"name": "Лагман", "quantity": 1, "iiko_id": "uuid-lagman", "category": "Первое"}],
         "foods_subtotal": 1990.0,

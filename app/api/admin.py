@@ -40,7 +40,7 @@ from app.db.models import (
 from app.db.session import async_session_factory, get_db, redis_client
 from app.integrations.whatsapp import send_message
 from app.services.admin_tokens import create_admin_ws_token, parse_admin_ws_token
-from app.services.ai_brain import call_gemini
+from app.services.ai_brain import call_openai
 from app.services.demo_data import clear_demo_data, demo_data_exists, seed_demo_data
 from app.services.integration_health import (
     build_status_payload,
@@ -827,7 +827,7 @@ async def integrations_status(db: AsyncSession = Depends(get_db)) -> dict:
         if settings.whatsapp_verify_token
         else None
     )
-    base["gemini_configured"] = bool(str(settings.gemini_api_key or "").strip())
+    base["openai_configured"] = bool(str(settings.openai_api_key or "").strip())
     base["whatsapp_voice_replies_enabled"] = bool(settings.whatsapp_voice_replies)
     return base
 
@@ -1381,7 +1381,7 @@ async def delete_menu_item(
     return {"ok": True, "id": item_id}
 
 
-# ─── База знаний (FAQ заведения для промпта Gemini) ──────
+# ─── База знаний (FAQ заведения для промпта LLM) ──────
 
 
 def _knowledge_item_dict(row: KnowledgeItem) -> dict:
@@ -1907,7 +1907,7 @@ async def settings_environment(db: AsyncSession = Depends(get_db)) -> dict:
                     and str(settings.telegram_admin_chat_id or "").strip(),
                 ),
             },
-            "gemini": {"configured": bool(str(settings.gemini_api_key or "").strip())},
+            "openai": {"configured": bool(str(settings.openai_api_key or "").strip())},
             "public_base_url_set": bool(str(settings.public_base_url or "").strip()),
         },
         "integration_health": {
@@ -2720,7 +2720,7 @@ async def test_bot(body: TextRequest) -> dict:
             strategy_ctx = format_strategy_for_prompt(
                 build_sales_strategy(cart, total, meta_d, menu_items),
             )
-        ai_response = await call_gemini(
+        ai_response = await call_openai(
             history,
             message_text,
             menu_context,

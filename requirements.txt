@@ -12,8 +12,8 @@ alembic>=1.14.0
 # === Кэш и сессии (Redis, async — опционально) ===
 redis>=5.2.0
 
-# === AI / LLM (Gemini) ===
-google-genai>=1.0.0
+# === AI / LLM (OpenAI: чат + Whisper) ===
+openai>=1.59.0
 
 # === Валидация и конфигурация ===
 pydantic>=2.10.0
