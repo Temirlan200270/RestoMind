@@ -81,8 +81,14 @@ def _system_prompt_with_context(
     kb_context: str,
     draft_order_context: str = "",
     sales_strategy_context: str = "",
+    customer_context: str = "",
 ) -> str:
     system_prompt = RESTAURANT_SYSTEM_PROMPT
+    if (customer_context or "").strip():
+        system_prompt += (
+            "\n\n# Досье гостя (только факты с сервера; для тона и узнавания)\n"
+            f"{customer_context.strip()}"
+        )
     if kb_context:
         system_prompt += f"\n\n# Справочник заведения (база знаний)\n{kb_context}"
     if menu_context:
@@ -123,12 +129,17 @@ async def call_openai(
     kb_context: str = "",
     draft_order_context: str = "",
     sales_strategy_context: str = "",
+    customer_context: str = "",
 ) -> AIBrainResponse:
     """
     Отправляет контекст в OpenAI и получает структурированный ответ (JSON → AIBrainResponse).
     """
     system_prompt = _system_prompt_with_context(
-        menu_context, kb_context, draft_order_context, sales_strategy_context,
+        menu_context,
+        kb_context,
+        draft_order_context,
+        sales_strategy_context,
+        customer_context=customer_context,
     )
     messages = _history_to_chat_messages(system_prompt, history, user_text)
 
@@ -223,6 +234,7 @@ async def call_openai_with_audio(
     kb_context: str = "",
     draft_order_context: str = "",
     sales_strategy_context: str = "",
+    customer_context: str = "",
 ) -> AIBrainResponse:
     """
     Голосовое: сначала Whisper, затем тот же чат с текстом + инструкция VOICE_CHAT_BRIDGE.
@@ -240,4 +252,5 @@ async def call_openai_with_audio(
         kb_context=kb_context,
         draft_order_context=draft_order_context,
         sales_strategy_context=sales_strategy_context,
+        customer_context=customer_context,
     )

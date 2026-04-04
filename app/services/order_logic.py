@@ -623,7 +623,9 @@ def build_menu_context(db_items: list[MenuItem]) -> str:
             current_category = item.category
             lines.append(f"\n## {current_category}")
         iiko_tag = f" [id: {item.iiko_id}]" if item.iiko_id else ""
-        lines.append(f"- {item.name}: {float(item.price):.0f} ₸{iiko_tag}")
+        tags_s = (getattr(item, "tags", None) or "").strip()
+        tags_part = f" — теги: {tags_s}" if tags_s else ""
+        lines.append(f"- {item.name}: {float(item.price):.0f} ₸{iiko_tag}{tags_part}")
 
     return "\n".join(lines)
 
@@ -1035,6 +1037,37 @@ def format_order_confirmation_summary(
         # здесь не дублируем — иначе клиент получает 2-3 одинаковых предупреждения.
 
     return "\n".join(lines)
+
+
+def format_whatsapp_order_card(
+    items_json: dict[str, object],
+    validated_summary: str,
+) -> str:
+    """
+    Состав заказа для WhatsApp: разделители, *жирный* для итога (Markdown WhatsApp).
+    Содержательно совпадает с format_order_confirmation_summary.
+    """
+    core = format_order_confirmation_summary(items_json, validated_summary)
+    parts: list[str] = [
+        "✨ *Ваш заказ*",
+        "━━━━━━━━━━━━",
+        "",
+    ]
+    for raw in core.split("\n"):
+        line = raw.rstrip()
+        if line.startswith("💰 Итого"):
+            rest = line.replace("💰", "", 1).strip()
+            parts.append(f"💰 *{rest}*")
+        else:
+            parts.append(line)
+    parts.extend(
+        [
+            "",
+            "━━━━━━━━━━━━",
+            "_Готовим для вас с душой — до встречи!_",
+        ]
+    )
+    return "\n".join(parts)
 
 
 def merge_total_into_items_json(items_json: dict[str, object], total_price: float) -> dict[str, object]:

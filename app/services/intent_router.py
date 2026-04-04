@@ -31,7 +31,7 @@ from app.services.order_logic import (
     draft_food_lines_to_order_items,
     enrich_merged_items_from_menu,
     finalize_order_draft,
-    format_order_confirmation_summary,
+    format_whatsapp_order_card,
     load_available_menu,
     load_packaging_rules,
     merge_cart_actions,
@@ -401,8 +401,8 @@ async def _handle_order(
         db.add(order)
         await db.flush()
 
-    body_text = format_order_confirmation_summary(items_json, validated.summary_text)
-    reply = ai_response.reply_text + "\n\n📋 Ваш заказ:\n" + body_text
+    body_text = format_whatsapp_order_card(items_json, validated.summary_text)
+    reply = ai_response.reply_text + "\n\n" + body_text
 
     if validated.unknown_items:
         reply += "\n\nНе нашёл в меню некоторые позиции. Уточните, пожалуйста."

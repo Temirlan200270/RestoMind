@@ -29,6 +29,7 @@ from app.integrations.twilio_client import verify_twilio_signature
 from app.integrations.twilio_media import mulaw_8k_to_wav
 from app.integrations.whatsapp import download_media_bytes, send_template, send_voice_message
 from app.services.ai_brain import call_openai, call_openai_with_audio, openai_transcribe_voice
+from app.services.customer_context import build_customer_context
 from app.services.customer_reply import (
     reset_twilio_call_context,
     send_customer_text,
@@ -65,8 +66,9 @@ from app.services.order_logic import (
     build_summary_text_from_stored_items,
     detect_payment_method_from_text,
     format_draft_order_context_for_prompt,
-    format_order_confirmation_summary,
+    format_whatsapp_order_card,
     load_available_menu,
+    merge_total_into_items_json,
 )
 from app.services.sales_strategy import build_sales_strategy, format_strategy_for_prompt
 from app.services.whatsapp_idempotency import try_claim_whatsapp_inbound_in_db
@@ -356,9 +358,14 @@ async def handle_confirmation(phone: str, message_text: str) -> str | None:
         })
 
         await clear_pending_order(redis_client, phone)
+        ij = order.items_json if isinstance(order.items_json, dict) else {}
+        ij = merge_total_into_items_json(ij, float(order.total_price or 0))
+        summary_core = build_summary_text_from_stored_items(ij)
+        card = format_whatsapp_order_card(ij, summary_core)
         return (
-            f"Отлично! Заказ #{order.id} на сумму {float(order.total_price):.0f} ₸ подтверждён. "
-            "Оператор проверит детали и отправит заказ в iiko — при необходимости с вами свяжутся. 👨‍💼"
+            f"✨ *Заказ #{order.id} подтверждён!*\n\n"
+            f"{card}\n\n"
+            "_Оператор проверит детали и отправит заказ в iiko — при необходимости с вами свяжутся._"
         )
 
     if word in CANCEL_WORDS:
@@ -484,11 +491,11 @@ async def handle_order_payment_choice(phone: str, message_text: str) -> str | No
         order.items_json = items_json
 
         summary_core = build_summary_text_from_stored_items(items_json)
-        body = format_order_confirmation_summary(items_json, summary_core)
+        body = format_whatsapp_order_card(items_json, summary_core)
         pay_human = _PAYMENT_LABEL_RU.get(pm, pm)
         reply = (
             f"Принял способ оплаты: {pay_human}.\n\n"
-            f"📋 Ваш заказ:\n{body}\n\n"
+            f"{body}\n\n"
             "✅ Подтверждаете заказ? (Да / Нет)"
         )
         await db.commit()
@@ -510,7 +517,7 @@ async def handle_order_payment_choice(phone: str, message_text: str) -> str | No
         await set_user_state(redis_client, phone, UserState.CHATTING)
         return (
             f"Принял способ оплаты: {pay_human}.\n\n"
-            f"📋 Ваш заказ:\n{body}\n\n"
+            f"{body}\n\n"
             f"💳 Сумма от **{int(settings.order_prepayment_threshold_kzt):,}** ₸ — нужна предоплата. "
             "Оператор пришлёт реквизиты или ссылку. После оплаты вы сможете подтвердить заказ ответом «Да»."
         )
@@ -730,6 +737,7 @@ async def process_message(
             menu_context = build_menu_context(menu_items)
             u_row = await db.scalar(select(User).where(User.phone == phone))
             org_id = u_row.organization_id if u_row else None
+            customer_ctx = await build_customer_context(db, u_row)
             kb_context = await load_knowledge_context_block(db, org_id)
             draft_row = await get_open_draft_order(db, phone)
             draft_ctx = format_draft_order_context_for_prompt(
@@ -758,6 +766,7 @@ async def process_message(
                     kb_context,
                     draft_order_context=draft_ctx,
                     sales_strategy_context=strategy_ctx,
+                    customer_context=customer_ctx,
                 )
                 user_log_text = (ai_response.recognized_speech or "").strip() or "🎤 голосовое сообщение"
                 await append_to_history(redis_client, phone, "user", user_log_text)
@@ -770,6 +779,7 @@ async def process_message(
                     kb_context,
                     draft_order_context=draft_ctx,
                     sales_strategy_context=strategy_ctx,
+                    customer_context=customer_ctx,
                 )
 
             log_pipeline_stage(

@@ -1556,6 +1556,13 @@
                                 class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 resize-y" placeholder="Состав, порция…"></textarea>
                         </div>
                         <div>
+                            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Теги / сочетаемость (для ИИ)</label>
+                            <textarea x-model="menuEditForm.tags" rows="2"
+                                class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 resize-y"
+                                placeholder="Через запятую: хит, к нему: ачичук, чай грузинский"></textarea>
+                            <p class="mt-1 text-[11px] text-gray-400 leading-snug">Бот использует теги в первую очередь для рекомендаций к этому блюду (названия как в меню).</p>
+                        </div>
+                        <div>
                             <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Фото (URL, необязательно)</label>
                             <input type="url" x-model="menuEditForm.image_url"
                                 class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500" placeholder="https://…">
@@ -2928,6 +2935,7 @@ function adminApp() {
             name: '',
             category: '',
             description: '',
+            tags: '',
             price: 0,
             is_available: true,
             image_url: '',
@@ -5583,6 +5591,7 @@ function adminApp() {
                 name: '',
                 category: this.menuCategoryFilter || '',
                 description: '',
+                tags: '',
                 price: 0,
                 is_available: true,
                 image_url: '',
@@ -5597,6 +5606,7 @@ function adminApp() {
                 name: item.name || '',
                 category: item.category || '',
                 description: item.description || '',
+                tags: item.tags || '',
                 price: Number(item.price) || 0,
                 is_available: !!item.is_available,
                 image_url: item.image_url || '',
@@ -5619,6 +5629,7 @@ function adminApp() {
                     name,
                     category: String(f.category || '').trim(),
                     description: String(f.description || '').trim(),
+                    tags: String(f.tags || '').trim(),
                     price: Math.max(0, Number(f.price) || 0),
                     is_available: !!f.is_available,
                     image_url: String(f.image_url || '').trim() || null,

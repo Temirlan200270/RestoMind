@@ -3,6 +3,7 @@
 """
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import MenuItem
@@ -15,6 +16,7 @@ from app.services.order_logic import (
     draft_food_lines_to_order_items,
     enrich_merged_items_from_menu,
     format_draft_order_context_for_prompt,
+    format_whatsapp_order_card,
     load_available_menu,
     merge_cart_actions,
     validate_order,
@@ -129,6 +131,20 @@ async def test_build_menu_context(db_with_menu: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
+async def test_build_menu_context_includes_tags(db_with_menu: AsyncSession) -> None:
+    """Теги из БД попадают в контекст меню для ИИ."""
+    res = await db_with_menu.execute(select(MenuItem).where(MenuItem.name == "Плов"))
+    plov = res.scalar_one()
+    plov.tags = "хит, к нему: Салат ачичук, чай"
+    await db_with_menu.commit()
+
+    menu = await load_available_menu(db_with_menu)
+    context = build_menu_context(menu)
+    assert "теги:" in context
+    assert "ачичук" in context.lower()
+
+
+@pytest.mark.asyncio
 async def test_validate_with_mock_menu_fallback() -> None:
     """Если menu_items пуст — fallback на MOCK_MENU."""
     items = [OrderItem(name="Плов", quantity=1)]
@@ -168,6 +184,23 @@ def test_build_summary_from_stored_items() -> None:
     s = build_summary_text_from_stored_items(j)
     assert "Плов" in s
     assert "5580" in s
+
+
+def test_format_whatsapp_order_card_markdown() -> None:
+    """Карточка заказа для WhatsApp: разделители и жирный итог."""
+    j: dict = {
+        "items": [{"name": "Чай", "quantity": 1, "item_total": 500.0}],
+        "total_price": 500.0,
+        "order_meta": {"order_type": "pickup", "payment_method": "cash"},
+    }
+    core = build_summary_text_from_stored_items(j)
+    text = format_whatsapp_order_card(j, core)
+    assert "✨ *Ваш заказ*" in text
+    assert "━━━━━━━━━━━━" in text
+    assert "Итого к оплате" in text
+    assert "500" in text
+    assert "*Итого к оплате: 500" in text or "💰 *" in text
+    assert "_Готовим для вас с душой" in text
 
 
 def test_format_draft_order_context_for_prompt_includes_ids() -> None:

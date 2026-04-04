@@ -41,6 +41,7 @@ from app.db.session import async_session_factory, get_db, redis_client
 from app.integrations.whatsapp import send_message
 from app.services.admin_tokens import create_admin_ws_token, parse_admin_ws_token
 from app.services.ai_brain import call_openai
+from app.services.customer_context import build_customer_context
 from app.services.demo_data import clear_demo_data, demo_data_exists, seed_demo_data
 from app.services.integration_health import (
     build_status_payload,
@@ -1234,6 +1235,7 @@ def _menu_item_dict(item: MenuItem) -> dict:
         "name": item.name,
         "category": item.category or "",
         "description": item.description or "",
+        "tags": item.tags or "",
         "price": float(item.price),
         "is_available": item.is_available,
         "image_url": item.image_url,
@@ -1246,6 +1248,7 @@ class MenuItemPatchBody(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=255)
     category: str | None = Field(None, max_length=100)
     description: str | None = None
+    tags: str | None = None
     price: float | None = Field(None, ge=0)
     is_available: bool | None = None
     image_url: str | None = Field(None, max_length=500)
@@ -1263,6 +1266,7 @@ class MenuItemCreateBody(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     category: str = Field(default="", max_length=100)
     description: str = ""
+    tags: str = ""
     price: float = Field(0, ge=0)
     is_available: bool = True
     image_url: str | None = Field(None, max_length=500)
@@ -1306,6 +1310,7 @@ async def create_menu_item(
         name=body.name.strip(),
         category=(body.category or "").strip(),
         description=(body.description or "").strip(),
+        tags=(body.tags or "").strip(),
         price=body.price,
         is_available=body.is_available,
         image_url=(body.image_url or "").strip() or None,
@@ -1334,6 +1339,8 @@ async def patch_menu_item(
         data["category"] = data["category"].strip()
     if "description" in data and data["description"] is not None:
         data["description"] = data["description"].strip()
+    if "tags" in data and data["tags"] is not None:
+        data["tags"] = data["tags"].strip()
     if "image_url" in data:
         url = (data["image_url"] or "").strip()
         data["image_url"] = url if url else None
@@ -2703,6 +2710,7 @@ async def test_bot(body: TextRequest) -> dict:
         menu_context = build_menu_context(menu_items)
         u_row = await db.scalar(select(User).where(User.phone == phone))
         org_id = u_row.organization_id if u_row else None
+        customer_ctx = await build_customer_context(db, u_row)
         kb_context = await load_knowledge_context_block(db, org_id)
         draft_row = await get_open_draft_order(db, phone)
         draft_ctx = format_draft_order_context_for_prompt(
@@ -2727,6 +2735,7 @@ async def test_bot(body: TextRequest) -> dict:
             kb_context,
             draft_order_context=draft_ctx,
             sales_strategy_context=strategy_ctx,
+            customer_context=customer_ctx,
         )
         result = await route_intent(
             db, phone, ai_response, menu_items=menu_items,

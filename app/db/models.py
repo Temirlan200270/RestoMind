@@ -290,6 +290,12 @@ class MenuItem(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False, index=True, comment="Название блюда")
     category: Mapped[str] = mapped_column(String(100), default="", comment="Категория (Пицца, Супы, Напитки...)")
     description: Mapped[str] = mapped_column(Text, default="", comment="Описание блюда")
+    tags: Mapped[str] = mapped_column(
+        Text,
+        default="",
+        server_default="",
+        comment="Теги сочетаемости для ИИ: через запятую (напр. хит, к нему: ачичук, чай)",
+    )
     price: Mapped[float] = mapped_column(Numeric(10, 2), default=0, comment="Цена в тенге")
     is_available: Mapped[bool] = mapped_column(Boolean, default=True, comment="Есть ли в наличии")
     image_url: Mapped[str | None] = mapped_column(String(500), nullable=True, comment="Ссылка на фото")
