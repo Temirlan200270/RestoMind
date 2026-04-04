@@ -53,6 +53,19 @@ def test_build_sales_strategy_pairing_plov_to_achichuk() -> None:
     assert "uuid-ach" in d.target_iiko_ids
 
 
+def test_build_sales_strategy_rejected_iiko_id_blocks_pairing() -> None:
+    """Отказ по UUID не предлагает ту же позицию снова (связка плов → ачичук)."""
+    meta = {"upsell_rejected_iiko_ids": ["uuid-ach"]}
+    d = build_sales_strategy(
+        [{"name": "Плов", "quantity": 1, "iiko_id": "uuid-plov", "category": "Горячее"}],
+        2790.0,
+        meta,
+        _menu_pairing_only(),
+    )
+    assert d.goal == "close_order"
+    assert "uuid-ach" not in d.target_iiko_ids
+
+
 def test_format_strategy_for_prompt_non_empty() -> None:
     t = format_strategy_for_prompt(
         StrategyDecision(goal="upsell", target_name_hints=["Чай"], restriction="Один совет."),

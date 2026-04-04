@@ -199,19 +199,19 @@ async def _send_order_to_iiko(
     order_id: int,
     phone: str,
     items_json: dict[str, Any] | None,
-) -> tuple[bool, str | None]:
+) -> tuple[bool, str | None, dict[str, Any] | None]:
     """
     Попытка отправить подтверждённый заказ в iiko.
 
     Returns:
-        (True, None) — успех.
-        (False, None) — iiko не настроен в .env (ошибку в БД не пишем).
-        (False, msg) — настроен, но отправка не удалась (msg для админки).
+        (True, None, response_json) — успех; response_json — тело ответа iiko (correlationId, orderInfo…).
+        (False, None, None) — iiko не настроен в .env (ошибку в БД не пишем).
+        (False, msg, None) — настроен, но отправка не удалась (msg для админки).
     """
     if not settings.iiko_api_login or not settings.iiko_organization_id:
         logger.info("iiko не настроен — заказ сохранён только в БД")
         log_pipeline_stage("iiko_skip", phone=phone, extra={"order_id": order_id, "reason": "not_configured"})
-        return False, None
+        return False, None, None
 
     try:
         items_data = items_json.get("items", []) if items_json else []
@@ -242,7 +242,7 @@ async def _send_order_to_iiko(
         if not iiko_items:
             msg = "Нет позиций с iiko_id — синхронизируйте меню из iiko"
             logger.warning("Заказ #%d: %s", order_id, msg)
-            return False, msg
+            return False, msg, None
 
         meta = items_json.get("order_meta") if items_json else {}
         pd = meta.get("payment_details")
@@ -278,14 +278,14 @@ async def _send_order_to_iiko(
                 "или раздельные IIKO_ORDER_TYPE_ID_DELIVERY/PICKUP/HALL"
             )
             logger.warning("Заказ #%d: %s", order_id, msg)
-            return False, msg
+            return False, msg, None
         phone_e164 = _normalize_phone_e164(phone)
         if not phone_e164:
             msg = "Телефон клиента пустой — iiko deliveries/create требует customer.phone"
             logger.warning("Заказ #%d: %s", order_id, msg)
-            return False, msg
+            return False, msg, None
         async with IikoClient(api_login=settings.iiko_api_login) as client:
-            await client.create_delivery_order(
+            iiko_response = await client.create_delivery_order(
                 organization_id=settings.iiko_organization_id,
                 order_data={
                     "customer": {"phone": phone_e164},
@@ -301,7 +301,7 @@ async def _send_order_to_iiko(
                 terminal_group_id=terminal_group or None,
             )
         log_pipeline_stage("iiko_ok", phone=phone, extra={"order_id": order_id})
-        return True, None
+        return True, None, iiko_response if isinstance(iiko_response, dict) else None
     except Exception as exc:
         logger.error("Ошибка отправки заказа #%d в iiko: %s", order_id, exc, exc_info=True)
         msg = str(exc).strip() or type(exc).__name__
@@ -310,7 +310,7 @@ async def _send_order_to_iiko(
             phone=phone,
             extra={"order_id": order_id, "error": msg[:500]},
         )
-        return False, msg[:500]
+        return False, msg[:500], None
 
 
 async def handle_confirmation(phone: str, message_text: str) -> str | None:

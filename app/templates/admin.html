@@ -2451,18 +2451,22 @@
                             </div>
                             <details class="rounded-xl border border-slate-200 bg-slate-50/80 mb-3" x-show="selectedOrder?.status === 'draft'">
                                 <summary @click="initOrderRebuildFromSelected()" class="px-4 py-3 cursor-pointer text-sm font-semibold text-slate-800 list-none">
-                                    Пересобрать позиции (оператор)
+                                    Правка состава вручную
                                 </summary>
-                                <div class="px-4 pb-4 space-y-2 border-t border-slate-100 pt-3">
-                                    <p class="text-xs text-gray-500 leading-relaxed">
-                                        JSON-массив <code class="bg-white px-1 rounded">food_lines</code>:
-                                        <code class="bg-white px-1 rounded">name</code>, <code class="bg-white px-1 rounded">quantity</code>,
-                                        опционально <code class="bg-white px-1 rounded">iiko_item_id</code>, <code class="bg-white px-1 rounded">packaging_plov_1kg</code> (tabak / foil_kazan),
-                                        <code class="bg-white px-1 rounded">exclude_ingredients</code>.
-                                        После сохранения пересчитаются контейнеры, доставка и <span class="font-medium">payment_details</span> для смешанной оплаты.
+                                <div class="px-4 pb-4 space-y-3 border-t border-slate-100 pt-3">
+                                    <p class="text-sm text-gray-600 leading-relaxed">
+                                        Обычно состав заказа меняется через диалог с клиентом в WhatsApp. Этот блок — для согласованных правок с кухней или администратором. Если не уверены, не меняйте данные здесь.
                                     </p>
-                                    <textarea x-model="orderRebuildDraftJson" rows="8"
-                                        class="w-full font-mono text-xs border border-gray-200 rounded-lg p-2 bg-white"></textarea>
+                                    <details class="rounded-lg border border-slate-200 bg-white">
+                                        <summary class="px-3 py-2 cursor-pointer text-xs font-semibold text-slate-600">Техническое редактирование (JSON)</summary>
+                                        <div class="px-3 pb-3 space-y-2 border-t border-slate-100 pt-2">
+                                            <p class="text-[11px] text-gray-500 leading-relaxed">
+                                                Массив позиций: название, количество, при необходимости UUID из меню и упаковка плова 1 кг. После сохранения сервер пересчитает суммы и доставку.
+                                            </p>
+                                            <textarea x-model="orderRebuildDraftJson" rows="8"
+                                                class="w-full font-mono text-xs border border-gray-200 rounded-lg p-2 bg-gray-50"></textarea>
+                                        </div>
+                                    </details>
                                     <p x-show="orderRebuildError" class="text-xs text-red-600" x-text="orderRebuildError"></p>
                                     <button type="button" @click="submitOrderRebuildDraft()" :disabled="orderRebuildLoading"
                                         class="w-full py-2.5 rounded-xl text-sm font-bold bg-slate-800 text-white hover:bg-slate-900 disabled:opacity-50">
@@ -2481,6 +2485,14 @@
                                 class="w-full mt-2 py-4 rounded-2xl text-white font-black text-sm tracking-wide shadow-lg shadow-emerald-500/25 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:to-teal-500 transition">
                                 <span x-text="selectedOrder?.iiko_last_error ? 'Повторить отправку в iiko' : 'ПОДТВЕРДИТЬ И ПЕЧАТЬ В IIKO'"></span>
                             </button>
+                            <div x-show="selectedOrder?.items?.order_meta?.iiko_last_send && selectedOrder?.status === 'sent_to_iiko'"
+                                class="mt-2 rounded-xl border border-emerald-200 bg-emerald-50/90 px-3 py-2 text-xs text-emerald-900">
+                                <p class="font-semibold">Заказ принят iiko Cloud</p>
+                                <p class="mt-1 text-emerald-800/90">Ищите в iiko по внешнему номеру <span class="font-mono font-bold" x-text="'#' + (selectedOrder.items.order_meta.iiko_last_send.external_number || selectedOrder.id)"></span> или по correlationId в логах интеграции.</p>
+                                <p class="mt-1 font-mono text-[11px] break-all opacity-90" x-show="selectedOrder.items.order_meta.iiko_last_send.correlation_id"
+                                    x-text="'correlationId: ' + selectedOrder.items.order_meta.iiko_last_send.correlation_id"></p>
+                                <p class="text-[11px] text-emerald-800/80 mt-1">В iiko заказы из RestoMind создаются через API доставки: их видно в очереди доставок/самовывоза для той терминальной группы, что задана в настройках сервера, а не обязательно в той же ленте, что розничные чеки на кассе — уточните у администратора iiko, где смотреть внешние заказы.</p>
+                            </div>
                         </div>
                     </template>
                     <div class="mt-6 pt-4 border-t border-gray-200">
@@ -2579,6 +2591,52 @@
                     </div>
                 </div>
             </template>
+        </div>
+
+        <!-- Подтверждение удаления заказа: внутри main, выше модалок заказа/брони (z-50) -->
+        <div x-show="authenticated && showOrderDeleteConfirmModal" x-cloak x-transition.opacity
+            class="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto bg-slate-900/60 backdrop-blur-sm"
+            @click.self="closeOrderDeleteConfirm()">
+            <div class="bg-white rounded-2xl shadow-2xl border border-gray-100 w-full max-w-md overflow-hidden fade-in shrink-0 relative z-10" @click.stop role="dialog" aria-modal="true" aria-labelledby="order-delete-confirm-title">
+                <div class="h-1.5 bg-gradient-to-r from-red-600 via-rose-500 to-orange-400"></div>
+                <div class="p-6 md:p-8">
+                    <div class="flex items-start gap-4 mb-5">
+                        <div class="w-12 h-12 rounded-2xl bg-red-50 border border-red-100 flex items-center justify-center shrink-0">
+                            <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                        </div>
+                        <div class="min-w-0">
+                            <h2 id="order-delete-confirm-title" class="text-lg font-bold text-gray-900" x-text="orderDeleteConfirmIds.length > 1 ? 'Удалить выбранные заказы?' : 'Удалить заказ?'"></h2>
+                            <p class="text-sm text-gray-500 mt-1.5 leading-relaxed" x-show="orderDeleteConfirmIds.length === 1">
+                                Заказ <span class="font-mono font-semibold text-red-700 bg-red-50 px-1.5 py-0.5 rounded-md" x-text="'#' + orderDeleteConfirmIds[0]"></span> будет удалён из базы. Восстановление невозможно; запись пропадёт из списков и аналитики.
+                            </p>
+                            <div x-show="orderDeleteConfirmIds.length > 1" x-cloak class="mt-2 space-y-2">
+                                <p class="text-sm text-gray-600">Будут удалены <span class="font-bold text-gray-900" x-text="orderDeleteConfirmIds.length"></span> заказов (безвозвратно).</p>
+                                <div class="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 max-h-28 overflow-y-auto text-xs font-mono text-gray-800 leading-relaxed break-all" x-text="orderDeleteConfirmIds.map((i) => '#' + i).join(', ')"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <label class="flex items-start gap-3 cursor-pointer group mb-2">
+                        <input type="checkbox" x-model="orderDeleteConfirmAck" class="mt-1 rounded border-gray-300 text-red-600 focus:ring-red-500">
+                        <span class="text-sm text-gray-700 group-hover:text-gray-900">Я понимаю, что это действие нельзя отменить</span>
+                    </label>
+                    <p x-show="orderDeleteConfirmError" x-cloak class="text-sm text-red-600 mt-3" x-text="orderDeleteConfirmError"></p>
+                    <div class="flex flex-col-reverse sm:flex-row gap-3 mt-8">
+                        <button type="button" @click="closeOrderDeleteConfirm()" :disabled="orderDeleteConfirmLoading"
+                            class="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 font-semibold text-sm hover:bg-gray-50 transition disabled:opacity-50">
+                            Отмена
+                        </button>
+                        <button type="button" @click="executeOrderDeleteConfirmed()"
+                            :disabled="orderDeleteConfirmLoading || !orderDeleteConfirmAck"
+                            class="flex-1 py-3 rounded-xl bg-red-600 text-white font-semibold text-sm hover:bg-red-700 shadow-lg shadow-red-600/25 transition disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+                            <span x-show="!orderDeleteConfirmLoading">Удалить навсегда</span>
+                            <span x-show="orderDeleteConfirmLoading" x-cloak class="flex items-center gap-2">
+                                <span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                                Удаляем…
+                            </span>
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
     </main>
 
@@ -3450,8 +3508,12 @@ function adminApp() {
 
         async confirmSendToIiko() {
             if (!this.selectedOrder) return;
-            const ok = await this.patchOrderStatus(this.selectedOrder.id, 'sent_to_iiko');
-            if (ok) this.showOrderModal = false;
+            const id = this.selectedOrder.id;
+            const ok = await this.patchOrderStatus(id, 'sent_to_iiko');
+            if (ok) {
+                const updated = this.orders.find((o) => o.id === id);
+                if (updated) this.selectedOrder = updated;
+            }
         },
 
         openOrderDeleteConfirmFromModal() {
@@ -6031,52 +6093,6 @@ function adminApp() {
     };
 }
 </script>
-
-    <!-- Подтверждение удаления заказа: вне flex-контейнера приложения — всегда поверх модалок заказа/брони (z-50) и шапки -->
-    <div x-show="authenticated && showOrderDeleteConfirmModal" x-cloak x-transition.opacity
-        class="fixed inset-0 z-[9999] flex items-center justify-center p-4 overflow-y-auto bg-slate-900/60 backdrop-blur-sm"
-        @click.self="closeOrderDeleteConfirm()">
-        <div class="bg-white rounded-2xl shadow-2xl border border-gray-100 w-full max-w-md overflow-hidden fade-in shrink-0 relative z-10" @click.stop role="dialog" aria-modal="true" aria-labelledby="order-delete-confirm-title">
-            <div class="h-1.5 bg-gradient-to-r from-red-600 via-rose-500 to-orange-400"></div>
-            <div class="p-6 md:p-8">
-                <div class="flex items-start gap-4 mb-5">
-                    <div class="w-12 h-12 rounded-2xl bg-red-50 border border-red-100 flex items-center justify-center shrink-0">
-                        <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
-                    </div>
-                    <div class="min-w-0">
-                        <h2 id="order-delete-confirm-title" class="text-lg font-bold text-gray-900" x-text="orderDeleteConfirmIds.length > 1 ? 'Удалить выбранные заказы?' : 'Удалить заказ?'"></h2>
-                        <p class="text-sm text-gray-500 mt-1.5 leading-relaxed" x-show="orderDeleteConfirmIds.length === 1">
-                            Заказ <span class="font-mono font-semibold text-red-700 bg-red-50 px-1.5 py-0.5 rounded-md" x-text="'#' + orderDeleteConfirmIds[0]"></span> будет удалён из базы. Восстановление невозможно; запись пропадёт из списков и аналитики.
-                        </p>
-                        <div x-show="orderDeleteConfirmIds.length > 1" x-cloak class="mt-2 space-y-2">
-                            <p class="text-sm text-gray-600">Будут удалены <span class="font-bold text-gray-900" x-text="orderDeleteConfirmIds.length"></span> заказов (безвозвратно).</p>
-                            <div class="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 max-h-28 overflow-y-auto text-xs font-mono text-gray-800 leading-relaxed break-all" x-text="orderDeleteConfirmIds.map((i) => '#' + i).join(', ')"></div>
-                        </div>
-                    </div>
-                </div>
-                <label class="flex items-start gap-3 cursor-pointer group mb-2">
-                    <input type="checkbox" x-model="orderDeleteConfirmAck" class="mt-1 rounded border-gray-300 text-red-600 focus:ring-red-500">
-                    <span class="text-sm text-gray-700 group-hover:text-gray-900">Я понимаю, что это действие нельзя отменить</span>
-                </label>
-                <p x-show="orderDeleteConfirmError" x-cloak class="text-sm text-red-600 mt-3" x-text="orderDeleteConfirmError"></p>
-                <div class="flex flex-col-reverse sm:flex-row gap-3 mt-8">
-                    <button type="button" @click="closeOrderDeleteConfirm()" :disabled="orderDeleteConfirmLoading"
-                        class="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 font-semibold text-sm hover:bg-gray-50 transition disabled:opacity-50">
-                        Отмена
-                    </button>
-                    <button type="button" @click="executeOrderDeleteConfirmed()"
-                        :disabled="orderDeleteConfirmLoading || !orderDeleteConfirmAck"
-                        class="flex-1 py-3 rounded-xl bg-red-600 text-white font-semibold text-sm hover:bg-red-700 shadow-lg shadow-red-600/25 transition disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-                        <span x-show="!orderDeleteConfirmLoading">Удалить навсегда</span>
-                        <span x-show="orderDeleteConfirmLoading" x-cloak class="flex items-center gap-2">
-                            <span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
-                            Удаляем…
-                        </span>
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
 
 </body>
 </html>

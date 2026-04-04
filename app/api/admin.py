@@ -537,7 +537,7 @@ async def patch_order_status(
 
     # Подтверждён, но iiko не принял — повторная отправка на кухню
     if cur == OrderStatus.CONFIRMED.value and want == OrderStatus.SENT_TO_IIKO.value:
-        sent_to_iiko, iiko_err = await _send_order_to_iiko(
+        sent_to_iiko, iiko_err, iiko_raw = await _send_order_to_iiko(
             order_id=order.id,
             phone=phone,
             items_json=order.items_json,
@@ -545,6 +545,19 @@ async def patch_order_status(
         if sent_to_iiko:
             order.status = OrderStatus.SENT_TO_IIKO.value
             order.iiko_last_error = None
+            if iiko_raw and isinstance(order.items_json, dict):
+                ij = dict(order.items_json)
+                raw_om = ij.get("order_meta")
+                om: dict = dict(raw_om) if isinstance(raw_om, dict) else {}
+                oi = iiko_raw.get("orderInfo") if isinstance(iiko_raw.get("orderInfo"), dict) else {}
+                om["iiko_last_send"] = {
+                    "correlation_id": iiko_raw.get("correlationId"),
+                    "iiko_order_id": oi.get("id"),
+                    "external_number": str(order.id),
+                    "sent_at": datetime.now(timezone.utc).isoformat(),
+                }
+                ij["order_meta"] = om
+                order.items_json = ij
             await db.commit()
             return await _emit(order)
         if iiko_err:

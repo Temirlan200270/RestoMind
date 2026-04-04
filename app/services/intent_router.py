@@ -144,6 +144,32 @@ def _merge_recommendation_into_order_meta(
     return out
 
 
+def _merge_rejected_upsell_into_order_meta(
+    items_json: dict[str, object],
+    ai: AIBrainResponse,
+) -> dict[str, object]:
+    """
+    Накапливает отказы от допродаж по UUID iiko в order_meta.upsell_rejected_iiko_ids (без хрупкого матчинга по имени).
+    """
+    raw = list(ai.rejected_upsell_iiko_ids or [])
+    if not raw:
+        return items_json
+    meta = items_json.get("order_meta")
+    meta = dict(meta) if isinstance(meta, dict) else {}
+    prev = meta.get("upsell_rejected_iiko_ids")
+    merged: set[str] = set()
+    if isinstance(prev, list):
+        merged.update(str(x).strip().lower() for x in prev if str(x).strip())
+    for x in raw:
+        s = str(x).strip().lower()
+        if s:
+            merged.add(s)
+    meta["upsell_rejected_iiko_ids"] = sorted(merged)
+    out = dict(items_json)
+    out["order_meta"] = meta
+    return out
+
+
 @dataclass
 class RouteResult:
     """Результат маршрутизации intent — текст ответа + опциональные флаги."""
@@ -314,6 +340,7 @@ async def _handle_order(
         )
 
     items_json = _merge_recommendation_into_order_meta(items_json, ai_eff)
+    items_json = _merge_rejected_upsell_into_order_meta(items_json, ai_eff)
     log_pipeline_stage(
         "merge_ok",
         phone=phone,

@@ -182,6 +182,13 @@ class AIBrainResponse(BaseModel):
         default=None,
         description="Короткий аргумент: вкус, сочетаемость с заказом, традиция заведения — для логов и админки",
     )
+    rejected_upsell_iiko_ids: list[str] = Field(
+        default_factory=list,
+        description=(
+            "UUID номенклатуры iiko (`[id: …]` в меню), от которых клиент явно отказался в этом сообщении "
+            "(например после вашей рекомендации). Пустой список, если отказа к доп. позициям не было."
+        ),
+    )
     booking_details: BookingDetails | None = Field(
         default=None,
         description=(
