@@ -2172,7 +2172,9 @@
             </div>
 
         </div>
+    </main>
 
+        <!-- Модалки и оверлеи вне <main>: иначе fixed + z-index ограничены stacking context (scroll/transform внутри main). -->
         <!-- Глобальный поиск Ctrl+K -->
         <div x-show="globalSearchOpen" x-cloak x-transition.opacity
             class="fixed inset-0 z-[70] flex items-start justify-center pt-[8vh] px-4 bg-slate-900/50 backdrop-blur-sm"
@@ -2613,7 +2615,6 @@
                 </div>
             </div>
         </div>
-    </main>
 
 </div><!-- /authenticated -->
 
@@ -4148,7 +4149,7 @@ function adminApp() {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        kind: rule.kind, name: rule.name, price: rule.price,
+                        kind: rule.kind, name: rule.name, price: Number(rule.price) || 0,
                         iiko_product_id: rule.iiko_product_id || '',
                         keywords: rule.keywords || '', option_key: rule.option_key || '',
                         is_active: rule.is_active, sort_order: rule.sort_order,
