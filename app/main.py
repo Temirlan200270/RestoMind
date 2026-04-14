@@ -221,6 +221,48 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception:
         pass
 
+    for sql_sqlite, sql_pg in (
+        (
+            "ALTER TABLE chat_logs ADD COLUMN provider_message_id VARCHAR(128)",
+            "ALTER TABLE chat_logs ADD COLUMN IF NOT EXISTS provider_message_id VARCHAR(128)",
+        ),
+        (
+            "ALTER TABLE chat_logs ADD COLUMN delivery_status VARCHAR(32)",
+            "ALTER TABLE chat_logs ADD COLUMN IF NOT EXISTS delivery_status VARCHAR(32)",
+        ),
+        (
+            "ALTER TABLE chat_logs ADD COLUMN error_details TEXT",
+            "ALTER TABLE chat_logs ADD COLUMN IF NOT EXISTS error_details JSONB",
+        ),
+        (
+            "ALTER TABLE chat_logs ADD COLUMN status_updated_at TIMESTAMP",
+            "ALTER TABLE chat_logs ADD COLUMN IF NOT EXISTS status_updated_at TIMESTAMPTZ",
+        ),
+    ):
+        try:
+            async with async_engine.begin() as conn:
+                if settings.db_mode == "sqlite":
+                    await conn.execute(text(sql_sqlite))
+                else:
+                    await conn.execute(text(sql_pg))
+        except Exception:
+            pass
+
+    try:
+        async with async_engine.begin() as conn:
+            if settings.db_mode == "sqlite":
+                await conn.execute(
+                    text("CREATE INDEX IF NOT EXISTS ix_chat_logs_provider_message_id ON chat_logs (provider_message_id)"),
+                )
+            else:
+                await conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_chat_logs_provider_message_id ON chat_logs (provider_message_id)",
+                    ),
+                )
+    except Exception:
+        pass
+
     try:
         async with async_engine.begin() as conn:
             if settings.db_mode == "sqlite":

@@ -1,5 +1,5 @@
 """
-Конвертация аудио Twilio Media Streams (G.711 μ-law, 8 kHz, моно) в WAV PCM для Gemini.
+Конвертация аудио Twilio Media Streams (G.711 μ-law, 8 kHz, моно) в WAV PCM для Whisper (OpenAI).
 Python 3.11–3.12: stdlib `audioop`. Python 3.13+: пакет `audioop-lts` (см. requirements.txt).
 """
 
@@ -25,7 +25,7 @@ def mulaw_to_linear_pcm16(mulaw_data: bytes) -> bytes:
 
 def mulaw_8k_to_wav(mulaw_data: bytes, sample_rate: int = 8000) -> bytes:
     """
-    Упаковка μ-law в WAV (PCM 16-bit), mime audio/wav для gemini_transcribe_voice.
+    Упаковка μ-law в WAV (PCM 16-bit), mime audio/wav для openai_transcribe_voice (Whisper).
     """
     pcm = mulaw_to_linear_pcm16(mulaw_data)
     buf = io.BytesIO()

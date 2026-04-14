@@ -1,12 +1,12 @@
 # RestoMind — архитектура и соглашения
 
-Документ описывает **текущее состояние** репозитория и правила разработки. Исторический план с OpenAI и каталогом `rest_ai_agent/` не используется — код живёт в `app/` (см. [README.md](README.md)).
+Документ описывает **текущее состояние** репозитория и правила разработки. Исторический каталог `rest_ai_agent/` не используется — код живёт в `app/` (см. [README.md](README.md)).
 
 ---
 
 ## Назначение
 
-Интеллектуальный оператор для ресторана: общение в **WhatsApp**, понимание естественной речи (**Google Gemini**, structured JSON → Pydantic), заказы с подтверждением, бронирование столов, FAQ, эскалация на оператора. Интеграция с **iiko Cloud** (меню, стоп-листы, отправка доставки). Админ-панель: дашборд, канбан, live-чаты (WebSocket + Redis Pub/Sub), аналитика.
+Интеллектуальный оператор для ресторана: общение в **WhatsApp**, понимание естественной речи (**OpenAI**: structured output → Pydantic; **Whisper** для STT), заказы с подтверждением, бронирование столов, FAQ, эскалация на оператора. Интеграция с **iiko Cloud** (меню, стоп-листы, отправка доставки). Админ-панель: дашборд, канбан, live-чаты (WebSocket + Redis Pub/Sub), аналитика.
 
 ---
 
@@ -17,7 +17,7 @@
 | Backend | Python 3.11+, FastAPI |
 | БД | PostgreSQL (прод) / SQLite (разработка), SQLAlchemy 2.0, Alembic |
 | Кэш / сессии / события | Redis при `REDIS_ENABLED=true`, иначе in-memory заглушка |
-| AI | **Google Gemini** (`gemini-2.5-flash`), ответы в JSON по схеме `AIBrainResponse` |
+| AI | **OpenAI** (`gpt-4o-mini` по умолчанию, env `OPENAI_MODEL`), ответы по схеме `AIBrainResponse`; STT — **Whisper** (`OPENAI_TRANSCRIPTION_MODEL`) |
 | Мессенджер | Meta WhatsApp Cloud API |
 | РМС | iiko Cloud API (синхронизация меню, стоп-листы, создание заказа доставки) |
 | Админка | Jinja2, Alpine.js, Tailwind CSS, Chart.js |
@@ -76,7 +76,7 @@ RestoMind/
 ## Реализованный функционал (сводка)
 
 - Диалоги с историей в Redis, состояния: `CHATTING`, `AWAITING_ORDER_PAYMENT` (выбор оплаты перед Да/Нет), `CONFIRMING_ORDER`, `CONFIRMING_BOOKING`, `HUMAN_MODE`.
-- Контекст меню для Gemini: текстовый каталог с ценами и `[id: …]` (не векторный RAG).
+- Контекст меню для LLM: текстовый каталог с ценами и `[id: …]` (не векторный RAG).
 - Подтверждение заказа и брони словами да/нет; отправка заказа в iiko **только после действия оператора** в админке (переход `confirmed` → `sent_to_iiko`, `create_delivery_order`).
 - Перехват оператором, пауза ИИ (`ai_paused`), сообщения оператора в WhatsApp; WebSocket-события для админки.
 - Стоп-листы iiko, фоновое обновление; поле `iiko_last_error` у заказов при ошибках.
@@ -98,6 +98,65 @@ RestoMind/
 | [README.md](README.md) | Быстрый старт, переменные окружения, структура API |
 | [DEPLOY_RENDER.md](DEPLOY_RENDER.md) | Render (Blueprint, секреты, ограничения free tier) |
 | [DEPLOY_GUIDE.md](DEPLOY_GUIDE.md) | Свой VPS, Docker Compose, Traefik, HTTPS, вебхук WhatsApp |
+
+---
+
+## Продуктовая карта SaaS ([prompt.md](prompt.md))
+
+Файл **prompt.md** — продуктово-UX дорожная карта уровня SaaS: доверие к доставке сообщений, мультитенантность «на продажу», дашборд «сколько денег приносит бот», структура админки (Overview / операции / настройки), рост (Telegram, аналитика iiko, онбординг). Этот раздел **встраивает** эти цели в общий техплан с приоритетами и сверкой с кодом.
+
+### Как читать документы вместе
+
+| Документ | Роль |
+|----------|------|
+| **plan.md** | Стек, архитектура, что уже реализовано, Phase 16–18 /18.1, v3 |
+| **prompt.md** | Приоритеты P0–P3, UX-схема (sidebar, KPI, live activity), формулировка ценности для владельца |
+
+### Приоритеты из prompt.md
+
+#### P0 — критично (доверие и монетизация)
+
+| Задача (prompt.md) | Зачем | Состояние в репозитории | В техплане |
+|--------------------|-------|-------------------------|------------|
+| **Статусы исходящих сообщений** (отправка / доставлено / ошибка, повтор) | Оператор и продукт видят, дошёл ли ответ до WhatsApp | `chat_logs` хранит роль и текст; **нет** устойчивой модели `provider_message_id` + `delivery_status` и обработки вебхука статусов Meta | Новая линия: **«Messaging reliability»** (БД + вебхук statuses + отображение в админке / WebSocket) |
+| **Multi-tenant на уровне продукта** | Продажа нескольким заведениям | Есть **`organizations`**, `organization_id` у пользователей, заказов, броней, меню, KB, правил упаковки; **нет** полноценного онбординга организаций, брендинга (название в шапке, лого, тема) как в prompt | Расширение **v3 §12** + спринт «организации в админке» |
+| **Dashboard: деньги + вклад ИИ** (сегодня: заказы, выручка, доля через бота, upsell) | Ответ: «сколько приносит бот» | Аналитика и канбан есть; блок **AI Value** и конверсия советов — осмысленны после трассировки рекомендаций | **После / параллельно** §4.8 и стабильных полей `order_meta` / `recommendation_trace` |
+
+#### P1 — UX продукта
+
+| Задача | Примечание |
+|--------|------------|
+| Три уровня админки: **Overview → Операции → Настройки** (меньше шума на одном экране) | Сейчас — монолитная админка (Jinja2 + Alpine); целевая структура — в prompt (sidebar как у Stripe / Notion) |
+| **Настройки** группами: основное, интеграции, ИИ, оплата, уведомления; флаги вроде upsell | Частично в `.env`; цель — пер-организационные настройки |
+| **Упаковка:** наглядные карточки правил + превью расчёта (пример: 2 порции мант → доп. сумма к заказу) | Логика и CRUD в БД есть; усилить визуальный UX |
+| **Удаление заказа:** модалка с номером, суммой, телефоном | Мелкий, но важный trust UX |
+| **Мобильная адаптация** заказов и диалогов | Приоритет для работы с телефона на кухне / в зале |
+
+#### P2 — рост
+
+| Задача | Связь с plan.md |
+|--------|-----------------|
+| Аналитика upsell + **сводки по iiko / времени суток** (AI → BI) | §4.8, Phase 18, при необходимости экспорт/отчёты |
+| **Telegram** (уведомления операторам) | Заготовка `app/integrations/telegram.py` |
+| **Онбординг** и разделение KB: «данные заведения» vs «поведение бота» | Фаза 11 (KB) есть; расширить сценарий первого запуска |
+
+#### P3 — техплатформа
+
+| Задача | Примечание |
+|--------|------------|
+| Отдельный SPA (Vite и т.д.) | Имеет смысл только при существенном росте интерактива на админке (см. prompt) |
+| Крупный рефакторинг слоёв | После стабилизации Phase 18 (как в prompt § «рефакторинг») |
+
+### Сопоставление с «этапами 1–4» из prompt.md
+
+| Этап prompt.md | Содержание | Сопоставление |
+|----------------|------------|---------------|
+| **Этап 1** | Статусы сообщений, multi-tenant, dashboard денег | **P0** — закладывать параллельно или сразу после критичного ядра заказов |
+| **Этап 2** | Заказы UI, упаковка UX, настройки | **P1** |
+| **Этап 3** | Upsell-аналитика, iiko-анализ, Telegram | **P2** |
+| **Этап 4** | Онбординг, обучение пользователя, polish | **P2–P3** |
+
+Детальные макеты экранов (Overview, Conversations, KPI, alerts) остаются в **prompt.md**; при спринте переносить в задачи трекера по чек-листам.
 
 ---
 
@@ -194,7 +253,7 @@ RestoMind/
 
 #### 2.2. Мультиязычность (RU, KK, UZ, EN)
 
-- **Gemini:** автоопределение языка; поле `detected_language` в `AIBrainResponse`.
+- **LLM (OpenAI):** автоопределение языка; поле `detected_language` в `AIBrainResponse`.
 - **Edge-TTS:** голос по `detected_language` при `WHATSAPP_VOICE_REPLIES=true`.
 - **Эвристика оплаты:** расширенные ключевые слова в `detect_payment_method_from_text` (`app/services/order_logic.py`).
 
@@ -229,7 +288,7 @@ RestoMind/
 
 #### 4.2. Система рекомендаций (Upselling Engine)
 
-1. **Сочетаемость:** в текстовом/структурном `menu_context` для Gemini — поле **`tags`** у позиций (примеры: *«к плову»*, *«острое»*, *«хит»*, *«напиток»*). Источник тегов: БД меню (колонка или JSON) или вычисление по категории — на усмотрение реализации.
+1. **Сочетаемость:** в текстовом/структурном `menu_context` для LLM — поле **`tags`** у позиций (примеры: *«к плову»*, *«острое»*, *«хит»*, *«напиток»*). Источник тегов: БД меню (колонка или JSON) или вычисление по категории — на усмотрение реализации.
 2. **Аргументация в промпте:** явное правило персоны *гастро-эксперта*: при сомнении или после выбора **основного** блюда предлагать **салат / напиток / гарнир** с **обоснованием** (вкусовое сочетание, освежает жирное, «что заказывают к этому»), без сухого списка названий.
 
 #### 4.3. Технические изменения Backend (схемы)
@@ -260,7 +319,7 @@ class AIBrainResponse(BaseModel):
 
 #### 4.4. Интеллектуальное управление корзиной
 
-- [ ] **State sync в промпте:** в состоянии `ORDERING` (и родственных) в запрос к Gemini подмешивать **актуальный состав** из БД: `orders.items_json` / человекочитаемая сводка + при необходимости `order_meta` (упаковка плова 1кг и т.д.), чтобы модель правила **дельты**, а не «угадывала» корзину с нуля.
+- [ ] **State sync в промпте:** в состоянии `ORDERING` (и родственных) в запрос к LLM подмешивать **актуальный состав** из БД: `orders.items_json` / человекочитаемая сводка + при необходимости `order_meta` (упаковка плова 1кг и т.д.), чтобы модель правила **дельты**, а не «угадывала» корзину с нуля.
 - [ ] **Incremental updates:** команды «добавь / убери / ещё N порций» без сброса всего заказа; применение к `DRAFT` в БД через **merge** (`order_actions`), а не только полная перезапись `order_items`.
 - [ ] **Re-calculation:** после любого успешного merge — тот же пайплайн, что и сейчас: пересчёт **fee_lines**, упаковки (в т.ч. **плов 1кг → табак/казан**), доставки по порогу; при удалении позиции, давшей триггер упаковки, соответствующие строки должны **исчезнуть** (например убрали плов 1кг — не остаётся «висящий» казан/табак).
 - [ ] **Validation:** запрос убрать позицию, которой нет — вежливое уточнение состава (*«В заказе сейчас нет колы — убрать что-то другое?»*).
@@ -320,6 +379,7 @@ class AIBrainResponse(BaseModel):
 
 - **Почему 18 в приоритете:** без merge с `DRAFT` «добавь/убери» и upsell рассинхронизируют `items_json` с диалогом; Phase 17 по упаковке в основном закрыт.
 - **Параллельно малыми коммитами:** few-shot и блок персоны «гастро-эксперт» в `prompts.py`, черновик `tags` в контексте меню — можно вести рядом с Phase 18, не дожидаясь админки по рекомендациям (§4.8).
+- **Если цель — продажа SaaS ([prompt.md](prompt.md), P0):** после или параллельно Phase 18 вынести отдельным потоком **статусы исходящих в WhatsApp** + **мультитенантный UX** (организации, брендинг, фильтры) + **дашборд KPI**; иначе продукт выглядит «технически сильным», но слабым по доверию оператора и доказательству выручки.
 
 ---
 
@@ -328,7 +388,7 @@ class AIBrainResponse(BaseModel):
 Цель: функция уровня **`merge_cart_actions(current_items, actions) → new_items`** в `app/services/order_logic.py` (или рядом), вызываемая из **`intent_router`** после ответа модели, если есть `order_actions` и активен `DRAFT`.
 
 1. **Инвариант после merge:** всегда прогонять существующий расчёт итога — **`compute_fee_lines` / тарификация упаковки и доставки** — чтобы при удалении/добавлении позиций автоматически обновлялись контейнеры, плов 1кг, порог доставки и т.д. Не дублировать бизнес-правила в «сыром» JSON от модели.
-2. **Контекст для Gemini:** перед вызовом `call_gemini` подставлять текущий состав заказа из БД (и при необходимости краткое резюме fee), чтобы дельты были согласованы с реальностью.
+2. **Контекст для LLM:** перед вызовом `call_openai` подставлять текущий состав заказа из БД (и при необходимости краткое резюме fee), чтобы дельты были согласованы с реальностью.
 3. **Схема:** расширить `AIBrainResponse` (`order_actions`, `is_recommendation`, опционально `upsell_offered` / `upsell_reasoning`) согласованно с парсером в `ai_brain`; переходный режим: пустой `order_actions` → старое поведение «полный список из `order_items`».
 4. **Промпт:** блок правил для дельт («убери то, чего нет» → модель не выдумывает remove; клиент просит убрать отсутствующее → уточнение в `reply_text`); блок **RECOMMENDATION_ENGINE** / сочетаемость; few-shot из §4.6.
 5. **Тесты:** `tests/` — цепочки add → remove часть → set_quantity → проверка итога и fee_lines; кейс «убрали плов 1кг — нет строки казана/табака»; см. §4.7.
@@ -373,7 +433,7 @@ class AIBrainResponse(BaseModel):
 
 ### 3. Очереди вместо только `BackgroundTasks`
 
-Сейчас: FastAPI **BackgroundTasks** для `process_message`; поверх — **`process_with_retry`** (несколько попыток, затем запись в **`failed_tasks`** и сообщение клиенту). Цель v3: **Redis Queue / RQ / Celery** (или аналог) — `Webhook → enqueue → worker → process_message` с персистентным retry (Gemini/iiko 5xx), масштабированием воркеров и переживанием рестарта процесса API.
+Сейчас: FastAPI **BackgroundTasks** для `process_message`; поверх — **`process_with_retry`** (несколько попыток, затем запись в **`failed_tasks`** и сообщение клиенту). Цель v3: **Redis Queue / RQ / Celery** (или аналог) — `Webhook → enqueue → worker → process_message` с персистентным retry (OpenAI/iiko 5xx), масштабированием воркеров и переживанием рестарта процесса API.
 
 ### 4. STATE: БД vs Redis
 
@@ -434,7 +494,7 @@ class AIBrainResponse(BaseModel):
 
 - [x] **Cloud Infra:** Upstash Redis через TCP `REDIS_URL` (`rediss://`), не REST-only.
 - [x] **Consistency:** версионирование заказов (`orders.version` / `Order.row_version`, optimistic update в чате).
-- [x] **Voice (Twilio MVP):** `POST /api/whatsapp/voice/incoming` (TwiML) + `WebSocket /api/whatsapp/voice/stream` (Media Streams, μ-law → WAV → Gemini → ответ через TwiML `Say` при заданных `TWILIO_*`).
+- [x] **Voice (Twilio MVP):** `POST /api/whatsapp/voice/incoming` (TwiML) + `WebSocket /api/whatsapp/voice/stream` (Media Streams, μ-law → WAV → Whisper → ответ через TwiML `Say` при заданных `TWILIO_*`).
 - [x] **Idempotency (WhatsApp):** `message_id` + Redis + таблица `whatsapp_inbound_dedupe` (Twilio turn — отдельный префикс `twilio:CallSid:uuid` в `process_message`).
 
 ---
@@ -480,7 +540,7 @@ class AIBrainResponse(BaseModel):
 |-----------|--------|
 | Таблица `knowledge_items` (`KnowledgeItem`): `organization_id`, `category`, `question`, `answer`, `is_active`, `sort_order` | ✅ `create_all` / новая миграция при появлении Alembic-ревизий |
 | Сервис `app/services/knowledge_context.py` — сбор блока для промпта (лимит символов) | ✅ |
-| Подстановка в Gemini: `call_gemini(..., kb_context=...)` перед меню | ✅ WhatsApp + `test-bot` |
+| Подстановка в промпт: `call_openai(..., kb_context=...)` перед меню | ✅ WhatsApp + `test-bot` |
 | REST `GET/POST/PATCH/DELETE` `/api/admin/knowledge` | ✅ |
 | Админка: вкладка «База знаний» | ✅ |
 
@@ -494,13 +554,13 @@ class AIBrainResponse(BaseModel):
 |-----------|--------|
 | Вебхук `POST /api/whatsapp/webhook`: `type === "audio"` → `audio.id` | ✅ |
 | Скачивание медиа Meta Graph API | ✅ `app/integrations/whatsapp.py` → `download_media_bytes` |
-| STT через Gemini (мультимодально в `CHATTING`; лёгкая расшифровка для подтверждений / оператора) | ✅ `call_gemini_with_audio`, `gemini_transcribe_voice` в `app/services/ai_brain.py` |
-| Тот же `process_message(..., voice_audio=...)` — меню + KB + Gemini | ✅ |
+| STT через Whisper; в `CHATTING` — `call_openai_with_audio` (транскрипт + чат); для подтверждений — только `openai_transcribe_voice` | ✅ `app/services/ai_brain.py` |
+| Тот же `process_message(..., voice_audio=...)` — меню + KB + OpenAI | ✅ |
 | TTS бесплатно (опционально) | ✅ `edge-tts` → `app/services/tts_edge.py`, env `WHATSAPP_VOICE_REPLIES`, `EDGE_TTS_VOICE` |
 | Отправка аудио в WhatsApp | ✅ `upload_media_bytes`, `send_voice_message` в `app/integrations/whatsapp.py` |
-| Индикатор в админке «Интеграции» | ✅ `gemini_configured`, `whatsapp_voice_replies_enabled` в `/integrations/status` |
+| Индикатор в админке «Интеграции» | ✅ `openai_configured`, `whatsapp_voice_replies_enabled` в `/integrations/status` |
 
-**Zero-budget:** OpenAI Whisper и `OPENAI_API_KEY` убраны; голос завязан на **GEMINI_API_KEY** (бесплатный tier Google AI).
+**Секреты:** для текста и голоса нужен **`OPENAI_API_KEY`** (чат + Whisper по тарифам OpenAI).
 
 **В Meta Developer:** в подписке вебхука WhatsApp должны приходить сообщения с полем `messages` (тип `audio` для голосовых).
 
@@ -531,7 +591,7 @@ class AIBrainResponse(BaseModel):
 ### Фаза 13 — Twilio Voice MVP
 
 - Входящий PSTN → **Twilio Console** «A CALL COMES IN» = `POST https://<PUBLIC_BASE_URL>/api/whatsapp/voice/incoming` → TwiML (`Say` + `<Connect><Stream url="wss://…/api/whatsapp/voice/stream"/>`).
-- WebSocket принимает **Media Streams** (μ-law 8 kHz), накапливает буфер (`TWILIO_VOICE_BUFFER_BYTES`, по умолчанию ~3 с), конвертирует в **WAV** (`audioop-lts`), **STT** через `gemini_transcribe_voice`, далее тот же **`process_message`**, что WhatsApp.
+- WebSocket принимает **Media Streams** (μ-law 8 kHz), накапливает буфер (`TWILIO_VOICE_BUFFER_BYTES`, по умолчанию ~3 с), конвертирует в **WAV** (`audioop-lts`), **STT** через `openai_transcribe_voice` (Whisper), далее тот же **`process_message`**, что WhatsApp.
 - Ответ абоненту: **TwiML `Say` (Polly ru-RU)** через REST `Calls.update` — при активном одностороннем stream возможны ограничения Twilio; для «идеального» PSTN см. bidirectional stream / Фаза 13.1.
 - Секреты: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` (подпись вебхука, если токен задан). Заготовка абстракций: `app/integrations/telephony.py`.
 
@@ -540,7 +600,7 @@ class AIBrainResponse(BaseModel):
 Цель: удержать абонента на линии при ожидании модели.
 
 - [ ] **TTS streaming:** начинать воспроизведение первых фонем/слоёв, пока модель ещё дописывает хвост ответа (архитектура зависит от выбранного TTS и транспорта Twilio).
-- [ ] **Filler-фразы:** при ожидании Gemini **> ~2 с** — короткий аудио/текстовый сигнал («Минутку…», «Считаю сумму…») до основного ответа (аккуратно с дублированием в WhatsApp-тексте).
+- [ ] **Filler-фразы:** при ожидании LLM **> ~2 с** — короткий аудио/текстовый сигнал («Минутку…», «Считаю сумму…») до основного ответа (аккуратно с дублированием в WhatsApp-тексте).
 - [ ] **Метрики:** логировать длительность этапов STT → LLM → TTS для SLA.
 
 ### Телефония (историческая ссылка)

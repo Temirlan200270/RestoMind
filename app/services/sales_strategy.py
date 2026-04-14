@@ -1,5 +1,5 @@
 """
-Strategy Engine (Phase 18+): правила допродаж и анти-повторов до вызова Gemini.
+Strategy Engine (Phase 18+): правила допродаж и анти-повторов до вызова LLM.
 STATE → LOGIC → AI: здесь только LOGIC — модель получает готовое текстовое задание,
 а цены и состав корзины по-прежнему считает бэкенд после ответа (merge + finalize).
 """
@@ -135,7 +135,7 @@ def build_sales_strategy(
     menu_items: list[MenuItem],
 ) -> StrategyDecision:
     """
-    Мозг продаж: до Gemini решаем цель и кандидатов; модель формулирует reply_text и JSON.
+    Мозг продаж: до LLM решаем цель и кандидатов; модель формулирует reply_text и JSON.
     """
     meta = order_meta if isinstance(order_meta, dict) else {}
 

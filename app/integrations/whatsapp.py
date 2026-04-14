@@ -5,12 +5,25 @@
 - Если пуст → логирование в консоль (для разработки)
 """
 
+from __future__ import annotations
+
 import logging
 import re
+from dataclasses import dataclass
+from typing import Any
 
 import httpx
 
 from app.core.config import settings
+
+
+@dataclass(frozen=True)
+class WhatsAppSendResult:
+    """Результат отправки текстового сообщения (для трекинга wamid и ошибок)."""
+
+    ok: bool
+    message_id: str | None = None
+    error: dict[str, Any] | None = None
 
 logger = logging.getLogger(__name__)
 
@@ -57,28 +70,37 @@ def _is_recipient_not_allowed(resp: httpx.Response) -> bool:
         return False
 
 
-async def send_message(phone: str, text: str) -> bool:
+def _parse_send_error_payload(resp: httpx.Response) -> dict[str, Any]:
+    try:
+        payload = resp.json()
+        if isinstance(payload, dict) and payload.get("error"):
+            err = payload["error"]
+            return err if isinstance(err, dict) else {"raw": err}
+        return {"http_status": resp.status_code, "body": resp.text[:500]}
+    except Exception:
+        return {"http_status": resp.status_code, "body": resp.text[:500]}
+
+
+async def send_message(phone: str, text: str) -> WhatsAppSendResult:
     """
     Отправить текстовое сообщение клиенту в WhatsApp.
-    Если токен не настроен — просто логирует (режим разработки).
-
-    Returns:
-        True если сообщение отправлено (или залогировано), False при ошибке.
+    Если токен не настроен — логирует (режим разработки) и возвращает ok без wamid.
     """
     if not settings.whatsapp_api_token:
-        logger.info("📤 [WhatsApp → %s]: %s", phone, text[:200])
-        return True
+        logger.info("WhatsApp (dev, no token) -> %s: %s", phone, text[:200])
+        return WhatsAppSendResult(ok=True, message_id=None)
 
     candidates = _whatsapp_to_candidates(phone)
     if not candidates:
         logger.error("WhatsApp: пустой номер получателя")
-        return False
+        return WhatsAppSendResult(ok=False, error={"code": "empty_recipient"})
 
     headers = {
         "Authorization": f"Bearer {settings.whatsapp_api_token}",
         "Content-Type": "application/json",
     }
 
+    last_err: dict[str, Any] | None = None
     for to in candidates:
         for attempt in range(1, MAX_RETRIES + 1):
             try:
@@ -95,28 +117,40 @@ async def send_message(phone: str, text: str) -> bool:
                     )
 
                 if response.status_code == 200:
-                    logger.info("WhatsApp: сообщение доставлено → %s", to)
-                    return True
+                    logger.info("WhatsApp: сообщение принято API -> %s", to)
+                    wamid: str | None = None
+                    try:
+                        payload = response.json()
+                        msgs = payload.get("messages") if isinstance(payload, dict) else None
+                        if isinstance(msgs, list) and msgs and isinstance(msgs[0], dict):
+                            mid = msgs[0].get("id")
+                            if mid:
+                                wamid = str(mid)
+                    except Exception:
+                        wamid = None
+                    return WhatsAppSendResult(ok=True, message_id=wamid)
 
+                last_err = _parse_send_error_payload(response)
                 logger.error(
                     "WhatsApp: ошибка %d (to=%s, попытка %d/%d): %s",
                     response.status_code, to, attempt, MAX_RETRIES, response.text[:200],
                 )
                 if response.status_code == 400 and _is_recipient_not_allowed(response):
-                    # Пробуем следующий формат номера (workaround KZ test allowlist)
                     break
 
             except httpx.TimeoutException:
+                last_err = {"code": "timeout", "to": to, "attempt": attempt}
                 logger.error(
                     "WhatsApp: таймаут (to=%s, попытка %d/%d)", to, attempt, MAX_RETRIES,
                 )
             except httpx.HTTPError as exc:
+                last_err = {"code": "network", "detail": str(exc)[:300]}
                 logger.error(
                     "WhatsApp: сетевая ошибка (to=%s, попытка %d/%d): %s", to, attempt, MAX_RETRIES, exc,
                 )
 
-    logger.error("WhatsApp: не удалось отправить сообщение → %s после %d попыток", phone, MAX_RETRIES)
-    return False
+    logger.error("WhatsApp: не удалось отправить сообщение -> %s после %d попыток", phone, MAX_RETRIES)
+    return WhatsAppSendResult(ok=False, error=last_err or {"code": "unknown"})
 
 
 async def send_template(

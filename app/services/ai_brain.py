@@ -1,15 +1,15 @@
 """
 AI Brain — ядро интеллекта бота.
-Асинхронный вызов Gemini API с гарантированным возвратом Pydantic-схемы (Structured Outputs).
+Асинхронный вызов OpenAI (Chat Completions + structured output) с возвратом Pydantic-схемы.
 Включает retry при сбоях и fallback при невалидном ответе.
-Голос в WhatsApp: мультимодальный запрос к Gemini (без платного Whisper).
+Голос: Whisper (transcriptions) + тот же structured chat; мультимодальный один запрос не используется.
 """
 
+import io
 import logging
 from typing import Any
 
-from google import genai
-from google.genai import types
+from openai import APIError, AsyncOpenAI, RateLimitError
 from pydantic import ValidationError
 
 from app.core.config import settings
@@ -20,22 +20,22 @@ from app.services.prompts import RESTAURANT_SYSTEM_PROMPT
 logger = logging.getLogger(__name__)
 
 # Ленивая инициализация: при импорте модуля ключа может не быть (CI, тесты).
-_gemini_client: Any = None
+_openai_client: AsyncOpenAI | None = None
 
 
-def _ensure_gemini_client() -> Any:
-    """Возвращает клиент Gemini или None, если ключ не задан."""
-    global _gemini_client
-    if _gemini_client is not None:
-        return _gemini_client
-    key = settings.gemini_api_key.strip()
+def _ensure_openai_client() -> AsyncOpenAI | None:
+    """Возвращает клиент OpenAI или None, если ключ не задан."""
+    global _openai_client
+    if _openai_client is not None:
+        return _openai_client
+    key = settings.openai_api_key.strip()
     if not key:
         return None
-    _gemini_client = genai.Client(api_key=key)
-    return _gemini_client
+    _openai_client = AsyncOpenAI(api_key=key)
+    return _openai_client
 
 
-DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_CHAT_MODEL = "gpt-4o-mini"
 MAX_RETRIES = 2
 
 _FALLBACK_RESPONSE = AIBrainResponse(
@@ -43,20 +43,39 @@ _FALLBACK_RESPONSE = AIBrainResponse(
     reply_text="Прошу прощения, у меня возникли технические сложности. Переключаю на оператора.",
 )
 
-VOICE_CHAT_BRIDGE = (
-    "Клиент прислал голосовое сообщение в WhatsApp (аудио выше). "
-    "Прослушай, определи намерение и заполни JSON-схему AIBrainResponse. "
-    "В поле recognized_speech укажи краткую дословную расшифровку речи клиента на его языке. "
+VOICE_FROM_WHISPER_INSTRUCTION = (
+    "Клиент прислал голосовое в WhatsApp; ниже — распознанный текст (Whisper). "
+    "Определи намерение и заполни AIBrainResponse. "
+    "В recognized_speech укажи дословную или слегка нормализованную формулировку речи на языке клиента. "
     "Поле detected_language должно соответствовать основному языку reply_text."
 )
 
 
 def normalize_audio_mime(mime: str) -> str:
-    """Нормализует MIME для Gemini (убирает codecs=..., дефолт для неизвестного)."""
+    """Нормализует MIME (убирает codecs=..., дефолт для неизвестного)."""
     base = (mime or "").split(";")[0].strip().lower()
     if not base or base == "application/octet-stream":
         return "audio/ogg"
     return base
+
+
+def _whisper_filename(mime: str) -> str:
+    """Имя файла для multipart Whisper (по расширению сервер угадывает формат)."""
+    base = normalize_audio_mime(mime)
+    ext_map: dict[str, str] = {
+        "audio/ogg": ".ogg",
+        "audio/opus": ".ogg",
+        "audio/webm": ".webm",
+        "audio/wav": ".wav",
+        "audio/x-wav": ".wav",
+        "audio/wave": ".wav",
+        "audio/mpeg": ".mp3",
+        "audio/mp3": ".mp3",
+        "audio/mp4": ".m4a",
+        "audio/m4a": ".m4a",
+        "audio/x-m4a": ".m4a",
+    }
+    return f"audio{ext_map.get(base, '.ogg')}"
 
 
 def _system_prompt_with_context(
@@ -77,26 +96,29 @@ def _system_prompt_with_context(
     return system_prompt
 
 
-def _history_to_gemini_contents(history: list[dict[str, str]]) -> list[dict[str, Any]]:
-    out: list[dict[str, Any]] = []
+def _history_to_openai_messages(history: list[dict[str, str]]) -> list[dict[str, str]]:
+    out: list[dict[str, str]] = []
     for msg in history:
         role = msg["role"]
-        if role == "assistant":
-            role = "model"
-        out.append({"role": role, "parts": [{"text": msg["content"]}]})
+        if role == "model":
+            role = "assistant"
+        if role not in ("user", "assistant", "system"):
+            role = "user"
+        out.append({"role": role, "content": msg["content"]})
     return out
 
 
-def _structured_output_config(system_prompt: str) -> dict[str, Any]:
-    return {
-        "system_instruction": system_prompt,
-        "response_mime_type": "application/json",
-        "response_json_schema": AIBrainResponse.model_json_schema(),
-        "temperature": 0.3,
-    }
+def _chat_model() -> str:
+    m = (settings.openai_model or "").strip()
+    return m if m else DEFAULT_CHAT_MODEL
 
 
-async def call_gemini(
+def _transcription_model() -> str:
+    m = (settings.openai_transcription_model or "").strip()
+    return m if m else "whisper-1"
+
+
+async def call_openai(
     history: list[dict[str, str]],
     user_text: str,
     menu_context: str = "",
@@ -105,122 +127,126 @@ async def call_gemini(
     sales_strategy_context: str = "",
 ) -> AIBrainResponse:
     """
-    Отправляет контекст диалога в Gemini и получает структурированный ответ.
+    Отправляет контекст диалога в OpenAI и получает структурированный ответ.
     При сбое — до MAX_RETRIES повторных попыток, затем fallback на escalate.
-
-    Args:
-        history: Предыдущие сообщения диалога [{role: "user"/"model", content: "..."}].
-        user_text: Новое сообщение от пользователя.
-        menu_context: Текстовое описание актуального меню с ценами.
-        kb_context: Блок базы знаний (справочник заведения).
-        draft_order_context: «Память корзины»: текстовый снимок активного DRAFT из БД
-            (`format_draft_order_context_for_prompt` в `webhooks` / test-bot). Нужен для дельт `order_actions`.
-        sales_strategy_context: блок Strategy Engine (`sales_strategy.format_strategy_for_prompt`) — цели допродаж до ответа модели.
-
-    Returns:
-        AIBrainResponse — Pydantic-объект с intent, reply_text, items, booking_details.
     """
     system_prompt = _system_prompt_with_context(
         menu_context, kb_context, draft_order_context, sales_strategy_context,
     )
-    contents = _history_to_gemini_contents(history)
-    contents.append({"role": "user", "parts": [{"text": user_text}]})
+    messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
+    messages.extend(_history_to_openai_messages(history))
+    messages.append({"role": "user", "content": user_text})
 
     logger.debug(
-        "Запрос к Gemini: %d сообщений в контексте, новое: '%s'",
-        len(contents),
+        "Запрос к OpenAI: %d сообщений в контексте, новое: '%s'",
+        len(messages),
         user_text[:100],
     )
 
-    client = _ensure_gemini_client()
+    client = _ensure_openai_client()
     if client is None:
-        logger.error("GEMINI_API_KEY не задан — ответ недоступен, используем fallback")
+        logger.error("OPENAI_API_KEY не задан — ответ недоступен, используем fallback")
         return _FALLBACK_RESPONSE
 
     last_error: Exception | None = None
+    model = _chat_model()
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            response = await client.aio.models.generate_content(
-                model=DEFAULT_MODEL,
-                contents=contents,
-                config=_structured_output_config(system_prompt),
+            completion = await client.beta.chat.completions.parse(
+                model=model,
+                messages=messages,
+                response_format=AIBrainResponse,
+                temperature=0.3,
             )
-
-            if not response.text:
-                logger.warning("Gemini вернул пустой ответ (попытка %d/%d)", attempt, MAX_RETRIES)
-                last_error = ValueError("Empty response")
+            msg = completion.choices[0].message
+            if getattr(msg, "refusal", None):
+                logger.warning(
+                    "OpenAI отказ (попытка %d/%d): %s",
+                    attempt, MAX_RETRIES, msg.refusal,
+                )
+                last_error = ValueError("Model refusal")
                 continue
-
-            result = AIBrainResponse.model_validate_json(response.text)
-
-            logger.info(
-                "Ответ Gemini: intent=%s, reply='%s'",
-                result.intent,
-                result.reply_text[:80],
-            )
-            return result
+            parsed = msg.parsed
+            if parsed is not None:
+                logger.info(
+                    "Ответ OpenAI: intent=%s, reply='%s'",
+                    parsed.intent,
+                    parsed.reply_text[:80],
+                )
+                return parsed
+            raw = (msg.content or "").strip()
+            if raw:
+                result = AIBrainResponse.model_validate_json(raw)
+                logger.info(
+                    "Ответ OpenAI (из content): intent=%s, reply='%s'",
+                    result.intent,
+                    result.reply_text[:80],
+                )
+                return result
+            logger.warning("OpenAI вернул пустой ответ (попытка %d/%d)", attempt, MAX_RETRIES)
+            last_error = ValueError("Empty response")
 
         except ValidationError as exc:
             logger.error(
-                "Gemini вернул невалидный JSON (попытка %d/%d): %s",
+                "OpenAI: невалидная схема (попытка %d/%d): %s",
                 attempt, MAX_RETRIES, exc,
+            )
+            last_error = exc
+
+        except (APIError, RateLimitError) as exc:
+            logger.error(
+                "Ошибка API OpenAI (попытка %d/%d): %s",
+                attempt, MAX_RETRIES, exc,
+                exc_info=True,
             )
             last_error = exc
 
         except Exception as exc:
             logger.error(
-                "Ошибка при вызове Gemini (попытка %d/%d): %s",
-                attempt, MAX_RETRIES, exc, exc_info=True,
+                "Ошибка при вызове OpenAI (попытка %d/%d): %s",
+                attempt, MAX_RETRIES, exc,
+                exc_info=True,
             )
             last_error = exc
 
     logger.error(
-        "Все %d попыток вызова Gemini провалились. Последняя ошибка: %s",
+        "Все %d попыток вызова OpenAI провалились. Последняя ошибка: %s",
         MAX_RETRIES, last_error,
     )
     return _FALLBACK_RESPONSE
 
 
-async def gemini_transcribe_voice(audio_bytes: bytes, audio_mime: str) -> str:
+async def openai_transcribe_voice(audio_bytes: bytes, audio_mime: str) -> str:
     """
-    Лёгкая расшифровка голоса (без JSON): для Да/Нет, HUMAN_MODE и логов.
+    Расшифровка голоса (Whisper): для Да/Нет, HUMAN_MODE и логов.
     """
-    client = _ensure_gemini_client()
+    client = _ensure_openai_client()
     if client is None:
         return ""
-    mime = normalize_audio_mime(audio_mime)
-    contents = [
-        types.Content(
-            role="user",
-            parts=[
-                types.Part.from_bytes(data=audio_bytes, mime_type=mime),
-                types.Part.from_text(
-                    text=(
-                        "Распознай речь. Выведи только текст сказанного, без кавычек и комментариев. "
-                        "Если слышно нечётко — угадай по контексту или верни краткое «не разобрал»."
-                    ),
-                ),
-            ],
-        ),
-    ]
+    if not audio_bytes:
+        return ""
+    fname = _whisper_filename(audio_mime)
+    stt_model = _transcription_model()
+
     for attempt in range(1, MAX_RETRIES + 1):
+        buf = io.BytesIO(audio_bytes)
         try:
-            response = await client.aio.models.generate_content(
-                model=DEFAULT_MODEL,
-                contents=contents,
-                config={"temperature": 0.2},
+            tr = await client.audio.transcriptions.create(
+                model=stt_model,
+                file=(fname, buf),
             )
-            return (response.text or "").strip()
+            text = getattr(tr, "text", None) or ""
+            return text.strip()
         except Exception as exc:
             logger.warning(
-                "gemini_transcribe_voice попытка %d/%d: %s",
+                "openai_transcribe_voice попытка %d/%d: %s",
                 attempt, MAX_RETRIES, exc,
             )
     return ""
 
 
-async def call_gemini_with_audio(
+async def call_openai_with_audio(
     history: list[dict[str, str]],
     audio_bytes: bytes,
     audio_mime: str,
@@ -229,80 +255,41 @@ async def call_gemini_with_audio(
     draft_order_context: str = "",
     sales_strategy_context: str = "",
 ) -> AIBrainResponse:
-    """Диалог + голосовое в одном запросе (structured output)."""
-    system_prompt = _system_prompt_with_context(
-        menu_context, kb_context, draft_order_context, sales_strategy_context,
-    )
+    """
+    Голосовой ввод: Whisper → structured chat с тем же контрактом AIBrainResponse.
+    Поле recognized_speech заполняется транскриптом (источник STT).
+    """
     mime = normalize_audio_mime(audio_mime)
-
-    gemini_contents: list[Any] = []
-    for msg in history:
-        role = msg["role"]
-        if role == "assistant":
-            role = "model"
-        gemini_contents.append(
-            types.Content(
-                role=role,
-                parts=[types.Part.from_text(text=msg["content"])],
-            ),
-        )
-    gemini_contents.append(
-        types.Content(
-            role="user",
-            parts=[
-                types.Part.from_bytes(data=audio_bytes, mime_type=mime),
-                types.Part.from_text(text=VOICE_CHAT_BRIDGE),
-            ],
-        ),
-    )
-
     logger.debug(
-        "Запрос к Gemini (голос): %d сообщений в контексте, mime=%s, размер=%d байт",
-        len(gemini_contents),
+        "Запрос к OpenAI (голос): %d сообщений в истории, mime=%s, размер=%d байт",
+        len(history),
         mime,
         len(audio_bytes),
     )
 
-    client = _ensure_gemini_client()
+    client = _ensure_openai_client()
     if client is None:
-        logger.error("GEMINI_API_KEY не задан — голос недоступен, fallback")
+        logger.error("OPENAI_API_KEY не задан — голос недоступен, fallback")
         return _FALLBACK_RESPONSE
 
-    last_error: Exception | None = None
-    for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            response = await client.aio.models.generate_content(
-                model=DEFAULT_MODEL,
-                contents=gemini_contents,
-                config=_structured_output_config(system_prompt),
-            )
-            if not response.text:
-                logger.warning("Gemini (голос) пустой ответ (попытка %d/%d)", attempt, MAX_RETRIES)
-                last_error = ValueError("Empty response")
-                continue
-            result = AIBrainResponse.model_validate_json(response.text)
-            logger.info(
-                "Ответ Gemini (голос): intent=%s, reply='%s'",
-                result.intent,
-                result.reply_text[:80],
-            )
-            return result
-        except ValidationError as exc:
-            logger.error(
-                "Gemini (голос) невалидный JSON (попытка %d/%d): %s",
-                attempt, MAX_RETRIES, exc,
-            )
-            last_error = exc
-        except Exception as exc:
-            logger.error(
-                "Ошибка Gemini (голос) попытка %d/%d: %s",
-                attempt, MAX_RETRIES, exc,
-                exc_info=True,
-            )
-            last_error = exc
+    transcript = await openai_transcribe_voice(audio_bytes, audio_mime)
+    transcript = (transcript or "").strip()
+    if not transcript:
+        logger.warning("Whisper вернул пустой транскрипт — fallback")
+        return _FALLBACK_RESPONSE
 
-    logger.error(
-        "Все попытки call_gemini_with_audio провалились: %s",
-        last_error,
+    augmented = (
+        f"{VOICE_FROM_WHISPER_INSTRUCTION}\n\nТекст: {transcript}\n"
+        "Ответь клиенту; при необходимости уточни recognized_speech относительно этого текста."
     )
-    return _FALLBACK_RESPONSE
+    result = await call_openai(
+        history,
+        augmented,
+        menu_context,
+        kb_context,
+        draft_order_context,
+        sales_strategy_context,
+    )
+    if result.recognized_speech is None or not str(result.recognized_speech).strip():
+        return result.model_copy(update={"recognized_speech": transcript})
+    return result

@@ -202,6 +202,27 @@ class ChatLog(Base):
         nullable=True,
         comment="Служебные данные для админки (интент, уверенность, internal monologue)",
     )
+    provider_message_id: Mapped[str | None] = mapped_column(
+        String(128),
+        nullable=True,
+        index=True,
+        comment="ID исходящего сообщения WhatsApp (wamid) из ответа Graph API / вебхука statuses",
+    )
+    delivery_status: Mapped[str | None] = mapped_column(
+        String(32),
+        nullable=True,
+        comment="sending | sent | delivered | read | failed — только исходящие в WhatsApp",
+    )
+    error_details: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON,
+        nullable=True,
+        comment="Ответ Meta при ошибке доставки (failed)",
+    )
+    status_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Время последнего изменения delivery_status",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -325,7 +346,7 @@ class KnowledgeItem(Base):
     )
     question: Mapped[str] = mapped_column(String(500), nullable=False, comment="Краткий заголовок / формулировка вопроса")
     answer: Mapped[str] = mapped_column(Text, nullable=False, comment="Текст ответа (можно несколько абзацев)")
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, comment="Участвует ли в контексте для Gemini")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, comment="Участвует ли в контексте для LLM")
     sort_order: Mapped[int] = mapped_column(Integer, default=0, comment="Порядок вывода в справочнике")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(),

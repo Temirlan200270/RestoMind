@@ -16,6 +16,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        extra="ignore",
     )
 
     # --- Приложение ---
@@ -58,8 +59,22 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("REDIS_SSL_SKIP_VERIFY", "redis_ssl_skip_verify"),
     )
 
-    # --- Gemini (Google AI) ---
-    gemini_api_key: str = ""
+    # --- OpenAI (чат + structured output; Whisper для STT) ---
+    openai_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("OPENAI_API_KEY", "openai_api_key"),
+    )
+    openai_model: str = Field(
+        default="gpt-4o-mini",
+        validation_alias=AliasChoices("OPENAI_MODEL", "openai_model"),
+    )
+    openai_transcription_model: str = Field(
+        default="whisper-1",
+        validation_alias=AliasChoices(
+            "OPENAI_TRANSCRIPTION_MODEL",
+            "openai_transcription_model",
+        ),
+    )
 
     # --- WhatsApp (Meta API) ---
     whatsapp_api_token: str = ""
@@ -74,7 +89,7 @@ class Settings(BaseSettings):
         default="",
         validation_alias=AliasChoices("TWILIO_AUTH_TOKEN", "twilio_auth_token"),
     )
-    # Накопление μ-law от Media Stream перед отправкой в Gemini (~8000 байт/сек моно)
+    # Накопление μ-law от Media Stream перед отправкой в Whisper (~8000 байт/сек моно)
     twilio_voice_buffer_bytes: int = Field(
         default=24_000,
         ge=4000,

@@ -6,7 +6,9 @@
 import contextvars
 import logging
 
+from app.db.session import async_session_factory
 from app.integrations.whatsapp import send_message
+from app.services.chat_delivery import finalize_outbound_delivery
 
 logger = logging.getLogger(__name__)
 
@@ -29,9 +31,15 @@ def current_twilio_call_sid() -> str:
     return (_active_twilio_call_sid.get() or "").strip()
 
 
-async def send_customer_text(phone: str, text: str) -> None:
+async def send_customer_text(
+    phone: str,
+    text: str,
+    *,
+    outbound_chat_log_id: int | None = None,
+) -> None:
     """
     Если открыт контекст Twilio-звонка — озвучить через REST; иначе WhatsApp.
+    При outbound_chat_log_id обновляет chat_logs (sent/failed) и шлёт message_status_updated.
     """
     sid = current_twilio_call_sid()
     if sid:
@@ -40,5 +48,24 @@ async def send_customer_text(phone: str, text: str) -> None:
         ok = await twilio_speak_on_call(sid, text)
         if not ok:
             logger.warning("Не удалось озвучить ответ в Twilio (CallSid=%s)", sid[:8])
+        if outbound_chat_log_id is not None:
+            async with async_session_factory() as db:
+                await finalize_outbound_delivery(
+                    db, outbound_chat_log_id, send_ok=ok,
+                    error_details=None if ok else {"channel": "twilio", "detail": "speak_failed"},
+                )
+                await db.commit()
         return
-    await send_message(phone, text)
+
+    wa = await send_message(phone, text)
+    if outbound_chat_log_id is None:
+        return
+    async with async_session_factory() as db:
+        await finalize_outbound_delivery(
+            db,
+            outbound_chat_log_id,
+            send_ok=wa.ok,
+            provider_message_id=wa.message_id,
+            error_details=wa.error,
+        )
+        await db.commit()

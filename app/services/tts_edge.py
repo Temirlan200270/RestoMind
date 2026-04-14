@@ -1,6 +1,6 @@
 """
 Бесплатный TTS через edge-tts (голоса Microsoft Edge).
-Голос подбирается по detected_language из ответа Gemini (ru/kk/en/uz).
+Голос подбирается по detected_language из ответа LLM (ru/kk/en/uz).
 """
 
 import logging

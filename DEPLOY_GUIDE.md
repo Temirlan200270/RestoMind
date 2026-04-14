@@ -80,7 +80,7 @@ POSTGRES_PASSWORD=<СГЕНЕРИРУЙТЕ_НАДЁЖНЫЙ_ПАРОЛЬ>
 
 REDIS_ENABLED=true
 
-GEMINI_API_KEY=<ВАШ_КЛЮЧ_GOOGLE_AI>
+OPENAI_API_KEY=<ВАШ_КЛЮЧ_OPENAI>
 
 WHATSAPP_API_TOKEN=<ТОКЕН_ИЗ_META_BUSINESS>
 WHATSAPP_VERIFY_TOKEN=<ПРИДУМАЙТЕ_СЕКРЕТНУЮ_СТРОКУ>

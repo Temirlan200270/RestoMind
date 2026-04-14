@@ -6,6 +6,10 @@
 
 ## [Unreleased] — 2026-03-20
 
+### Изменено
+
+- **AI:** чат и STT на **OpenAI** — structured output (`call_openai`, `beta.chat.completions.parse`), голос — **Whisper** (`openai_transcribe_voice`, `call_openai_with_audio`). Переменные окружения: `OPENAI_API_KEY`, опционально `OPENAI_MODEL`, `OPENAI_TRANSCRIPTION_MODEL`. Удалена зависимость `google-genai`.
+
 ### Добавлено
 
 - **RestoMind v2.0 (логистика заказа):** тарификация контейнеров и доставки (`order_logic`, настройки `PRICING_*` в `.env`); расширенный `AIBrainResponse` (тип заказа, оплата, адрес/время); после «Да» в WhatsApp заказ только подтверждается — в iiko отправляет оператор из админки; комментарий к заказу в iiko с типом и пометкой WhatsApp; тесты `tests/test_pricing.py`.
@@ -95,7 +99,7 @@
 
 ## Ядро (AI + диалог)
 
-- AI на Google Gemini 2.5 Flash с Structured Outputs (Pydantic-схема)
+- AI на OpenAI (structured output по Pydantic-схеме; Whisper для голоса)
 - System Prompt, RAG — меню из БД в контексте
 - История в Redis (до 20 сообщений, TTL 24 ч)
 - Intents: `order`, `book`, `faq`, `escalate`
@@ -171,7 +175,7 @@
 ## Тесты
 
 - `tests/test_order_logic.py` — `validate_order`, меню, контекст
-- `tests/test_ai_brain.py` — мок Gemini, fallback, retry
+- `tests/test_ai_brain.py` — мок OpenAI, fallback, retry
 - `tests/test_rate_limiter.py` — лимиты
 - Фикстуры: SQLite in-memory, `db_with_menu`
 
