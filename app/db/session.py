@@ -177,6 +177,11 @@ def redis_connection_kwargs() -> dict[str, Any]:
 
 def _create_redis_client() -> Any:
     """Создаёт Redis-клиент или in-memory заглушку."""
+    if settings.redis_memory_only:
+        logger.info(
+            "REDIS_MEMORY_ONLY=true — внешний Redis не используется (in-memory, без лимитов провайдера)."
+        )
+        return InMemoryRedis()
     if settings.redis_enabled:
         from redis.asyncio import Redis
 
@@ -206,6 +211,9 @@ async def init_redis_or_fallback() -> None:
     (типично: на Render забыли REDIS_URL → остаётся localhost:6379), переключаемся на InMemoryRedis.
     """
     global redis_client
+    if settings.redis_memory_only:
+        logger.info("Redis: режим только память (REDIS_MEMORY_ONLY) — пропуск проверки сети")
+        return
     if not settings.redis_enabled:
         logger.info("Redis отключён в настройках — in-memory")
         return

@@ -62,6 +62,8 @@
 
 Сейчас в Blueprint **`REDIS_ENABLED=false`** — сессии/события работают в in-memory в рамках одного инстанса. Для нескольких инстансов или устойчивости включите Redis и задайте URL.
 
+**Тесты без лимитов Upstash:** задайте **`REDIS_MEMORY_ONLY=true`** (можно оставить `REDIS_URL` в секретах). Внешний Redis не вызывается; приложение использует только память процесса — удобно, пока квота исчерпана или не нужен общий кэш.
+
 - **Render Key Value:** `REDIS_ENABLED=true` и внутренний хост/порт (или одна строка **`REDIS_URL`**, если Render отдаёт полный URL).
 - **Upstash:** в Dashboard скопируйте **Redis Connect** (`rediss://default:ПАРОЛЬ@….upstash.io:6379`) → в Render добавьте секрет **`REDIS_URL`** (значение целиком) и **`REDIS_ENABLED=true`**.  
   **Не** используйте для этого проекта только Upstash **REST** (HTTPS + отдельный токен): у него нет Pub/Sub, а живые события админки идут через `redis.publish` / `subscribe`.

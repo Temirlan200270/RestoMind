@@ -2215,6 +2215,7 @@ async def settings_environment(db: AsyncSession = Depends(get_db)) -> dict:
         "app_debug": settings.app_debug,
         "db_mode": settings.db_mode,
         "redis_enabled": settings.redis_enabled,
+        "redis_memory_only": settings.redis_memory_only,
         "redis_backend": "redis" if settings.redis_enabled else "in_memory",
         "integrations": {
             "iiko": {

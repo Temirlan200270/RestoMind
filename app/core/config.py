@@ -58,6 +58,12 @@ class Settings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("REDIS_SSL_SKIP_VERIFY", "redis_ssl_skip_verify"),
     )
+    # Принудительно in-memory: не подключаться к REDIS_URL (тесты, исчерпана квота Upstash и т.п.).
+    # Имеет приоритет над REDIS_ENABLED — внешний Redis не используется.
+    redis_memory_only: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("REDIS_MEMORY_ONLY", "redis_memory_only"),
+    )
 
     # --- OpenAI (чат + structured output; Whisper для STT; опционально OPENAI_BASE_URL) ---
     openai_api_key: str = Field(
@@ -326,6 +332,13 @@ class Settings(BaseSettings):
         """Managed Postgres передаёт DATABASE_URL — принудительно включаем postgres."""
         if self.database_url_dsn.strip():
             object.__setattr__(self, "db_mode", "postgres")
+        return self
+
+    @model_validator(mode="after")
+    def _redis_memory_only_overrides_enabled(self) -> Self:
+        """REDIS_MEMORY_ONLY — отключает внешний Redis независимо от REDIS_ENABLED."""
+        if self.redis_memory_only:
+            object.__setattr__(self, "redis_enabled", False)
         return self
 
     @property

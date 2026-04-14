@@ -24,6 +24,7 @@ services:
         value: postgres
       - key: REDIS_ENABLED
         value: "false"
+      # Для тестов без внешнего Redis (квота Upstash и т.д.): REDIS_MEMORY_ONLY=true
       # Опционально: Upstash / внешний Redis — задайте в Dashboard (секрет), не коммитьте:
       # REDIS_URL=rediss://default:...@....upstash.io:6379
       # REDIS_SSL_SKIP_VERIFY=false
