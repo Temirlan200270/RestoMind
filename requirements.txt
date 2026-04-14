@@ -30,6 +30,8 @@ jinja2>=3.1.0
 
 # === Утилиты ===
 python-dotenv>=1.0.1
+# IANA TZ для zoneinfo на Windows (на Linux в образе данные уже есть)
+tzdata>=2024.2
 # μ-law (Twilio): в 3.11/3.12 — stdlib audioop; в 3.13+ — только audioop-lts (Docker/Render часто 3.11)
 audioop-lts>=0.2.1; python_version >= "3.13"
 

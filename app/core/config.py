@@ -3,6 +3,7 @@
 Читает переменные окружения из .env файла через Pydantic BaseSettings.
 """
 
+import os
 from typing import Self
 
 from pydantic import AliasChoices, Field, model_validator
@@ -130,6 +131,15 @@ class Settings(BaseSettings):
     )
     telegram_admin_chat_id: str = Field(
         default="", validation_alias=AliasChoices("TELEGRAM_ADMIN_CHAT_ID", "telegram_admin_chat_id"),
+    )
+    # IANA (например Asia/Almaty) — время в Telegram-алертах эскалации: сначала «заведение», затем UTC
+    display_timezone: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "DISPLAY_TIMEZONE",
+            "TELEGRAM_ALERT_TIMEZONE",
+            "display_timezone",
+        ),
     )
 
     # --- iiko Cloud API ---
@@ -339,6 +349,17 @@ class Settings(BaseSettings):
         """REDIS_MEMORY_ONLY — отключает внешний Redis независимо от REDIS_ENABLED."""
         if self.redis_memory_only:
             object.__setattr__(self, "redis_enabled", False)
+        return self
+
+    @model_validator(mode="after")
+    def _public_base_url_from_render(self) -> Self:
+        """На Render задаётся RENDER_EXTERNAL_URL — подставляем, если PUBLIC_BASE_URL пуст (вебхуки, ссылки в Telegram)."""
+        raw = (self.public_base_url or "").strip()
+        if raw:
+            return self
+        ext = (os.environ.get("RENDER_EXTERNAL_URL") or "").strip().rstrip("/")
+        if ext:
+            object.__setattr__(self, "public_base_url", ext)
         return self
 
     @property

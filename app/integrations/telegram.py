@@ -8,6 +8,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from urllib.parse import quote
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -71,6 +72,24 @@ def _fsm_ru(fsm: str) -> str:
     return f"<code>{_escape_html(key or '—')}</code>"
 
 
+def _alert_time_lines() -> list[str]:
+    """Строки «Время …» для алерта: при заданном DISPLAY_TIMEZONE — локальное + UTC, иначе только UTC."""
+    now = datetime.now(timezone.utc)
+    utc_hm = now.strftime("%Y-%m-%d %H:%M")
+    tz_name = (settings.display_timezone or "").strip()
+    if tz_name:
+        try:
+            local = now.astimezone(ZoneInfo(tz_name))
+            local_hm = local.strftime("%Y-%m-%d %H:%M")
+            return [
+                f"<b>Время (заведение, {_escape_html(tz_name)}):</b> <code>{local_hm}</code>",
+                f"<b>Время (UTC, сервер):</b> <code>{utc_hm}</code>",
+            ]
+        except Exception:
+            logger.warning("DISPLAY_TIMEZONE недействителен (%r) — в алерте только UTC", tz_name)
+    return [f"<b>Время (UTC):</b> <code>{utc_hm}</code>"]
+
+
 def _absolute_admin_dialog_url(phone: str) -> str | None:
     """
     Полный URL открытия админки на диалоге с клиентом.
@@ -109,7 +128,6 @@ async def send_tg_fallback_alert(
     u_short = (user_message or "")[:1400]
     r_short = (bot_reply or "")[:900]
 
-    now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     app_line = _escape_html((settings.app_name or "RestoMind").strip())
     ver = (settings.app_version or "").strip()
     if ver:
@@ -118,7 +136,7 @@ async def send_tg_fallback_alert(
     lines: list[str] = [
         "<b>Нужна помощь оператора</b>",
         "",
-        f"<b>Время (UTC):</b> <code>{now_utc}</code>",
+        *_alert_time_lines(),
         f"<b>Сервис:</b> {app_line}",
         f"<b>Телефон:</b> <code>{_escape_html(q)}</code>",
     ]
@@ -190,9 +208,11 @@ async def send_tg_fallback_alert(
         lines.extend(
             [
                 "",
-                "<b>Ссылка в админку недоступна:</b> задайте на сервере переменную "
-                "<code>PUBLIC_BASE_URL</code> (полный URL сайта, например "
-                "<code>https://your-app.onrender.com</code>).",
+                "<b>Ссылка в админку недоступна:</b> задайте "
+                "<code>PUBLIC_BASE_URL</code> (полный URL без <code>/admin</code>, например "
+                "<code>https://your-app.onrender.com</code>). "
+                "На Render без этой переменной подставляется <code>RENDER_EXTERNAL_URL</code>, "
+                "если она есть в окружении.",
                 f"Фрагмент для ручного открытия: <code>/admin#chats?phone={_escape_html(q)}</code>",
             ],
         )

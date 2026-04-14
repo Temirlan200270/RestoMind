@@ -66,6 +66,27 @@ const adminFormat = {
     },
 };
 
+/**
+ * Фрагмент админки в location.hash: #chats или #chats?phone=7705… (как в ссылках из Telegram).
+ * @returns {{ tab: string | null, phone: string | null }}
+ */
+function adminParseLocationHash() {
+    const raw = String(window.location.hash || '').replace(/^#/, '').trim();
+    if (!raw) return { tab: null, phone: null };
+    const q = raw.indexOf('?');
+    const path = (q >= 0 ? raw.slice(0, q) : raw).trim();
+    const qs = q >= 0 ? raw.slice(q + 1) : '';
+    let phone = null;
+    try {
+        const sp = new URLSearchParams(qs);
+        const p = (sp.get('phone') || '').trim();
+        phone = p || null;
+    } catch (e) {
+        phone = null;
+    }
+    return { tab: path || null, phone };
+}
+
 /** Начальное состояние GET /integrations/status — чтобы Alpine не падал на undefined до первой загрузки. */
 function defaultIntegrationStatus() {
     return {
@@ -1467,11 +1488,14 @@ function adminMixinAuthKnowledge() {
                     this.authenticated = true;
                     this.auth401AlertShown = false;
                     this.wsToken = data.ws_token || '';
+                    this._ensureAdminHashListener();
+                    this._applyAdminHashBeforeFirstPaint();
                     await this.refreshDemoStatus();
                     this.connectWebSocket();
                     await this.loadTabData();
                     await this.loadIntegrationStatus();
                     await this.loadChatList();
+                    await this._consumePendingHashChatPhone();
                 } else {
                     this.authenticated = false;
                     this.wsToken = '';
@@ -1505,11 +1529,14 @@ function adminMixinAuthKnowledge() {
                 this.authenticated = true;
                 this.wsToken = data.ws_token || '';
                 this.loginPassword = '';
+                this._ensureAdminHashListener();
+                this._applyAdminHashBeforeFirstPaint();
                 await this.refreshDemoStatus();
                 this.connectWebSocket();
                 await this.loadTabData();
                 await this.loadIntegrationStatus();
                 await this.loadChatList();
+                await this._consumePendingHashChatPhone();
             } catch {
                 this.loginError = 'Не удалось связаться с сервером';
             } finally {
@@ -2379,6 +2406,65 @@ function adminMixinWebSocketEvents() {
 /** Список чатов, сообщения, takeover */
 function adminMixinLiveChat() {
     return {
+        /** Телефон из #chats?phone=… до первого selectChat после loadChatList */
+        _pendingHashChatPhone: null,
+        _adminHashListenerInstalled: false,
+
+        _ensureAdminHashListener() {
+            if (this._adminHashListenerInstalled) return;
+            this._adminHashListenerInstalled = true;
+            window.addEventListener('hashchange', () => {
+                void this._onAdminHashChange();
+            });
+        },
+
+        /** Перед loadTabData: открыть нужную вкладку по hash (глубокая ссылка на диалог). */
+        _applyAdminHashBeforeFirstPaint() {
+            this._pendingHashChatPhone = null;
+            const { tab, phone } = adminParseLocationHash();
+            if (tab === 'chats') {
+                this.currentTab = 'chats';
+                if (phone) this._pendingHashChatPhone = phone;
+            }
+        },
+
+        syncAdminChatsHash(phone) {
+            if (!this.authenticated) return;
+            const path = window.location.pathname || '/admin';
+            const frag = phone && String(phone).trim()
+                ? `chats?phone=${encodeURIComponent(String(phone).trim())}`
+                : 'chats';
+            const url = `${path}#${frag}`;
+            try {
+                window.history.replaceState(null, '', url);
+            } catch (e) {
+                try {
+                    window.location.hash = frag;
+                } catch (e2) { /* ignore */ }
+            }
+        },
+
+        async _consumePendingHashChatPhone() {
+            const p = this._pendingHashChatPhone;
+            this._pendingHashChatPhone = null;
+            if (!p) return;
+            await this.selectChat(p);
+        },
+
+        async _onAdminHashChange() {
+            if (!this.authenticated) return;
+            const { tab, phone } = adminParseLocationHash();
+            if (tab !== 'chats') return;
+            this.currentTab = 'chats';
+            await this.loadTabData();
+            await this.loadChatList();
+            if (phone) await this.selectChat(phone);
+            else {
+                this.activeChatPhone = '';
+                this.chatMobileInfoOpen = false;
+            }
+        },
+
         // ─── Live Chat ───────────────────────────────
         async loadChatList() {
             try {
@@ -2463,12 +2549,14 @@ function adminMixinLiveChat() {
 
             this.scrollChatToBottom();
             await this.loadCustomerSummary(phone);
+            this.syncAdminChatsHash(phone);
         },
 
         /** Мобилка: вернуться к списку диалогов */
         backFromMobileChat() {
             this.chatMobileInfoOpen = false;
             this.activeChatPhone = '';
+            this.syncAdminChatsHash('');
         },
 
         async loadCustomerSummary(phone) {

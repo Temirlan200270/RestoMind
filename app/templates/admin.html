@@ -67,7 +67,7 @@
             <button type="button" class="md:hidden p-2 rounded-lg text-blue-200 hover:bg-white/10 shrink-0" @click="sidebarOpen = false" aria-label="Закрыть меню">&times;</button>
         </div>
 
-        <nav class="flex-1 min-h-0 overflow-y-auto px-3 py-4 space-y-1">
+        <nav class="admin-sidebar-scroll flex-1 min-h-0 overflow-y-auto px-3 py-4 space-y-1">
             <template x-for="item in navItems" :key="item.id">
                 <button
                     @click="currentTab = item.id; loadTabData(); sidebarOpen = false"
@@ -360,34 +360,49 @@
 
             <!-- ========== АНАЛИТИКА ========== -->
             <div x-show="currentTab === 'analytics'" x-cloak class="fade-in">
-                <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 mb-6">
-                    <div class="flex flex-col gap-3">
-                        <div class="flex flex-col gap-2 min-w-0 sm:flex-row sm:flex-wrap sm:items-center">
-                            <span class="text-sm font-medium text-gray-600 shrink-0">Период:</span>
-                            <div class="flex flex-wrap gap-2">
+                <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 sm:p-6 mb-6">
+                    <!-- Единая панель фильтра на всю ширину карточки — без «ступеньки» ширин -->
+                    <div class="rounded-2xl border border-gray-100 bg-gradient-to-b from-slate-50/90 to-white p-4 sm:p-5 space-y-4 sm:space-y-5">
+                        <div>
+                            <h3 class="text-sm font-semibold text-gray-900">Период отчёта</h3>
+                            <p class="text-xs text-gray-500 mt-1 leading-snug">Быстрый пресет или свои даты; после смены полей нажмите «Применить диапазон». Интервал считается в UTC.</p>
+                        </div>
+                        <div class="space-y-2">
+                            <span class="text-xs font-medium uppercase tracking-wide text-gray-500">Быстрый выбор</span>
+                            <div class="grid grid-cols-3 gap-2 sm:gap-3 w-full">
                                 <template x-for="p in [{id:'day', label:'Сегодня'}, {id:'week', label:'Неделя'}, {id:'month', label:'Месяц'}]" :key="p.id">
                                     <button
+                                        type="button"
                                         @click="analyticsPeriod = p.id; analyticsCustom = false; reloadAnalyticsForUi()"
                                         :class="analyticsPeriod === p.id && !analyticsCustom
-                                            ? 'bg-brand-600 text-white shadow-md'
-                                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'"
-                                        class="px-3 sm:px-4 py-2 rounded-xl text-sm font-medium transition"
+                                            ? 'bg-brand-600 text-white shadow-md shadow-brand-600/20 ring-1 ring-brand-500/30'
+                                            : 'bg-white text-gray-700 border border-gray-200 hover:border-brand-200 hover:bg-brand-50/40'"
+                                        class="min-h-[44px] px-2 sm:px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold text-center transition touch-manipulation"
                                         x-text="p.label"
                                     ></button>
                                 </template>
                             </div>
                         </div>
-                        <div class="grid grid-cols-1 min-[400px]:grid-cols-2 gap-2 min-w-0 w-full max-w-2xl">
-                            <input type="date" x-model="analyticsFrom" class="min-w-0 w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50">
-                            <input type="date" x-model="analyticsTo" class="min-w-0 w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50">
+                        <div class="space-y-2">
+                            <span class="text-xs font-medium uppercase tracking-wide text-gray-500">Свой диапазон (UTC)</span>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full">
+                                <div class="min-w-0">
+                                    <label class="sr-only" for="analytics-from">Дата начала</label>
+                                    <input id="analytics-from" type="date" x-model="analyticsFrom" class="min-w-0 w-full min-h-[44px] border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                                </div>
+                                <div class="min-w-0">
+                                    <label class="sr-only" for="analytics-to">Дата окончания</label>
+                                    <input id="analytics-to" type="date" x-model="analyticsTo" class="min-w-0 w-full min-h-[44px] border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                                </div>
+                            </div>
                             <button
                                 type="button"
                                 @click="analyticsPeriod = 'custom'; analyticsCustom = true; reloadAnalyticsForUi()"
-                                class="min-[400px]:col-span-2 w-full px-4 py-2 bg-brand-600 text-white rounded-xl text-sm font-medium hover:bg-brand-700 transition"
+                                class="w-full min-h-[44px] px-4 py-2.5 bg-brand-600 text-white rounded-xl text-sm font-semibold hover:bg-brand-700 transition shadow-sm shadow-brand-600/20 touch-manipulation"
                             >Применить диапазон</button>
                         </div>
                     </div>
-                    <details class="hint-details mt-3 rounded-xl border border-gray-200/80 bg-gray-50/40 px-3 py-2 hover:bg-gray-50/80 transition-colors">
+                    <details class="hint-details mt-4 rounded-xl border border-gray-200/80 bg-gray-50/40 px-3 py-2 hover:bg-gray-50/80 transition-colors">
                         <summary class="cursor-pointer flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-brand-700 select-none py-1">
                             <svg class="w-4 h-4 text-gray-400 shrink-0 transition-transform duration-200 hint-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
                             Про часовой пояс (UTC)
@@ -398,7 +413,7 @@
                     </details>
 
                     <div x-show="analyticsData.date_from && analyticsData.date_to" x-cloak
-                        class="mt-4 flex flex-col sm:flex-row sm:items-stretch gap-3 rounded-2xl border border-brand-200/60 bg-gradient-to-br from-brand-50/90 via-white to-violet-50/50 p-4 shadow-sm shadow-brand-900/5">
+                        class="mt-4 flex flex-col sm:flex-row sm:items-stretch gap-3 rounded-2xl border border-brand-200/60 bg-gradient-to-br from-brand-50/90 via-white to-violet-50/50 p-4 sm:p-5 shadow-sm shadow-brand-900/5">
                         <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white border border-brand-100 text-brand-600 shadow-sm">
                             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/>
@@ -411,7 +426,7 @@
                         </div>
                     </div>
 
-                    <details class="hint-details mt-3 rounded-xl border border-gray-200/80 bg-gray-50/40 px-3 py-2 hover:bg-gray-50/80 transition-colors">
+                    <details class="hint-details mt-4 rounded-xl border border-gray-200/80 bg-gray-50/40 px-3 py-2 hover:bg-gray-50/80 transition-colors">
                         <summary class="cursor-pointer flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-brand-700 select-none py-1">
                             <svg class="w-4 h-4 text-gray-400 shrink-0 transition-transform duration-200 hint-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
                             Почему суммы за день, неделю и месяц иногда совпадают?
@@ -1154,14 +1169,14 @@
 
                         <template x-if="activeChatPhone">
                             <div class="flex flex-col flex-1 min-h-0 h-full">
-                                <!-- Шапка чата: на мобилке — две строки (кнопки не перекрывают ленту сообщений) -->
-                                <div class="shrink-0 border-b border-gray-100 bg-white flex flex-col gap-2 py-2.5 px-3 md:flex-row md:items-center md:justify-between md:gap-3 md:py-0 md:min-h-[52px] md:px-6">
-                                    <div class="flex items-center gap-2 md:gap-3 min-w-0 w-full md:flex-1">
-                                        <button type="button" class="md:hidden min-h-[44px] min-w-[44px] shrink-0 inline-flex items-center justify-center rounded-xl border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100"
+                                <!-- Шапка: фиксированные строки — кнопки не наезжают друг на друга и на ленту -->
+                                <div class="shrink-0 border-b border-gray-100 bg-white z-10 shadow-sm shadow-slate-200/60">
+                                    <div class="flex items-center gap-2 px-3 pt-2.5 pb-2 md:px-6 md:pt-3 md:pb-2 min-w-0">
+                                        <button type="button" class="md:hidden min-h-[48px] min-w-[48px] shrink-0 inline-flex items-center justify-center rounded-xl border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 touch-manipulation"
                                             @click="backFromMobileChat()" aria-label="К списку диалогов">
                                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
                                         </button>
-                                        <button type="button" class="lg:hidden min-h-[44px] min-w-[44px] shrink-0 inline-flex items-center justify-center rounded-xl border border-brand-200 bg-brand-50 text-brand-700 hover:bg-brand-100"
+                                        <button type="button" class="lg:hidden min-h-[48px] min-w-[48px] shrink-0 inline-flex items-center justify-center rounded-xl border border-brand-200 bg-brand-50 text-brand-700 hover:bg-brand-100 touch-manipulation"
                                             @click="chatMobileInfoOpen = true" aria-label="О клиенте" title="О клиенте">
                                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                                         </button>
@@ -1171,31 +1186,33 @@
                                             <h3 class="font-semibold text-gray-900 truncate text-sm md:text-base" x-text="activeChatTitle()"></h3>
                                             <p class="text-xs text-gray-400 font-mono truncate" x-text="activeChatPhone"></p>
                                         </div>
+                                    </div>
+                                    <div class="flex flex-wrap items-center gap-1.5 px-3 pb-2 md:px-6">
                                         <span x-show="activeChatState !== 'human_mode' && activeChatState !== 'confirming_order'"
-                                            class="hidden md:inline-flex px-2 py-1 bg-emerald-50 text-emerald-700 text-xs font-medium rounded-md items-center gap-1 shrink-0">
+                                            class="inline-flex px-2 py-1 bg-emerald-50 text-emerald-700 text-xs font-medium rounded-md items-center gap-1 shrink-0">
                                             ИИ отвечает
                                         </span>
                                         <span x-show="activeChatState === 'confirming_order'"
-                                            class="hidden md:inline-flex px-2 py-1 bg-amber-50 text-amber-800 text-xs font-medium rounded-md shrink-0">
+                                            class="inline-flex px-2 py-1 bg-amber-50 text-amber-800 text-xs font-medium rounded-md shrink-0">
                                             Подтверждение заказа
                                         </span>
                                         <span x-show="activeChatState === 'human_mode'"
-                                            class="hidden md:inline-flex px-2 py-1 bg-orange-50 text-orange-700 text-xs font-medium rounded-md shrink-0">
+                                            class="inline-flex px-2 py-1 bg-orange-50 text-orange-700 text-xs font-medium rounded-md shrink-0">
                                             Вы ведёте диалог
                                         </span>
                                     </div>
-                                    <div class="flex flex-row gap-2 w-full md:w-auto md:flex-wrap md:justify-end md:items-center">
+                                    <div class="flex flex-col gap-2 px-3 pb-3 md:px-6 md:flex-row md:flex-wrap md:justify-end md:items-stretch">
                                         <button type="button" x-show="customerSummary.user_exists" @click="toggleAiPaused()"
-                                            class="flex-1 min-h-[44px] md:flex-none px-3 py-2 text-xs sm:text-sm font-semibold rounded-xl border shadow-sm transition-colors"
+                                            class="w-full min-h-[48px] md:w-auto md:max-w-[20rem] px-4 py-2.5 text-sm font-semibold rounded-xl border shadow-sm transition-colors touch-manipulation active:opacity-90"
                                             :class="customerSummary.ai_paused ? 'bg-slate-800 text-white border-slate-700 hover:bg-slate-700' : 'bg-violet-50 text-violet-800 border-violet-200 hover:bg-violet-100'"
                                             x-text="customerSummary.ai_paused ? 'Включить ИИ для клиента' : 'Заблокировать ИИ'"></button>
-                                        <div class="flex flex-col flex-1 min-w-0 md:flex-none md:items-end">
+                                        <div class="flex flex-col gap-1 w-full md:w-auto md:max-w-[20rem]">
                                             <button type="button" @click="toggleTakeover()"
                                                 title="Переключает режим диалога: пока включён перехват, бот не отвечает клиенту — вы пишете сами."
-                                                class="w-full min-h-[44px] md:w-auto px-3 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-colors shadow-sm"
+                                                class="w-full min-h-[48px] px-4 py-2.5 text-sm font-semibold rounded-xl transition-colors shadow-sm touch-manipulation active:opacity-90"
                                                 :class="chatIsBotActive() ? 'bg-orange-50 text-orange-700 hover:bg-orange-100 border border-orange-200' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200'"
                                                 x-text="chatIsBotActive() ? 'Перехватить диалог' : 'Вернуть ИИ'"></button>
-                                            <p x-show="activeChatState === 'human_mode'" class="hidden sm:block text-[10px] text-gray-400 max-w-[11rem] text-right leading-tight mt-0.5">Завершить помощь — снова отвечает бот</p>
+                                            <p x-show="activeChatState === 'human_mode'" class="text-[10px] text-gray-500 leading-snug text-center md:text-right px-0.5">Завершить помощь — снова отвечает бот</p>
                                         </div>
                                     </div>
                                 </div>
@@ -1204,13 +1221,11 @@
                                     <template x-for="(msg, idx) in chatMessages" :key="msg.id != null ? 'm-' + msg.id : 'i-' + idx">
                                         <div class="flex w-full msg-new"
                                             :class="msg.role === 'user' ? 'justify-start' : 'justify-end'">
-                                            <!-- Клиент: слева -->
                                             <div x-show="msg.role === 'user'"
                                                 class="bg-white border border-gray-100 text-gray-800 px-4 py-3 rounded-2xl rounded-tl-md max-w-[85%] sm:max-w-[70%] shadow-sm">
                                                 <p class="text-sm whitespace-pre-line" x-text="msg.content"></p>
                                                 <span class="text-[10px] text-gray-400 mt-1 block tabular-nums" x-text="fmt.time(msg.created_at)"></span>
                                             </div>
-                                            <!-- Ассистент / оператор / система: справа -->
                                             <div x-show="msg.role !== 'user'"
                                                 class="px-4 py-3 rounded-2xl rounded-tr-md max-w-[85%] sm:max-w-[70%] shadow-md"
                                                 :class="msg.role === 'operator' ? 'bg-amber-500 text-white shadow-amber-500/25' : 'bg-brand-600 text-white shadow-brand-600/25'">
@@ -1229,13 +1244,13 @@
                                                         :title="chatDeliveryTitle(msg)"
                                                         x-text="chatDeliveryMark(msg)"></span>
                                                 </div>
-                                </div>
-                            </div>
-                        </template>
+                                            </div>
+                                        </div>
+                                    </template>
                                     <div x-show="chatMessages.length === 0" class="flex flex-col items-center justify-center py-16 text-gray-400">
                                         <p class="text-sm">Сообщений пока нет</p>
-                    </div>
-                </div>
+                                    </div>
+                                </div>
 
                                 <div class="p-4 bg-white border-t border-gray-100 shrink-0">
                                     <div class="relative">
@@ -1247,7 +1262,7 @@
                                             rows="2"></textarea>
                                         <button type="button" @click="sendOperatorMessage()"
                                             :disabled="chatIsBotActive() || !operatorInput.trim()"
-                                            class="absolute right-3 bottom-3 p-2.5 bg-brand-600 text-white rounded-xl hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-sm shadow-brand-600/20">
+                                            class="absolute right-3 bottom-3 min-h-[44px] min-w-[44px] inline-flex items-center justify-center p-2.5 bg-brand-600 text-white rounded-xl hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-sm shadow-brand-600/20 touch-manipulation active:opacity-90">
                                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path>
                                             </svg>

@@ -34,6 +34,10 @@ services:
           property: connectionString
       - key: SESSION_SECRET
         generateValue: true
+      # Опционально: явный публичный URL (без /admin). На Render обычно хватает RENDER_EXTERNAL_URL —
+      # приложение подставит его в public_base_url, если PUBLIC_BASE_URL не задан.
+      # - key: PUBLIC_BASE_URL
+      #   value: https://restomind.onrender.com
       - key: OPENAI_API_KEY
         sync: false
       - key: ADMIN_PASSWORD
