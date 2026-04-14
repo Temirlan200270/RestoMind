@@ -12,6 +12,7 @@ venv/
 
 # Локальные секреты и БД
 .env
+.openai_check.env
 *.db
 
 # Логи
