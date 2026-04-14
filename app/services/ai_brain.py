@@ -50,6 +50,12 @@ _FALLBACK_RESPONSE = AIBrainResponse(
     reply_text="Прошу прощения, у меня возникли технические сложности. Переключаю на оператора.",
 )
 
+
+def is_openai_fallback_escalation_reply(reply_text: str) -> bool:
+    """True, если ответ совпадает с запасным при сбое OpenAI (квота, сеть и т.д.)."""
+    return (reply_text or "").strip() == _FALLBACK_RESPONSE.reply_text.strip()
+
+
 VOICE_FROM_WHISPER_INSTRUCTION = (
     "Клиент прислал голосовое в WhatsApp; ниже — распознанный текст (Whisper). "
     "Определи намерение и заполни AIBrainResponse. "

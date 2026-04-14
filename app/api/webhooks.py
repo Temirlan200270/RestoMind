@@ -25,11 +25,16 @@ from app.core.rate_limiter import check_rate_limit
 from app.db.models import ChatLog, EscalationEvent, FailedTask, Order, OrderStatus, User
 from app.db.session import async_session_factory, redis_client
 from app.integrations.iiko_client import IikoClient
-from app.integrations.telegram import send_tg_fallback_alert
+from app.integrations.telegram import EscalationAlertExtras, send_tg_fallback_alert
 from app.integrations.twilio_client import verify_twilio_signature
 from app.integrations.twilio_media import mulaw_8k_to_wav
 from app.integrations.whatsapp import download_media_bytes, send_template, send_voice_message
-from app.services.ai_brain import call_openai, call_openai_with_audio, openai_transcribe_voice
+from app.services.ai_brain import (
+    call_openai,
+    call_openai_with_audio,
+    is_openai_fallback_escalation_reply,
+    openai_transcribe_voice,
+)
 from app.services.chat_delivery import apply_whatsapp_status_webhook
 from app.services.customer_context import build_customer_context
 from app.services.customer_reply import (
@@ -785,6 +790,7 @@ async def process_message(
             await append_to_history(redis_client, phone, "user", message_text)
 
         outbound_id_chat: int | None = None
+        tg_alert_ctx: EscalationAlertExtras | None = None
         async with async_session_factory() as db:
             menu_items = await load_available_menu(db)
             menu_context = build_menu_context(menu_items)
@@ -877,6 +883,28 @@ async def process_message(
                         reason=(result.reply_text or "")[:2000],
                     ),
                 )
+                draft_total_str: str | None = None
+                if draft_row is not None and draft_row.total_price is not None:
+                    try:
+                        n = float(draft_row.total_price)
+                        draft_total_str = f"{n:,.0f}".replace(",", " ") + " \u20b8"
+                    except (TypeError, ValueError):
+                        draft_total_str = str(draft_row.total_price)
+                p_ord = await get_pending_order(redis_client, phone)
+                p_book = await get_pending_booking(redis_client, phone)
+                tg_alert_ctx = EscalationAlertExtras(
+                    intent=ai_response.intent,
+                    fsm_state=state.value,
+                    had_voice=had_voice,
+                    detected_language=ai_response.detected_language,
+                    draft_order_id=draft_row.id if draft_row else None,
+                    draft_order_total=draft_total_str,
+                    customer_name=(u_row.name or "").strip() or None if u_row else None,
+                    technical_fallback=is_openai_fallback_escalation_reply(result.reply_text),
+                    outbound_chat_log_id=outbound_id_chat,
+                    pending_order_id=p_ord,
+                    pending_booking_id=p_book,
+                )
             await db.commit()
 
         await append_to_history(redis_client, phone, "assistant", result.reply_text)
@@ -911,7 +939,12 @@ async def process_message(
                 "intent": ai_response.intent,
             })
             try:
-                await send_tg_fallback_alert(phone, user_log_text, result.reply_text)
+                await send_tg_fallback_alert(
+                    phone,
+                    user_log_text,
+                    result.reply_text,
+                    extras=tg_alert_ctx,
+                )
             except Exception as tg_exc:
                 logger.warning("Telegram fallback alert не отправлен: %s", tg_exc)
 
