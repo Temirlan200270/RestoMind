@@ -335,6 +335,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception:
             pass
 
+    # Меню: теги сочетаемости для ИИ (§4.2); create_all не добавляет колонки в существующие таблицы
+    try:
+        async with async_engine.begin() as conn:
+            if settings.db_mode == "sqlite":
+                await conn.execute(text("ALTER TABLE menu_items ADD COLUMN tags TEXT DEFAULT ''"))
+            else:
+                await conn.execute(
+                    text("ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS tags TEXT DEFAULT ''"),
+                )
+    except Exception:
+        pass
+
     await init_redis_or_fallback()
 
     stop_list_task = asyncio.create_task(_stop_list_sync_loop())

@@ -1,5 +1,5 @@
 """
-Тесты AI Brain: fallback поведение, валидация ответов.
+Тесты AI Brain: fallback, валидация ответов (мок OpenAI).
 """
 
 import pytest
@@ -48,7 +48,7 @@ async def test_openai_returns_valid_response() -> None:
         return_value=_completion_with_parsed(parsed=parsed),
     )
 
-    with patch("app.services.ai_brain._openai_client", mock_client):
+    with patch("app.services.ai_brain._ensure_openai_client", return_value=mock_client):
         result = await call_openai([], "Когда вы работаете?")
 
     assert isinstance(result, AIBrainResponse)
@@ -64,7 +64,7 @@ async def test_openai_invalid_json_triggers_retry() -> None:
         return_value=_completion_with_parsed(content="это не JSON вообще"),
     )
 
-    with patch("app.services.ai_brain._openai_client", mock_client):
+    with patch("app.services.ai_brain._ensure_openai_client", return_value=mock_client):
         result = await call_openai([], "Привет")
 
     assert result.intent == "escalate"
@@ -76,7 +76,7 @@ async def test_openai_exception_triggers_fallback() -> None:
     mock_client = MagicMock()
     mock_client.beta.chat.completions.parse = AsyncMock(side_effect=RuntimeError("API down"))
 
-    with patch("app.services.ai_brain._openai_client", mock_client):
+    with patch("app.services.ai_brain._ensure_openai_client", return_value=mock_client):
         result = await call_openai([], "Привет")
 
     assert result.intent == "escalate"
@@ -90,7 +90,7 @@ async def test_openai_empty_response_retries() -> None:
         return_value=_completion_with_parsed(parsed=None, content=""),
     )
 
-    with patch("app.services.ai_brain._openai_client", mock_client):
+    with patch("app.services.ai_brain._ensure_openai_client", return_value=mock_client):
         result = await call_openai([], "Привет")
 
     assert result.intent == "escalate"
@@ -109,7 +109,7 @@ async def test_openai_order_response_with_items() -> None:
         return_value=_completion_with_parsed(parsed=parsed),
     )
 
-    with patch("app.services.ai_brain._openai_client", mock_client):
+    with patch("app.services.ai_brain._ensure_openai_client", return_value=mock_client):
         result = await call_openai([], "Хочу 2 плова")
 
     assert result.intent == "order"
@@ -129,14 +129,14 @@ async def test_openai_menu_context_injected() -> None:
         return_value=_completion_with_parsed(parsed=parsed),
     )
 
-    with patch("app.services.ai_brain._openai_client", mock_client):
-        await call_openai([], "What is on the menu?", menu_context="- Plov: 2790 KZT")
+    with patch("app.services.ai_brain._ensure_openai_client", return_value=mock_client):
+        await call_openai([], "Что есть?", menu_context="- Плов: 2790 ₸")
 
-        call_args = mock_client.beta.chat.completions.parse.call_args
-        messages = call_args.kwargs["messages"]
-        system_text = messages[0]["content"]
+    call_args = mock_client.beta.chat.completions.parse.call_args
+    messages = call_args.kwargs["messages"]
+    system_text = messages[0]["content"]
 
-        assert "Plov" in system_text
+    assert "Плов" in system_text
 
 
 @pytest.mark.asyncio
@@ -154,7 +154,7 @@ async def test_openai_with_audio_returns_valid_response() -> None:
         return_value=MagicMock(text="хочу столик"),
     )
 
-    with patch("app.services.ai_brain._openai_client", mock_client):
+    with patch("app.services.ai_brain._ensure_openai_client", return_value=mock_client):
         result = await call_openai_with_audio(
             [{"role": "user", "content": "Привет"}],
             b"\x00fake",

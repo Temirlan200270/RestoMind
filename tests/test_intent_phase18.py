@@ -92,6 +92,55 @@ async def test_route_intent_saves_upsell_in_order_meta(db_with_menu: AsyncSessio
 
 
 @pytest.mark.asyncio
+async def test_route_intent_upsell_trace_marks_accepted_on_follow_up(db_with_menu: AsyncSession) -> None:
+    """§4.8: трасса не теряется между сообщениями; принятие фиксируется по offered_iiko_id."""
+    phone = "+77007776655"
+    menu = await load_available_menu(db_with_menu)
+    r1 = await route_intent(
+        db_with_menu,
+        phone,
+        AIBrainResponse(
+            intent="order",
+            reply_text="Плов в заказе, к нему советую капучино.",
+            items=[OrderItem(name="Плов", quantity=1, iiko_item_id="uuid-plov")],
+            order_type="delivery",
+            payment_method="cash",
+            delivery_address="ул. Тест 2",
+            is_recommendation=True,
+            upsell_offered="Капучино",
+            upsell_offered_id="uuid-cappuccino",
+            upsell_reasoning="К классике",
+        ),
+        menu_items=menu,
+    )
+    await db_with_menu.commit()
+    oid = r1.pending_order_id
+    assert oid is not None
+
+    await route_intent(
+        db_with_menu,
+        phone,
+        AIBrainResponse(
+            intent="order",
+            reply_text="Добавил капучино.",
+            items=[],
+            order_actions=[OrderAction(item_id="Капучино", action="add", quantity=1)],
+            order_type="delivery",
+            payment_method="cash",
+        ),
+        menu_items=menu,
+    )
+    await db_with_menu.commit()
+    order = await db_with_menu.get(Order, oid)
+    assert order is not None
+    meta = (order.items_json or {}).get("order_meta") or {}
+    trace = meta.get("recommendation_trace")
+    assert isinstance(trace, list) and len(trace) >= 1
+    assert trace[0].get("accepted") is True
+    assert float(trace[0].get("accepted_revenue_kzt") or 0) >= 1190.0 - 1
+
+
+@pytest.mark.asyncio
 async def test_get_open_draft_order_none_for_new_phone(db_with_menu: AsyncSession) -> None:
     assert await get_open_draft_order(db_with_menu, "+77000000001") is None
 

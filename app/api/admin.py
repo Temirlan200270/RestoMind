@@ -11,6 +11,7 @@ import logging
 import secrets
 import uuid
 from collections import defaultdict
+from typing import Literal
 from datetime import date, datetime, time as dt_time, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
@@ -41,6 +42,7 @@ from app.db.session import async_session_factory, get_db, redis_client
 from app.integrations.whatsapp import send_message
 from app.services.admin_tokens import create_admin_ws_token, parse_admin_ws_token
 from app.services.ai_brain import call_openai
+from app.services.customer_context import build_customer_context
 from app.services.demo_data import clear_demo_data, demo_data_exists, seed_demo_data
 from app.services.integration_health import (
     build_status_payload,
@@ -84,8 +86,24 @@ from app.services.order_logic import (
     validate_order,
 )
 from app.services.sales_strategy import build_sales_strategy, format_strategy_for_prompt
+from app.services.intelligence_analytics import delivery_geo_rows, menu_engineering_rows
+from app.api.webhooks import _normalize_phone_e164
 
 logger = logging.getLogger(__name__)
+
+
+def _pick_seed_menu_item(menu_items: list[MenuItem]) -> MenuItem | None:
+    """Первая доступная позиция без обязательного выбора упаковки плова 1 кг."""
+    for mi in menu_items:
+        if not mi.is_available:
+            continue
+        pk = classify_packaging_kind(mi.name or "", mi.category or "")
+        if pk != "plov_1kg":
+            return mi
+    for mi in menu_items:
+        if mi.is_available:
+            return mi
+    return None
 
 
 def _credentials_ok(username: str, password: str) -> bool:
@@ -207,6 +225,49 @@ def _order_meta_from_items_json(items_json: dict | None) -> dict:
         return {}
     raw = items_json.get("order_meta")
     return raw if isinstance(raw, dict) else {}
+
+
+def _upsell_stats_from_items_json(items_json: dict | None) -> tuple[int, int, float]:
+    """
+    §4.8: число предложений допродаж, принятий и сумма по accepted_revenue_kzt за заказ.
+    Считает события в recommendation_trace; без трассы — fallback на recommendation + имя в позициях.
+    """
+    if not isinstance(items_json, dict):
+        return 0, 0, 0.0
+    meta = _order_meta_from_items_json(items_json)
+    trace = meta.get("recommendation_trace")
+    offers = 0
+    accepts = 0
+    revenue = 0.0
+    if isinstance(trace, list) and trace:
+        for ev in trace:
+            if not isinstance(ev, dict):
+                continue
+            if ev.get("offered") or ev.get("offered_iiko_id"):
+                offers += 1
+            if ev.get("accepted") is True:
+                accepts += 1
+                revenue += float(ev.get("accepted_revenue_kzt") or 0)
+        return offers, accepts, revenue
+    rec = meta.get("recommendation")
+    if isinstance(rec, dict) and (rec.get("offered") or rec.get("offered_iiko_id")):
+        offers = 1
+        if rec.get("accepted") is True:
+            accepts = 1
+            revenue += float(rec.get("accepted_revenue_kzt") or 0)
+        else:
+            off = str(rec.get("offered") or "").strip().lower()
+            items = items_json.get("items")
+            if off and isinstance(items, list):
+                for it in items:
+                    if not isinstance(it, dict):
+                        continue
+                    nm = str(it.get("name") or "").lower()
+                    if off and off in nm:
+                        accepts = 1
+                        break
+        return offers, accepts, revenue
+    return 0, 0, 0.0
 
 
 def _check_mixed_payment_split(items_json: dict | None, total_price: float, *, tol: float = 1.0) -> str | None:
@@ -406,6 +467,35 @@ class OrderRebuildDraftBody(BaseModel):
     )
 
 
+class OrderPaymentSplitPatchBody(BaseModel):
+    """Ручная правка способа оплаты в order_meta (после смены состава и т.п.)."""
+
+    payment_mode: Literal["single", "mixed"]
+    payment_method: Literal["cash", "card", "remote"] = "cash"
+    split_cash: float = Field(0.0, ge=0)
+    split_card: float = Field(0.0, ge=0)
+    split_remote: float = Field(0.0, ge=0)
+    expected_version: int | None = Field(
+        default=None,
+        description="Ожидаемая row_version; при рассинхроне — 409.",
+    )
+
+
+class AdminManualOrderBody(BaseModel):
+    """Создание черновика заказа из админки (тесты и ручной ввод)."""
+
+    phone: str = Field(..., min_length=8, max_length=32)
+    order_type: Literal["delivery", "pickup", "hall"] = "pickup"
+    payment_mode: Literal["single", "mixed"] = "single"
+    payment_method: Literal["cash", "card", "remote"] = "cash"
+    split_cash: float = Field(0.0, ge=0)
+    split_card: float = Field(0.0, ge=0)
+    split_remote: float = Field(0.0, ge=0)
+    delivery_address: str = ""
+    pickup_time_note: str = ""
+    food_lines: list[AdminFoodLineIn] = Field(default_factory=list)
+
+
 class FailedTaskPatchBody(BaseModel):
     resolved: bool = False
 
@@ -538,7 +628,7 @@ async def patch_order_status(
 
     # Подтверждён, но iiko не принял — повторная отправка на кухню
     if cur == OrderStatus.CONFIRMED.value and want == OrderStatus.SENT_TO_IIKO.value:
-        sent_to_iiko, iiko_err = await _send_order_to_iiko(
+        sent_to_iiko, iiko_err, iiko_raw = await _send_order_to_iiko(
             order_id=order.id,
             phone=phone,
             items_json=order.items_json,
@@ -546,6 +636,19 @@ async def patch_order_status(
         if sent_to_iiko:
             order.status = OrderStatus.SENT_TO_IIKO.value
             order.iiko_last_error = None
+            if iiko_raw and isinstance(order.items_json, dict):
+                ij = dict(order.items_json)
+                raw_om = ij.get("order_meta")
+                om: dict = dict(raw_om) if isinstance(raw_om, dict) else {}
+                oi = iiko_raw.get("orderInfo") if isinstance(iiko_raw.get("orderInfo"), dict) else {}
+                om["iiko_last_send"] = {
+                    "correlation_id": iiko_raw.get("correlationId"),
+                    "iiko_order_id": oi.get("id"),
+                    "external_number": str(order.id),
+                    "sent_at": datetime.now(timezone.utc).isoformat(),
+                }
+                ij["order_meta"] = om
+                order.items_json = ij
             await db.commit()
             return await _emit(order)
         if iiko_err:
@@ -622,15 +725,21 @@ async def rebuild_order_draft(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """
-    Пересборка позиций черновика: validate_order → finalize_order_draft.
-    Сохраняет тип доставки/оплату из order_meta; recommendation не затирается.
+    Пересборка позиций заказа: validate_order → finalize_order_draft (fee_lines, доставка, и т.д.).
+    Сохраняет тип доставки/оплату из order_meta; recommendation_trace не затирается.
+
+    Доступно для **draft** и **confirmed** (правка до отправки в iiko). После **sent_to_iiko** — нельзя.
     """
     res = await db.execute(select(Order).where(Order.id == order_id))
     order = res.scalar_one_or_none()
     if order is None:
         raise HTTPException(status_code=404, detail="Заказ не найден")
-    if (order.status or "").lower() != OrderStatus.DRAFT.value:
-        raise HTTPException(status_code=400, detail="Пересборка доступна только для статуса draft")
+    st = (order.status or "").lower()
+    if st not in (OrderStatus.DRAFT.value, OrderStatus.CONFIRMED.value):
+        raise HTTPException(
+            status_code=400,
+            detail="Пересборка доступна только для черновика или подтверждённого заказа (до отправки в iiko).",
+        )
     if body.expected_version is not None and int(order.row_version) != int(body.expected_version):
         raise HTTPException(
             status_code=409,
@@ -693,6 +802,223 @@ async def rebuild_order_draft(
     return {
         "ok": True,
         "id": order.id,
+        "total_price": float(order.total_price),
+        "row_version": int(order.row_version),
+        "items_json": merged,
+        "payment_split_warning": split_warn,
+    }
+
+
+@router.patch("/orders/{order_id}/payment-split")
+async def patch_order_payment_split(
+    order_id: int,
+    body: OrderPaymentSplitPatchBody,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    Ручная правка способа оплаты в order_meta после смены суммы (состав, доставка и т.п.).
+    """
+    res = await db.execute(select(Order).where(Order.id == order_id))
+    order = res.scalar_one_or_none()
+    if order is None:
+        raise HTTPException(status_code=404, detail="Заказ не найден")
+    st = (order.status or "").lower()
+    if st not in (OrderStatus.DRAFT.value, OrderStatus.CONFIRMED.value):
+        raise HTTPException(
+            status_code=400,
+            detail="Правка оплаты доступна только для черновика или подтверждённого заказа (до отправки в iiko).",
+        )
+    if body.expected_version is not None and int(order.row_version) != int(body.expected_version):
+        raise HTTPException(
+            status_code=409,
+            detail="Заказ изменился в другом окне. Обновите список и повторите.",
+        )
+    ij = order.items_json if isinstance(order.items_json, dict) else {}
+    meta = dict(_order_meta_from_items_json(ij))
+    grand_total = float(order.total_price or 0)
+
+    pm = body.payment_mode
+    pay_m = body.payment_method
+    if pay_m not in ("cash", "card", "remote"):
+        pay_m = "cash"
+
+    if pm == "mixed":
+        ps = PaymentSplit(
+            cash=float(body.split_cash),
+            card=float(body.split_card),
+            remote=float(body.split_remote),
+        )
+        ai_chk = AIBrainResponse(
+            intent="order",
+            reply_text="",
+            items=[],
+            order_type=str(meta.get("order_type") or "pickup"),
+            payment_mode="mixed",
+            payment_method=pay_m,
+            payment_split=ps,
+        )
+        mix_err = validate_mixed_payment_total(ai_chk, grand_total)
+        if mix_err:
+            raise HTTPException(status_code=400, detail=mix_err)
+        pay_details: dict[str, object] = {
+            "type": "mixed",
+            "split": {
+                "cash": float(ps.cash),
+                "card": float(ps.card),
+                "remote": float(ps.remote),
+            },
+        }
+    else:
+        pay_details = {"type": "single", "method": pay_m}
+
+    meta["payment_mode"] = pm
+    meta["payment_method"] = pay_m
+    meta["payment_details"] = pay_details
+
+    new_ij = dict(ij)
+    new_ij["order_meta"] = meta
+    order.items_json = new_ij
+    order.row_version = int(order.row_version) + 1
+    await db.commit()
+    await db.refresh(order)
+    split_warn = _check_mixed_payment_split(new_ij, grand_total)
+    return {
+        "ok": True,
+        "id": order.id,
+        "row_version": int(order.row_version),
+        "items_json": new_ij,
+        "payment_split_warning": split_warn,
+    }
+
+
+@router.post("/orders/manual")
+async def create_manual_order(
+    body: AdminManualOrderBody,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    Создать черновик заказа из админки (тест / ручной ввод).
+    Без позиций — одна «безопасная» строка из меню (не плов 1 кг без упаковки).
+    """
+    raw_phone = (body.phone or "").strip()
+    phone = _normalize_phone_e164(raw_phone)
+    if not phone:
+        raise HTTPException(status_code=400, detail="Некорректный номер телефона")
+
+    existing = await get_open_draft_order(db, phone)
+    if existing is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"У этого номера уже есть открытый черновик заказа №{existing.id}. "
+                "Завершите или отмените его."
+            ),
+        )
+
+    user = await get_or_create_user(db, phone)
+    menu_items = await load_available_menu(db)
+    rules = await load_packaging_rules(db)
+
+    items_in: list[OrderItem] = []
+    if body.food_lines:
+        for line in body.food_lines:
+            pkg_raw = (line.packaging_plov_1kg or "").strip()
+            if pkg_raw not in ("", "tabak", "foil_kazan"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Недопустимое packaging_plov_1kg для «{line.name}» "
+                        "(ожидается tabak, foil_kazan или пусто)."
+                    ),
+                )
+            items_in.append(
+                OrderItem(
+                    name=line.name.strip(),
+                    quantity=line.quantity,
+                    iiko_item_id=(line.iiko_item_id or "").strip(),
+                    packaging_plov_1kg=pkg_raw,  # type: ignore[arg-type]
+                    exclude_ingredients=list(line.exclude_ingredients or []),
+                ),
+            )
+    else:
+        seed = _pick_seed_menu_item(menu_items)
+        if seed is None:
+            raise HTTPException(
+                status_code=400,
+                detail="В меню нет доступных позиций для тестового заказа.",
+            )
+        items_in.append(
+            OrderItem(
+                name=(seed.name or "").strip(),
+                quantity=1,
+                iiko_item_id=(seed.iiko_item_id or "").strip(),
+                packaging_plov_1kg="",
+                exclude_ingredients=[],
+            ),
+        )
+
+    validated = await validate_order(items_in, db=db)
+    if validated.unknown_items:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Не найдено в меню: {', '.join(validated.unknown_items)}",
+        )
+    for vi in validated.valid_items:
+        pk = classify_packaging_kind(str(vi.get("name", "")), str(vi.get("category", "")))
+        if pk == "plov_1kg":
+            ch = (vi.get("packaging_plov_1kg") or "").strip()
+            if ch not in ("tabak", "foil_kazan"):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Для плова 1 кг укажите упаковку: tabak или foil_kazan в поле packaging_plov_1kg.",
+                )
+
+    pm_mode = body.payment_mode
+    pay_m = body.payment_method
+    if pay_m not in ("cash", "card", "remote"):
+        pay_m = "cash"
+    ps = PaymentSplit(
+        cash=float(body.split_cash),
+        card=float(body.split_card),
+        remote=float(body.split_remote),
+    )
+    ai = AIBrainResponse(
+        intent="order",
+        reply_text="",
+        items=[],
+        order_type=body.order_type,
+        payment_mode=pm_mode,
+        payment_method=pay_m,
+        payment_split=ps,
+        delivery_address=(body.delivery_address or "").strip(),
+        pickup_time_note=(body.pickup_time_note or "").strip(),
+    )
+    merged, grand_total = finalize_order_draft(validated, ai, packaging_rules=rules)
+    mix_err = validate_mixed_payment_total(ai, grand_total)
+    if mix_err:
+        raise HTTPException(status_code=400, detail=mix_err)
+
+    om = merged.get("order_meta") if isinstance(merged.get("order_meta"), dict) else {}
+    prepayment_status = (
+        "pending" if om.get("requires_order_prepayment") else "not_required"
+    )
+
+    order = Order(
+        user_id=user.id,
+        status=OrderStatus.DRAFT,
+        items_json=merged,
+        total_price=grand_total,
+        prepayment_status=prepayment_status,
+        row_version=1,
+    )
+    db.add(order)
+    await db.commit()
+    await db.refresh(order)
+    split_warn = _check_mixed_payment_split(merged, float(grand_total))
+    return {
+        "ok": True,
+        "id": order.id,
+        "phone": phone,
         "total_price": float(order.total_price),
         "row_version": int(order.row_version),
         "items_json": merged,
@@ -1226,6 +1552,7 @@ def _menu_item_dict(item: MenuItem) -> dict:
         "name": item.name,
         "category": item.category or "",
         "description": item.description or "",
+        "tags": item.tags or "",
         "price": float(item.price),
         "is_available": item.is_available,
         "image_url": item.image_url,
@@ -1238,6 +1565,7 @@ class MenuItemPatchBody(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=255)
     category: str | None = Field(None, max_length=100)
     description: str | None = None
+    tags: str | None = None
     price: float | None = Field(None, ge=0)
     is_available: bool | None = None
     image_url: str | None = Field(None, max_length=500)
@@ -1255,6 +1583,7 @@ class MenuItemCreateBody(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     category: str = Field(default="", max_length=100)
     description: str = ""
+    tags: str = ""
     price: float = Field(0, ge=0)
     is_available: bool = True
     image_url: str | None = Field(None, max_length=500)
@@ -1298,6 +1627,7 @@ async def create_menu_item(
         name=body.name.strip(),
         category=(body.category or "").strip(),
         description=(body.description or "").strip(),
+        tags=(body.tags or "").strip(),
         price=body.price,
         is_available=body.is_available,
         image_url=(body.image_url or "").strip() or None,
@@ -1326,6 +1656,8 @@ async def patch_menu_item(
         data["category"] = data["category"].strip()
     if "description" in data and data["description"] is not None:
         data["description"] = data["description"].strip()
+    if "tags" in data and data["tags"] is not None:
+        data["tags"] = data["tags"].strip()
     if "image_url" in data:
         url = (data["image_url"] or "").strip()
         data["image_url"] = url if url else None
@@ -2245,23 +2577,12 @@ async def dashboard_stats(
     )
     upsell_offered_today = 0
     upsell_accepted_today = 0
+    upsell_revenue_today = 0.0
     for (ij,) in upsell_rows.all():
-        meta = _order_meta_from_items_json(ij if isinstance(ij, dict) else None)
-        rec = meta.get("recommendation") if isinstance(meta.get("recommendation"), dict) else {}
-        off = str(rec.get("offered") or "").strip()
-        if not off:
-            continue
-        upsell_offered_today += 1
-        items = (ij or {}).get("items") if isinstance(ij, dict) else None
-        if isinstance(items, list):
-            off_l = off.lower()
-            for it in items:
-                if not isinstance(it, dict):
-                    continue
-                nm = str(it.get("name") or "").lower()
-                if off_l and off_l in nm:
-                    upsell_accepted_today += 1
-                    break
+        o, a, rev = _upsell_stats_from_items_json(ij if isinstance(ij, dict) else None)
+        upsell_offered_today += o
+        upsell_accepted_today += a
+        upsell_revenue_today += rev
 
     upsell_conversion_pct: float | None = None
     if upsell_offered_today > 0:
@@ -2294,6 +2615,7 @@ async def dashboard_stats(
         "failed_tasks_open": failed_open,
         "upsell_offered_today": upsell_offered_today,
         "upsell_accepted_today": upsell_accepted_today,
+        "upsell_revenue_today": round(upsell_revenue_today, 2),
         "upsell_conversion_pct": upsell_conversion_pct,
         "iiko_errors_today": iiko_errors_today,
     }
@@ -2515,6 +2837,34 @@ async def analytics(
         round(100.0 * auto_cnt / funnel_finished, 1) if funnel_finished else None
     )
 
+    broad_total_cnt = int(
+        await db.scalar(
+            select(func.count(Order.id)).where(
+                not_cancelled,
+                Order.created_at >= start_sql,
+                Order.created_at <= end_sql,
+            ),
+        )
+        or 0,
+    )
+    broad_auto_cnt = int(
+        await db.scalar(
+            select(func.count(Order.id)).where(
+                not_cancelled,
+                Order.created_at >= start_sql,
+                Order.created_at <= end_sql,
+                ~op_exists,
+            ),
+        )
+        or 0,
+    )
+    automation_broad_pct = (
+        round(100.0 * broad_auto_cnt / broad_total_cnt, 1) if broad_total_cnt else None
+    )
+
+    menu_engineering = menu_engineering_rows(current_orders)
+    delivery_geo = delivery_geo_rows(current_orders)
+
     heatmap_matrix = [[0 for _ in range(24)] for _ in range(7)]
     for o in current_orders:
         dt = o.created_at
@@ -2572,7 +2922,12 @@ async def analytics(
             "rate_pct": automation_rate,
             "finished_without_operator": auto_cnt,
             "finished_total": funnel_finished,
+            "broad_rate_pct": automation_broad_pct,
+            "orders_without_operator": broad_auto_cnt,
+            "orders_total": broad_total_cnt,
         },
+        "menu_engineering": menu_engineering,
+        "delivery_geo": delivery_geo,
         "heatmap": {
             "matrix": heatmap_matrix,
             "weekday_labels": ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"],
@@ -2711,6 +3066,7 @@ async def test_bot(body: TextRequest) -> dict:
         menu_context = build_menu_context(menu_items)
         u_row = await db.scalar(select(User).where(User.phone == phone))
         org_id = u_row.organization_id if u_row else None
+        customer_ctx = await build_customer_context(db, u_row)
         kb_context = await load_knowledge_context_block(db, org_id)
         draft_row = await get_open_draft_order(db, phone)
         draft_ctx = format_draft_order_context_for_prompt(
@@ -2735,6 +3091,7 @@ async def test_bot(body: TextRequest) -> dict:
             kb_context,
             draft_order_context=draft_ctx,
             sales_strategy_context=strategy_ctx,
+            customer_context=customer_ctx,
         )
         result = await route_intent(
             db, phone, ai_response, menu_items=menu_items,

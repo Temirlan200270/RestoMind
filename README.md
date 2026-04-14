@@ -1,6 +1,6 @@
 # RestoMind
 
-AI-оператор для ресторана: принимает заказы и бронирует столики через WhatsApp, используя **OpenAI** (structured output по схеме Pydantic; голос — **Whisper**) для понимания естественной речи. Интегрируется с **iiko** для синхронизации меню и отправки заказов на кухню.
+AI-оператор для ресторана: принимает заказы и бронирует столики через WhatsApp, используя **OpenAI** (structured output по схеме `AIBrainResponse`; голос — **Whisper**) для понимания естественной речи. Интегрируется с **iiko** для синхронизации меню и отправки заказов на кухню.
 
 Подробный список изменений и возможностей — в [CHANGELOG.md](CHANGELOG.md). Архитектура, соглашения по коду и идеи развития — в [plan.md](plan.md).
 
@@ -22,7 +22,7 @@ AI-оператор для ресторана: принимает заказы �
 | Backend | Python 3.11+, FastAPI |
 | Database | PostgreSQL / SQLite (dev), SQLAlchemy 2.0, **Alembic** |
 | Cache | Redis (опционально, есть in-memory fallback) |
-| AI | OpenAI (`gpt-4o-mini` по умолчанию) + Whisper для STT |
+| AI | OpenAI (`gpt-4o-mini`, env `OPENAI_MODEL`), structured output + Whisper (`OPENAI_TRANSCRIPTION_MODEL`); опц. `OPENAI_BASE_URL` |
 | Интеграции | Meta WhatsApp API, iiko Cloud API |
 | Админка | Jinja2 + Alpine.js + Tailwind CSS + Chart.js |
 | Тесты | pytest, pytest-asyncio (`tests/`, ~25 тестов) |

@@ -92,7 +92,35 @@ def _offered_names(meta: dict) -> set[str]:
     return {x for x in s if x}
 
 
+def _offered_iiko_ids(meta: dict) -> set[str]:
+    """UUID уже предложенных допродаж (из recommendation / trace)."""
+    s: set[str] = set()
+    rec = meta.get("recommendation")
+    if isinstance(rec, dict):
+        oid = (rec.get("offered_iiko_id") or "").strip().lower()
+        if oid:
+            s.add(oid)
+    tr = meta.get("recommendation_trace")
+    if isinstance(tr, list):
+        for e in tr:
+            if not isinstance(e, dict):
+                continue
+            oid = (e.get("offered_iiko_id") or "").strip().lower()
+            if oid:
+                s.add(oid)
+    return s
+
+
+def _rejected_iiko_ids(meta: dict) -> set[str]:
+    """UUID отказов по допродажам (order_meta.upsell_rejected_iiko_ids)."""
+    raw = meta.get("upsell_rejected_iiko_ids")
+    if not isinstance(raw, list):
+        return set()
+    return {str(x).strip().lower() for x in raw if str(x).strip()}
+
+
 def _rejected_names(meta: dict) -> set[str]:
+    """Legacy: строковые отказы в upsell_rejected (имена), до внедрения UUID."""
     raw = meta.get("upsell_rejected")
     if not isinstance(raw, list):
         return set()
@@ -150,7 +178,11 @@ def build_sales_strategy(
 
     offered = _offered_names(meta)
     rejected = _rejected_names(meta)
-    skip_iiko = _cart_iiko_ids(cart_items)
+    skip_iiko = (
+        _cart_iiko_ids(cart_items)
+        | _offered_iiko_ids(meta)
+        | _rejected_iiko_ids(meta)
+    )
     skip_names = offered | rejected
 
     if not cart_items:

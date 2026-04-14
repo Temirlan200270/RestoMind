@@ -47,7 +47,7 @@ None (single package).
 **auth:** Session-based (admin login) + WhatsApp phone number as user identifier  
 **build:** Alembic migrations (PostgreSQL), Tailwind CSS compiler  
 **services:**
-- `ai_brain.py` → OpenAI API call with structured output (AIBrainResponse)
+- `ai_brain.py` → OpenAI Chat Completions (parse) with structured output (AIBrainResponse)
 - `intent_router.py` → map AI intent (order, book, faq, escalate) → business logic
 - `dialog_mgr.py` → user conversation state (Redis/in-memory, history, pending actions)
 - `order_logic.py` → order validation, pricing (container, delivery fee), JSON serialization
@@ -147,7 +147,7 @@ High-signal directories:
 - `DB_` (db_mode, database_url_dsn)
 - `POSTGRES_` (user, password, host, port, db)
 - `REDIS_` (enabled, host, port, db)
-- `OPENAI_` (api_key, model, transcription_model)
+- `OPENAI_` (api_key, model, transcription_model, base_url)
 - `WHATSAPP_` (api_token, verify_token, phone_number_id, public_base_url)
 - `TELEGRAM_` (bot_token, admin_chat_id)
 - `IIKO_` (api_login, organization_id, terminal_group_id, product_ids, menu_sync_only_dish_good)

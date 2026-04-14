@@ -2,8 +2,10 @@
 AI Brain — ядро интеллекта бота.
 Асинхронный вызов OpenAI (Chat Completions + structured output) с возвратом Pydantic-схемы.
 Включает retry при сбоях и fallback при невалидном ответе.
-Голос: Whisper (transcriptions) + тот же structured chat; мультимодальный один запрос не используется.
+Голос: Whisper (transcriptions) + structured chat; опционально OPENAI_BASE_URL для прокси/Azure.
 """
+
+from __future__ import annotations
 
 import io
 import logging
@@ -14,24 +16,29 @@ from pydantic import ValidationError
 
 from app.core.config import settings
 from app.schemas.ai_schemas import AIBrainResponse
-from app.services.order_logic import format_draft_order_context_for_prompt
 from app.services.prompts import RESTAURANT_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
-# Ленивая инициализация: при импорте модуля ключа может не быть (CI, тесты).
 _openai_client: AsyncOpenAI | None = None
+_cached_openai_key: str = ""
+_cached_openai_base: str = ""
 
 
 def _ensure_openai_client() -> AsyncOpenAI | None:
-    """Возвращает клиент OpenAI или None, если ключ не задан."""
-    global _openai_client
-    if _openai_client is not None:
-        return _openai_client
-    key = settings.openai_api_key.strip()
+    """Клиент OpenAI или None, если ключ не задан. Пересоздаётся при смене ключа или base_url."""
+    global _openai_client, _cached_openai_key, _cached_openai_base
+    key = (settings.openai_api_key or "").strip()
     if not key:
         return None
-    _openai_client = AsyncOpenAI(api_key=key)
+    base = (settings.openai_base_url or "").strip()
+    if _openai_client is None or _cached_openai_key != key or _cached_openai_base != base:
+        _cached_openai_key = key
+        _cached_openai_base = base
+        kw: dict[str, Any] = {"api_key": key}
+        if base:
+            kw["base_url"] = base
+        _openai_client = AsyncOpenAI(**kw)
     return _openai_client
 
 
@@ -52,7 +59,7 @@ VOICE_FROM_WHISPER_INSTRUCTION = (
 
 
 def normalize_audio_mime(mime: str) -> str:
-    """Нормализует MIME (убирает codecs=..., дефолт для неизвестного)."""
+    """Нормализует MIME для Whisper (убирает codecs=..., дефолт для неизвестного)."""
     base = (mime or "").split(";")[0].strip().lower()
     if not base or base == "application/octet-stream":
         return "audio/ogg"
@@ -83,8 +90,14 @@ def _system_prompt_with_context(
     kb_context: str,
     draft_order_context: str = "",
     sales_strategy_context: str = "",
+    customer_context: str = "",
 ) -> str:
     system_prompt = RESTAURANT_SYSTEM_PROMPT
+    if (customer_context or "").strip():
+        system_prompt += (
+            "\n\n# Досье гостя (только факты с сервера; для тона и узнавания)\n"
+            f"{customer_context.strip()}"
+        )
     if kb_context:
         system_prompt += f"\n\n# Справочник заведения (база знаний)\n{kb_context}"
     if menu_context:
@@ -125,13 +138,18 @@ async def call_openai(
     kb_context: str = "",
     draft_order_context: str = "",
     sales_strategy_context: str = "",
+    customer_context: str = "",
 ) -> AIBrainResponse:
     """
     Отправляет контекст диалога в OpenAI и получает структурированный ответ.
     При сбое — до MAX_RETRIES повторных попыток, затем fallback на escalate.
     """
     system_prompt = _system_prompt_with_context(
-        menu_context, kb_context, draft_order_context, sales_strategy_context,
+        menu_context,
+        kb_context,
+        draft_order_context,
+        sales_strategy_context,
+        customer_context=customer_context,
     )
     messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
     messages.extend(_history_to_openai_messages(history))
@@ -163,7 +181,9 @@ async def call_openai(
             if getattr(msg, "refusal", None):
                 logger.warning(
                     "OpenAI отказ (попытка %d/%d): %s",
-                    attempt, MAX_RETRIES, msg.refusal,
+                    attempt,
+                    MAX_RETRIES,
+                    msg.refusal,
                 )
                 last_error = ValueError("Model refusal")
                 continue
@@ -190,14 +210,18 @@ async def call_openai(
         except ValidationError as exc:
             logger.error(
                 "OpenAI: невалидная схема (попытка %d/%d): %s",
-                attempt, MAX_RETRIES, exc,
+                attempt,
+                MAX_RETRIES,
+                exc,
             )
             last_error = exc
 
         except (APIError, RateLimitError) as exc:
             logger.error(
                 "Ошибка API OpenAI (попытка %d/%d): %s",
-                attempt, MAX_RETRIES, exc,
+                attempt,
+                MAX_RETRIES,
+                exc,
                 exc_info=True,
             )
             last_error = exc
@@ -205,26 +229,25 @@ async def call_openai(
         except Exception as exc:
             logger.error(
                 "Ошибка при вызове OpenAI (попытка %d/%d): %s",
-                attempt, MAX_RETRIES, exc,
+                attempt,
+                MAX_RETRIES,
+                exc,
                 exc_info=True,
             )
             last_error = exc
 
     logger.error(
         "Все %d попыток вызова OpenAI провалились. Последняя ошибка: %s",
-        MAX_RETRIES, last_error,
+        MAX_RETRIES,
+        last_error,
     )
     return _FALLBACK_RESPONSE
 
 
 async def openai_transcribe_voice(audio_bytes: bytes, audio_mime: str) -> str:
-    """
-    Расшифровка голоса (Whisper): для Да/Нет, HUMAN_MODE и логов.
-    """
+    """Расшифровка голоса (Whisper): для Да/Нет, HUMAN_MODE и логов."""
     client = _ensure_openai_client()
-    if client is None:
-        return ""
-    if not audio_bytes:
+    if client is None or not audio_bytes:
         return ""
     fname = _whisper_filename(audio_mime)
     stt_model = _transcription_model()
@@ -241,7 +264,9 @@ async def openai_transcribe_voice(audio_bytes: bytes, audio_mime: str) -> str:
         except Exception as exc:
             logger.warning(
                 "openai_transcribe_voice попытка %d/%d: %s",
-                attempt, MAX_RETRIES, exc,
+                attempt,
+                MAX_RETRIES,
+                exc,
             )
     return ""
 
@@ -254,6 +279,7 @@ async def call_openai_with_audio(
     kb_context: str = "",
     draft_order_context: str = "",
     sales_strategy_context: str = "",
+    customer_context: str = "",
 ) -> AIBrainResponse:
     """
     Голосовой ввод: Whisper → structured chat с тем же контрактом AIBrainResponse.
@@ -289,6 +315,7 @@ async def call_openai_with_audio(
         kb_context,
         draft_order_context,
         sales_strategy_context,
+        customer_context=customer_context,
     )
     if result.recognized_speech is None or not str(result.recognized_speech).strip():
         return result.model_copy(update={"recognized_speech": transcript})

@@ -31,6 +31,7 @@ from app.integrations.twilio_media import mulaw_8k_to_wav
 from app.integrations.whatsapp import download_media_bytes, send_template, send_voice_message
 from app.services.ai_brain import call_openai, call_openai_with_audio, openai_transcribe_voice
 from app.services.chat_delivery import apply_whatsapp_status_webhook
+from app.services.customer_context import build_customer_context
 from app.services.customer_reply import (
     reset_twilio_call_context,
     send_customer_text,
@@ -67,8 +68,9 @@ from app.services.order_logic import (
     build_summary_text_from_stored_items,
     detect_payment_method_from_text,
     format_draft_order_context_for_prompt,
-    format_order_confirmation_summary,
+    format_whatsapp_order_card,
     load_available_menu,
+    merge_total_into_items_json,
 )
 from app.services.sales_strategy import build_sales_strategy, format_strategy_for_prompt
 from app.services.whatsapp_idempotency import try_claim_whatsapp_inbound_in_db
@@ -230,19 +232,19 @@ async def _send_order_to_iiko(
     order_id: int,
     phone: str,
     items_json: dict[str, Any] | None,
-) -> tuple[bool, str | None]:
+) -> tuple[bool, str | None, dict[str, Any] | None]:
     """
     Попытка отправить подтверждённый заказ в iiko.
 
     Returns:
-        (True, None) — успех.
-        (False, None) — iiko не настроен в .env (ошибку в БД не пишем).
-        (False, msg) — настроен, но отправка не удалась (msg для админки).
+        (True, None, response_json) — успех; response_json — тело ответа iiko (correlationId, orderInfo…).
+        (False, None, None) — iiko не настроен в .env (ошибку в БД не пишем).
+        (False, msg, None) — настроен, но отправка не удалась (msg для админки).
     """
     if not settings.iiko_api_login or not settings.iiko_organization_id:
         logger.info("iiko не настроен — заказ сохранён только в БД")
         log_pipeline_stage("iiko_skip", phone=phone, extra={"order_id": order_id, "reason": "not_configured"})
-        return False, None
+        return False, None, None
 
     try:
         items_data = items_json.get("items", []) if items_json else []
@@ -273,7 +275,7 @@ async def _send_order_to_iiko(
         if not iiko_items:
             msg = "Нет позиций с iiko_id — синхронизируйте меню из iiko"
             logger.warning("Заказ #%d: %s", order_id, msg)
-            return False, msg
+            return False, msg, None
 
         meta = items_json.get("order_meta") if items_json else {}
         pd = meta.get("payment_details")
@@ -309,14 +311,14 @@ async def _send_order_to_iiko(
                 "или раздельные IIKO_ORDER_TYPE_ID_DELIVERY/PICKUP/HALL"
             )
             logger.warning("Заказ #%d: %s", order_id, msg)
-            return False, msg
+            return False, msg, None
         phone_e164 = _normalize_phone_e164(phone)
         if not phone_e164:
             msg = "Телефон клиента пустой — iiko deliveries/create требует customer.phone"
             logger.warning("Заказ #%d: %s", order_id, msg)
-            return False, msg
+            return False, msg, None
         async with IikoClient(api_login=settings.iiko_api_login) as client:
-            await client.create_delivery_order(
+            iiko_response = await client.create_delivery_order(
                 organization_id=settings.iiko_organization_id,
                 order_data={
                     "customer": {"phone": phone_e164},
@@ -332,7 +334,7 @@ async def _send_order_to_iiko(
                 terminal_group_id=terminal_group or None,
             )
         log_pipeline_stage("iiko_ok", phone=phone, extra={"order_id": order_id})
-        return True, None
+        return True, None, iiko_response if isinstance(iiko_response, dict) else None
     except Exception as exc:
         logger.error("Ошибка отправки заказа #%d в iiko: %s", order_id, exc, exc_info=True)
         msg = str(exc).strip() or type(exc).__name__
@@ -341,7 +343,7 @@ async def _send_order_to_iiko(
             phone=phone,
             extra={"order_id": order_id, "error": msg[:500]},
         )
-        return False, msg[:500]
+        return False, msg[:500], None
 
 
 async def handle_confirmation(phone: str, message_text: str) -> str | None:
@@ -387,9 +389,14 @@ async def handle_confirmation(phone: str, message_text: str) -> str | None:
         })
 
         await clear_pending_order(redis_client, phone)
+        ij = order.items_json if isinstance(order.items_json, dict) else {}
+        ij = merge_total_into_items_json(ij, float(order.total_price or 0))
+        summary_core = build_summary_text_from_stored_items(ij)
+        card = format_whatsapp_order_card(ij, summary_core)
         return (
-            f"Отлично! Заказ #{order.id} на сумму {float(order.total_price):.0f} ₸ подтверждён. "
-            "Оператор проверит детали и отправит заказ в iiko — при необходимости с вами свяжутся. 👨‍💼"
+            f"✨ *Заказ #{order.id} подтверждён!*\n\n"
+            f"{card}\n\n"
+            "_Оператор проверит детали и отправит заказ в iiko — при необходимости с вами свяжутся._"
         )
 
     if word in CANCEL_WORDS:
@@ -515,11 +522,11 @@ async def handle_order_payment_choice(phone: str, message_text: str) -> str | No
         order.items_json = items_json
 
         summary_core = build_summary_text_from_stored_items(items_json)
-        body = format_order_confirmation_summary(items_json, summary_core)
+        body = format_whatsapp_order_card(items_json, summary_core)
         pay_human = _PAYMENT_LABEL_RU.get(pm, pm)
         reply = (
             f"Принял способ оплаты: {pay_human}.\n\n"
-            f"📋 Ваш заказ:\n{body}\n\n"
+            f"{body}\n\n"
             "✅ Подтверждаете заказ? (Да / Нет)"
         )
         await db.commit()
@@ -541,7 +548,7 @@ async def handle_order_payment_choice(phone: str, message_text: str) -> str | No
         await set_user_state(redis_client, phone, UserState.CHATTING)
         return (
             f"Принял способ оплаты: {pay_human}.\n\n"
-            f"📋 Ваш заказ:\n{body}\n\n"
+            f"{body}\n\n"
             f"💳 Сумма от **{int(settings.order_prepayment_threshold_kzt):,}** ₸ — нужна предоплата. "
             "Оператор пришлёт реквизиты или ссылку. После оплаты вы сможете подтвердить заказ ответом «Да»."
         )
@@ -783,6 +790,7 @@ async def process_message(
             menu_context = build_menu_context(menu_items)
             u_row = await db.scalar(select(User).where(User.phone == phone))
             org_id = u_row.organization_id if u_row else None
+            customer_ctx = await build_customer_context(db, u_row)
             kb_context = await load_knowledge_context_block(db, org_id)
             draft_row = await get_open_draft_order(db, phone)
             draft_ctx = format_draft_order_context_for_prompt(
@@ -811,6 +819,7 @@ async def process_message(
                     kb_context,
                     draft_order_context=draft_ctx,
                     sales_strategy_context=strategy_ctx,
+                    customer_context=customer_ctx,
                 )
                 user_log_text = (ai_response.recognized_speech or "").strip() or "🎤 голосовое сообщение"
                 await append_to_history(redis_client, phone, "user", user_log_text)
@@ -823,6 +832,7 @@ async def process_message(
                     kb_context,
                     draft_order_context=draft_ctx,
                     sales_strategy_context=strategy_ctx,
+                    customer_context=customer_ctx,
                 )
 
             log_pipeline_stage(
@@ -911,10 +921,9 @@ async def process_message(
         )
     except Exception as exc:
         logger.error("Ошибка обработки сообщения от %s: %s", phone, exc, exc_info=True)
-        try:
-            await send_customer_text(phone, "Извините, произошла ошибка. Попробуйте ещё раз чуть позже.")
-        except Exception:
-            logger.error("Не удалось отправить сообщение об ошибке → %s", phone)
+        # Не глотаем исключение: иначе process_with_retry не сможет записать FailedTask и сделать backoff.
+        # Сообщение клиенту после исчерпания попыток отправляет process_with_retry.
+        raise
 
 
 async def process_voice_message(
@@ -924,7 +933,7 @@ async def process_voice_message(
     whatsapp_message_id: str = "",
 ) -> None:
     """
-    Голосовое WhatsApp: скачать → OpenAI (Whisper + чат в CHATTING или только STT в подтверждениях).
+    Голосовое WhatsApp: скачать → Whisper (STT) + чат OpenAI в CHATTING или только STT в подтверждениях.
     """
     try:
         if not (settings.openai_api_key or "").strip():

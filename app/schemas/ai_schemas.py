@@ -1,6 +1,6 @@
 """
-Pydantic-схемы для структурированных ответов AI (OpenAI parse / JSON schema).
-Используются как response_format для гарантированного structured output.
+Pydantic-схемы для структурированных ответов AI (OpenAI structured output / parse).
+Используются как response_format для гарантированной схемы AIBrainResponse.
 """
 
 from typing import Literal
@@ -118,7 +118,7 @@ class OrderAction(BaseModel):
 
 class AIBrainResponse(BaseModel):
     """
-    Структурированный ответ от ИИ (OpenAI structured output).
+    Структурированный ответ от ИИ (OpenAI structured output по этой схеме).
 
     Соответствие формулировкам ТЗ (одна схема, без дублирования полей):
     тип заказа и оплата — order_type, payment_method;
@@ -181,6 +181,13 @@ class AIBrainResponse(BaseModel):
     upsell_reasoning: str | None = Field(
         default=None,
         description="Короткий аргумент: вкус, сочетаемость с заказом, традиция заведения — для логов и админки",
+    )
+    rejected_upsell_iiko_ids: list[str] = Field(
+        default_factory=list,
+        description=(
+            "UUID номенклатуры iiko (`[id: …]` в меню), от которых клиент явно отказался в этом сообщении "
+            "(например после вашей рекомендации). Пустой список, если отказа к доп. позициям не было."
+        ),
     )
     booking_details: BookingDetails | None = Field(
         default=None,
