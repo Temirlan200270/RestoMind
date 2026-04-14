@@ -436,7 +436,11 @@ async def deep_health_check() -> dict:
 @app.get("/admin", response_class=HTMLResponse, tags=["Admin Panel"])
 async def admin_page(request: Request) -> HTMLResponse:
     """Главная страница — админ-панель."""
-    response = templates.TemplateResponse(request, "admin.html")
+    response = templates.TemplateResponse(
+        request,
+        "admin.html",
+        {"asset_ver": settings.app_version},
+    )
     # Чтобы браузер не держал устаревший HTML (Alpine/шаблон после деплоя).
     response.headers["Cache-Control"] = "no-store, max-age=0, must-revalidate"
     return response

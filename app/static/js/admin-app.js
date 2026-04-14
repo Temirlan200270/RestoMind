@@ -245,6 +245,8 @@ function adminMixinState() {
         ordersSort: { column: 'date', dir: 'desc' },
         showOrderModal: false,
         selectedOrder: null,
+        /** После drag-and-drop канбана: коротко блокировать открытие карточки по «хвостовому» клику */
+        _kanbanBlockOpenUntil: 0,
 
         failedTasks: [],
         failedTasksTotal: 0,
@@ -959,6 +961,31 @@ function adminMixinMenuOrdersUi() {
             } catch { /* ignore */ }
         },
 
+        kanbanDragEnd() {
+            this._kanbanBlockOpenUntil = Date.now() + 450;
+        },
+
+        /**
+         * Карточка заказа (канбан, таблица, дашборд): полная модалка с составом и действиями.
+         * Раньше метод отсутствовал — клики по канбану ничего не открывали.
+         */
+        openOrderDetails(order) {
+            if (!order || order.id == null) return;
+            if (this._kanbanBlockOpenUntil && Date.now() < this._kanbanBlockOpenUntil) return;
+            const id = Number(order.id);
+            if (!Number.isFinite(id)) return;
+            const fresh = (this.orders || []).find((o) => Number(o.id) === id);
+            this.selectedOrder = fresh || order;
+            this.orderCompositionOpen = false;
+            this.orderRebuildError = '';
+            this.showOrderModal = true;
+            this.$nextTick(() => {
+                try {
+                    this.initOrderRebuildFromSelected();
+                } catch (e) { /* ignore */ }
+            });
+        },
+
         async kanbanDrop(ev, targetCol) {
             const raw = ev.dataTransfer.getData('text/plain');
             const id = parseInt(raw, 10);
@@ -1172,7 +1199,12 @@ function adminMixinSearchBookings() {
             this.currentTab = 'orders';
             this.ordersView = 'table';
             this.orderSearchQ = String(order.user_phone || order.id || '');
-            this.loadTabData();
+            const oid = Number(order?.id);
+            this.loadTabData().then(() => {
+                if (!Number.isFinite(oid)) return;
+                const o = this.orders.find((x) => Number(x.id) === oid);
+                if (o) this.openOrderDetails(o);
+            });
         },
 
         globalSearchGoChat(row) {
