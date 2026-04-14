@@ -3793,9 +3793,23 @@ function adminMixinDataChartsSettings() {
     };
 }
 
+/**
+ * Слияние миксинов через дескрипторы свойств.
+ * Object.assign вызывает [[Get]] у геттеров при копировании — тогда this указывает на фрагмент миксина без menuItems/orders и Alpine падает при инициализации.
+ */
+function mergeAdminMixins(...sources) {
+    const target = {};
+    for (const src of sources) {
+        for (const key of Reflect.ownKeys(src)) {
+            const desc = Object.getOwnPropertyDescriptor(src, key);
+            if (desc) Object.defineProperty(target, key, desc);
+        }
+    }
+    return target;
+}
+
 function adminApp() {
-    return Object.assign(
-        {},
+    return mergeAdminMixins(
         adminMixinState(),
         adminMixinMenuOrdersUi(),
         adminMixinSearchBookings(),
