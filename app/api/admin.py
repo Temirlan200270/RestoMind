@@ -255,7 +255,10 @@ async def admin_login(request: Request, body: LoginBody, db: AsyncSession = Depe
             }
 
     if _credentials_ok(body.username.strip(), password):
-        oid = int(settings.default_organization_id)
+        # Legacy-вход (ADMIN_USERNAME/PASSWORD): привязываем сессию к реальной организации,
+        # иначе при миграциях/демо-данных id может быть не 1 и админка будет "пустой".
+        oid_db = await db.scalar(select(Organization.id).order_by(Organization.id.asc()).limit(1))
+        oid = int(oid_db) if oid_db is not None else int(settings.default_organization_id)
         request.session["admin_ok"] = True
         request.session["admin_user"] = body.username.strip()
         request.session["organization_id"] = oid
@@ -283,12 +286,20 @@ async def admin_logout(request: Request) -> dict:
 
 
 @auth_router.get("/me")
-async def admin_me(request: Request) -> dict:
+async def admin_me(request: Request, db: AsyncSession = Depends(get_db)) -> dict:
     """Проверка сессии и перевыпуск ws_token для переподключения."""
     if not request.session.get("admin_ok"):
         raise HTTPException(status_code=401, detail="Не авторизован")
     user = request.session.get("admin_user") or settings.admin_username
     oid = admin_org_from_session(request)
+    # Если в сессии лежит несуществующий organization_id (после миграций/ресетов БД),
+    # переведём админку на первую доступную организацию.
+    exists_oid = await db.scalar(select(Organization.id).where(Organization.id == int(oid)))
+    if exists_oid is None:
+        oid_db = await db.scalar(select(Organization.id).order_by(Organization.id.asc()).limit(1))
+        if oid_db is not None:
+            oid = int(oid_db)
+            request.session["organization_id"] = oid
     sid = request.session.get("staff_id")
     return {
         "authenticated": True,

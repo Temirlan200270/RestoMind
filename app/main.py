@@ -129,9 +129,14 @@ async def _stop_list_sync_loop() -> None:
                         ),
                     )
                 if not targets and settings.iiko_api_login and settings.iiko_organization_id:
+                    # Не полагаемся на DEFAULT_ORGANIZATION_ID=1: на боевой БД id может отличаться,
+                    # а тогда запись integration_events начнёт падать по FK.
+                    fallback_oid = await db.scalar(
+                        text("SELECT id FROM organizations ORDER BY id ASC LIMIT 1"),
+                    )
                     targets.append(
                         (
-                            int(settings.default_organization_id),
+                            int(fallback_oid) if fallback_oid is not None else int(settings.default_organization_id),
                             settings.iiko_api_login.strip(),
                             settings.iiko_organization_id.strip(),
                             (settings.iiko_terminal_group_id or "").strip(),
