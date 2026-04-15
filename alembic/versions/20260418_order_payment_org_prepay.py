@@ -18,22 +18,46 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "organizations",
-        sa.Column(
-            "prepayment_enforced",
-            sa.Boolean(),
-            server_default=sa.text("true"),
-            nullable=False,
-        ),
-    )
-    op.alter_column("organizations", "prepayment_enforced", server_default=None)
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
 
-    op.add_column("orders", sa.Column("payment_provider", sa.String(length=64), nullable=True))
-    op.add_column("orders", sa.Column("external_payment_id", sa.String(length=200), nullable=True))
-    op.add_column("orders", sa.Column("payment_amount_captured", sa.Numeric(12, 2), nullable=True))
-    op.create_index("ix_orders_payment_provider", "orders", ["payment_provider"])
-    op.create_index("ix_orders_external_payment_id", "orders", ["external_payment_id"])
+    def _cols(table: str) -> set[str]:
+        try:
+            return {c.get("name") for c in insp.get_columns(table)}
+        except Exception:
+            return set()
+
+    def _has_index(table: str, name: str) -> bool:
+        try:
+            return any((i.get("name") == name) for i in insp.get_indexes(table))
+        except Exception:
+            return False
+
+    org_cols = _cols("organizations")
+    if "prepayment_enforced" not in org_cols:
+        op.add_column(
+            "organizations",
+            sa.Column(
+                "prepayment_enforced",
+                sa.Boolean(),
+                server_default=sa.text("true"),
+                nullable=False,
+            ),
+        )
+        op.alter_column("organizations", "prepayment_enforced", server_default=None)
+
+    order_cols = _cols("orders")
+    if "payment_provider" not in order_cols:
+        op.add_column("orders", sa.Column("payment_provider", sa.String(length=64), nullable=True))
+    if "external_payment_id" not in order_cols:
+        op.add_column("orders", sa.Column("external_payment_id", sa.String(length=200), nullable=True))
+    if "payment_amount_captured" not in order_cols:
+        op.add_column("orders", sa.Column("payment_amount_captured", sa.Numeric(12, 2), nullable=True))
+
+    if not _has_index("orders", "ix_orders_payment_provider"):
+        op.create_index("ix_orders_payment_provider", "orders", ["payment_provider"])
+    if not _has_index("orders", "ix_orders_external_payment_id"):
+        op.create_index("ix_orders_external_payment_id", "orders", ["external_payment_id"])
 
 
 def downgrade() -> None:
