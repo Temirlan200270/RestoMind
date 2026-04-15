@@ -1,5 +1,7 @@
-# Blueprint для https://dashboard.render.com → New → Blueprint
-# Подключите GitHub/GitLab; после деплоя укажите секреты с sync: false вручную (или через Dashboard).
+# Blueprint для деплоя RestoMind на https://dashboard.render.com
+# 1. Создайте New -> Blueprint
+# 2. Подключите ваш репозиторий
+# 3. После деплоя зайдите в Dashboard -> Environment и заполните пустые секреты (OpenAI, WhatsApp и т.д.)
 
 databases:
   - name: restomind-db
@@ -16,7 +18,13 @@ services:
     dockerfilePath: ./Dockerfile
     dockerContext: .
     healthCheckPath: /health
+    
+    # Сначала выполняем миграции БД в отдельном слое
     preDeployCommand: alembic upgrade head
+    
+    # Затем запускаем сервер (без alembic, чтобы не было конфликта аргументов)
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port 10000
+
     envVars:
       - key: APP_DEBUG
         value: "false"
@@ -24,20 +32,23 @@ services:
         value: postgres
       - key: REDIS_ENABLED
         value: "false"
-      # Для тестов без внешнего Redis (квота Upstash и т.д.): REDIS_MEMORY_ONLY=true
-      # Опционально: Upstash / внешний Redis — задайте в Dashboard (секрет), не коммитьте:
-      # REDIS_URL=rediss://default:...@....upstash.io:6379
-      # REDIS_SSL_SKIP_VERIFY=false
+      - key: REDIS_MEMORY_ONLY
+        value: "true"
+      
+      # Подключение к базе данных Render
       - key: DATABASE_URL
         fromDatabase:
           name: restomind-db
           property: connectionString
+
+      # Автоматическое определение URL сервиса (нужно для Webhook WhatsApp)
+      - key: PUBLIC_BASE_URL
+        fromContext: instance_url
+
       - key: SESSION_SECRET
         generateValue: true
-      # Опционально: явный публичный URL (без /admin). На Render обычно хватает RENDER_EXTERNAL_URL —
-      # приложение подставит его в public_base_url, если PUBLIC_BASE_URL не задан.
-      # - key: PUBLIC_BASE_URL
-      #   value: https://restomind.onrender.com
+
+      # Секреты (нужно будет заполнить вручную в Dashboard после создания)
       - key: OPENAI_API_KEY
         sync: false
       - key: ADMIN_PASSWORD
@@ -47,4 +58,10 @@ services:
       - key: WHATSAPP_API_TOKEN
         sync: false
       - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      
+      # Дополнительные настройки iiko (если есть)
+      - key: IIKO_API_LOGIN
+        sync: false
+      - key: IIKO_ORGANIZATION_ID
         sync: false
