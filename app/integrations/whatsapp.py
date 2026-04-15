@@ -30,10 +30,18 @@ class WhatsAppSendResult:
 
 logger = logging.getLogger(__name__)
 
-GRAPH_API_VERSION = "v21.0"
-WHATSAPP_API_URL = (
-    f"https://graph.facebook.com/{GRAPH_API_VERSION}/{settings.whatsapp_phone_number_id}/messages"
-)
+def _graph_api_version() -> str:
+    return (getattr(settings, "whatsapp_api_version", "") or "v21.0").strip() or "v21.0"
+
+
+def _messages_url() -> str:
+    pnid = (settings.whatsapp_phone_number_id or "").strip()
+    return f"https://graph.facebook.com/{_graph_api_version()}/{pnid}/messages"
+
+
+def _media_upload_url() -> str:
+    pnid = (settings.whatsapp_phone_number_id or "").strip()
+    return f"https://graph.facebook.com/{_graph_api_version()}/{pnid}/media"
 
 SEND_TIMEOUT = 10.0
 MEDIA_TIMEOUT = 60.0
@@ -149,7 +157,7 @@ async def _post_whatsapp_messages(
         for attempt in range(1, MAX_RETRIES + 1):
             try:
                 response = await client.post(
-                    WHATSAPP_API_URL,
+                    _messages_url(),
                     headers=headers,
                     json=build_json(to),
                     timeout=timeout,
@@ -207,6 +215,15 @@ async def _post_whatsapp_messages(
             )
             if _recipient_not_allowed(response):
                 break
+            if response.status_code == 429 and attempt < MAX_RETRIES:
+                retry_after = (response.headers.get("Retry-After") or "").strip()
+                try:
+                    ra_s = float(retry_after) if retry_after else 0.0
+                except Exception:
+                    ra_s = 0.0
+                sleep_s = max(ra_s, _retry_delay_seconds(attempt) * 2)
+                await asyncio.sleep(min(sleep_s, BACKOFF_CAP_SECONDS * 2))
+                continue
             if attempt < MAX_RETRIES:
                 await asyncio.sleep(_retry_delay_seconds(attempt))
 
@@ -334,7 +351,7 @@ async def download_media_bytes(media_id: str) -> tuple[bytes, str] | None:
         logger.warning("WhatsApp media: нет токена или media_id")
         return None
 
-    meta_url = f"https://graph.facebook.com/{GRAPH_API_VERSION}/{media_id}"
+    meta_url = f"https://graph.facebook.com/{_graph_api_version()}/{media_id}"
 
     try:
         client = await _ensure_http_client()
@@ -374,11 +391,6 @@ async def download_media_bytes(media_id: str) -> tuple[bytes, str] | None:
         return None
 
 
-MEDIA_UPLOAD_URL = (
-    f"https://graph.facebook.com/{GRAPH_API_VERSION}/{settings.whatsapp_phone_number_id}/media"
-)
-
-
 async def upload_media_bytes(
     file_bytes: bytes,
     mime_type: str,
@@ -395,9 +407,10 @@ async def upload_media_bytes(
     client = await _ensure_http_client()
     last_exc: BaseException | None = None
     for attempt in range(1, MAX_RETRIES + 1):
+        response: httpx.Response | None = None
         try:
             response = await client.post(
-                MEDIA_UPLOAD_URL,
+                _media_upload_url(),
                 headers={"Authorization": f"Bearer {token}"},
                 files={
                     "file": (filename, file_bytes, mime_type),
@@ -421,11 +434,23 @@ async def upload_media_bytes(
                 MAX_RETRIES,
                 response.text[:200],
             )
+            # 4xx (кроме 429) обычно не имеет смысла ретраить.
+            if 400 <= response.status_code < 500 and response.status_code != 429:
+                break
         except (httpx.TimeoutException, httpx.HTTPError) as exc:
             last_exc = exc
             logger.error("upload_media ошибка (попытка %d/%d): %s", attempt, MAX_RETRIES, exc)
         if attempt < MAX_RETRIES:
-            await asyncio.sleep(_retry_delay_seconds(attempt))
+            if response is not None and response.status_code == 429:
+                retry_after = (response.headers.get("Retry-After") or "").strip()
+                try:
+                    ra_s = float(retry_after) if retry_after else 0.0
+                except Exception:
+                    ra_s = 0.0
+                sleep_s = max(ra_s, _retry_delay_seconds(attempt) * 2)
+                await asyncio.sleep(min(sleep_s, BACKOFF_CAP_SECONDS * 2))
+            else:
+                await asyncio.sleep(_retry_delay_seconds(attempt))
 
     if last_exc:
         logger.error("upload_media: исчерпаны попытки: %s", last_exc)

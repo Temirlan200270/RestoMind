@@ -148,7 +148,6 @@ async def sync_menu_from_iiko(
             existing.description = description
             existing.price = price
             existing.image_url = image_url
-            existing.is_available = True
             updated += 1
         else:
             item = MenuItem(
@@ -284,7 +283,14 @@ async def sync_stop_lists(
 
     qm = select(MenuItem)
     if menu_organization_id is not None:
-        qm = qm.where(MenuItem.organization_id == menu_organization_id)
+        # Legacy: в ранних версиях organization_id мог быть NULL.
+        # UI и сервисы читают (org_id OR NULL), поэтому стоп-лист тоже должен применяться к legacy-строкам.
+        qm = qm.where(
+            or_(
+                MenuItem.organization_id == menu_organization_id,
+                MenuItem.organization_id.is_(None),
+            )
+        )
     result = await db.execute(qm)
     all_items = result.scalars().all()
 
@@ -292,14 +298,17 @@ async def sync_stop_lists(
     restored_count = 0
 
     for item in all_items:
-        if item.iiko_id in stopped_ids:
-            if item.is_available:
-                item.is_available = False
-                stopped_count += 1
-        else:
-            if not item.is_available:
-                item.is_available = True
+        # Мигрируем legacy-строки к текущему филиалу, чтобы в дальнейшем не разъезжались фильтры UI/синка.
+        if menu_organization_id is not None and item.organization_id is None:
+            item.organization_id = menu_organization_id
+
+        next_available = (item.iiko_id or "") not in stopped_ids
+        if item.is_available != next_available:
+            item.is_available = next_available
+            if next_available:
                 restored_count += 1
+            else:
+                stopped_count += 1
 
     await db.flush()
 

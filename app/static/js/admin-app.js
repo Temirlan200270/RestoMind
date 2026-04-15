@@ -407,6 +407,7 @@ function adminMixinState() {
         fmt: adminFormat,
         /** Ошибка загрузки GET /api/admin/menu (401, сеть и т.д.) */
         menuLoadError: '',
+        bookingsLoadError: '',
         menuEditOpen: false,
         menuEditSaving: false,
         menuEditForm: {
@@ -2715,6 +2716,15 @@ function adminMixinWebSocketEvents() {
                 this._clearWsReadyTimer();
                 this.wsChannelReady = true;
                 this.wsEpoch++;
+                // После реконнекта могли потеряться события. Догружаем состояние по REST.
+                if (this.currentTab === 'orders' || this.currentTab === 'dashboard') {
+                    void this.loadOrders();
+                    void this.loadDashStats();
+                }
+                if (this.currentTab === 'chats') {
+                    void this.loadChatList();
+                    if (this.activeChatPhone) void this.selectChat(this.activeChatPhone);
+                }
                 return;
             }
 
@@ -2871,52 +2881,24 @@ function adminMixinWebSocketEvents() {
 
         onOrderUpdated(data) {
             const oid = Number(data.order_id);
-            const applyPatch = (row) => {
-                if (!row) return;
-                row.status = data.status;
-                if (data.total_price !== undefined) row.total_price = data.total_price;
-                if (data.iiko_last_error !== undefined) {
-                    row.iiko_last_error = data.iiko_last_error;
-                }
-                row.updated_at = new Date().toISOString();
-            };
-            const idx = this.orders.findIndex(o => Number(o.id) === oid);
-            if (idx >= 0) {
-                applyPatch(this.orders[idx]);
+            const idx = this.orders.findIndex((o) => Number(o.id) === oid);
+
+            if (data.order) {
+                if (idx >= 0) this.orders.splice(idx, 1, data.order);
+                else this.orders.unshift(data.order);
             } else {
-                const nowIso = new Date().toISOString();
-                const payloadCreated = (data.created_at || data.createdAt || '').trim();
-                const createdAt = payloadCreated || nowIso;
-                const newRow = {
-                    id: oid,
-                    status: data.status,
-                    total_price: data.total_price || 0,
-                    items: data.items ? { items: data.items } : {},
-                    created_at: createdAt,
-                    updated_at: nowIso,
-                    iiko_last_error: data.iiko_last_error ?? null,
-                };
-                const sortRow = payloadCreated
-                    ? { created_at: payloadCreated, updated_at: null }
-                    : null;
-                const tNew = sortRow ? this._orderListSortTs(sortRow) : null;
-                const recentWindowMs = 20 * 60 * 1000;
-                const canInsertByTime = tNew != null && (Date.now() - tNew) <= recentWindowMs;
-                if (!canInsertByTime) {
-                    this.orders.push(newRow);
-                } else {
-                    const insertIdx = this.orders.findIndex((o) => {
-                        const t = this._orderListSortTs(o);
-                        return t != null && tNew > t;
-                    });
-                    if (insertIdx === -1) this.orders.push(newRow);
-                    else this.orders.splice(insertIdx, 0, newRow);
-                }
-                this.playOrderPing();
+                // Если событие не несёт полный заказ — синхронизируемся по REST.
+                void this.loadOrders();
             }
+
             const sidx = this.settingsOrdersList.findIndex((o) => Number(o.id) === oid);
-            if (sidx >= 0) {
-                applyPatch(this.settingsOrdersList[sidx]);
+            if (data.order && sidx >= 0) {
+                this.settingsOrdersList.splice(sidx, 1, data.order);
+            }
+
+            if (this.selectedOrder && Number(this.selectedOrder.id) === oid) {
+                const fresh = this.orders.find((o) => Number(o.id) === oid);
+                if (fresh) this.selectedOrder = fresh;
             }
         },
 
@@ -2942,56 +2924,42 @@ function adminMixinWebSocketEvents() {
         },
 
         // ─── Alerts ──────────────────────────────────
-        playAlertSound() {
+        _playTone(type, freq, duration = 0.2, volume = 0.12) {
             try {
-                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const Ctx = window.AudioContext || window.webkitAudioContext;
+                this._audioCtx = this._audioCtx || new Ctx();
+                const ctx = this._audioCtx;
                 const osc = ctx.createOscillator();
                 const gain = ctx.createGain();
+                osc.type = type;
                 osc.connect(gain);
                 gain.connect(ctx.destination);
-                osc.frequency.setValueAtTime(880, ctx.currentTime);
-                osc.frequency.setValueAtTime(660, ctx.currentTime + 0.15);
-                osc.frequency.setValueAtTime(880, ctx.currentTime + 0.3);
-                gain.gain.setValueAtTime(0.3, ctx.currentTime);
-                gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5);
-                osc.start(ctx.currentTime);
-                osc.stop(ctx.currentTime + 0.5);
+                osc.frequency.setValueAtTime(freq, ctx.currentTime);
+                gain.gain.setValueAtTime(volume, ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + duration);
+                osc.start();
+                osc.stop(ctx.currentTime + duration);
+                osc.onended = () => {
+                    try { osc.disconnect(); } catch {}
+                };
             } catch {}
+        },
+
+        playAlertSound() {
+            this._playTone('sine', 880, 0.14, 0.18);
+            setTimeout(() => this._playTone('sine', 660, 0.14, 0.16), 160);
+            setTimeout(() => this._playTone('sine', 880, 0.18, 0.18), 320);
         },
 
         /** Короткий сигнал: новое сообщение клиента (мягче, чем «бот зовёт»). */
         playChatPing() {
-            try {
-                const ctx = new (window.AudioContext || window.webkitAudioContext)();
-                const osc = ctx.createOscillator();
-                const gain = ctx.createGain();
-                osc.connect(gain);
-                gain.connect(ctx.destination);
-                osc.type = 'sine';
-                osc.frequency.setValueAtTime(520, ctx.currentTime);
-                gain.gain.setValueAtTime(0.12, ctx.currentTime);
-                gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.12);
-                osc.start(ctx.currentTime);
-                osc.stop(ctx.currentTime + 0.12);
-            } catch {}
+            this._playTone('sine', 520, 0.12, 0.12);
         },
 
         /** Новый заказ в ленте канбана. */
         playOrderPing() {
-            try {
-                const ctx = new (window.AudioContext || window.webkitAudioContext)();
-                const osc = ctx.createOscillator();
-                const gain = ctx.createGain();
-                osc.connect(gain);
-                gain.connect(ctx.destination);
-                osc.type = 'triangle';
-                osc.frequency.setValueAtTime(392, ctx.currentTime);
-                osc.frequency.setValueAtTime(523, ctx.currentTime + 0.08);
-                gain.gain.setValueAtTime(0.14, ctx.currentTime);
-                gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.22);
-                osc.start(ctx.currentTime);
-                osc.stop(ctx.currentTime + 0.22);
-            } catch {}
+            this._playTone('triangle', 392, 0.10, 0.14);
+            setTimeout(() => this._playTone('triangle', 523, 0.12, 0.12), 90);
         },
 
         dismissAlert() {
@@ -3104,6 +3072,8 @@ function adminMixinLiveChat() {
         async selectChat(phone) {
             if (!phone?.trim()) return;
             phone = phone.trim();
+            const requestId = Symbol(phone);
+            this._selectChatRequestId = requestId;
             this.chatMobileInfoOpen = false;
             this.activeChatPhone = phone;
             this.customerSummaryLoading = true;
@@ -3129,7 +3099,8 @@ function adminMixinLiveChat() {
             }
 
             try {
-                const stateRes = await this.apiFetch(`/api/admin/chats/${phone}/state`);
+                const stateRes = await this.apiFetch(`/api/admin/chats/${encodeURIComponent(phone)}/state`);
+                if (this._selectChatRequestId !== requestId || this.activeChatPhone !== phone) return;
                 if (stateRes.ok) {
                     const stateData = await stateRes.json();
                     this.activeChatState = stateData.state;
@@ -3138,7 +3109,8 @@ function adminMixinLiveChat() {
             } catch {}
 
             try {
-                const res = await this.apiFetch(`/api/admin/chats/${phone}`);
+                const res = await this.apiFetch(`/api/admin/chats/${encodeURIComponent(phone)}`);
+                if (this._selectChatRequestId !== requestId || this.activeChatPhone !== phone) return;
                 if (res.ok) {
                     const data = await res.json();
                     this.chatMessages = data.messages || [];
@@ -3313,13 +3285,17 @@ function adminMixinLiveChat() {
             this.operatorInput = '';
 
             try {
-                await this.apiFetch(`/api/admin/chats/${this.activeChatPhone}/send_message`, {
+                const res = await this.apiFetch(`/api/admin/chats/${encodeURIComponent(this.activeChatPhone)}/send_message`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ text }),
                 });
+                if (!res.ok) throw new Error(`send_message ${res.status}`);
                 this.scrollChatToBottom();
-            } catch {}
+            } catch (e) {
+                this.operatorInput = text;
+                void this.showUiAlert('Сообщение не отправлено. Текст возвращён в поле.', 'Ошибка');
+            }
         },
 
     };
@@ -3367,7 +3343,10 @@ function adminMixinDataChartsSettings() {
                 } else if (this.currentTab === 'chats') {
                     await this.loadChatList();
                 }
-            } catch (e) { console.error(e); }
+            } catch (e) {
+                console.error(e);
+                void this.showUiAlert('Не удалось загрузить данные вкладки. Проверьте сеть и обновите страницу.', 'Ошибка');
+            }
             if (this.currentTab !== 'dashboard' && charts.dashboard) {
                 try {
                     charts.dashboard.destroy();
@@ -3633,8 +3612,19 @@ function adminMixinDataChartsSettings() {
         },
 
         async loadBookings() {
-            const { ok, data } = await this.apiJsonResponse('/api/admin/bookings');
-            if (ok) this.bookings = data.bookings || [];
+            this.bookingsLoadError = '';
+            try {
+                const { ok, data } = await this.apiJsonResponse('/api/admin/bookings');
+                if (!ok) {
+                    this.bookings = [];
+                    this.bookingsLoadError = this.formatApiError(data) || 'Не удалось загрузить брони';
+                    return;
+                }
+                this.bookings = data.bookings || [];
+            } catch {
+                this.bookings = [];
+                this.bookingsLoadError = 'Ошибка сети';
+            }
         },
 
         async loadMenu() {

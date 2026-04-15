@@ -61,12 +61,29 @@ def _setup_logging() -> None:
     console.setFormatter(logging.Formatter(LOG_FORMAT))
     root.addHandler(console)
 
+    # На Windows, при uvicorn --reload и при параллельных процессах тестов,
+    # ротация RotatingFileHandler часто падает с WinError 32 (файл занят другим процессом).
+    # Поэтому файловые лог-хендлеры включаем только в "нормальном" рантайме.
+    # PYTEST_CURRENT_TEST появляется не всегда на стадии import/collection,
+    # поэтому используем более надёжный признак — загруженный модуль pytest.
+    import sys
+
+    is_pytest = (
+        "pytest" in sys.modules
+        or bool((os.environ.get("PYTEST_CURRENT_TEST") or "").strip())
+        or bool((os.environ.get("PYTEST_ADDOPTS") or "").strip())
+    )
+    is_reload = bool((os.environ.get("UVICORN_RELOAD") or "").strip())
+    if is_pytest or is_reload:
+        return
+
     LOG_DIR.mkdir(exist_ok=True)
     file_handler = logging.handlers.RotatingFileHandler(
         LOG_DIR / "restomind.log",
         maxBytes=10 * 1024 * 1024,  # 10 MB
         backupCount=5,
         encoding="utf-8",
+        delay=True,
     )
     file_handler.setFormatter(logging.Formatter(LOG_FORMAT))
     root.addHandler(file_handler)
@@ -76,6 +93,7 @@ def _setup_logging() -> None:
         maxBytes=5 * 1024 * 1024,
         backupCount=3,
         encoding="utf-8",
+        delay=True,
     )
     error_handler.setLevel(logging.ERROR)
     error_handler.setFormatter(logging.Formatter(LOG_FORMAT))
@@ -99,6 +117,33 @@ logger = logging.getLogger(__name__)
 
 
 STOP_LIST_SYNC_INTERVAL = 900  # 15 минут
+
+
+def _is_expected_ddl_error(exc: Exception) -> bool:
+    """
+    Стартап-DDL в SQLite/Postgres должен быть идемпотентным:
+    - SQLite: "duplicate column name", "already exists"
+    - Postgres: "already exists", "duplicate", "exists"
+    """
+    msg = (str(exc) or "").lower()
+    if not msg:
+        return False
+    expected_markers = (
+        "duplicate column name",
+        "already exists",
+        "exists",
+        "duplicate",
+        "duplicate key",
+        "duplicate_object",
+        "duplicate_column",
+    )
+    return any(m in msg for m in expected_markers)
+
+
+def _ddl_warn(sql: str, exc: Exception) -> None:
+    if _is_expected_ddl_error(exc):
+        return
+    logger.warning("DDL на старте не применился: %s (%s)", sql, exc, exc_info=True)
 
 
 async def _stop_list_sync_loop() -> None:
@@ -220,44 +265,46 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     try:
         async with async_engine.begin() as conn:
             if settings.db_mode == "sqlite":
-                await conn.execute(text("ALTER TABLE users ADD COLUMN operator_note TEXT DEFAULT ''"))
+                sql = "ALTER TABLE users ADD COLUMN operator_note TEXT DEFAULT ''"
+                await conn.execute(text(sql))
             else:
-                await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS operator_note TEXT DEFAULT ''"))
-    except Exception:
-        pass  # колонка уже есть или другой диалект
+                sql = "ALTER TABLE users ADD COLUMN IF NOT EXISTS operator_note TEXT DEFAULT ''"
+                await conn.execute(text(sql))
+    except Exception as exc:
+        _ddl_warn(sql, exc)
 
     try:
         async with async_engine.begin() as conn:
             if settings.db_mode == "sqlite":
-                await conn.execute(text("ALTER TABLE orders ADD COLUMN iiko_last_error VARCHAR(512)"))
+                sql = "ALTER TABLE orders ADD COLUMN iiko_last_error VARCHAR(512)"
+                await conn.execute(text(sql))
             else:
-                await conn.execute(
-                    text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS iiko_last_error VARCHAR(512)"),
-                )
-    except Exception:
-        pass
+                sql = "ALTER TABLE orders ADD COLUMN IF NOT EXISTS iiko_last_error VARCHAR(512)"
+                await conn.execute(text(sql))
+    except Exception as exc:
+        _ddl_warn(sql, exc)
 
     try:
         async with async_engine.begin() as conn:
             if settings.db_mode == "sqlite":
-                await conn.execute(text("ALTER TABLE users ADD COLUMN ai_paused BOOLEAN DEFAULT 0"))
+                sql = "ALTER TABLE users ADD COLUMN ai_paused BOOLEAN DEFAULT 0"
+                await conn.execute(text(sql))
             else:
-                await conn.execute(
-                    text("ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_paused BOOLEAN DEFAULT FALSE"),
-                )
-    except Exception:
-        pass
+                sql = "ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_paused BOOLEAN DEFAULT FALSE"
+                await conn.execute(text(sql))
+    except Exception as exc:
+        _ddl_warn(sql, exc)
 
     try:
         async with async_engine.begin() as conn:
             if settings.db_mode == "sqlite":
-                await conn.execute(text("ALTER TABLE chat_logs ADD COLUMN meta_json TEXT"))
+                sql = "ALTER TABLE chat_logs ADD COLUMN meta_json TEXT"
+                await conn.execute(text(sql))
             else:
-                await conn.execute(
-                    text("ALTER TABLE chat_logs ADD COLUMN IF NOT EXISTS meta_json JSONB"),
-                )
-    except Exception:
-        pass
+                sql = "ALTER TABLE chat_logs ADD COLUMN IF NOT EXISTS meta_json JSONB"
+                await conn.execute(text(sql))
+    except Exception as exc:
+        _ddl_warn(sql, exc)
 
     for sql_sqlite, sql_pg in (
         (
@@ -283,50 +330,42 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     await conn.execute(text(sql_sqlite))
                 else:
                     await conn.execute(text(sql_pg))
-        except Exception:
-            pass
+        except Exception as exc:
+            _ddl_warn(sql_sqlite if settings.db_mode == "sqlite" else sql_pg, exc)
 
     try:
         async with async_engine.begin() as conn:
             if settings.db_mode == "sqlite":
-                await conn.execute(
-                    text("CREATE INDEX IF NOT EXISTS ix_chat_logs_provider_message_id ON chat_logs (provider_message_id)"),
-                )
+                sql = "CREATE INDEX IF NOT EXISTS ix_chat_logs_provider_message_id ON chat_logs (provider_message_id)"
+                await conn.execute(text(sql))
             else:
-                await conn.execute(
-                    text(
-                        "CREATE INDEX IF NOT EXISTS ix_chat_logs_provider_message_id ON chat_logs (provider_message_id)",
-                    ),
-                )
-    except Exception:
-        pass
+                sql = "CREATE INDEX IF NOT EXISTS ix_chat_logs_provider_message_id ON chat_logs (provider_message_id)"
+                await conn.execute(text(sql))
+    except Exception as exc:
+        _ddl_warn(sql, exc)
 
     try:
         async with async_engine.begin() as conn:
             if settings.db_mode == "sqlite":
-                await conn.execute(text("ALTER TABLE bookings ADD COLUMN hall VARCHAR(20) DEFAULT 'hall_1'"))
+                sql = "ALTER TABLE bookings ADD COLUMN hall VARCHAR(20) DEFAULT 'hall_1'"
+                await conn.execute(text(sql))
             else:
-                await conn.execute(
-                    text("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS hall VARCHAR(20) DEFAULT 'hall_1'"),
-                )
-    except Exception:
-        pass
+                sql = "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS hall VARCHAR(20) DEFAULT 'hall_1'"
+                await conn.execute(text(sql))
+    except Exception as exc:
+        _ddl_warn(sql, exc)
 
     # Заказ: optimistic locking (версия строки)
     try:
         async with async_engine.begin() as conn:
             if settings.db_mode == "sqlite":
-                await conn.execute(
-                    text("ALTER TABLE orders ADD COLUMN version INTEGER NOT NULL DEFAULT 1"),
-                )
+                sql = "ALTER TABLE orders ADD COLUMN version INTEGER NOT NULL DEFAULT 1"
+                await conn.execute(text(sql))
             else:
-                await conn.execute(
-                    text(
-                        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1",
-                    ),
-                )
-    except Exception:
-        pass
+                sql = "ALTER TABLE orders ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1"
+                await conn.execute(text(sql))
+    except Exception as exc:
+        _ddl_warn(sql, exc)
 
     # Заказ: связь с бронью (предзаказ в зале) и поля предоплаты
     for sql_sqlite, sql_pg in (
@@ -346,8 +385,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     await conn.execute(text(sql_sqlite))
                 else:
                     await conn.execute(text(sql_pg))
-        except Exception:
-            pass
+        except Exception as exc:
+            _ddl_warn(sql_sqlite if settings.db_mode == "sqlite" else sql_pg, exc)
 
     # State Recovery: поля сессии в User для восстановления после потери Redis
     for sql_sqlite, sql_pg in (
@@ -370,26 +409,38 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     await conn.execute(text(sql_sqlite))
                 else:
                     await conn.execute(text(sql_pg))
-        except Exception:
-            pass
+        except Exception as exc:
+            _ddl_warn(sql_sqlite if settings.db_mode == "sqlite" else sql_pg, exc)
 
     # Меню: теги сочетаемости для ИИ (§4.2); create_all не добавляет колонки в существующие таблицы
     try:
         async with async_engine.begin() as conn:
             if settings.db_mode == "sqlite":
-                await conn.execute(text("ALTER TABLE menu_items ADD COLUMN tags TEXT DEFAULT ''"))
+                sql = "ALTER TABLE menu_items ADD COLUMN tags TEXT DEFAULT ''"
+                await conn.execute(text(sql))
             else:
-                await conn.execute(
-                    text("ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS tags TEXT DEFAULT ''"),
-                )
-    except Exception:
-        pass
+                sql = "ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS tags TEXT DEFAULT ''"
+                await conn.execute(text(sql))
+    except Exception as exc:
+        _ddl_warn(sql, exc)
 
     # Franchise / iiko в БД: create_all создаёт новые таблицы; для существующих SQLite — колонки.
     for sql_sqlite, sql_pg in (
         (
             "ALTER TABLE organizations ADD COLUMN tenant_id INTEGER",
             "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS tenant_id INTEGER",
+        ),
+        (
+            "ALTER TABLE organizations ADD COLUMN slug VARCHAR(120) DEFAULT ''",
+            "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS slug VARCHAR(120) DEFAULT ''",
+        ),
+        (
+            "ALTER TABLE organizations ADD COLUMN timezone VARCHAR(64) DEFAULT 'UTC'",
+            "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS timezone VARCHAR(64) DEFAULT 'UTC'",
+        ),
+        (
+            "ALTER TABLE organizations ADD COLUMN currency VARCHAR(8) DEFAULT 'KZT'",
+            "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS currency VARCHAR(8) DEFAULT 'KZT'",
         ),
         (
             "ALTER TABLE organizations ADD COLUMN iiko_api_login_enc TEXT",
@@ -406,25 +457,36 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     await conn.execute(text(sql_sqlite))
                 else:
                     await conn.execute(text(sql_pg))
-        except Exception:
-            pass
+        except Exception as exc:
+            _ddl_warn(sql_sqlite if settings.db_mode == "sqlite" else sql_pg, exc)
+
+    # integration_events: поле organization_id нужно для мультитенантной админки; в legacy SQLite могло отсутствовать.
+    try:
+        async with async_engine.begin() as conn:
+            if settings.db_mode == "sqlite":
+                sql = "ALTER TABLE integration_events ADD COLUMN organization_id INTEGER"
+                await conn.execute(text(sql))
+            else:
+                sql = "ALTER TABLE integration_events ADD COLUMN IF NOT EXISTS organization_id INTEGER"
+                await conn.execute(text(sql))
+    except Exception as exc:
+        _ddl_warn(sql, exc)
 
     try:
         async with async_engine.begin() as conn:
-            await conn.execute(
-                text(
-                    "INSERT INTO tenants (name, plan) SELECT 'Default', 'standard' "
-                    "WHERE NOT EXISTS (SELECT 1 FROM tenants LIMIT 1)",
-                ),
+            sql1 = (
+                "INSERT INTO tenants (name, plan) SELECT 'Default', 'standard' "
+                "WHERE NOT EXISTS (SELECT 1 FROM tenants LIMIT 1)"
             )
-            await conn.execute(
-                text(
-                    "UPDATE organizations SET tenant_id = (SELECT id FROM tenants ORDER BY id ASC LIMIT 1) "
-                    "WHERE tenant_id IS NULL",
-                ),
+            await conn.execute(text(sql1))
+            sql2 = (
+                "UPDATE organizations SET tenant_id = (SELECT id FROM tenants ORDER BY id ASC LIMIT 1) "
+                "WHERE tenant_id IS NULL"
             )
-    except Exception:
-        pass
+            await conn.execute(text(sql2))
+    except Exception as exc:
+        # Это не DDL, но критично для мультитенантности — не глушим полностью.
+        logger.warning("Startup seed/repair failed: %s", exc, exc_info=True)
 
     for sql_sqlite, sql_pg in (
         (
@@ -450,27 +512,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     await conn.execute(text(sql_sqlite))
                 else:
                     await conn.execute(text(sql_pg))
-        except Exception:
-            pass
+        except Exception as exc:
+            _ddl_warn(sql_sqlite if settings.db_mode == "sqlite" else sql_pg, exc)
 
     try:
         async with async_engine.begin() as conn:
             if settings.db_mode == "sqlite":
-                await conn.execute(
-                    text("CREATE INDEX IF NOT EXISTS ix_orders_payment_provider ON orders (payment_provider)"),
-                )
-                await conn.execute(
-                    text("CREATE INDEX IF NOT EXISTS ix_orders_external_payment_id ON orders (external_payment_id)"),
-                )
+                sql1 = "CREATE INDEX IF NOT EXISTS ix_orders_payment_provider ON orders (payment_provider)"
+                await conn.execute(text(sql1))
+                sql2 = "CREATE INDEX IF NOT EXISTS ix_orders_external_payment_id ON orders (external_payment_id)"
+                await conn.execute(text(sql2))
             else:
-                await conn.execute(
-                    text("CREATE INDEX IF NOT EXISTS ix_orders_payment_provider ON orders (payment_provider)"),
-                )
-                await conn.execute(
-                    text("CREATE INDEX IF NOT EXISTS ix_orders_external_payment_id ON orders (external_payment_id)"),
-                )
-    except Exception:
-        pass
+                sql1 = "CREATE INDEX IF NOT EXISTS ix_orders_payment_provider ON orders (payment_provider)"
+                await conn.execute(text(sql1))
+                sql2 = "CREATE INDEX IF NOT EXISTS ix_orders_external_payment_id ON orders (external_payment_id)"
+                await conn.execute(text(sql2))
+    except Exception as exc:
+        _ddl_warn(sql1, exc)
 
     await init_redis_or_fallback()
 

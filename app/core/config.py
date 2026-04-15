@@ -92,6 +92,10 @@ class Settings(BaseSettings):
     whatsapp_api_token: str = ""
     whatsapp_verify_token: str = ""
     whatsapp_phone_number_id: str = ""
+    whatsapp_api_version: str = Field(
+        default="v21.0",
+        validation_alias=AliasChoices("WHATSAPP_API_VERSION", "whatsapp_api_version"),
+    )
     # Twilio Voice (PSTN): для подписи вебхука и TwiML Say через REST (секреты только из env)
     twilio_account_sid: str = Field(
         default="",
@@ -390,6 +394,27 @@ class Settings(BaseSettings):
         ext = (os.environ.get("RENDER_EXTERNAL_URL") or "").strip().rstrip("/")
         if ext:
             object.__setattr__(self, "public_base_url", ext)
+        return self
+
+    @model_validator(mode="after")
+    def _require_strong_admin_secrets_in_prod(self) -> Self:
+        """
+        В продакшене SessionMiddleware и WS-токены должны подписываться настоящим секретом,
+        а не производным от дефолтных кредов.
+
+        Чтобы не ломать локальную разработку "из коробки", включаем правило только если
+        похоже на прод-среду (Render / Postgres / DATABASE_URL).
+        """
+        is_prod_like = bool(
+            (os.environ.get("RENDER") or "").strip()
+            or self.database_url_dsn.strip()
+            or (self.db_mode or "").strip().lower() == "postgres"
+        )
+        if not self.app_debug and is_prod_like:
+            if not self.session_secret.strip():
+                raise ValueError("SESSION_SECRET обязателен в продакшене (задайте длинную случайную строку).")
+            if (self.admin_username or "").strip().lower() == "admin" and (self.admin_password or "").strip() == "restomind":
+                raise ValueError("ADMIN_USERNAME/ADMIN_PASSWORD должны быть изменены в продакшене (дефолтные небезопасны).")
         return self
 
     @property
