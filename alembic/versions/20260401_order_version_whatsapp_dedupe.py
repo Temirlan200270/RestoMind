@@ -18,23 +18,43 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "orders",
-        sa.Column("version", sa.Integer(), server_default="1", nullable=False),
-    )
-    op.create_table(
-        "whatsapp_inbound_dedupe",
-        sa.Column("message_id", sa.String(length=128), nullable=False),
-        sa.Column("phone", sa.String(length=32), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=True),
-        sa.PrimaryKeyConstraint("message_id"),
-    )
-    op.create_index(
-        op.f("ix_whatsapp_inbound_dedupe_phone"),
-        "whatsapp_inbound_dedupe",
-        ["phone"],
-        unique=False,
-    )
+    # Ранняя миграция (base -> v1) может применяться к БД, где часть колонок уже
+    # создана вручную/через bootstrap. Делаем шаги идемпотентными.
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+
+    try:
+        cols = {c.get("name") for c in insp.get_columns("orders")}
+    except Exception:
+        cols = set()
+    if "version" not in cols:
+        op.add_column(
+            "orders",
+            sa.Column("version", sa.Integer(), server_default="1", nullable=False),
+        )
+
+    if not insp.has_table("whatsapp_inbound_dedupe"):
+        op.create_table(
+            "whatsapp_inbound_dedupe",
+            sa.Column("message_id", sa.String(length=128), nullable=False),
+            sa.Column("phone", sa.String(length=32), nullable=False),
+            sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=True),
+            sa.PrimaryKeyConstraint("message_id"),
+        )
+
+    # Индекс может существовать даже если таблица уже была создана.
+    try:
+        idx = {i.get("name") for i in insp.get_indexes("whatsapp_inbound_dedupe")}
+    except Exception:
+        idx = set()
+    idx_name = op.f("ix_whatsapp_inbound_dedupe_phone")
+    if idx_name not in idx:
+        op.create_index(
+            idx_name,
+            "whatsapp_inbound_dedupe",
+            ["phone"],
+            unique=False,
+        )
 
 
 def downgrade() -> None:
