@@ -1,7 +1,7 @@
 """menu_items: unique per (organization_id, iiko_id)
 
-Revision ID: 20260415_menu_iiko_org
-Revises: 20260404_tags
+Revision ID: 20260419_menu_iiko_org
+Revises: 20260418_pay
 Create Date: 2026-04-15
 
 """
@@ -11,8 +11,8 @@ from typing import Sequence, Union
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "20260415_menu_iiko_org"
-down_revision: Union[str, None] = "20260404_tags"
+revision: str = "20260419_menu_iiko_org"
+down_revision: Union[str, None] = "20260418_pay"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
