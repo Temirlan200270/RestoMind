@@ -6,6 +6,7 @@
 
 import asyncio
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 import httpx
@@ -44,6 +45,14 @@ class IikoClient:
         if self._http:
             await self._http.aclose()
 
+    async def _ensure_token(self) -> None:
+        """
+        Гарантирует, что токен есть. Это не "фикс бага сейчас", а страховка
+        на случай, если клиент начнут использовать долго (токен живёт ~15 минут).
+        """
+        if not self._token:
+            await self._authenticate()
+
     async def _authenticate(self) -> None:
         """
         Получить токен доступа iiko.
@@ -71,18 +80,115 @@ class IikoClient:
             raise RuntimeError("Токен не получен. Сначала вызовите _authenticate().")
         return {"Authorization": f"Bearer {self._token}"}
 
-    async def get_organizations(self) -> list[dict[str, Any]]:
-        """Получить список организаций, привязанных к API-логину."""
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        json: Mapping[str, Any] | None = None,
+        timeout: float | None = None,
+        retry_on_4xx: bool = False,
+    ) -> dict[str, Any]:
+        """
+        Единая точка политики HTTP-вызовов:
+        - retry на сетевые ошибки и 5xx
+        - обработка 401: переавторизация + 1 повтор
+        - единые логи тела ошибки для диагностики
+
+        Возвращает JSON-ответ iiko как dict.
+        """
         if not self._http:
             raise RuntimeError("HTTP-клиент не инициализирован.")
 
-        response = await self._http.post(
-            "/api/1/organizations",
-            headers=self._auth_headers(),
-            json={},
-        )
-        response.raise_for_status()
-        data = response.json()
+        await self._ensure_token()
+
+        last_exc: Exception | None = None
+        refreshed = False
+
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                response = await self._http.request(
+                    method=method,
+                    url=path,
+                    headers=self._auth_headers(),
+                    json=dict(json) if json is not None else None,
+                    timeout=timeout,
+                )
+
+                if response.status_code == 401 and not refreshed:
+                    # Токен протух: переавторизация и один повтор в рамках того же attempt.
+                    logger.warning("iiko: 401 на %s %s — переавторизация", method, path)
+                    await self._authenticate()
+                    refreshed = True
+                    response = await self._http.request(
+                        method=method,
+                        url=path,
+                        headers=self._auth_headers(),
+                        json=dict(json) if json is not None else None,
+                        timeout=timeout,
+                    )
+
+                if response.status_code >= 400:
+                    body_preview = (response.text or "")[:2000]
+                    logger.error(
+                        "iiko: %s %s HTTP %s (попытка %d/%d). body=%s",
+                        method,
+                        path,
+                        response.status_code,
+                        attempt,
+                        MAX_RETRIES,
+                        body_preview,
+                    )
+
+                response.raise_for_status()
+
+                data = response.json()
+                if not isinstance(data, dict):
+                    raise ValueError("iiko API вернул неожиданный JSON (ожидали object)")
+                return data
+
+            except (httpx.TimeoutException, httpx.ConnectError) as exc:
+                last_exc = exc
+                logger.warning(
+                    "iiko: сеть при %s %s (попытка %d/%d): %s",
+                    method,
+                    path,
+                    attempt,
+                    MAX_RETRIES,
+                    exc,
+                )
+            except httpx.HTTPStatusError as exc:
+                last_exc = exc
+                status = exc.response.status_code if exc.response is not None else 0
+                if status >= 500:
+                    logger.warning(
+                        "iiko: 5xx при %s %s (попытка %d/%d): %s",
+                        method,
+                        path,
+                        attempt,
+                        MAX_RETRIES,
+                        status,
+                    )
+                elif retry_on_4xx and status >= 400:
+                    logger.warning(
+                        "iiko: 4xx при %s %s (попытка %d/%d): %s",
+                        method,
+                        path,
+                        attempt,
+                        MAX_RETRIES,
+                        status,
+                    )
+                else:
+                    raise
+
+            if attempt < MAX_RETRIES:
+                await asyncio.sleep(RETRY_DELAY * attempt)
+
+        raise last_exc or RuntimeError(f"iiko: не удалось выполнить {method} {path}")
+
+    async def get_organizations(self) -> list[dict[str, Any]]:
+        """Получить список организаций, привязанных к API-логину."""
+        data = await self._request("POST", "/api/1/organizations", json={})
         orgs = data.get("organizations", [])
         logger.info("iiko: найдено %d организаций", len(orgs))
         return orgs
@@ -94,18 +200,13 @@ class IikoClient:
         Returns:
             Словарь с ключами 'groups' (категории) и 'products' (позиции).
         """
-        if not self._http:
-            raise RuntimeError("HTTP-клиент не инициализирован.")
-
         # Крупная номенклатура может отвечать дольше стандартного таймаута
-        response = await self._http.post(
+        data = await self._request(
+            "POST",
             "/api/1/nomenclature",
-            headers=self._auth_headers(),
             json={"organizationId": organization_id},
             timeout=60.0,
         )
-        response.raise_for_status()
-        data = response.json()
 
         groups = data.get("groups", [])
         products = data.get("products", [])
@@ -141,9 +242,6 @@ class IikoClient:
         Returns:
             Ответ iiko с orderInfo (correlationId, orderId и т.д.).
         """
-        if not self._http:
-            raise RuntimeError("HTTP-клиент не инициализирован.")
-
         payload: dict[str, Any] = {
             "organizationId": organization_id,
             "order": order_data,
@@ -152,56 +250,19 @@ class IikoClient:
         if tg:
             payload["terminalGroupId"] = tg
 
-        last_exc: Exception | None = None
-        for attempt in range(1, MAX_RETRIES + 1):
-            try:
-                # Debug: логируем минимум про customer.phone, чтобы быстро ловить null/не тот формат.
-                try:
-                    order_obj = payload.get("order") if isinstance(payload, dict) else None
-                    customer_obj = order_obj.get("customer") if isinstance(order_obj, dict) else None
-                    phone = customer_obj.get("phone") if isinstance(customer_obj, dict) else None
-                    logger.info("iiko: deliveries/create payload customer.phone=%r", phone)
-                except Exception:
-                    pass
+        # Debug: логируем минимум про customer.phone, чтобы быстро ловить null/не тот формат.
+        try:
+            order_obj = payload.get("order") if isinstance(payload, dict) else None
+            customer_obj = order_obj.get("customer") if isinstance(order_obj, dict) else None
+            phone = customer_obj.get("phone") if isinstance(customer_obj, dict) else None
+            logger.info("iiko: deliveries/create payload customer.phone=%r", phone)
+        except Exception:
+            pass
 
-                response = await self._http.post(
-                    "/api/1/deliveries/create",
-                    headers=self._auth_headers(),
-                    json=payload,
-                )
-                if response.status_code >= 400:
-                    # iiko почти всегда возвращает полезные validationErrors в теле ответа.
-                    # Без этого в логах остаётся только "400 Bad Request" без причины.
-                    body_preview = (response.text or "")[:2000]
-                    logger.error(
-                        "iiko: deliveries/create HTTP %s (попытка %d/%d). body=%s",
-                        response.status_code,
-                        attempt,
-                        MAX_RETRIES,
-                        body_preview,
-                    )
-                response.raise_for_status()
-                result = response.json()
-
-                correlation_id = result.get("correlationId", "?")
-                logger.info("iiko: заказ создан, correlationId=%s", correlation_id)
-                return result
-
-            except (httpx.TimeoutException, httpx.ConnectError) as exc:
-                last_exc = exc
-                logger.warning(
-                    "iiko: сетевая ошибка при создании заказа (попытка %d/%d): %s",
-                    attempt, MAX_RETRIES, exc,
-                )
-                if attempt < MAX_RETRIES:
-                    await asyncio.sleep(RETRY_DELAY * attempt)
-            except httpx.HTTPStatusError as exc:
-                # 4xx/5xx — не ретраим бесконечно, но сохраним контекст.
-                last_exc = exc
-                if attempt < MAX_RETRIES and (exc.response is not None) and exc.response.status_code >= 500:
-                    await asyncio.sleep(RETRY_DELAY * attempt)
-
-        raise last_exc or RuntimeError("iiko: не удалось создать заказ")
+        result = await self._request("POST", "/api/1/deliveries/create", json=payload)
+        correlation_id = result.get("correlationId", "?")
+        logger.info("iiko: заказ создан, correlationId=%s", correlation_id)
+        return result
 
     async def get_stop_lists(self, organization_ids: list[str]) -> dict[str, Any]:
         """
@@ -214,17 +275,7 @@ class IikoClient:
         Returns:
             Словарь со стоп-листами по организациям.
         """
-        if not self._http:
-            raise RuntimeError("HTTP-клиент не инициализирован.")
-
-        response = await self._http.post(
-            "/api/1/stop_lists",
-            headers=self._auth_headers(),
-            json={"organizationIds": organization_ids},
-        )
-        response.raise_for_status()
-        data = response.json()
-
+        data = await self._request("POST", "/api/1/stop_lists", json={"organizationIds": organization_ids})
         logger.info("iiko: получены стоп-листы для %d организаций", len(organization_ids))
         return data
 
@@ -238,19 +289,14 @@ class IikoClient:
         Список терминальных групп (кассы/точки) по организациям.
         Эндпоинт: POST /api/1/terminal_groups
         """
-        if not self._http:
-            raise RuntimeError("HTTP-клиент не инициализирован.")
-
-        response = await self._http.post(
+        data = await self._request(
+            "POST",
             "/api/1/terminal_groups",
-            headers=self._auth_headers(),
             json={
                 "organizationIds": organization_ids,
                 "includeDisabled": include_disabled,
             },
         )
-        response.raise_for_status()
-        data = response.json()
         logger.info("iiko: запрошены терминальные группы для %d организаций", len(organization_ids))
         return data
 
@@ -265,15 +311,6 @@ class IikoClient:
         Returns:
             Словарь со списками типов заказов (структура зависит от iiko-окружения).
         """
-        if not self._http:
-            raise RuntimeError("HTTP-клиент не инициализирован.")
-
-        response = await self._http.post(
-            "/api/1/deliveries/order_types",
-            headers=self._auth_headers(),
-            json={"organizationIds": organization_ids},
-        )
-        response.raise_for_status()
-        data = response.json()
+        data = await self._request("POST", "/api/1/deliveries/order_types", json={"organizationIds": organization_ids})
         logger.info("iiko: запрошены типы заказов deliveries для %d организаций", len(organization_ids))
         return data

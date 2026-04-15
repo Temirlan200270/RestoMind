@@ -1760,6 +1760,10 @@
                             <input type="search" x-model.debounce.300ms="stopListSearchQuery" placeholder="Поиск по названию или разделу…"
                                 class="w-full pl-11 pr-4 py-3 rounded-2xl border border-gray-200 bg-white text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-orange-500">
                         </div>
+                        <div class="shrink-0 flex items-center gap-2 text-xs font-bold text-gray-600 bg-white border border-gray-200 rounded-2xl px-4 py-3 shadow-sm">
+                            <span class="text-gray-400">В стопе:</span>
+                            <span class="tabular-nums" x-text="stopListFilteredItems.length"></span>
+                        </div>
                         <button type="button" @click="syncStopListOnly()"
                             :disabled="stopListSyncLoading || integrationSyncLoading || !integrationStatus.iiko_configured"
                             class="min-h-[48px] shrink-0 px-6 py-3 rounded-2xl font-bold text-sm bg-orange-600 text-white hover:bg-orange-700 shadow-md shadow-orange-600/25 transition disabled:opacity-45 disabled:cursor-not-allowed flex items-center justify-center gap-2">

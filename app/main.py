@@ -26,6 +26,7 @@ from app.api.payment_webhook import router as payment_webhook_router
 from app.api.webhooks import router as webhooks_router
 from app.core.config import settings
 from app.db.models import Base
+from app.integrations.whatsapp import close_whatsapp_http_client, init_whatsapp_http_client
 from app.db.session import (
     InMemoryRedis,
     async_engine,
@@ -473,6 +474,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     await init_redis_or_fallback()
 
+    await init_whatsapp_http_client()
+
     stop_list_task = asyncio.create_task(_stop_list_sync_loop())
     chat_retention_task = asyncio.create_task(_chat_log_retention_loop())
 
@@ -484,6 +487,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await bg
         except asyncio.CancelledError:
             pass
+
+    await close_whatsapp_http_client()
 
     await redis_client.aclose()
     await async_engine.dispose()

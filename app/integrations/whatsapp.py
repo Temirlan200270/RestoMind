@@ -7,8 +7,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import random
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -34,7 +37,48 @@ WHATSAPP_API_URL = (
 
 SEND_TIMEOUT = 10.0
 MEDIA_TIMEOUT = 60.0
-MAX_RETRIES = 2
+MAX_RETRIES = 3
+BACKOFF_CAP_SECONDS = 8.0
+
+_http_client: httpx.AsyncClient | None = None
+_http_lock: asyncio.Lock | None = None
+
+
+def _retry_delay_seconds(attempt_index: int) -> float:
+    """Экспоненциальная задержка перед следующей попыткой (attempt_index = номер неудачной попытки, с 1)."""
+    base = min(2.0 ** (attempt_index - 1), BACKOFF_CAP_SECONDS)
+    return base + random.uniform(0, 0.25)
+
+
+async def _ensure_http_client() -> httpx.AsyncClient:
+    """Один AsyncClient на процесс: пул соединений + корректное закрытие из lifespan."""
+    global _http_client, _http_lock
+    if _http_lock is None:
+        _http_lock = asyncio.Lock()
+    async with _http_lock:
+        if _http_client is None or _http_client.is_closed:
+            _http_client = httpx.AsyncClient(
+                timeout=httpx.Timeout(MEDIA_TIMEOUT, connect=15.0),
+                limits=httpx.Limits(max_keepalive_connections=20, max_connections=50),
+            )
+        return _http_client
+
+
+async def init_whatsapp_http_client() -> None:
+    """Прогрев клиента при старте приложения (опционально)."""
+    if (settings.whatsapp_api_token or "").strip():
+        await _ensure_http_client()
+
+
+async def close_whatsapp_http_client() -> None:
+    """Закрыть HTTP-клиент WhatsApp (вызывать из lifespan shutdown)."""
+    global _http_client
+    if _http_lock is None:
+        return
+    async with _http_lock:
+        if _http_client is not None and not _http_client.is_closed:
+            await _http_client.aclose()
+        _http_client = None
 
 
 def _digits_only(phone: str) -> str:
@@ -81,6 +125,99 @@ def _parse_send_error_payload(resp: httpx.Response) -> dict[str, Any]:
         return {"http_status": resp.status_code, "body": resp.text[:500]}
 
 
+def _recipient_not_allowed(response: httpx.Response) -> bool:
+    return response.status_code == 400 and _is_recipient_not_allowed(response)
+
+
+async def _post_whatsapp_messages(
+    *,
+    candidates: list[str],
+    headers: dict[str, str],
+    build_json: Callable[[str], dict[str, Any]],
+    timeout: float,
+    extract_wamid: bool,
+    log_prefix: str,
+) -> WhatsAppSendResult:
+    """
+    Общий POST на /messages: кандидаты номера, 131030 → следующий номер,
+    между повторными попытками — exponential backoff + jitter.
+    """
+    last_err: dict[str, Any] | None = None
+    client = await _ensure_http_client()
+
+    for to in candidates:
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                response = await client.post(
+                    WHATSAPP_API_URL,
+                    headers=headers,
+                    json=build_json(to),
+                    timeout=timeout,
+                )
+            except httpx.TimeoutException:
+                last_err = {"code": "timeout", "to": to, "attempt": attempt}
+                logger.error(
+                    "%s: таймаут (to=%s, попытка %d/%d)",
+                    log_prefix,
+                    to,
+                    attempt,
+                    MAX_RETRIES,
+                )
+                if attempt < MAX_RETRIES:
+                    await asyncio.sleep(_retry_delay_seconds(attempt))
+                continue
+            except httpx.HTTPError as exc:
+                last_err = {"code": "network", "detail": str(exc)[:300]}
+                logger.error(
+                    "%s: сеть (to=%s, попытка %d/%d): %s",
+                    log_prefix,
+                    to,
+                    attempt,
+                    MAX_RETRIES,
+                    exc,
+                )
+                if attempt < MAX_RETRIES:
+                    await asyncio.sleep(_retry_delay_seconds(attempt))
+                continue
+
+            if response.status_code == 200:
+                wamid: str | None = None
+                if extract_wamid:
+                    try:
+                        payload = response.json()
+                        msgs = payload.get("messages") if isinstance(payload, dict) else None
+                        if isinstance(msgs, list) and msgs and isinstance(msgs[0], dict):
+                            mid = msgs[0].get("id")
+                            if mid:
+                                wamid = str(mid)
+                    except Exception:
+                        wamid = None
+                logger.info("%s: сообщение принято API -> %s", log_prefix, to)
+                return WhatsAppSendResult(ok=True, message_id=wamid)
+
+            last_err = _parse_send_error_payload(response)
+            logger.error(
+                "%s: ошибка %d (to=%s, попытка %d/%d): %s",
+                log_prefix,
+                response.status_code,
+                to,
+                attempt,
+                MAX_RETRIES,
+                response.text[:200],
+            )
+            if _recipient_not_allowed(response):
+                break
+            if attempt < MAX_RETRIES:
+                await asyncio.sleep(_retry_delay_seconds(attempt))
+
+    logger.error(
+        "%s: не удалось отправить после %d попыток на номер(а)",
+        log_prefix,
+        MAX_RETRIES,
+    )
+    return WhatsAppSendResult(ok=False, error=last_err or {"code": "unknown"})
+
+
 async def send_message(phone: str, text: str) -> WhatsAppSendResult:
     """
     Отправить текстовое сообщение клиенту в WhatsApp.
@@ -100,57 +237,22 @@ async def send_message(phone: str, text: str) -> WhatsAppSendResult:
         "Content-Type": "application/json",
     }
 
-    last_err: dict[str, Any] | None = None
-    for to in candidates:
-        for attempt in range(1, MAX_RETRIES + 1):
-            try:
-                async with httpx.AsyncClient(timeout=SEND_TIMEOUT) as client:
-                    response = await client.post(
-                        WHATSAPP_API_URL,
-                        headers=headers,
-                        json={
-                            "messaging_product": "whatsapp",
-                            "to": to,
-                            "type": "text",
-                            "text": {"body": text},
-                        },
-                    )
+    def _body(to: str) -> dict[str, Any]:
+        return {
+            "messaging_product": "whatsapp",
+            "to": to,
+            "type": "text",
+            "text": {"body": text},
+        }
 
-                if response.status_code == 200:
-                    logger.info("WhatsApp: сообщение принято API -> %s", to)
-                    wamid: str | None = None
-                    try:
-                        payload = response.json()
-                        msgs = payload.get("messages") if isinstance(payload, dict) else None
-                        if isinstance(msgs, list) and msgs and isinstance(msgs[0], dict):
-                            mid = msgs[0].get("id")
-                            if mid:
-                                wamid = str(mid)
-                    except Exception:
-                        wamid = None
-                    return WhatsAppSendResult(ok=True, message_id=wamid)
-
-                last_err = _parse_send_error_payload(response)
-                logger.error(
-                    "WhatsApp: ошибка %d (to=%s, попытка %d/%d): %s",
-                    response.status_code, to, attempt, MAX_RETRIES, response.text[:200],
-                )
-                if response.status_code == 400 and _is_recipient_not_allowed(response):
-                    break
-
-            except httpx.TimeoutException:
-                last_err = {"code": "timeout", "to": to, "attempt": attempt}
-                logger.error(
-                    "WhatsApp: таймаут (to=%s, попытка %d/%d)", to, attempt, MAX_RETRIES,
-                )
-            except httpx.HTTPError as exc:
-                last_err = {"code": "network", "detail": str(exc)[:300]}
-                logger.error(
-                    "WhatsApp: сетевая ошибка (to=%s, попытка %d/%d): %s", to, attempt, MAX_RETRIES, exc,
-                )
-
-    logger.error("WhatsApp: не удалось отправить сообщение -> %s после %d попыток", phone, MAX_RETRIES)
-    return WhatsAppSendResult(ok=False, error=last_err or {"code": "unknown"})
+    return await _post_whatsapp_messages(
+        candidates=candidates,
+        headers=headers,
+        build_json=_body,
+        timeout=SEND_TIMEOUT,
+        extract_wamid=True,
+        log_prefix="WhatsApp",
+    )
 
 
 async def send_template(
@@ -203,30 +305,20 @@ async def send_template(
         "Content-Type": "application/json",
     }
 
-    for to in candidates:
-        payload["to"] = to
-        for attempt in range(1, MAX_RETRIES + 1):
-            try:
-                async with httpx.AsyncClient(timeout=SEND_TIMEOUT) as client:
-                    response = await client.post(
-                        WHATSAPP_API_URL,
-                        headers=headers,
-                        json=payload,
-                    )
-                if response.status_code == 200:
-                    logger.info("WhatsApp template '%s' → %s", template_name, to)
-                    return True
-                logger.error(
-                    "WhatsApp template error %d (to=%s, попытка %d/%d): %s",
-                    response.status_code, to, attempt, MAX_RETRIES, response.text[:200],
-                )
-                if response.status_code == 400 and _is_recipient_not_allowed(response):
-                    break
-            except (httpx.TimeoutException, httpx.HTTPError) as exc:
-                logger.error(
-                    "WhatsApp template error (to=%s, попытка %d/%d): %s", to, attempt, MAX_RETRIES, exc,
-                )
+    def _body(to: str) -> dict[str, Any]:
+        body = {**payload, "to": to}
+        return body
 
+    result = await _post_whatsapp_messages(
+        candidates=candidates,
+        headers=headers,
+        build_json=_body,
+        timeout=SEND_TIMEOUT,
+        extract_wamid=False,
+        log_prefix=f"WhatsApp template '{template_name}'",
+    )
+    if result.ok:
+        return True
     return False
 
 
@@ -245,36 +337,38 @@ async def download_media_bytes(media_id: str) -> tuple[bytes, str] | None:
     meta_url = f"https://graph.facebook.com/{GRAPH_API_VERSION}/{media_id}"
 
     try:
-        async with httpx.AsyncClient(timeout=MEDIA_TIMEOUT) as client:
-            r = await client.get(
-                meta_url,
-                headers={"Authorization": f"Bearer {token}"},
+        client = await _ensure_http_client()
+        r = await client.get(
+            meta_url,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=MEDIA_TIMEOUT,
+        )
+        if r.status_code != 200:
+            logger.error(
+                "WhatsApp media meta: HTTP %s — %s",
+                r.status_code,
+                r.text[:300],
             )
-            if r.status_code != 200:
-                logger.error(
-                    "WhatsApp media meta: HTTP %s — %s",
-                    r.status_code,
-                    r.text[:300],
-                )
-                return None
-            payload = r.json()
-            download_url = payload.get("url")
-            mime_type = (payload.get("mime_type") or "application/octet-stream").split(";")[0].strip()
-            if not download_url:
-                logger.error("WhatsApp media meta: нет поля url")
-                return None
+            return None
+        payload = r.json()
+        download_url = payload.get("url")
+        mime_type = (payload.get("mime_type") or "application/octet-stream").split(";")[0].strip()
+        if not download_url:
+            logger.error("WhatsApp media meta: нет поля url")
+            return None
 
-            r2 = await client.get(
-                download_url,
-                headers={"Authorization": f"Bearer {token}"},
+        r2 = await client.get(
+            download_url,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=MEDIA_TIMEOUT,
+        )
+        if r2.status_code != 200:
+            logger.error(
+                "WhatsApp media download: HTTP %s",
+                r2.status_code,
             )
-            if r2.status_code != 200:
-                logger.error(
-                    "WhatsApp media download: HTTP %s",
-                    r2.status_code,
-                )
-                return None
-            return (r2.content, mime_type)
+            return None
+        return (r2.content, mime_type)
     except httpx.HTTPError as exc:
         logger.error("WhatsApp media: ошибка загрузки: %s", exc)
         return None
@@ -298,20 +392,22 @@ async def upload_media_bytes(
         logger.warning("upload_media: нет токена или пустой файл")
         return None
 
+    client = await _ensure_http_client()
+    last_exc: BaseException | None = None
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            async with httpx.AsyncClient(timeout=MEDIA_TIMEOUT) as client:
-                response = await client.post(
-                    MEDIA_UPLOAD_URL,
-                    headers={"Authorization": f"Bearer {token}"},
-                    files={
-                        "file": (filename, file_bytes, mime_type),
-                    },
-                    data={
-                        "messaging_product": "whatsapp",
-                        "type": mime_type,
-                    },
-                )
+            response = await client.post(
+                MEDIA_UPLOAD_URL,
+                headers={"Authorization": f"Bearer {token}"},
+                files={
+                    "file": (filename, file_bytes, mime_type),
+                },
+                data={
+                    "messaging_product": "whatsapp",
+                    "type": mime_type,
+                },
+                timeout=MEDIA_TIMEOUT,
+            )
             if response.status_code == 200:
                 mid = (response.json() or {}).get("id")
                 if mid:
@@ -320,11 +416,19 @@ async def upload_media_bytes(
                 return None
             logger.error(
                 "upload_media HTTP %s (попытка %d/%d): %s",
-                response.status_code, attempt, MAX_RETRIES, response.text[:200],
+                response.status_code,
+                attempt,
+                MAX_RETRIES,
+                response.text[:200],
             )
         except (httpx.TimeoutException, httpx.HTTPError) as exc:
+            last_exc = exc
             logger.error("upload_media ошибка (попытка %d/%d): %s", attempt, MAX_RETRIES, exc)
+        if attempt < MAX_RETRIES:
+            await asyncio.sleep(_retry_delay_seconds(attempt))
 
+    if last_exc:
+        logger.error("upload_media: исчерпаны попытки: %s", last_exc)
     return None
 
 
@@ -353,33 +457,22 @@ async def send_voice_message(phone: str, audio_mp3: bytes) -> bool:
         "Content-Type": "application/json",
     }
 
-    for to in candidates:
-        for attempt in range(1, MAX_RETRIES + 1):
-            try:
-                async with httpx.AsyncClient(timeout=SEND_TIMEOUT) as client:
-                    response = await client.post(
-                        WHATSAPP_API_URL,
-                        headers=headers,
-                        json={
-                            "messaging_product": "whatsapp",
-                            "to": to,
-                            "type": "audio",
-                            "audio": {"id": media_id},
-                        },
-                    )
-                if response.status_code == 200:
-                    logger.info("WhatsApp: аудио доставлено → %s", to)
-                    return True
-                logger.error(
-                    "WhatsApp audio: HTTP %s (to=%s, попытка %d/%d): %s",
-                    response.status_code, to, attempt, MAX_RETRIES, response.text[:200],
-                )
-                if response.status_code == 400 and _is_recipient_not_allowed(response):
-                    break
-            except (httpx.TimeoutException, httpx.HTTPError) as exc:
-                logger.error(
-                    "WhatsApp audio: сеть (to=%s, попытка %d/%d): %s",
-                    to, attempt, MAX_RETRIES, exc,
-                )
+    def _body(to: str) -> dict[str, Any]:
+        return {
+            "messaging_product": "whatsapp",
+            "to": to,
+            "type": "audio",
+            "audio": {"id": media_id},
+        }
 
+    result = await _post_whatsapp_messages(
+        candidates=candidates,
+        headers=headers,
+        build_json=_body,
+        timeout=SEND_TIMEOUT,
+        extract_wamid=False,
+        log_prefix="WhatsApp audio",
+    )
+    if result.ok:
+        return True
     return False

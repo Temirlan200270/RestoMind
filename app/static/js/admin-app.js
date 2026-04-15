@@ -146,6 +146,7 @@ function adminMixinState() {
 
         /** Вкладка «Стоп-лист»: только позиции с is_available=false */
         stopListItems: [],
+        stopListFilteredItems: [],
         stopListLoadError: '',
         stopListSearchQuery: '',
         stopListSyncLoading: false,
@@ -512,14 +513,17 @@ function adminMixinMenuOrdersUi() {
             return this.menuItems.filter((i) => !i.is_available).length;
         },
 
-        /** Позиции в стопе на вкладке «Стоп-лист» (поиск). */
-        get stopListFilteredItems() {
+        /** Пересчёт stopListFilteredItems (явное состояние вместо getter). */
+        _recalcStopListFiltered() {
             const q = (this.stopListSearchQuery || '').trim().toLowerCase();
-            const items = this.stopListItems || [];
-            if (!q) return items;
-            return items.filter((it) =>
-                String(it.name || '').toLowerCase().includes(q) ||
-                String(it.category || '').toLowerCase().includes(q),
+            const items = Array.isArray(this.stopListItems) ? this.stopListItems : [];
+            if (!q) {
+                this.stopListFilteredItems = items;
+                return;
+            }
+            this.stopListFilteredItems = items.filter((it) =>
+                String(it?.name || '').toLowerCase().includes(q) ||
+                String(it?.category || '').toLowerCase().includes(q),
             );
         },
 
@@ -647,6 +651,15 @@ function adminMixinMenuOrdersUi() {
             }
 
             await this.checkSession();
+
+            // Стоп-лист: держим производный список в явном состоянии (не getter),
+            // чтобы Alpine гарантированно перерисовывал сетку при поиске/обновлении данных.
+            try {
+                this.$watch('stopListSearchQuery', () => this._recalcStopListFiltered());
+                this.$watch('stopListItems', () => this._recalcStopListFiltered());
+            } catch (e) {
+                // no-op: на случай if Alpine $watch недоступен (не должно быть)
+            }
         },
 
         /** Есть ли активный поиск / раздел / фильтр по наличию (нужна кнопка «Показать всё меню»). */
@@ -2453,6 +2466,7 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                 const { ok, data } = await this.apiJsonResponse('/api/admin/menu?stopped_only=true');
                 if (!ok) {
                     this.stopListItems = [];
+                    this.stopListFilteredItems = [];
                     this.stopListLoadError = this.formatApiError(data.detail) || 'Не удалось загрузить стоп-лист';
                     return;
                 }
@@ -2464,6 +2478,7 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                     this.stopListItems = apiItems;
                     this.demoToastMessage = `Стоп-лист: ${apiItems.length} поз.`;
                     setTimeout(() => { this.demoToastMessage = ''; }, 4000);
+                    this._recalcStopListFiltered();
                     return;
                 }
                 if (!Array.isArray(this.menuItems) || this.menuItems.length === 0) {
@@ -2473,9 +2488,11 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                 this.stopListItems = derived;
                 this.demoToastMessage = `Стоп-лист: ${derived.length} поз.`;
                 setTimeout(() => { this.demoToastMessage = ''; }, 4000);
+                this._recalcStopListFiltered();
             } catch (e) {
                 console.error('[admin] loadStopList', e);
                 this.stopListItems = [];
+                this.stopListFilteredItems = [];
                 this.stopListLoadError = 'Ошибка сети';
             }
         },
