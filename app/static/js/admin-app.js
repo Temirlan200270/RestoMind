@@ -2456,7 +2456,18 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                     this.stopListLoadError = this.formatApiError(data.detail) || 'Не удалось загрузить стоп-лист';
                     return;
                 }
-                this.stopListItems = data.items || [];
+                const apiItems = Array.isArray(data.items) ? data.items : [];
+                // Иногда после миграций org-контекст в админке может “поплыть”, а также бывают
+                // edge-case'ы с legacy данными. В таких случаях быстрее и надёжнее восстановить
+                // стоп-лист из уже загруженного меню (available_only=false).
+                if (apiItems.length > 0) {
+                    this.stopListItems = apiItems;
+                    return;
+                }
+                if (!Array.isArray(this.menuItems) || this.menuItems.length === 0) {
+                    await this.loadMenu();
+                }
+                this.stopListItems = (this.menuItems || []).filter((i) => i && i.is_available === false);
             } catch (e) {
                 console.error('[admin] loadStopList', e);
                 this.stopListItems = [];
