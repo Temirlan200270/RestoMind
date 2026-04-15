@@ -307,6 +307,12 @@ async def sync_stop_lists(
         "Стоп-листы применены к БД: в стоп добавлено %d, восстановлено в продажу %d",
         stopped_count, restored_count,
     )
+    logger.info(
+        "Стоп-листы: org=%s items_scanned=%d stopped_ids=%d",
+        str(menu_organization_id) if menu_organization_id is not None else "None",
+        len(all_items),
+        len(stopped_ids),
+    )
     return {
         "stopped": stopped_count,
         "restored": restored_count,

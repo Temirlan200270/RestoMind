@@ -2002,6 +2002,13 @@ async def list_menu(
     result = await db.execute(query)
     items = result.scalars().all()
 
+    if stopped_only:
+        logger.info(
+            "Admin stoplist fetch org=%s: returned=%d (stopped_only=true)",
+            org_id,
+            len(items),
+        )
+
     return {
         "count": len(items),
         "items": [_menu_item_dict(item) for item in items],
