@@ -11,6 +11,7 @@ alembic>=1.14.0
 
 # === Кэш и сессии (Redis, async — опционально) ===
 redis>=5.2.0
+arq>=0.26.0
 
 # === AI / LLM (OpenAI: чат + Whisper) ===
 openai>=1.76.0

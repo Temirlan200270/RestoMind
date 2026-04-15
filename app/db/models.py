@@ -420,13 +420,18 @@ class MenuItem(Base):
     """
 
     __tablename__ = "menu_items"
+    __table_args__ = (
+        # Multi-tenant: один и тот же UUID iiko может существовать у разных организаций.
+        # Уникальность должна быть на пару (organization_id, iiko_id).
+        UniqueConstraint("organization_id", "iiko_id", name="uq_menu_items_org_iiko_id"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     organization_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("organizations.id"), nullable=True, index=True,
     )
     iiko_id: Mapped[str | None] = mapped_column(
-        String(100), unique=True, nullable=True, index=True,
+        String(100), nullable=True, index=True,
         comment="ID продукта в iiko (UUID)"
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False, index=True, comment="Название блюда")

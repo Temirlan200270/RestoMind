@@ -1326,7 +1326,14 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks) -
         value = changes.get("value", {})
         statuses = value.get("statuses", []) or []
         if statuses:
-            background_tasks.add_task(_process_whatsapp_status_batch, list(statuses))
+            from app.services.task_queue import enqueue_job
+
+            ok = await enqueue_job(
+                "whatsapp_process_statuses",
+                statuses=list(statuses),
+            )
+            if not ok:
+                background_tasks.add_task(_process_whatsapp_status_batch, list(statuses))
 
         messages = value.get("messages", []) or []
 
@@ -1347,24 +1354,44 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks) -
             if msg_type == "audio":
                 media_id = (msg.get("audio") or {}).get("id") or ""
                 if media_id:
-                    background_tasks.add_task(
-                        process_voice_message,
-                        phone,
-                        media_id,
+                    from app.services.task_queue import enqueue_job
+
+                    ok = await enqueue_job(
+                        "whatsapp_process_voice",
+                        phone=phone,
+                        media_id=media_id,
                         whatsapp_message_id=message_id,
                         webhook_value=value,
                     )
+                    if not ok:
+                        background_tasks.add_task(
+                            process_voice_message,
+                            phone,
+                            media_id,
+                            whatsapp_message_id=message_id,
+                            webhook_value=value,
+                        )
                     logger.info("Голосовое от %s поставлено в очередь", phone)
             else:
                 message_text = (msg.get("text") or {}).get("body") or ""
                 if message_text:
-                    background_tasks.add_task(
-                        process_with_retry,
-                        phone,
-                        message_text,
+                    from app.services.task_queue import enqueue_job
+
+                    ok = await enqueue_job(
+                        "whatsapp_process_text",
+                        phone=phone,
+                        message_text=message_text,
                         whatsapp_message_id=message_id,
                         webhook_value=value,
                     )
+                    if not ok:
+                        background_tasks.add_task(
+                            process_with_retry,
+                            phone,
+                            message_text,
+                            whatsapp_message_id=message_id,
+                            webhook_value=value,
+                        )
                     logger.info("Сообщение от %s поставлено в очередь обработки", phone)
 
     except (IndexError, KeyError, TypeError) as exc:

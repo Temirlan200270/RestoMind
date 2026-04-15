@@ -8,7 +8,7 @@
 import logging
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -98,7 +98,15 @@ async def sync_menu_from_iiko(
 
     q = select(MenuItem)
     if restomind_organization_id is not None:
-        q = q.where(MenuItem.organization_id == restomind_organization_id)
+        # Legacy: в ранних версиях organization_id мог быть NULL.
+        # Для синка конкретного филиала подхватываем и такие строки, чтобы обновлять,
+        # а не пытаться вставлять заново и ловить UniqueViolation по iiko_id.
+        q = q.where(
+            or_(
+                MenuItem.organization_id == restomind_organization_id,
+                MenuItem.organization_id.is_(None),
+            )
+        )
     existing_result = await db.execute(q)
     existing_by_iiko: dict[str, MenuItem] = {
         mi.iiko_id: mi for mi in existing_result.scalars().all() if mi.iiko_id
@@ -133,6 +141,8 @@ async def sync_menu_from_iiko(
         existing = existing_by_iiko.get(iiko_id)
 
         if existing:
+            if restomind_organization_id is not None and existing.organization_id is None:
+                existing.organization_id = restomind_organization_id
             existing.name = name
             existing.category = category_name
             existing.description = description

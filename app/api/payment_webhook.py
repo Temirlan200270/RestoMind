@@ -80,7 +80,11 @@ async def _run_payment_webhook(
         and body.status == "paid"
         and (out.get("prepayment_status") or "").strip().lower() == "paid"
     ):
-        background_tasks.add_task(run_payment_received_customer_notify, body.order_id)
+        from app.services.task_queue import enqueue_job
+
+        ok = await enqueue_job("payment_notify_customer", order_id=int(body.order_id))
+        if not ok:
+            background_tasks.add_task(run_payment_received_customer_notify, body.order_id)
     return out
 
 

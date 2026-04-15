@@ -353,6 +353,16 @@ class Settings(BaseSettings):
     # --- Rate Limiting ---
     rate_limit_per_minute: int = 20
 
+    # --- Очередь задач (ARQ + Redis) ---
+    arq_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("ARQ_ENABLED", "arq_enabled"),
+    )
+    arq_queue_name: str = Field(
+        default="restomind",
+        validation_alias=AliasChoices("ARQ_QUEUE_NAME", "arq_queue_name"),
+    )
+
     # --- Сессии админки (cookie) и подпись WS-токена ---
     # В продакшене задайте длинную случайную строку (openssl rand -hex 32)
     session_secret: str = ""
