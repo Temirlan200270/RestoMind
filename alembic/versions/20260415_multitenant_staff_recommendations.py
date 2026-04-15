@@ -241,18 +241,22 @@ def upgrade() -> None:
             sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"]),
             sa.PrimaryKeyConstraint("id"),
         )
-    op.create_index(
-        op.f("ix_recommendation_events_organization_id"),
-        "recommendation_events",
-        ["organization_id"],
-        unique=False,
-    )
-    op.create_index(
-        op.f("ix_recommendation_events_order_id"),
-        "recommendation_events",
-        ["order_id"],
-        unique=False,
-    )
+    ix_reco_org = op.f("ix_recommendation_events_organization_id")
+    if insp.has_table("recommendation_events") and not _has_index("recommendation_events", ix_reco_org):
+        op.create_index(
+            ix_reco_org,
+            "recommendation_events",
+            ["organization_id"],
+            unique=False,
+        )
+    ix_reco_order = op.f("ix_recommendation_events_order_id")
+    if insp.has_table("recommendation_events") and not _has_index("recommendation_events", ix_reco_order):
+        op.create_index(
+            ix_reco_order,
+            "recommendation_events",
+            ["order_id"],
+            unique=False,
+        )
 
     if is_sqlite:
         with op.batch_alter_table("users", schema=None, recreate="always") as batch_op:
