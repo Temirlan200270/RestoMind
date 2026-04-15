@@ -6,6 +6,7 @@ from app.services.intelligence_analytics import (
     delivery_geo_rows,
     menu_engineering_rows,
     normalize_address_bucket,
+    upsell_stats_from_items_json,
 )
 
 
@@ -61,6 +62,17 @@ def test_delivery_geo_groups_by_area() -> None:
     assert rows[0]["unique_customers"] == 2
     assert rows[0]["orders_per_customer"] == 1.0
     assert rows[0]["revenue"] == 8000.0
+
+
+def test_upsell_stats_single_recommendation_name_fallback() -> None:
+    ij = {
+        "items": [{"name": "Манты классические", "qty": 1}],
+        "order_meta": {
+            "recommendation": {"offered": "Манты", "accepted": False},
+        },
+    }
+    o, a, rev = upsell_stats_from_items_json(ij)
+    assert o == 1 and a == 1 and rev == 0.0
 
 
 def test_delivery_geo_skips_non_delivery() -> None:

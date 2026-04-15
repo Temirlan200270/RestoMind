@@ -2,8 +2,16 @@
 Тесты AI Brain: fallback, валидация ответов (мок OpenAI).
 """
 
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+if str(Path(__file__).resolve().parents[1]) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.schemas.ai_schemas import AIBrainResponse
 from app.services.ai_brain import (

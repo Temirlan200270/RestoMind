@@ -14,15 +14,16 @@ from collections import defaultdict
 from typing import Literal
 from datetime import date, datetime, time as dt_time, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
 from sqlalchemy import delete as sql_delete
-from sqlalchemy import exists, func, or_, select
+from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
+from app.core.passwords import verify_password
 from app.db.models import (
     Booking,
     ChatLog,
@@ -34,13 +35,16 @@ from app.db.models import (
     MenuItem,
     Order,
     OrderStatus,
+    Organization,
     PackagingRule,
     PaymentEvent,
+    StaffUser,
+    UpsellRule,
     User,
 )
 from app.db.session import async_session_factory, get_db, redis_client
 from app.integrations.whatsapp import send_message
-from app.services.admin_tokens import create_admin_ws_token, parse_admin_ws_token
+from app.services.admin_tokens import AdminWsClaims, create_admin_ws_token, parse_admin_ws_token
 from app.services.ai_brain import call_openai
 from app.services.customer_context import build_customer_context
 from app.services.demo_data import clear_demo_data, demo_data_exists, seed_demo_data
@@ -72,7 +76,9 @@ from app.services.intent_router import (
     get_or_create_user,
     route_intent,
 )
+from app.services.iiko_onboarding import setup_organization_iiko, verify_iiko_api_login
 from app.services.menu_sync import sync_menu_from_iiko, sync_stop_lists
+from app.services.org_iiko import resolve_org_iiko_credentials
 from app.services.knowledge_context import load_knowledge_context_block
 from app.schemas.ai_schemas import AIBrainResponse, BookingDetails, OrderItem, PaymentSplit
 from app.services.order_logic import (
@@ -85,8 +91,14 @@ from app.services.order_logic import (
     validate_mixed_payment_total,
     validate_order,
 )
+from app.services.payment_notify import run_payment_received_customer_notify
 from app.services.sales_strategy import build_sales_strategy, format_strategy_for_prompt
-from app.services.intelligence_analytics import delivery_geo_rows, menu_engineering_rows
+from app.services.intelligence_analytics import (
+    delivery_geo_rows,
+    menu_engineering_rows,
+    order_meta_from_items_json,
+    upsell_stats_from_items_json,
+)
 from app.api.webhooks import _normalize_phone_e164
 
 logger = logging.getLogger(__name__)
@@ -118,28 +130,149 @@ def require_admin_session(request: Request) -> None:
         raise HTTPException(status_code=401, detail="Требуется вход в админку")
 
 
+def admin_org_from_session(request: Request) -> int:
+    """organization_id текущей админ-сессии (staff или legacy)."""
+    v = request.session.get("organization_id")
+    if v is not None:
+        return int(v)
+    return int(settings.default_organization_id)
+
+
+async def _order_in_org(db: AsyncSession, order_id: int, org_id: int) -> Order:
+    order = await db.get(Order, order_id)
+    if order is None or int(order.organization_id or 0) != org_id:
+        raise HTTPException(status_code=404, detail="Заказ не найден")
+    return order
+
+
+def _menu_tenant_clause(org_id: int):
+    """Позиции меню арендатора + legacy без organization_id."""
+    return or_(MenuItem.organization_id == org_id, MenuItem.organization_id.is_(None))
+
+
+def _packaging_tenant_clause(org_id: int):
+    return or_(PackagingRule.organization_id == org_id, PackagingRule.organization_id.is_(None))
+
+
+def _knowledge_tenant_clause(org_id: int):
+    return or_(KnowledgeItem.organization_id == org_id, KnowledgeItem.organization_id.is_(None))
+
+
+def _orders_tenant_clause(org_id: int):
+    """Заказы филиала: явный organization_id или legacy через user."""
+    return or_(
+        Order.organization_id == org_id,
+        and_(
+            Order.organization_id.is_(None),
+            Order.user_id.in_(select(User.id).where(User.organization_id == org_id)),
+        ),
+    )
+
+
+def _bookings_tenant_clause(org_id: int):
+    return or_(
+        Booking.organization_id == org_id,
+        and_(
+            Booking.organization_id.is_(None),
+            Booking.user_id.in_(select(User.id).where(User.organization_id == org_id)),
+        ),
+    )
+
+
+def _phones_subquery_for_org(org_id: int):
+    return select(User.phone).where(User.organization_id == org_id)
+
+
+def _escalation_tenant_clause(org_id: int):
+    return or_(
+        EscalationEvent.organization_id == org_id,
+        and_(
+            EscalationEvent.organization_id.is_(None),
+            EscalationEvent.phone.in_(_phones_subquery_for_org(org_id)),
+        ),
+    )
+
+
+def _integration_events_tenant_clause(org_id: int):
+    """События синхронизации: только филиал; NULL — legacy у дефолтной организации."""
+    if int(org_id) == int(settings.default_organization_id):
+        return or_(IntegrationEvent.organization_id == org_id, IntegrationEvent.organization_id.is_(None))
+    return IntegrationEvent.organization_id == org_id
+
+
+def _failed_tasks_tenant_clause(org_id: int):
+    return or_(
+        FailedTask.organization_id == org_id,
+        and_(
+            FailedTask.organization_id.is_(None),
+            FailedTask.phone.in_(_phones_subquery_for_org(org_id)),
+        ),
+    )
+
+
 # ─── Публичные эндпоинты входа (без сессии) ──────────────
 
 auth_router = APIRouter(prefix="/admin/auth", tags=["Admin Auth"])
 
 
 class LoginBody(BaseModel):
-    """Данные формы входа в админку."""
+    """Данные формы входа: email staff или legacy username + пароль."""
 
     username: str = ""
+    email: str = ""
     password: str = ""
 
 
 @auth_router.post("/login")
-async def admin_login(request: Request, body: LoginBody) -> dict:
-    """Установить сессию администратора и выдать токен для WebSocket."""
-    if not _credentials_ok(body.username.strip(), body.password):
-        raise HTTPException(status_code=401, detail="Неверный логин или пароль")
+async def admin_login(request: Request, body: LoginBody, db: AsyncSession = Depends(get_db)) -> dict:
+    """Staff по email или legacy ADMIN_USERNAME / ADMIN_PASSWORD."""
+    email_try = (body.email or body.username).strip().lower()
+    password = body.password
     request.session.clear()
-    request.session["admin_ok"] = True
-    request.session["admin_user"] = body.username.strip()
-    ws_token = create_admin_ws_token(body.username.strip())
-    return {"ok": True, "username": body.username.strip(), "ws_token": ws_token}
+
+    if email_try and "@" in email_try:
+        staff = await db.scalar(
+            select(StaffUser).where(
+                StaffUser.email == email_try,
+                StaffUser.is_active.is_(True),
+            ),
+        )
+        if staff and verify_password(password, staff.password_hash):
+            request.session["admin_ok"] = True
+            request.session["admin_user"] = staff.email
+            request.session["staff_id"] = int(staff.id)
+            request.session["organization_id"] = int(staff.organization_id)
+            ws_token = create_admin_ws_token(
+                organization_id=int(staff.organization_id),
+                email=staff.email,
+                staff_id=int(staff.id),
+            )
+            return {
+                "ok": True,
+                "username": staff.email,
+                "organization_id": int(staff.organization_id),
+                "ws_token": ws_token,
+            }
+
+    if _credentials_ok(body.username.strip(), password):
+        oid = int(settings.default_organization_id)
+        request.session["admin_ok"] = True
+        request.session["admin_user"] = body.username.strip()
+        request.session["organization_id"] = oid
+        request.session["staff_id"] = None
+        ws_token = create_admin_ws_token(
+            organization_id=oid,
+            email=body.username.strip(),
+            staff_id=None,
+        )
+        return {
+            "ok": True,
+            "username": body.username.strip(),
+            "organization_id": oid,
+            "ws_token": ws_token,
+        }
+
+    raise HTTPException(status_code=401, detail="Неверный логин или пароль")
 
 
 @auth_router.post("/logout")
@@ -155,10 +288,17 @@ async def admin_me(request: Request) -> dict:
     if not request.session.get("admin_ok"):
         raise HTTPException(status_code=401, detail="Не авторизован")
     user = request.session.get("admin_user") or settings.admin_username
+    oid = admin_org_from_session(request)
+    sid = request.session.get("staff_id")
     return {
         "authenticated": True,
         "username": user,
-        "ws_token": create_admin_ws_token(str(user)),
+        "organization_id": oid,
+        "ws_token": create_admin_ws_token(
+            organization_id=oid,
+            email=str(user),
+            staff_id=int(sid) if sid is not None else None,
+        ),
     }
 
 
@@ -184,28 +324,45 @@ def _make_naive(dt: datetime | None) -> datetime | None:
 
 # ─── WebSocket (Live-события для админки) ────────────────
 
+def _ws_event_allowed_for_org(event_json: str, claims: AdminWsClaims) -> bool:
+    """События с чужим organization_id не отправляем подписчику."""
+    try:
+        payload = json.loads(event_json)
+    except json.JSONDecodeError:
+        return True
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return True
+    if "organization_id" not in data:
+        return True
+    try:
+        return int(data["organization_id"]) == int(claims.organization_id)
+    except (TypeError, ValueError):
+        return True
+
+
 @ws_router.websocket("/ws")
 async def admin_websocket(ws: WebSocket, token: str = "") -> None:
     """
     WebSocket для real-time уведомлений в админке.
     Авторизация: query ?token= — подписанный токен из POST /auth/login или GET /auth/me.
     """
-    username = parse_admin_ws_token(token)
-    if not username or not secrets.compare_digest(username, settings.admin_username):
+    claims = parse_admin_ws_token(token)
+    if claims is None:
         await ws.close(code=4003, reason="Unauthorized")
         return
     await ws.accept()
-    logger.info("Admin WebSocket подключён")
-    # Сигнал клиенту: сокет принят, дальше — цикл подписки (Redis / in-memory).
+    logger.info("Admin WebSocket подключён org=%s", claims.organization_id)
     try:
         await ws.send_text(json.dumps({"type": "ws_ready", "v": 1}, ensure_ascii=False))
     except Exception:
         return
     try:
         async for event_json in subscribe_events():
-            await ws.send_text(event_json)
-    except WebSocketDisconnect:
-        logger.info("Admin WebSocket отключён")
+            if _ws_event_allowed_for_org(event_json, claims):
+                await ws.send_text(event_json)
+    except (WebSocketDisconnect, RuntimeError) as exc:
+        logger.info("Admin WebSocket отключён: %s", exc)
     except Exception as exc:
         logger.error("WebSocket error: %s", exc)
 
@@ -219,60 +376,9 @@ def _order_items_count(items_json: dict | None) -> int:
     return len(items) if isinstance(items, list) else 0
 
 
-def _order_meta_from_items_json(items_json: dict | None) -> dict:
-    """Метаданные v2 (тип заказа, оплата, адрес) из items_json."""
-    if not isinstance(items_json, dict):
-        return {}
-    raw = items_json.get("order_meta")
-    return raw if isinstance(raw, dict) else {}
-
-
-def _upsell_stats_from_items_json(items_json: dict | None) -> tuple[int, int, float]:
-    """
-    §4.8: число предложений допродаж, принятий и сумма по accepted_revenue_kzt за заказ.
-    Считает события в recommendation_trace; без трассы — fallback на recommendation + имя в позициях.
-    """
-    if not isinstance(items_json, dict):
-        return 0, 0, 0.0
-    meta = _order_meta_from_items_json(items_json)
-    trace = meta.get("recommendation_trace")
-    offers = 0
-    accepts = 0
-    revenue = 0.0
-    if isinstance(trace, list) and trace:
-        for ev in trace:
-            if not isinstance(ev, dict):
-                continue
-            if ev.get("offered") or ev.get("offered_iiko_id"):
-                offers += 1
-            if ev.get("accepted") is True:
-                accepts += 1
-                revenue += float(ev.get("accepted_revenue_kzt") or 0)
-        return offers, accepts, revenue
-    rec = meta.get("recommendation")
-    if isinstance(rec, dict) and (rec.get("offered") or rec.get("offered_iiko_id")):
-        offers = 1
-        if rec.get("accepted") is True:
-            accepts = 1
-            revenue += float(rec.get("accepted_revenue_kzt") or 0)
-        else:
-            off = str(rec.get("offered") or "").strip().lower()
-            items = items_json.get("items")
-            if off and isinstance(items, list):
-                for it in items:
-                    if not isinstance(it, dict):
-                        continue
-                    nm = str(it.get("name") or "").lower()
-                    if off and off in nm:
-                        accepts = 1
-                        break
-        return offers, accepts, revenue
-    return 0, 0, 0.0
-
-
 def _check_mixed_payment_split(items_json: dict | None, total_price: float, *, tol: float = 1.0) -> str | None:
     """Проверяет, совпадает ли сумма частей смешанной оплаты с итогом. None = ОК."""
-    meta = _order_meta_from_items_json(items_json)
+    meta = order_meta_from_items_json(items_json)
     pd = meta.get("payment_details")
     if not isinstance(pd, dict) or pd.get("type") != "mixed":
         return None
@@ -363,6 +469,7 @@ def _booking_public(b: Booking | None) -> dict | None:
 
 @router.get("/orders")
 async def list_orders(
+    request: Request,
     status: str | None = Query(None, description="Фильтр по статусу (draft, confirmed, ...)"),
     q: str | None = Query(None, description="Поиск по № заказа, телефону или имени клиента"),
     sum_min: float | None = Query(None, ge=0, description="Мин. сумма заказа"),
@@ -372,10 +479,12 @@ async def list_orders(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Список заказов с пагинацией; телефон/имя — из связанного пользователя (WhatsApp)."""
+    org_id = admin_org_from_session(request)
     query = (
         select(Order, User.phone, User.name)
         .join(User, Order.user_id == User.id)
         .options(joinedload(Order.booking))
+        .where(Order.organization_id == org_id, User.organization_id == org_id)
     )
     if status:
         query = query.where(Order.status == status)
@@ -409,7 +518,7 @@ async def list_orders(
     out: list[dict] = []
     for o, phone, user_name in rows:
         items_json = o.items_json
-        meta = _order_meta_from_items_json(items_json if isinstance(items_json, dict) else None)
+        meta = order_meta_from_items_json(items_json if isinstance(items_json, dict) else None)
         out.append(
             {
                 "id": o.id,
@@ -430,6 +539,13 @@ async def list_orders(
                 "booking": _booking_public(o.booking),
                 "prepayment_status": getattr(o, "prepayment_status", None) or "not_required",
                 "payment_link_url": getattr(o, "payment_link_url", None),
+                "payment_provider": getattr(o, "payment_provider", None),
+                "external_payment_id": getattr(o, "external_payment_id", None),
+                "payment_amount_captured": (
+                    float(o.payment_amount_captured)
+                    if getattr(o, "payment_amount_captured", None) is not None
+                    else None
+                ),
                 "row_version": int(getattr(o, "row_version", 1) or 1),
                 "payment_split_warning": _check_mixed_payment_split(
                     items_json if isinstance(items_json, dict) else None, float(o.total_price),
@@ -512,20 +628,20 @@ class OrderPaymentPatchBody(BaseModel):
 
 @router.patch("/orders/{order_id}/payment")
 async def patch_order_payment_meta(
+    request: Request,
     order_id: int,
     body: OrderPaymentPatchBody,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Проставить ссылку на оплату и статус предоплаты (оператор или будущий webhook)."""
     if body.prepayment_status is None and body.payment_link_url is None:
         raise HTTPException(status_code=400, detail="Укажите prepayment_status и/или payment_link_url")
 
-    res = await db.execute(select(Order).where(Order.id == order_id))
-    order = res.scalar_one_or_none()
-    if order is None:
-        raise HTTPException(status_code=404, detail="Заказ не найден")
+    order = await _order_in_org(db, order_id, admin_org_from_session(request))
 
     old_status = (order.prepayment_status or "").strip().lower()
+    notify_paid = False
 
     if body.prepayment_status is not None:
         st = (body.prepayment_status or "").strip().lower()
@@ -535,6 +651,12 @@ async def patch_order_payment_meta(
                 detail=f"Недопустимый prepayment_status (ожидается одно из: {', '.join(sorted(PREPAYMENT_STATUS_KEYS))})",
             )
         order.prepayment_status = st
+
+        if st == "paid" and old_status != "paid":
+            notify_paid = True
+            if not (order.external_payment_id or "").strip():
+                order.payment_provider = "manual"
+                order.payment_amount_captured = float(order.total_price or 0)
 
         if st != old_status:
             event_type = {
@@ -556,6 +678,8 @@ async def patch_order_payment_meta(
         order.payment_link_url = url if url else None
 
     await db.commit()
+    if notify_paid:
+        background_tasks.add_task(run_payment_received_customer_notify, order.id)
     return {
         "ok": True,
         "id": order.id,
@@ -566,6 +690,7 @@ async def patch_order_payment_meta(
 
 @router.patch("/orders/{order_id}")
 async def patch_order_status(
+    request: Request,
     order_id: int,
     body: OrderPatchBody,
     db: AsyncSession = Depends(get_db),
@@ -577,26 +702,26 @@ async def patch_order_status(
     """
     from app.api.webhooks import _send_order_to_iiko
 
-    res = await db.execute(
-        select(Order, User.phone).join(User, Order.user_id == User.id).where(Order.id == order_id),
-    )
-    row = res.one_or_none()
-    if row is None:
-        raise HTTPException(status_code=404, detail="Заказ не найден")
-    order, phone = row
+    org_id = admin_org_from_session(request)
+    order = await _order_in_org(db, order_id, org_id)
+    phone = await db.scalar(select(User.phone).where(User.id == order.user_id))
+    phone_s = (phone or "").strip()
 
     want = body.status.strip().lower()
     cur = (order.status or "").lower()
 
     async def _emit(upd: Order, **extra) -> dict:
+        created_at_iso = upd.created_at.isoformat() if getattr(upd, "created_at", None) else None
         await publish_event(
             "order_updated",
             {
                 "order_id": upd.id,
                 "status": upd.status,
-                "phone": phone,
+                "phone": phone_s,
                 "total_price": float(upd.total_price),
                 "iiko_last_error": upd.iiko_last_error,
+                "organization_id": org_id,
+                **({"created_at": created_at_iso} if created_at_iso else {}),
                 **extra,
             },
         )
@@ -630,8 +755,9 @@ async def patch_order_status(
     if cur == OrderStatus.CONFIRMED.value and want == OrderStatus.SENT_TO_IIKO.value:
         sent_to_iiko, iiko_err, iiko_raw = await _send_order_to_iiko(
             order_id=order.id,
-            phone=phone,
+            phone=phone_s,
             items_json=order.items_json,
+            restaurant_organization_id=int(order.organization_id or org_id),
         )
         if sent_to_iiko:
             order.status = OrderStatus.SENT_TO_IIKO.value
@@ -677,6 +803,7 @@ def _failed_task_public(t: FailedTask) -> dict:
 
 @router.get("/failed-tasks")
 async def list_failed_tasks(
+    request: Request,
     resolved: str | None = Query(None, description="true | false | all"),
     phone: str | None = Query(None, max_length=24),
     limit: int = Query(50, ge=1, le=200),
@@ -684,8 +811,9 @@ async def list_failed_tasks(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Очередь ошибок обработки сообщений (retry исчерпан)."""
-    q = select(FailedTask)
-    cnt_q = select(func.count(FailedTask.id))
+    org_id = admin_org_from_session(request)
+    q = select(FailedTask).where(FailedTask.organization_id == org_id)
+    cnt_q = select(func.count(FailedTask.id)).where(FailedTask.organization_id == org_id)
     if resolved == "true":
         q = q.where(FailedTask.resolved.is_(True))
         cnt_q = cnt_q.where(FailedTask.resolved.is_(True))
@@ -704,11 +832,18 @@ async def list_failed_tasks(
 
 @router.patch("/failed-tasks/{task_id}")
 async def patch_failed_task(
+    request: Request,
     task_id: int,
     body: FailedTaskPatchBody,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    res = await db.execute(select(FailedTask).where(FailedTask.id == task_id))
+    org_id = admin_org_from_session(request)
+    res = await db.execute(
+        select(FailedTask).where(
+            FailedTask.id == task_id,
+            FailedTask.organization_id == org_id,
+        ),
+    )
     t = res.scalar_one_or_none()
     if t is None:
         raise HTTPException(status_code=404, detail="Запись не найдена")
@@ -720,6 +855,7 @@ async def patch_failed_task(
 
 @router.post("/orders/{order_id}/rebuild-draft")
 async def rebuild_order_draft(
+    request: Request,
     order_id: int,
     body: OrderRebuildDraftBody,
     db: AsyncSession = Depends(get_db),
@@ -730,10 +866,7 @@ async def rebuild_order_draft(
 
     Доступно для **draft** и **confirmed** (правка до отправки в iiko). После **sent_to_iiko** — нельзя.
     """
-    res = await db.execute(select(Order).where(Order.id == order_id))
-    order = res.scalar_one_or_none()
-    if order is None:
-        raise HTTPException(status_code=404, detail="Заказ не найден")
+    order = await _order_in_org(db, order_id, admin_org_from_session(request))
     st = (order.status or "").lower()
     if st not in (OrderStatus.DRAFT.value, OrderStatus.CONFIRMED.value):
         raise HTTPException(
@@ -746,7 +879,7 @@ async def rebuild_order_draft(
             detail="Заказ изменился в другом окне. Обновите список и повторите правку.",
         )
     old_ij = order.items_json if isinstance(order.items_json, dict) else {}
-    old_meta = _order_meta_from_items_json(old_ij)
+    old_meta = order_meta_from_items_json(old_ij)
     preserved_rec: dict[str, object] = {
         k: old_meta[k]
         for k in ("recommendation", "recommendation_trace")
@@ -785,8 +918,13 @@ async def rebuild_order_draft(
                     detail="Для плова 1 кг укажите упаковку: tabak или foil_kazan в поле packaging_plov_1kg.",
                 )
     ai = _ai_brain_from_order_meta(old_meta)
-    rules = await load_packaging_rules(db)
-    merged, grand_total = finalize_order_draft(validated, ai, packaging_rules=rules)
+    org_id = int(order.organization_id)
+    org_ent = await db.get(Organization, org_id)
+    prepay_enf = bool(org_ent.prepayment_enforced) if org_ent else True
+    rules = await load_packaging_rules(db, org_id)
+    merged, grand_total = finalize_order_draft(
+        validated, ai, packaging_rules=rules, prepayment_enforced=prepay_enf,
+    )
     mix_err = validate_mixed_payment_total(ai, grand_total)
     if mix_err:
         raise HTTPException(status_code=400, detail=mix_err)
@@ -811,6 +949,7 @@ async def rebuild_order_draft(
 
 @router.patch("/orders/{order_id}/payment-split")
 async def patch_order_payment_split(
+    request: Request,
     order_id: int,
     body: OrderPaymentSplitPatchBody,
     db: AsyncSession = Depends(get_db),
@@ -818,10 +957,7 @@ async def patch_order_payment_split(
     """
     Ручная правка способа оплаты в order_meta после смены суммы (состав, доставка и т.п.).
     """
-    res = await db.execute(select(Order).where(Order.id == order_id))
-    order = res.scalar_one_or_none()
-    if order is None:
-        raise HTTPException(status_code=404, detail="Заказ не найден")
+    order = await _order_in_org(db, order_id, admin_org_from_session(request))
     st = (order.status or "").lower()
     if st not in (OrderStatus.DRAFT.value, OrderStatus.CONFIRMED.value):
         raise HTTPException(
@@ -834,7 +970,7 @@ async def patch_order_payment_split(
             detail="Заказ изменился в другом окне. Обновите список и повторите.",
         )
     ij = order.items_json if isinstance(order.items_json, dict) else {}
-    meta = dict(_order_meta_from_items_json(ij))
+    meta = dict(order_meta_from_items_json(ij))
     grand_total = float(order.total_price or 0)
 
     pm = body.payment_mode
@@ -893,6 +1029,7 @@ async def patch_order_payment_split(
 
 @router.post("/orders/manual")
 async def create_manual_order(
+    request: Request,
     body: AdminManualOrderBody,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
@@ -900,12 +1037,13 @@ async def create_manual_order(
     Создать черновик заказа из админки (тест / ручной ввод).
     Без позиций — одна «безопасная» строка из меню (не плов 1 кг без упаковки).
     """
+    org_id = admin_org_from_session(request)
     raw_phone = (body.phone or "").strip()
     phone = _normalize_phone_e164(raw_phone)
     if not phone:
         raise HTTPException(status_code=400, detail="Некорректный номер телефона")
 
-    existing = await get_open_draft_order(db, phone)
+    existing = await get_open_draft_order(db, phone, org_id)
     if existing is not None:
         raise HTTPException(
             status_code=409,
@@ -915,9 +1053,9 @@ async def create_manual_order(
             ),
         )
 
-    user = await get_or_create_user(db, phone)
+    user = await get_or_create_user(db, phone, org_id)
     menu_items = await load_available_menu(db)
-    rules = await load_packaging_rules(db)
+    rules = await load_packaging_rules(db, org_id)
 
     items_in: list[OrderItem] = []
     if body.food_lines:
@@ -993,7 +1131,11 @@ async def create_manual_order(
         delivery_address=(body.delivery_address or "").strip(),
         pickup_time_note=(body.pickup_time_note or "").strip(),
     )
-    merged, grand_total = finalize_order_draft(validated, ai, packaging_rules=rules)
+    org_ent = await db.get(Organization, org_id)
+    prepay_enf = bool(org_ent.prepayment_enforced) if org_ent else True
+    merged, grand_total = finalize_order_draft(
+        validated, ai, packaging_rules=rules, prepayment_enforced=prepay_enf,
+    )
     mix_err = validate_mixed_payment_total(ai, grand_total)
     if mix_err:
         raise HTTPException(status_code=400, detail=mix_err)
@@ -1004,6 +1146,7 @@ async def create_manual_order(
     )
 
     order = Order(
+        organization_id=org_id,
         user_id=user.id,
         status=OrderStatus.DRAFT,
         items_json=merged,
@@ -1028,11 +1171,13 @@ async def create_manual_order(
 
 @router.get("/search")
 async def global_search(
+    request: Request,
     q: str = Query(..., min_length=1, max_length=80),
     limit: int = Query(12, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Поиск по телефону/имени: заказы, чаты, бронирования (для Ctrl+K)."""
+    org_id = admin_org_from_session(request)
     raw = q.strip()
     term = f"%{raw}%"
     out_orders: list[dict] = []
@@ -1049,14 +1194,14 @@ async def global_search(
     oq = (
         select(Order, User.phone, User.name)
         .join(User, Order.user_id == User.id)
-        .where(or_(*o_clauses))
+        .where(Order.organization_id == org_id, User.organization_id == org_id, or_(*o_clauses))
         .order_by(Order.created_at.desc())
         .limit(limit)
     )
 
     r1 = await db.execute(oq)
     for o, p, nm in r1.all():
-        meta = _order_meta_from_items_json(o.items_json if isinstance(o.items_json, dict) else None)
+        meta = order_meta_from_items_json(o.items_json if isinstance(o.items_json, dict) else None)
         out_orders.append(
             {
                 "id": o.id,
@@ -1074,7 +1219,10 @@ async def global_search(
     cq = (
         select(User.phone, User.name, func.max(ChatLog.created_at))
         .join(ChatLog, ChatLog.user_id == User.id)
-        .where(or_(User.phone.ilike(term), func.coalesce(User.name, "").ilike(term)))
+        .where(
+            User.organization_id == org_id,
+            or_(User.phone.ilike(term), func.coalesce(User.name, "").ilike(term)),
+        )
         .group_by(User.id, User.phone, User.name)
         .order_by(func.max(ChatLog.created_at).desc())
         .limit(limit)
@@ -1093,7 +1241,7 @@ async def global_search(
     bq = (
         select(Booking, User.phone, User.name)
         .join(User, Booking.user_id == User.id)
-        .where(User.phone.ilike(term))
+        .where(User.organization_id == org_id, User.phone.ilike(term))
         .order_by(Booking.created_at.desc())
         .limit(limit)
     )
@@ -1118,6 +1266,13 @@ def _iiko_env_configured() -> bool:
     return bool(str(settings.iiko_api_login or "").strip() and str(settings.iiko_organization_id or "").strip())
 
 
+async def _iiko_effective_configured(db: AsyncSession, org_id: int) -> bool:
+    c = await resolve_org_iiko_credentials(db, org_id)
+    if c is not None:
+        return True
+    return _iiko_env_configured()
+
+
 def _whatsapp_env_configured() -> bool:
     return bool(
         str(settings.whatsapp_api_token or "").strip()
@@ -1126,11 +1281,16 @@ def _whatsapp_env_configured() -> bool:
 
 
 @router.get("/integrations/status")
-async def integrations_status(db: AsyncSession = Depends(get_db)) -> dict:
+async def integrations_status(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
     """Состояние интеграций для админки: индикаторы iiko / WhatsApp."""
+    org_id = admin_org_from_session(request)
+    iiko_ok = await _iiko_effective_configured(db, org_id)
     base = await build_status_payload(
         db,
-        iiko_configured=_iiko_env_configured(),
+        iiko_configured=iiko_ok,
         whatsapp_configured=_whatsapp_env_configured(),
     )
     pub = (settings.public_base_url or "").strip().rstrip("/")
@@ -1143,28 +1303,200 @@ async def integrations_status(db: AsyncSession = Depends(get_db)) -> dict:
     )
     base["openai_configured"] = bool(str(settings.openai_api_key or "").strip())
     base["whatsapp_voice_replies_enabled"] = bool(settings.whatsapp_voice_replies)
+    base["iiko_secrets_encrypt_ready"] = bool((settings.app_secrets_fernet_key or "").strip())
+    org_row = await db.get(Organization, org_id)
+    base["prepayment_enforced"] = bool(getattr(org_row, "prepayment_enforced", True)) if org_row else True
     return base
+
+
+class OrganizationPrefsPatchBody(BaseModel):
+    """Настройки филиала (без секретов)."""
+
+    prepayment_enforced: bool | None = Field(
+        default=None,
+        description="False — не требовать предоплату по порогу; оператор подтверждает оплату вручную",
+    )
+
+
+@router.get("/organization/prefs")
+async def get_organization_prefs(request: Request, db: AsyncSession = Depends(get_db)) -> dict:
+    org_id = admin_org_from_session(request)
+    org = await db.get(Organization, org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    return {
+        "id": org.id,
+        "name": org.name,
+        "organization_id": org.id,
+        "prepayment_enforced": bool(getattr(org, "prepayment_enforced", True)),
+    }
+
+
+@router.patch("/organization/prefs")
+async def patch_organization_prefs(
+    request: Request,
+    body: OrganizationPrefsPatchBody,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    org_id = admin_org_from_session(request)
+    org = await db.get(Organization, org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    if body.prepayment_enforced is not None:
+        org.prepayment_enforced = bool(body.prepayment_enforced)
+    await db.commit()
+    await db.refresh(org)
+    return {"ok": True, "prepayment_enforced": bool(getattr(org, "prepayment_enforced", True))}
 
 
 @router.get("/integrations/events")
 async def integrations_events(
+    request: Request,
     limit: int = Query(40, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Журнал последних событий синхронизации (меню, стоп-листы)."""
-    events = await list_integration_events(db, limit=limit)
+    events = await list_integration_events(
+        db, limit=limit, organization_id=admin_org_from_session(request),
+    )
     return {"events": events}
 
 
+class IikoVerifyBody(BaseModel):
+    api_login: str = Field(..., min_length=2, description="Ключ apiLogin из iiko Cloud")
+
+
+@router.post("/integrations/iiko/verify")
+async def integrations_iiko_verify(body: IikoVerifyBody) -> dict:
+    """Проверить ключ и получить список организаций iiko (ключ не сохраняется)."""
+    try:
+        orgs = await verify_iiko_api_login(body.api_login)
+    except Exception as exc:
+        logger.warning("iiko verify failed: %s", exc)
+        raise HTTPException(status_code=502, detail=str(exc)[:500]) from exc
+    return {"ok": True, "organizations": orgs}
+
+
+class IikoSetupBody(BaseModel):
+    api_login: str = Field(..., min_length=2)
+    iiko_organization_id: str = Field(..., min_length=8)
+    terminal_group_id: str = ""
+
+
+@router.post("/integrations/iiko/setup")
+async def integrations_iiko_setup(
+    request: Request,
+    body: IikoSetupBody,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Сохранить ключ (зашифрованно при APP_SECRETS_FERNET_KEY) и импортировать меню филиала."""
+    org_id = admin_org_from_session(request)
+    enc = bool((settings.app_secrets_fernet_key or "").strip())
+    try:
+        stats = await setup_organization_iiko(
+            db,
+            organization_id=org_id,
+            api_login_plain=body.api_login.strip(),
+            iiko_organization_uuid=body.iiko_organization_id.strip(),
+            encrypt_login=enc,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("iiko setup: %s", exc, exc_info=True)
+        raise HTTPException(status_code=502, detail=str(exc)[:500]) from exc
+    org = await db.get(Organization, org_id)
+    if org is not None and (body.terminal_group_id or "").strip():
+        org.iiko_terminal_group_id = body.terminal_group_id.strip()
+    sk = stats.get("skipped")
+    detail_m = (
+        f"Синхронизация меню: успешно "
+        f"(всего {stats.get('total', 0)}, новых {stats.get('created', 0)}, обновлено {stats.get('updated', 0)}"
+        + (f", пропущено {sk}" if sk else "")
+        + ")"
+    )
+    await record_menu_sync(db, True, None, detail=detail_m, organization_id=org_id)
+    await db.commit()
+    return {"ok": True, "stats": stats, "encrypted": enc}
+
+
+@router.get("/setup-status")
+async def setup_status(request: Request, db: AsyncSession = Depends(get_db)) -> dict:
+    """Прогресс онбординга (Stripe-style) для текущего филиала."""
+    org_id = admin_org_from_session(request)
+    org = await db.get(Organization, org_id)
+    creds = await resolve_org_iiko_credentials(db, org_id)
+    iiko_ok = creds is not None
+    menu_n = int(
+        await db.scalar(
+            select(func.count()).select_from(MenuItem).where(MenuItem.organization_id == org_id),
+        )
+        or 0,
+    )
+    packaging_n = int(
+        await db.scalar(
+            select(func.count()).select_from(PackagingRule).where(
+                PackagingRule.organization_id == org_id,
+                PackagingRule.is_active.is_(True),
+            ),
+        )
+        or 0,
+    )
+    org_wa = ((org.whatsapp_phone_number_id if org else None) or "").strip()
+    wa_ok = bool(org_wa) or (
+        bool((settings.whatsapp_phone_number_id or "").strip())
+        and bool((settings.whatsapp_api_token or "").strip())
+    )
+    rules_n = int(
+        await db.scalar(
+            select(func.count()).select_from(UpsellRule).where(
+                UpsellRule.organization_id == org_id,
+                UpsellRule.is_active.is_(True),
+            ),
+        )
+        or 0,
+    )
+    kb_n = int(
+        await db.scalar(
+            select(func.count()).select_from(KnowledgeItem).where(
+                KnowledgeItem.organization_id == org_id,
+                KnowledgeItem.is_active.is_(True),
+            ),
+        )
+        or 0,
+    )
+    steps = [
+        {"id": "iiko", "label": "iiko подключён", "done": iiko_ok},
+        {"id": "menu", "label": "Меню импортировано", "done": menu_n > 0},
+        {"id": "whatsapp", "label": "WhatsApp (номер или .env)", "done": wa_ok},
+        {"id": "packaging", "label": "Правила упаковки", "done": packaging_n > 0},
+        {"id": "upsell", "label": "Правила допродаж", "done": rules_n > 0},
+        {"id": "knowledge", "label": "База знаний", "done": kb_n > 0},
+    ]
+    score = int(round(100 * sum(1 for s in steps if s["done"]) / max(len(steps), 1)))
+    return {
+        "score": score,
+        "steps": steps,
+        "menu_items": menu_n,
+        "packaging_rules": packaging_n,
+        "upsell_rules": rules_n,
+    }
+
+
 @router.post("/integrations/sync")
-async def integrations_sync_now(db: AsyncSession = Depends(get_db)) -> dict:
+async def integrations_sync_now(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
     """
-    Принудительно: номенклатура + стоп-листы из iiko (учётные данные из .env).
+    Принудительно: номенклатура + стоп-листы из iiko (настройки филиала или .env).
     """
-    if not _iiko_env_configured():
+    org_id = admin_org_from_session(request)
+    creds = await resolve_org_iiko_credentials(db, org_id)
+    if creds is None:
         raise HTTPException(
             status_code=400,
-            detail="Задайте IIKO_API_LOGIN и IIKO_ORGANIZATION_ID в .env",
+            detail="Настройте iiko для филиала (ключ и организация) или задайте IIKO_* в .env",
         )
 
     menu_block: dict = {"ok": False, "stats": None, "error": None}
@@ -1172,7 +1504,10 @@ async def integrations_sync_now(db: AsyncSession = Depends(get_db)) -> dict:
 
     try:
         stats_m = await sync_menu_from_iiko(
-            db, settings.iiko_api_login, settings.iiko_organization_id,
+            db,
+            creds.api_login,
+            creds.iiko_organization_id,
+            restomind_organization_id=org_id,
         )
         menu_block = {"ok": True, "stats": stats_m, "error": None}
         sk = stats_m.get("skipped")
@@ -1182,28 +1517,36 @@ async def integrations_sync_now(db: AsyncSession = Depends(get_db)) -> dict:
             + (f", пропущено {sk}" if sk else "")
             + ")"
         )
-        await record_menu_sync(db, True, None, detail=detail_m)
+        await record_menu_sync(db, True, None, detail=detail_m, organization_id=org_id)
     except Exception as exc:
         err = str(exc)
         logger.error("Ручная синхронизация меню iiko: %s", exc, exc_info=True)
         menu_block = {"ok": False, "stats": None, "error": err}
-        await record_menu_sync(db, False, err, detail=f"Синхронизация меню: ошибка — {err[:400]}")
+        await record_menu_sync(
+            db, False, err, detail=f"Синхронизация меню: ошибка — {err[:400]}", organization_id=org_id,
+        )
 
     try:
         stats_s = await sync_stop_lists(
-            db, settings.iiko_api_login, settings.iiko_organization_id,
+            db,
+            creds.api_login,
+            creds.iiko_organization_id,
+            terminal_group_id=creds.terminal_group_id or None,
+            menu_organization_id=org_id,
         )
         stop_block = {"ok": True, "stats": stats_s, "error": None}
         detail_s = (
             f"Стоп-листы: успешно "
             f"(в стопе: {stats_s.get('stopped', 0)}, восстановлено: {stats_s.get('restored', 0)})"
         )
-        await record_stoplist_sync(db, True, None, detail=detail_s)
+        await record_stoplist_sync(db, True, None, detail=detail_s, organization_id=org_id)
     except Exception as exc:
         err = str(exc)
         logger.error("Ручная синхронизация стоп-листов iiko: %s", exc, exc_info=True)
         stop_block = {"ok": False, "stats": None, "error": err}
-        await record_stoplist_sync(db, False, err, detail=f"Стоп-листы: ошибка — {err[:400]}")
+        await record_stoplist_sync(
+            db, False, err, detail=f"Стоп-листы: ошибка — {err[:400]}", organization_id=org_id,
+        )
 
     if not menu_block["ok"] and not stop_block["ok"]:
         raise HTTPException(
@@ -1213,7 +1556,7 @@ async def integrations_sync_now(db: AsyncSession = Depends(get_db)) -> dict:
 
     snap = await build_status_payload(
         db,
-        iiko_configured=True,
+        iiko_configured=await _iiko_effective_configured(db, org_id),
         whatsapp_configured=_whatsapp_env_configured(),
     )
     logger.info(
@@ -1235,16 +1578,19 @@ async def integrations_sync_now(db: AsyncSession = Depends(get_db)) -> dict:
 
 @router.get("/bookings")
 async def list_bookings(
+    request: Request,
     status: str | None = Query(None, description="Фильтр по статусу (pending, confirmed, cancelled)"),
     q: str | None = Query(None, description="Поиск по телефону клиента"),
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Список бронирований."""
+    org_id = admin_org_from_session(request)
     query = (
         select(Booking, User.phone, User.name, Order.id)
         .join(User, Booking.user_id == User.id)
         .outerjoin(Order, Order.booking_id == Booking.id)
+        .where(User.organization_id == org_id)
         .order_by(Booking.created_at.desc())
     )
     if status:
@@ -1290,6 +1636,7 @@ class BookingPatch(BaseModel):
 
 @router.patch("/bookings/{booking_id}")
 async def patch_booking(
+    request: Request,
     booking_id: int,
     body: BookingPatch,
     db: AsyncSession = Depends(get_db),
@@ -1301,7 +1648,12 @@ async def patch_booking(
     if body.hall is None and body.status is None:
         raise HTTPException(status_code=400, detail="Укажите поле hall и/или status")
 
-    result = await db.execute(select(Booking).where(Booking.id == booking_id))
+    org_id = admin_org_from_session(request)
+    result = await db.execute(
+        select(Booking)
+        .join(User, User.id == Booking.user_id)
+        .where(Booking.id == booking_id, User.organization_id == org_id),
+    )
     booking = result.scalar_one_or_none()
     if not booking:
         raise HTTPException(status_code=404, detail="Бронирование не найдено")
@@ -1344,6 +1696,7 @@ async def patch_booking(
 
 @router.get("/chats")
 async def list_chats_sidebar(
+    request: Request,
     limit: int = Query(120, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
@@ -1351,9 +1704,11 @@ async def list_chats_sidebar(
     Список диалогов для боковой панели админки: телефон, превью последнего сообщения, время.
     Берём пользователей по убыванию времени последнего сообщения в chat_logs.
     """
+    org_id = admin_org_from_session(request)
     result = await db.execute(
         select(ChatLog, User.phone, User.name)
         .join(User, User.id == ChatLog.user_id)
+        .where(User.organization_id == org_id)
         .order_by(ChatLog.created_at.desc()),
     )
     rows = result.all()
@@ -1380,12 +1735,16 @@ async def list_chats_sidebar(
 
 @router.get("/chats/{phone}")
 async def get_chat_log(
+    request: Request,
     phone: str,
     limit: int = Query(50, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Просмотр истории диалога с клиентом по номеру телефона."""
-    result = await db.execute(select(User).where(User.phone == phone))
+    org_id = admin_org_from_session(request)
+    result = await db.execute(
+        select(User).where(User.phone == phone, User.organization_id == org_id),
+    )
     user = result.scalar_one_or_none()
 
     if user is None:
@@ -1427,12 +1786,19 @@ class CustomerNoteBody(BaseModel):
 
 
 @router.get("/customers/{phone}/summary")
-async def customer_summary(phone: str, db: AsyncSession = Depends(get_db)) -> dict:
+async def customer_summary(
+    request: Request,
+    phone: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
     """
     Сводка по клиенту для панели оператора: заказы, выручка, заметка, «чёрный список» (is_active).
     Если пользователя с таким телефоном ещё нет в БД — возвращаются нули (диалог только откроют вручную).
     """
-    user = await db.scalar(select(User).where(User.phone == phone))
+    org_id = admin_org_from_session(request)
+    user = await db.scalar(
+        select(User).where(User.phone == phone, User.organization_id == org_id),
+    )
     if user is None:
         return {
             "user_exists": False,
@@ -1484,12 +1850,16 @@ async def customer_summary(phone: str, db: AsyncSession = Depends(get_db)) -> di
 
 @router.post("/customers/{phone}/note")
 async def save_customer_note(
+    request: Request,
     phone: str,
     body: CustomerNoteBody,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Сохранить внутреннюю заметку оператора о клиенте."""
-    user = await db.scalar(select(User).where(User.phone == phone))
+    org_id = admin_org_from_session(request)
+    user = await db.scalar(
+        select(User).where(User.phone == phone, User.organization_id == org_id),
+    )
     if user is None:
         raise HTTPException(
             status_code=404,
@@ -1508,6 +1878,7 @@ class AiPauseBody(BaseModel):
 
 @router.post("/customers/{phone}/ai-pause")
 async def set_customer_ai_pause(
+    request: Request,
     phone: str,
     body: AiPauseBody,
     db: AsyncSession = Depends(get_db),
@@ -1516,7 +1887,10 @@ async def set_customer_ai_pause(
     Заблокировать ИИ для номера: бот не отвечает, пока не снять блокировку.
     Дублирует смысл «перехвата», но сохраняется в БД (переживает рестарт Redis).
     """
-    user = await db.scalar(select(User).where(User.phone == phone))
+    org_id = admin_org_from_session(request)
+    user = await db.scalar(
+        select(User).where(User.phone == phone, User.organization_id == org_id),
+    )
     if user is None:
         raise HTTPException(
             status_code=404,
@@ -1527,16 +1901,16 @@ async def set_customer_ai_pause(
     await db.commit()
 
     if body.paused:
-        await set_user_state(redis_client, phone, UserState.HUMAN_MODE)
+        await set_user_state(redis_client, phone, UserState.HUMAN_MODE, organization_id=org_id)
         await publish_event(
             "state_changed",
-            {"phone": phone, "state": UserState.HUMAN_MODE.value},
+            {"phone": phone, "state": UserState.HUMAN_MODE.value, "organization_id": org_id},
         )
     else:
-        await set_user_state(redis_client, phone, UserState.CHATTING)
+        await set_user_state(redis_client, phone, UserState.CHATTING, organization_id=org_id)
         await publish_event(
             "state_changed",
-            {"phone": phone, "state": UserState.CHATTING.value},
+            {"phone": phone, "state": UserState.CHATTING.value, "organization_id": org_id},
         )
     return {"ok": True, "ai_paused": user.ai_paused}
 
@@ -1591,6 +1965,7 @@ class MenuItemCreateBody(BaseModel):
 
 @router.get("/menu")
 async def list_menu(
+    request: Request,
     category: str | None = Query(None, description="Фильтр по категории"),
     available_only: bool = Query(True),
     stopped_only: bool = Query(
@@ -1600,7 +1975,12 @@ async def list_menu(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Список позиций меню."""
-    query = select(MenuItem).order_by(MenuItem.category, MenuItem.name)
+    org_id = admin_org_from_session(request)
+    query = (
+        select(MenuItem)
+        .where(_menu_tenant_clause(org_id))
+        .order_by(MenuItem.category, MenuItem.name)
+    )
     if category:
         query = query.where(MenuItem.category == category)
     if stopped_only:
@@ -1619,11 +1999,14 @@ async def list_menu(
 
 @router.post("/menu")
 async def create_menu_item(
+    request: Request,
     body: MenuItemCreateBody,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Добавить позицию меню вручную (iiko_id генерируется локально)."""
+    org_id = admin_org_from_session(request)
     item = MenuItem(
+        organization_id=org_id,
         name=body.name.strip(),
         category=(body.category or "").strip(),
         description=(body.description or "").strip(),
@@ -1640,13 +2023,17 @@ async def create_menu_item(
 
 @router.patch("/menu/{item_id}")
 async def patch_menu_item(
+    request: Request,
     item_id: int,
     body: MenuItemPatchBody,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Изменить поля позиции меню (цена, стоп-лист, название и т.д.)."""
+    org_id = admin_org_from_session(request)
     item = await db.get(MenuItem, item_id)
     if item is None:
+        raise HTTPException(status_code=404, detail="Позиция не найдена")
+    if item.organization_id is not None and int(item.organization_id) != org_id:
         raise HTTPException(status_code=404, detail="Позиция не найдена")
 
     data = body.model_dump(exclude_unset=True)
@@ -1671,6 +2058,7 @@ async def patch_menu_item(
 
 @router.post("/menu/clear")
 async def clear_all_menu_items(
+    request: Request,
     body: ClearMenuBody,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
@@ -1684,8 +2072,14 @@ async def clear_all_menu_items(
             status_code=400,
             detail="Для очистки меню передайте в теле JSON: {\"confirm\": true}",
         )
-    cnt = await db.scalar(select(func.count()).select_from(MenuItem)) or 0
-    await db.execute(sql_delete(MenuItem))
+    org_id = admin_org_from_session(request)
+    cnt = (
+        await db.scalar(
+            select(func.count()).select_from(MenuItem).where(MenuItem.organization_id == org_id),
+        )
+        or 0
+    )
+    await db.execute(sql_delete(MenuItem).where(MenuItem.organization_id == org_id))
     await db.flush()
     logger.warning("Админ: полная очистка menu_items, удалено позиций: %d", cnt)
     return {"ok": True, "deleted": int(cnt)}
@@ -1693,12 +2087,16 @@ async def clear_all_menu_items(
 
 @router.delete("/menu/{item_id}")
 async def delete_menu_item(
+    request: Request,
     item_id: int,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Удалить позицию из меню (осторожно: старые заказы ссылаются на названия в JSON)."""
+    org_id = admin_org_from_session(request)
     item = await db.get(MenuItem, item_id)
     if item is None:
+        raise HTTPException(status_code=404, detail="Позиция не найдена")
+    if item.organization_id is not None and int(item.organization_id) != org_id:
         raise HTTPException(status_code=404, detail="Позиция не найдена")
     await db.execute(sql_delete(MenuItem).where(MenuItem.id == item_id))
     await db.flush()
@@ -1712,6 +2110,7 @@ def _knowledge_item_dict(row: KnowledgeItem) -> dict:
     return {
         "id": row.id,
         "organization_id": row.organization_id,
+        "knowledge_kind": getattr(row, "knowledge_kind", None) or "facility",
         "category": row.category or "",
         "question": row.question,
         "answer": row.answer,
@@ -1729,6 +2128,10 @@ class KnowledgeItemCreateBody(BaseModel):
     is_active: bool = True
     sort_order: int = Field(0, ge=-10_000, le=10_000)
     organization_id: int | None = Field(None, description="NULL — общая запись для всех организаций")
+    knowledge_kind: str = Field(
+        "facility",
+        description="facility — справочник заведения; persona — тон и характер бота",
+    )
 
 
 class KnowledgeItemPatchBody(BaseModel):
@@ -1738,15 +2141,22 @@ class KnowledgeItemPatchBody(BaseModel):
     is_active: bool | None = None
     sort_order: int | None = Field(None, ge=-10_000, le=10_000)
     organization_id: int | None = None
+    knowledge_kind: str | None = Field(None, description="facility | persona")
 
 
 @router.get("/knowledge")
 async def list_knowledge_items(
+    request: Request,
     db: AsyncSession = Depends(get_db),
     active_only: bool = Query(False, description="Только is_active=true"),
 ) -> dict:
     """Список записей базы знаний для админки."""
-    q = select(KnowledgeItem).order_by(KnowledgeItem.sort_order, KnowledgeItem.id)
+    org_id = admin_org_from_session(request)
+    q = (
+        select(KnowledgeItem)
+        .where(_knowledge_tenant_clause(org_id))
+        .order_by(KnowledgeItem.sort_order, KnowledgeItem.id)
+    )
     if active_only:
         q = q.where(KnowledgeItem.is_active.is_(True))
     result = await db.execute(q)
@@ -1756,11 +2166,14 @@ async def list_knowledge_items(
 
 @router.post("/knowledge")
 async def create_knowledge_item(
+    request: Request,
     body: KnowledgeItemCreateBody,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
+    org_id = admin_org_from_session(request)
     row = KnowledgeItem(
-        organization_id=body.organization_id,
+        organization_id=body.organization_id if body.organization_id is not None else org_id,
+        knowledge_kind=(body.knowledge_kind or "facility").strip().lower()[:32],
         category=(body.category or "").strip(),
         question=body.question.strip(),
         answer=body.answer.strip(),
@@ -1774,12 +2187,18 @@ async def create_knowledge_item(
 
 @router.patch("/knowledge/{item_id}")
 async def patch_knowledge_item(
+    request: Request,
     item_id: int,
     body: KnowledgeItemPatchBody,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
+    org_id = admin_org_from_session(request)
     row = await db.get(KnowledgeItem, item_id)
     if row is None:
+        raise HTTPException(status_code=404, detail="Запись не найдена")
+    if row.organization_id is None and org_id != int(settings.default_organization_id):
+        raise HTTPException(status_code=404, detail="Запись не найдена")
+    if row.organization_id is not None and int(row.organization_id) != org_id:
         raise HTTPException(status_code=404, detail="Запись не найдена")
     data = body.model_dump(exclude_unset=True)
     if "category" in data and data["category"] is not None:
@@ -1796,26 +2215,33 @@ async def patch_knowledge_item(
 
 @router.delete("/knowledge/{item_id}")
 async def delete_knowledge_item(
+    request: Request,
     item_id: int,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    return await _delete_knowledge_item_impl(item_id, db)
+    return await _delete_knowledge_item_impl(request, item_id, db)
 
 
 @router.post("/knowledge/{item_id}/delete")
 async def delete_knowledge_item_post(
+    request: Request,
     item_id: int,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """
     То же, что DELETE /knowledge/{id}: часть хостингов/прокси режет метод DELETE.
     """
-    return await _delete_knowledge_item_impl(item_id, db)
+    return await _delete_knowledge_item_impl(request, item_id, db)
 
 
-async def _delete_knowledge_item_impl(item_id: int, db: AsyncSession) -> dict:
+async def _delete_knowledge_item_impl(request: Request, item_id: int, db: AsyncSession) -> dict:
+    org_id = admin_org_from_session(request)
     row = await db.get(KnowledgeItem, item_id)
     if row is None:
+        raise HTTPException(status_code=404, detail="Запись не найдена")
+    if row.organization_id is None and org_id != int(settings.default_organization_id):
+        raise HTTPException(status_code=404, detail="Запись не найдена")
+    if row.organization_id is not None and int(row.organization_id) != org_id:
         raise HTTPException(status_code=404, detail="Запись не найдена")
     await db.execute(sql_delete(KnowledgeItem).where(KnowledgeItem.id == item_id))
     await db.flush()
@@ -1824,6 +2250,7 @@ async def _delete_knowledge_item_impl(item_id: int, db: AsyncSession) -> dict:
 
 @router.post("/menu/sync")
 async def sync_menu(
+    request: Request,
     api_login: str | None = Query(
         None,
         description="API-логин iiko (если не задан — берётся IIKO_API_LOGIN из .env)",
@@ -1836,17 +2263,23 @@ async def sync_menu(
 ) -> dict:
     """
     Синхронизация номенклатуры iiko → ``menu_items`` (цены и UUID для бота).
-    Учётные данные из query или из .env. Совпадение по ``iiko_id``, не по первичному ключу БД.
+    Учётные данные из query, из настроек филиала или из .env. Совпадение по ``iiko_id``.
     """
-    login = (api_login or settings.iiko_api_login or "").strip()
-    org = (organization_id or settings.iiko_organization_id or "").strip()
+    org_id = admin_org_from_session(request)
+    login = (api_login or "").strip()
+    org = (organization_id or "").strip()
     if not login or not org:
-        raise HTTPException(
-            status_code=400,
-            detail="Задайте IIKO_API_LOGIN и IIKO_ORGANIZATION_ID в .env или передайте api_login и organization_id в query.",
-        )
+        creds = await resolve_org_iiko_credentials(db, org_id)
+        if creds is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Задайте iiko в настройках филиала или IIKO_* в .env / query.",
+            )
+        login, org = creds.api_login, creds.iiko_organization_id
     try:
-        stats = await sync_menu_from_iiko(db, login, org)
+        stats = await sync_menu_from_iiko(
+            db, login, org, restomind_organization_id=org_id,
+        )
         sk = stats.get("skipped")
         detail_m = (
             f"Синхронизация меню: успешно "
@@ -1854,12 +2287,17 @@ async def sync_menu(
             + (f", пропущено {sk}" if sk else "")
             + ")"
         )
-        await record_menu_sync(db, True, None, detail=detail_m)
+        await record_menu_sync(
+            db, True, None, detail=detail_m, organization_id=admin_org_from_session(request),
+        )
         return {"ok": True, "status": "ok", **stats}
     except Exception as exc:
         err = str(exc)
         logger.error("Ошибка синхронизации меню: %s", exc, exc_info=True)
-        await record_menu_sync(db, False, err, detail=f"Синхронизация меню: ошибка — {err[:400]}")
+        await record_menu_sync(
+            db, False, err, detail=f"Синхронизация меню: ошибка — {err[:400]}",
+            organization_id=admin_org_from_session(request),
+        )
         raise HTTPException(status_code=502, detail=f"Ошибка при обращении к iiko: {err}")
 
 
@@ -1883,6 +2321,7 @@ async def sync_stop_lists_endpoint(
 
 @router.post("/stop-lists/sync")
 async def sync_stop_lists_from_env(
+    request: Request,
     api_login: str | None = Query(
         None,
         description="API-логин iiko (если не задан — IIKO_API_LOGIN из .env)",
@@ -1894,33 +2333,46 @@ async def sync_stop_lists_from_env(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """
-    Синхронизация стоп-листов iiko → флаги is_available в menu_items (учётные данные из .env или query).
+    Синхронизация стоп-листов iiko → флаги is_available в menu_items (филиал, .env или query).
     """
-    login = (api_login or settings.iiko_api_login or "").strip()
-    org = (organization_id or settings.iiko_organization_id or "").strip()
+    org_id = admin_org_from_session(request)
+    login = (api_login or "").strip()
+    org = (organization_id or "").strip()
+    tg: str | None = None
     if not login or not org:
-        raise HTTPException(
-            status_code=400,
-            detail="Задайте IIKO_API_LOGIN и IIKO_ORGANIZATION_ID в .env или передайте api_login и organization_id в query.",
-        )
+        creds = await resolve_org_iiko_credentials(db, org_id)
+        if creds is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Задайте iiko в настройках филиала или IIKO_* в .env / query.",
+            )
+        login, org = creds.api_login, creds.iiko_organization_id
+        tg = creds.terminal_group_id or None
     try:
-        stats = await sync_stop_lists(db, login, org)
+        stats = await sync_stop_lists(
+            db, login, org, terminal_group_id=tg, menu_organization_id=org_id,
+        )
         detail_s = (
             f"Стоп-листы: успешно "
             f"(в стопе: {stats.get('stopped', 0)}, восстановлено: {stats.get('restored', 0)})"
         )
-        await record_stoplist_sync(db, True, None, detail=detail_s)
+        await record_stoplist_sync(
+            db, True, None, detail=detail_s, organization_id=org_id,
+        )
         snap = await build_status_payload(
             db,
-            iiko_configured=True,
+            iiko_configured=await _iiko_effective_configured(db, org_id),
             whatsapp_configured=_whatsapp_env_configured(),
         )
-        logger.info("Синхронизация стоп-листов из админки (.env): %s", stats)
+        logger.info("Синхронизация стоп-листов из админки: %s", stats)
         return {"ok": True, "status": "ok", **stats, "integration_status": snap}
     except Exception as exc:
         err = str(exc)
         logger.error("Ошибка синхронизации стоп-листов (.env): %s", exc, exc_info=True)
-        await record_stoplist_sync(db, False, err, detail=f"Стоп-листы: ошибка — {err[:400]}")
+        await record_stoplist_sync(
+            db, False, err, detail=f"Стоп-листы: ошибка — {err[:400]}",
+            organization_id=admin_org_from_session(request),
+        )
         raise HTTPException(status_code=502, detail=f"Ошибка при обращении к iiko: {err}")
 
 
@@ -2004,29 +2456,36 @@ def _sql_delete_rowcount(res) -> int:
     return int(n) if n is not None and n >= 0 else 0
 
 
-async def _clear_redis_pending_if_matches(phone: str | None, order_id: int) -> None:
+async def _clear_redis_pending_if_matches(
+    phone: str | None,
+    order_id: int,
+    organization_id: int | None = None,
+) -> None:
     """Если в Redis висит черновик этого заказа — снять, чтобы клиент не застрял на мёртвом id."""
     if not phone:
         return
     try:
-        pid = await get_pending_order(redis_client, phone)
+        pid = await get_pending_order(redis_client, phone, organization_id=organization_id)
         if pid == order_id:
-            await clear_pending_order(redis_client, phone)
+            await clear_pending_order(redis_client, phone, organization_id=organization_id)
     except Exception:
         logger.exception("Redis: не удалось сбросить pending_order для %s", phone)
 
 
 @router.post("/settings/purge-operational-data")
 async def purge_operational_data(
+    request: Request,
     body: PurgeOperationalBody,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """
-    Удалить **все** операционные записи: ``chat_logs``, ``orders``, ``bookings``,
-    ``escalation_events``, ``integration_events``.
+    Удалить операционные записи **текущего филиала** (сессия): ``chat_logs``, ``orders``,
+    ``bookings``, ``escalation_events``, ``integration_events``, ``failed_tasks``.
 
     Таблицы ``users``, ``menu_items``, ``organizations`` **не** трогаются.
-    Сбрасывается строка ``integration_health`` (id=1), если есть.
+    ``integration_health`` (id=1) — глобальный singleton для всей платформы, при очистке
+    одного филиала **не** сбрасывается.
+
     Требуются ``confirm: true`` и фраза «УДАЛИТЬ ВСЕ ДАННЫЕ».
     """
     if not body.confirm:
@@ -2040,66 +2499,70 @@ async def purge_operational_data(
             detail=f"Введите фразу подтверждения: {SETTINGS_PURGE_PHRASE}",
         )
 
-    r_chat = await db.execute(sql_delete(ChatLog))
-    r_ord = await db.execute(sql_delete(Order))
-    r_book = await db.execute(sql_delete(Booking))
-    r_esc = await db.execute(sql_delete(EscalationEvent))
-    r_int = await db.execute(sql_delete(IntegrationEvent))
+    org_id = admin_org_from_session(request)
 
-    row = await db.get(IntegrationHealth, 1)
-    if row is not None:
-        row.last_stoplist_at = None
-        row.last_stoplist_ok = False
-        row.last_stoplist_error = ""
-        row.last_menu_sync_at = None
-        row.last_menu_sync_ok = False
-        row.last_menu_sync_error = ""
+    r_chat = await db.execute(sql_delete(ChatLog).where(ChatLog.organization_id == org_id))
+    r_ord = await db.execute(sql_delete(Order).where(_orders_tenant_clause(org_id)))
+    r_book = await db.execute(sql_delete(Booking).where(_bookings_tenant_clause(org_id)))
+    r_esc = await db.execute(sql_delete(EscalationEvent).where(_escalation_tenant_clause(org_id)))
+    r_int = await db.execute(sql_delete(IntegrationEvent).where(_integration_events_tenant_clause(org_id)))
+    r_ft = await db.execute(sql_delete(FailedTask).where(_failed_tasks_tenant_clause(org_id)))
 
     await db.commit()
     logger.warning(
-        "Админ: полный сброс операционных данных (чаты/заказы/брони/эскалации/журнал интеграций)",
+        "Админ: сброс операционных данных филиала org_id=%s (чаты/заказы/брони/эскалации/интеграции/failed_tasks)",
+        org_id,
     )
     return {
         "ok": True,
+        "organization_id": org_id,
         "chat_logs_deleted": _sql_delete_rowcount(r_chat),
         "orders_deleted": _sql_delete_rowcount(r_ord),
         "bookings_deleted": _sql_delete_rowcount(r_book),
         "escalation_events_deleted": _sql_delete_rowcount(r_esc),
         "integration_events_deleted": _sql_delete_rowcount(r_int),
+        "failed_tasks_deleted": _sql_delete_rowcount(r_ft),
     }
 
 
 @router.post("/settings/clear-menu-and-stop-snapshot")
 async def clear_menu_and_stop_snapshot(
+    request: Request,
     body: ClearMenuBody,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """
-    Удалить все строки ``menu_items`` и сбросить в UI блок «последняя синхронизация стоп-листа»
-    (поля ``integration_health`` для стопа). Отдельной таблицы стоп-листа в БД нет.
+    Удалить строки ``menu_items`` с ``organization_id`` текущего филиала (как ``POST /menu/clear``).
+
+    Строки с ``organization_id IS NULL`` (legacy) **не** трогаем — иначе франшиза сотрёт общую
+    номенклатуру платформы. Отдельной таблицы стоп-листа в БД нет. ``integration_health``
+    глобальный — не сбрасываем, чтобы не ломать индикаторы других филиалов.
     """
     if not body.confirm:
         raise HTTPException(
             status_code=400,
             detail='Для очистки передайте в теле JSON: {"confirm": true}',
         )
-    cnt = await db.scalar(select(func.count()).select_from(MenuItem)) or 0
-    await db.execute(sql_delete(MenuItem))
-    row = await db.get(IntegrationHealth, 1)
-    if row is not None:
-        row.last_stoplist_at = None
-        row.last_stoplist_ok = False
-        row.last_stoplist_error = ""
+    org_id = admin_org_from_session(request)
+    cnt = (
+        await db.scalar(
+            select(func.count()).select_from(MenuItem).where(MenuItem.organization_id == org_id),
+        )
+        or 0
+    )
+    await db.execute(sql_delete(MenuItem).where(MenuItem.organization_id == org_id))
     await db.commit()
     logger.warning(
-        "Админ: очистка menu_items и сброс снимка стоп-листа в integration_health, позиций: %d",
+        "Админ: очистка menu_items филиала org_id=%s, позиций: %d",
+        org_id,
         int(cnt),
     )
-    return {"ok": True, "menu_items_deleted": int(cnt), "stop_snapshot_reset": True}
+    return {"ok": True, "organization_id": org_id, "menu_items_deleted": int(cnt)}
 
 
 @router.post("/orders/bulk-delete")
 async def bulk_delete_orders(
+    request: Request,
     body: DeleteOrdersBulkBody,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
@@ -2109,6 +2572,7 @@ async def bulk_delete_orders(
             status_code=400,
             detail='Передайте {"confirm": true, "order_ids": [1, 2, ...]}',
         )
+    org_id = admin_org_from_session(request)
     ids = sorted({int(x) for x in body.order_ids if int(x) > 0})
     if not ids:
         raise HTTPException(status_code=400, detail="Список order_ids пуст")
@@ -2117,7 +2581,7 @@ async def bulk_delete_orders(
     res = await db.execute(
         select(Order, User.phone)
         .outerjoin(User, Order.user_id == User.id)
-        .where(Order.id.in_(ids)),
+        .where(Order.id.in_(ids), Order.organization_id == org_id),
     )
     rows = res.all()
     found = {o.id for o, _p in rows}
@@ -2129,19 +2593,20 @@ async def bulk_delete_orders(
         )
 
     for order, phone in rows:
-        await _clear_redis_pending_if_matches(phone, order.id)
+        await _clear_redis_pending_if_matches(phone, order.id, organization_id=org_id)
 
     r_del = await db.execute(sql_delete(Order).where(Order.id.in_(ids)))
     await db.commit()
     deleted = _sql_delete_rowcount(r_del)
     for oid in ids:
-        await publish_event("order_deleted", {"order_id": oid})
+        await publish_event("order_deleted", {"order_id": oid, "organization_id": org_id})
     logger.warning("Админ: удалено заказов (bulk): %s", ids)
     return {"ok": True, "deleted": deleted, "order_ids": ids}
 
 
 @router.post("/orders/{order_id}/delete")
 async def delete_single_order(
+    request: Request,
     order_id: int,
     body: DeleteSingleOrderBody,
     db: AsyncSession = Depends(get_db),
@@ -2152,19 +2617,20 @@ async def delete_single_order(
             status_code=400,
             detail='Передайте {"confirm": true}',
         )
+    org_id = admin_org_from_session(request)
     res = await db.execute(
         select(Order, User.phone)
         .outerjoin(User, Order.user_id == User.id)
-        .where(Order.id == order_id),
+        .where(Order.id == order_id, Order.organization_id == org_id),
     )
     row = res.one_or_none()
     if row is None:
         raise HTTPException(status_code=404, detail="Заказ не найден")
     order, phone = row
-    await _clear_redis_pending_if_matches(phone, order.id)
+    await _clear_redis_pending_if_matches(phone, order.id, organization_id=org_id)
     await db.execute(sql_delete(Order).where(Order.id == order_id))
     await db.commit()
-    await publish_event("order_deleted", {"order_id": order_id})
+    await publish_event("order_deleted", {"order_id": order_id, "organization_id": org_id})
     logger.warning("Админ: удалён заказ #%s", order_id)
     return {"ok": True, "id": order_id}
 
@@ -2249,7 +2715,7 @@ async def settings_environment(db: AsyncSession = Depends(get_db)) -> dict:
 
 
 @router.post("/settings/redis-purge-phone")
-async def redis_purge_phone(body: RedisPurgePhoneBody) -> dict:
+async def redis_purge_phone(request: Request, body: RedisPurgePhoneBody) -> dict:
     """Удалить из Redis/in-memory ключи chat:history, user:state, pending_order/booking для номера."""
     if not body.confirm:
         raise HTTPException(
@@ -2259,7 +2725,9 @@ async def redis_purge_phone(body: RedisPurgePhoneBody) -> dict:
     phone = (body.phone or "").strip()
     if not phone:
         raise HTTPException(status_code=400, detail="Укажите телефон")
-    await purge_all_session_keys_for_phone(redis_client, phone)
+    await purge_all_session_keys_for_phone(
+        redis_client, phone, organization_id=admin_org_from_session(request),
+    )
     logger.warning("Админ: сброшена Redis-сессия для %s", phone[:6] + "…")
     return {"ok": True, "phone": phone}
 
@@ -2284,6 +2752,7 @@ async def run_chat_log_retention_manual(
 
 @router.post("/orders/bulk-cancel")
 async def bulk_cancel_orders(
+    request: Request,
     body: DeleteOrdersBulkBody,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
@@ -2293,6 +2762,7 @@ async def bulk_cancel_orders(
             status_code=400,
             detail='Передайте {"confirm": true, "order_ids": [1, 2, ...]}',
         )
+    org_id = admin_org_from_session(request)
     ids = sorted({int(x) for x in body.order_ids if int(x) > 0})
     if not ids:
         raise HTTPException(status_code=400, detail="Список order_ids пуст")
@@ -2300,7 +2770,7 @@ async def bulk_cancel_orders(
     res = await db.execute(
         select(Order, User.phone)
         .join(User, Order.user_id == User.id)
-        .where(Order.id.in_(ids)),
+        .where(Order.id.in_(ids), Order.organization_id == org_id),
     )
     rows = res.all()
     found = {o.id for o, _p in rows}
@@ -2317,7 +2787,7 @@ async def bulk_cancel_orders(
             continue
         order.status = OrderStatus.CANCELLED.value
         order.iiko_last_error = None
-        await _clear_redis_pending_if_matches(phone, order.id)
+        await _clear_redis_pending_if_matches(phone, order.id, organization_id=org_id)
         cancelled += 1
         to_emit.append((order.id, phone, float(order.total_price)))
 
@@ -2331,6 +2801,7 @@ async def bulk_cancel_orders(
                 "phone": phone,
                 "total_price": total,
                 "iiko_last_error": None,
+                "organization_id": org_id,
             },
         )
     logger.warning("Админ: массовая отмена заказов: ids=%s, отменено=%d, уже были отменены=%d", ids, cancelled, skipped)
@@ -2339,11 +2810,13 @@ async def bulk_cancel_orders(
 
 @router.get("/export/orders")
 async def export_orders_csv(
+    request: Request,
     date_from: date | None = Query(None, description="Начало периода (UTC, дата)"),
     date_to: date | None = Query(None, description="Конец периода включительно (UTC, дата)"),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
     """CSV заказов за период (UTF-8 с BOM для Excel)."""
+    org_id = admin_org_from_session(request)
     lo, hi_excl = _export_range_utc(date_from, date_to)
     lo_sql = _sql_dt_for_filter(lo)
     hi_sql = _sql_dt_for_filter(hi_excl)
@@ -2351,7 +2824,12 @@ async def export_orders_csv(
     res = await db.execute(
         select(Order, User.phone, User.name)
         .join(User, Order.user_id == User.id)
-        .where(Order.created_at >= lo_sql, Order.created_at < hi_sql)
+        .where(
+            Order.organization_id == org_id,
+            User.organization_id == org_id,
+            Order.created_at >= lo_sql,
+            Order.created_at < hi_sql,
+        )
         .order_by(Order.id.asc())
         .limit(MAX_CSV_EXPORT_ROWS + 1),
     )
@@ -2378,7 +2856,7 @@ async def export_orders_csv(
         ],
     )
     for o, phone, name in rows:
-        meta = _order_meta_from_items_json(o.items_json if isinstance(o.items_json, dict) else None)
+        meta = order_meta_from_items_json(o.items_json if isinstance(o.items_json, dict) else None)
         w.writerow(
             [
                 o.id,
@@ -2404,11 +2882,13 @@ async def export_orders_csv(
 
 @router.get("/export/chats")
 async def export_chats_csv(
+    request: Request,
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
     """CSV сообщений chat_logs за период (роль, телефон клиента)."""
+    org_id = admin_org_from_session(request)
     lo, hi_excl = _export_range_utc(date_from, date_to)
     lo_sql = _sql_dt_for_filter(lo)
     hi_sql = _sql_dt_for_filter(hi_excl)
@@ -2416,7 +2896,11 @@ async def export_chats_csv(
     res = await db.execute(
         select(ChatLog, User.phone)
         .join(User, ChatLog.user_id == User.id)
-        .where(ChatLog.created_at >= lo_sql, ChatLog.created_at < hi_sql)
+        .where(
+            User.organization_id == org_id,
+            ChatLog.created_at >= lo_sql,
+            ChatLog.created_at < hi_sql,
+        )
         .order_by(ChatLog.id.asc())
         .limit(MAX_CSV_EXPORT_ROWS + 1),
     )
@@ -2482,9 +2966,11 @@ def _sql_dt_for_filter(dt: datetime) -> datetime:
 
 @router.get("/stats")
 async def dashboard_stats(
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Статистика для дашборда: выручка за сегодня, общие счётчики."""
+    org_id = admin_org_from_session(request)
     now_utc = datetime.now(tz=timezone.utc)
     today_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
     ts_lo = _sql_dt_for_filter(today_start)
@@ -2492,10 +2978,11 @@ async def dashboard_stats(
     ys_lo = _sql_dt_for_filter(today_start - timedelta(days=1))
 
     not_cancelled = Order.status != OrderStatus.CANCELLED
+    org_orders = Order.organization_id == org_id
 
     total_q = await db.execute(
         select(func.count(Order.id), func.coalesce(func.sum(Order.total_price), 0))
-        .where(not_cancelled)
+        .where(not_cancelled, org_orders)
     )
     total_row = total_q.one()
     total_orders = total_row[0]
@@ -2505,6 +2992,7 @@ async def dashboard_stats(
         select(func.count(Order.id), func.coalesce(func.sum(Order.total_price), 0))
         .where(
             not_cancelled,
+            org_orders,
             Order.created_at >= ts_lo,
             Order.created_at <= ts_hi,
         )
@@ -2518,6 +3006,7 @@ async def dashboard_stats(
         select(func.count(Order.id), func.coalesce(func.sum(Order.total_price), 0))
         .where(
             not_cancelled,
+            org_orders,
             Order.created_at >= ys_lo,
             Order.created_at < ts_lo,
         )
@@ -2539,6 +3028,7 @@ async def dashboard_stats(
     rows = await db.execute(
         select(Order.created_at, Order.total_price).where(
             not_cancelled,
+            org_orders,
             Order.created_at.isnot(None),
         ),
     )
@@ -2559,19 +3049,30 @@ async def dashboard_stats(
         for k in valid_keys
     ]
 
-    bookings_result = await db.execute(select(func.count(Booking.id)))
+    bookings_result = await db.execute(
+        select(func.count(Booking.id)).where(Booking.organization_id == org_id),
+    )
     bookings_count = bookings_result.scalar() or 0
 
-    menu_result = await db.execute(select(func.count(MenuItem.id)))
+    menu_result = await db.execute(
+        select(func.count(MenuItem.id)).where(MenuItem.organization_id == org_id),
+    )
     menu_count = menu_result.scalar() or 0
 
     failed_open = int(
-        await db.scalar(select(func.count(FailedTask.id)).where(FailedTask.resolved.is_(False))) or 0,
+        await db.scalar(
+            select(func.count(FailedTask.id)).where(
+                FailedTask.resolved.is_(False),
+                FailedTask.organization_id == org_id,
+            ),
+        )
+        or 0,
     )
 
     upsell_rows = await db.execute(
         select(Order.items_json).where(
             not_cancelled,
+            org_orders,
             Order.created_at >= ts_lo,
             Order.created_at <= ts_hi,
         ),
@@ -2580,7 +3081,7 @@ async def dashboard_stats(
     upsell_accepted_today = 0
     upsell_revenue_today = 0.0
     for (ij,) in upsell_rows.all():
-        o, a, rev = _upsell_stats_from_items_json(ij if isinstance(ij, dict) else None)
+        o, a, rev = upsell_stats_from_items_json(ij if isinstance(ij, dict) else None)
         upsell_offered_today += o
         upsell_accepted_today += a
         upsell_revenue_today += rev
@@ -2592,6 +3093,7 @@ async def dashboard_stats(
     iiko_errors_today = int(
         await db.scalar(
             select(func.count(Order.id)).where(
+                org_orders,
                 Order.created_at >= ts_lo,
                 Order.created_at <= ts_hi,
                 Order.iiko_last_error.isnot(None),
@@ -2599,6 +3101,30 @@ async def dashboard_stats(
             ),
         )
         or 0,
+    )
+
+    ai_checks_accept: list[float] = []
+    ai_checks_no_offer: list[float] = []
+    ai_val_rows = await db.execute(
+        select(Order.total_price, Order.items_json).where(
+            not_cancelled,
+            org_orders,
+            Order.created_at >= ts_lo,
+            Order.created_at <= ts_hi,
+        ),
+    )
+    for total_price, ij in ai_val_rows.all():
+        off, acc, _rev = upsell_stats_from_items_json(ij if isinstance(ij, dict) else None)
+        tp = float(total_price or 0)
+        if acc > 0:
+            ai_checks_accept.append(tp)
+        elif off == 0:
+            ai_checks_no_offer.append(tp)
+    ai_avg_check_upsell_accepted = (
+        round(sum(ai_checks_accept) / len(ai_checks_accept), 2) if ai_checks_accept else None
+    )
+    ai_avg_check_no_upsell_offer = (
+        round(sum(ai_checks_no_offer) / len(ai_checks_no_offer), 2) if ai_checks_no_offer else None
     )
 
     return {
@@ -2619,6 +3145,8 @@ async def dashboard_stats(
         "upsell_revenue_today": round(upsell_revenue_today, 2),
         "upsell_conversion_pct": upsell_conversion_pct,
         "iiko_errors_today": iiko_errors_today,
+        "ai_avg_check_upsell_accepted": ai_avg_check_upsell_accepted,
+        "ai_avg_check_no_upsell_offer": ai_avg_check_no_upsell_offer,
     }
 
 
@@ -2627,6 +3155,7 @@ async def dashboard_stats(
 
 @router.get("/analytics")
 async def analytics(
+    request: Request,
     response: Response,
     period: str = Query("week", description="day, week, month, custom"),
     date_from: str | None = Query(None, description="Начало периода (YYYY-MM-DD)"),
@@ -2640,6 +3169,9 @@ async def analytics(
     Границы и дневные корзины — **UTC** (как в GET /stats), ключ дня — календарная дата в UTC.
     """
     response.headers["Cache-Control"] = "no-store"
+
+    org_id = admin_org_from_session(request)
+    org_orders = Order.organization_id == org_id
 
     now = datetime.now(tz=timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -2676,9 +3208,14 @@ async def analytics(
     prev_start_sql = _sql_dt_for_filter(prev_start)
     prev_end_sql = _sql_dt_for_filter(prev_end)
 
+    esc_scope = or_(
+        EscalationEvent.organization_id == org_id,
+        EscalationEvent.organization_id.is_(None),
+    )
     esc_count = int(
         await db.scalar(
             select(func.count(EscalationEvent.id)).where(
+                esc_scope,
                 EscalationEvent.created_at >= start_sql,
                 EscalationEvent.created_at <= end_sql,
             ),
@@ -2688,6 +3225,7 @@ async def analytics(
     prev_esc = int(
         await db.scalar(
             select(func.count(EscalationEvent.id)).where(
+                esc_scope,
                 EscalationEvent.created_at >= prev_start_sql,
                 EscalationEvent.created_at < prev_end_sql,
             ),
@@ -2703,7 +3241,12 @@ async def analytics(
             func.count(Order.id),
             func.coalesce(func.sum(Order.total_price), 0),
         )
-        .where(not_cancelled, Order.created_at >= start_sql, Order.created_at <= end_sql)
+        .where(
+            not_cancelled,
+            org_orders,
+            Order.created_at >= start_sql,
+            Order.created_at <= end_sql,
+        )
     )
     cur_row = cur_q.one()
     current_count = cur_row[0]
@@ -2717,6 +3260,7 @@ async def analytics(
         )
         .where(
             not_cancelled,
+            org_orders,
             Order.created_at >= prev_start_sql,
             Order.created_at < prev_end_sql,
         )
@@ -2731,7 +3275,12 @@ async def analytics(
     # Загружаем только заказы текущего периода (для daily + top_items)
     cur_orders_result = await db.execute(
         select(Order)
-        .where(not_cancelled, Order.created_at >= start_sql, Order.created_at <= end_sql)
+        .where(
+            not_cancelled,
+            org_orders,
+            Order.created_at >= start_sql,
+            Order.created_at <= end_sql,
+        )
     )
     current_orders = cur_orders_result.scalars().all()
 
@@ -2781,7 +3330,12 @@ async def analytics(
     # Воронка: активность в чатах → черновики → «закрытые» в iiko/завершённые
     chat_users_sq = (
         select(ChatLog.user_id)
-        .where(ChatLog.created_at >= start_sql, ChatLog.created_at <= end_sql)
+        .join(User, User.id == ChatLog.user_id)
+        .where(
+            User.organization_id == org_id,
+            ChatLog.created_at >= start_sql,
+            ChatLog.created_at <= end_sql,
+        )
         .distinct()
         .subquery()
     )
@@ -2793,6 +3347,7 @@ async def analytics(
             select(func.count(Order.id)).where(
                 Order.status == OrderStatus.DRAFT.value,
                 not_cancelled,
+                org_orders,
                 Order.created_at >= start_sql,
                 Order.created_at <= end_sql,
             ),
@@ -2806,6 +3361,7 @@ async def analytics(
                     [OrderStatus.SENT_TO_IIKO.value, OrderStatus.COMPLETED.value],
                 ),
                 not_cancelled,
+                org_orders,
                 Order.created_at >= start_sql,
                 Order.created_at <= end_sql,
             ),
@@ -2827,6 +3383,7 @@ async def analytics(
                     [OrderStatus.SENT_TO_IIKO.value, OrderStatus.COMPLETED.value],
                 ),
                 not_cancelled,
+                org_orders,
                 Order.created_at >= start_sql,
                 Order.created_at <= end_sql,
                 ~op_exists,
@@ -2842,6 +3399,7 @@ async def analytics(
         await db.scalar(
             select(func.count(Order.id)).where(
                 not_cancelled,
+                org_orders,
                 Order.created_at >= start_sql,
                 Order.created_at <= end_sql,
             ),
@@ -2852,6 +3410,7 @@ async def analytics(
         await db.scalar(
             select(func.count(Order.id)).where(
                 not_cancelled,
+                org_orders,
                 Order.created_at >= start_sql,
                 Order.created_at <= end_sql,
                 ~op_exists,
@@ -2940,28 +3499,34 @@ async def analytics(
 
 
 @router.post("/chats/{phone}/takeover")
-async def takeover_chat(phone: str) -> dict:
+async def takeover_chat(request: Request, phone: str) -> dict:
     """
     Перехватить диалог — AI замолкает, оператор ведёт общение вручную.
     Устанавливает флаг HUMAN_MODE в Redis.
     """
-    await set_user_state(redis_client, phone, UserState.HUMAN_MODE)
+    org_id = admin_org_from_session(request)
+    await set_user_state(redis_client, phone, UserState.HUMAN_MODE, organization_id=org_id)
     await publish_event("state_changed", {
-        "phone": phone, "state": UserState.HUMAN_MODE,
+        "phone": phone,
+        "state": UserState.HUMAN_MODE,
+        "organization_id": org_id,
     })
     logger.info("Оператор перехватил диалог: %s", phone)
     return {"status": "ok", "phone": phone, "mode": "human"}
 
 
 @router.post("/chats/{phone}/release")
-async def release_chat(phone: str) -> dict:
+async def release_chat(request: Request, phone: str) -> dict:
     """
     Вернуть управление боту — AI снова отвечает на сообщения.
     Возвращает состояние в CHATTING.
     """
-    await set_user_state(redis_client, phone, UserState.CHATTING)
+    org_id = admin_org_from_session(request)
+    await set_user_state(redis_client, phone, UserState.CHATTING, organization_id=org_id)
     await publish_event("state_changed", {
-        "phone": phone, "state": UserState.CHATTING,
+        "phone": phone,
+        "state": UserState.CHATTING,
+        "organization_id": org_id,
     })
     logger.info("Оператор вернул бота: %s", phone)
     return {"status": "ok", "phone": phone, "mode": "bot"}
@@ -2974,6 +3539,7 @@ class TextRequest(BaseModel):
 
 @router.post("/chats/{phone}/send_message")
 async def admin_send_message(
+    request: Request,
     phone: str,
     body: TextRequest,
     db: AsyncSession = Depends(get_db),
@@ -2982,10 +3548,12 @@ async def admin_send_message(
     Отправить сообщение клиенту от имени оператора.
     Сохраняется в ChatLog и отправляется через WhatsApp.
     """
-    user = await get_or_create_user(db, phone)
+    org_id = admin_org_from_session(request)
+    user = await get_or_create_user(db, phone, org_id)
     now = datetime.now(timezone.utc)
     op_log = ChatLog(
         user_id=user.id,
+        organization_id=org_id,
         role="operator",
         content=body.text,
         delivery_status="sending",
@@ -3000,6 +3568,7 @@ async def admin_send_message(
         "content": body.text,
         "id": log_id,
         "delivery_status": "sending",
+        "organization_id": org_id,
     })
     wa = await send_message(phone, body.text)
     await finalize_outbound_delivery(
@@ -3009,17 +3578,62 @@ async def admin_send_message(
     return {"status": "sent" if wa.ok else "failed", "phone": phone, "chat_log_id": log_id}
 
 
+@router.post("/chats/{phone}/messages/{chat_log_id}/resend")
+async def resend_failed_chat_message(
+    request: Request,
+    phone: str,
+    chat_log_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Повторная отправка текста той же записи ChatLog после статуса failed (WhatsApp)."""
+    org_id = admin_org_from_session(request)
+    log = await db.get(ChatLog, chat_log_id)
+    if log is None:
+        raise HTTPException(status_code=404, detail="Сообщение не найдено")
+    user = await db.get(User, log.user_id)
+    if user is None or int(user.organization_id) != org_id or user.phone != phone:
+        raise HTTPException(status_code=404, detail="Сообщение не найдено")
+    if (log.delivery_status or "").lower() != "failed":
+        raise HTTPException(status_code=400, detail="Переотправка доступна только для failed")
+    if (log.role or "") not in ("operator", "assistant"):
+        raise HTTPException(status_code=400, detail="Неподдерживаемая роль для переотправки")
+    text = (log.content or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Пустой текст сообщения")
+
+    now = datetime.now(timezone.utc)
+    log.delivery_status = "sending"
+    log.error_details = None
+    log.status_updated_at = now
+    await db.flush()
+    await publish_event("new_message", {
+        "phone": phone,
+        "role": log.role,
+        "content": text,
+        "id": chat_log_id,
+        "delivery_status": "sending",
+        "organization_id": org_id,
+    })
+    wa = await send_message(phone, text)
+    await finalize_outbound_delivery(
+        db, chat_log_id, wa.ok, provider_message_id=wa.message_id, error_details=wa.error,
+    )
+    await db.commit()
+    return {"status": "sent" if wa.ok else "failed", "phone": phone, "chat_log_id": chat_log_id}
+
+
 @router.get("/chats/{phone}/state")
-async def get_chat_state(phone: str) -> dict:
+async def get_chat_state(request: Request, phone: str) -> dict:
     """Получить текущее состояние диалога (CHATTING, CONFIRMING_ORDER, HUMAN_MODE)."""
-    state = await get_user_state(redis_client, phone)
+    org_id = admin_org_from_session(request)
+    state = await get_user_state(redis_client, phone, organization_id=org_id)
     return {"phone": phone, "state": state.value}
 
 
 # ─── Тест бота (без WhatsApp) ────────────────────────────
 
 @router.post("/test-bot")
-async def test_bot(body: TextRequest) -> dict:
+async def test_bot(request: Request, body: TextRequest) -> dict:
     """
     Тестовый endpoint: эмулирует диалог с ботом без WhatsApp.
     Использует фиктивный номер 'test-admin', проходит полный цикл AI.
@@ -3030,46 +3644,48 @@ async def test_bot(body: TextRequest) -> dict:
         handle_order_payment_choice,
     )
 
+    org_id = admin_org_from_session(request)
     phone = "test-admin"
     message_text = body.text
 
-    state = await get_user_state(redis_client, phone)
+    state = await get_user_state(redis_client, phone, organization_id=org_id)
 
     if state == UserState.HUMAN_MODE:
         return {"reply": "[HUMAN_MODE — AI отключён]", "state": state.value, "intent": None}
 
     if state == UserState.AWAITING_ORDER_PAYMENT:
-        reply = await handle_order_payment_choice(phone, message_text)
-        await append_to_history(redis_client, phone, "user", message_text)
-        await append_to_history(redis_client, phone, "assistant", reply)
-        new_state = await get_user_state(redis_client, phone)
+        reply = await handle_order_payment_choice(phone, message_text, org_id)
+        await append_to_history(redis_client, phone, "user", message_text, organization_id=org_id)
+        await append_to_history(redis_client, phone, "assistant", reply or "", organization_id=org_id)
+        new_state = await get_user_state(redis_client, phone, organization_id=org_id)
         return {"reply": reply, "state": new_state.value, "intent": None}
 
     if state == UserState.CONFIRMING_ORDER:
-        reply = await handle_confirmation(phone, message_text)
-        await append_to_history(redis_client, phone, "user", message_text)
-        await append_to_history(redis_client, phone, "assistant", reply)
-        new_state = await get_user_state(redis_client, phone)
+        reply = await handle_confirmation(phone, message_text, org_id)
+        await append_to_history(redis_client, phone, "user", message_text, organization_id=org_id)
+        await append_to_history(redis_client, phone, "assistant", reply or "", organization_id=org_id)
+        new_state = await get_user_state(redis_client, phone, organization_id=org_id)
         return {"reply": reply, "state": new_state.value, "intent": None}
 
     if state == UserState.CONFIRMING_BOOKING:
-        reply = await handle_booking_confirmation(phone, message_text)
-        await append_to_history(redis_client, phone, "user", message_text)
-        await append_to_history(redis_client, phone, "assistant", reply)
-        new_state = await get_user_state(redis_client, phone)
+        reply = await handle_booking_confirmation(phone, message_text, org_id)
+        await append_to_history(redis_client, phone, "user", message_text, organization_id=org_id)
+        await append_to_history(redis_client, phone, "assistant", reply, organization_id=org_id)
+        new_state = await get_user_state(redis_client, phone, organization_id=org_id)
         return {"reply": reply, "state": new_state.value, "intent": None}
 
-    history = await get_chat_history(redis_client, phone)
-    await append_to_history(redis_client, phone, "user", message_text)
+    history = await get_chat_history(redis_client, phone, organization_id=org_id)
+    await append_to_history(redis_client, phone, "user", message_text, organization_id=org_id)
 
     async with async_session_factory() as db:
         menu_items = await load_available_menu(db)
         menu_context = build_menu_context(menu_items)
-        u_row = await db.scalar(select(User).where(User.phone == phone))
-        org_id = u_row.organization_id if u_row else None
+        u_row = await db.scalar(
+            select(User).where(User.phone == phone, User.organization_id == org_id),
+        )
         customer_ctx = await build_customer_context(db, u_row)
         kb_context = await load_knowledge_context_block(db, org_id)
-        draft_row = await get_open_draft_order(db, phone)
+        draft_row = await get_open_draft_order(db, phone, org_id)
         draft_ctx = format_draft_order_context_for_prompt(
             draft_row.items_json if draft_row else None,
         )
@@ -3095,21 +3711,21 @@ async def test_bot(body: TextRequest) -> dict:
             customer_context=customer_ctx,
         )
         result = await route_intent(
-            db, phone, ai_response, menu_items=menu_items,
+            db, phone, ai_response, menu_items=menu_items, organization_id=org_id,
         )
 
         if result.new_state:
-            await set_user_state(redis_client, phone, result.new_state)
+            await set_user_state(redis_client, phone, result.new_state, organization_id=org_id)
         if result.pending_order_id:
-            await set_pending_order(redis_client, phone, result.pending_order_id)
+            await set_pending_order(redis_client, phone, result.pending_order_id, organization_id=org_id)
         if result.pending_booking_id:
-            await set_pending_booking(redis_client, phone, result.pending_booking_id)
+            await set_pending_booking(redis_client, phone, result.pending_booking_id, organization_id=org_id)
 
         await db.commit()
 
-    await append_to_history(redis_client, phone, "assistant", result.reply_text)
+    await append_to_history(redis_client, phone, "assistant", result.reply_text, organization_id=org_id)
 
-    new_state = await get_user_state(redis_client, phone)
+    new_state = await get_user_state(redis_client, phone, organization_id=org_id)
     return {
         "reply": result.reply_text,
         "state": new_state.value,
@@ -3137,6 +3753,117 @@ def _packaging_rule_dict(r: PackagingRule) -> dict:
     }
 
 
+def _upsell_rule_dict(r: UpsellRule) -> dict:
+    return {
+        "id": r.id,
+        "organization_id": r.organization_id,
+        "trigger_mode": r.trigger_mode,
+        "trigger_category": r.trigger_category,
+        "suggest_category": r.suggest_category,
+        "min_order_sum": float(r.min_order_sum or 0),
+        "max_order_sum": float(r.max_order_sum) if r.max_order_sum is not None else None,
+        "phrase_template": r.phrase_template or "",
+        "sort_order": r.sort_order,
+        "is_active": bool(r.is_active),
+    }
+
+
+class UpsellRuleCreateBody(BaseModel):
+    trigger_mode: str = "missing_category"
+    trigger_category: str = Field(..., min_length=1, max_length=120)
+    suggest_category: str = Field(..., min_length=1, max_length=120)
+    min_order_sum: float = Field(0, ge=0)
+    max_order_sum: float | None = Field(None, ge=0)
+    phrase_template: str = ""
+    sort_order: int = 0
+    is_active: bool = True
+
+
+class UpsellRulePatchBody(BaseModel):
+    trigger_mode: str | None = None
+    trigger_category: str | None = Field(None, max_length=120)
+    suggest_category: str | None = Field(None, max_length=120)
+    min_order_sum: float | None = Field(None, ge=0)
+    max_order_sum: float | None = None
+    phrase_template: str | None = None
+    sort_order: int | None = None
+    is_active: bool | None = None
+
+
+@router.get("/upsell-rules")
+async def list_upsell_rules(request: Request, db: AsyncSession = Depends(get_db)) -> dict:
+    org_id = admin_org_from_session(request)
+    result = await db.execute(
+        select(UpsellRule)
+        .where(UpsellRule.organization_id == org_id)
+        .order_by(UpsellRule.sort_order.desc(), UpsellRule.id),
+    )
+    rows = list(result.scalars().all())
+    return {"items": [_upsell_rule_dict(r) for r in rows]}
+
+
+@router.post("/upsell-rules")
+async def create_upsell_rule(
+    request: Request,
+    body: UpsellRuleCreateBody,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    org_id = admin_org_from_session(request)
+    tmpl = (body.phrase_template or "").strip() or (
+        "К заказу отлично подойдёт {item_name} ({price} ₸). Добавить?"
+    )
+    row = UpsellRule(
+        organization_id=org_id,
+        trigger_mode=(body.trigger_mode or "missing_category").strip(),
+        trigger_category=body.trigger_category.strip(),
+        suggest_category=body.suggest_category.strip(),
+        min_order_sum=body.min_order_sum,
+        max_order_sum=body.max_order_sum,
+        phrase_template=tmpl,
+        sort_order=body.sort_order,
+        is_active=body.is_active,
+    )
+    db.add(row)
+    await db.flush()
+    return {"ok": True, "item": _upsell_rule_dict(row)}
+
+
+@router.patch("/upsell-rules/{rule_id}")
+async def patch_upsell_rule(
+    request: Request,
+    rule_id: int,
+    body: UpsellRulePatchBody,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    org_id = admin_org_from_session(request)
+    row = await db.get(UpsellRule, rule_id)
+    if row is None or int(row.organization_id) != org_id:
+        raise HTTPException(status_code=404, detail="Правило не найдено")
+    data = body.model_dump(exclude_unset=True)
+    for key in ("trigger_mode", "trigger_category", "suggest_category", "phrase_template"):
+        if key in data and data[key] is not None:
+            data[key] = str(data[key]).strip()
+    for key, value in data.items():
+        setattr(row, key, value)
+    await db.flush()
+    return {"ok": True, "item": _upsell_rule_dict(row)}
+
+
+@router.delete("/upsell-rules/{rule_id}")
+async def delete_upsell_rule(
+    request: Request,
+    rule_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    org_id = admin_org_from_session(request)
+    row = await db.get(UpsellRule, rule_id)
+    if row is None or int(row.organization_id) != org_id:
+        raise HTTPException(status_code=404, detail="Правило не найдено")
+    await db.delete(row)
+    await db.flush()
+    return {"ok": True}
+
+
 class PackagingRuleCreateBody(BaseModel):
     kind: str = Field(..., min_length=1, max_length=60)
     name: str = Field(..., min_length=1, max_length=200)
@@ -3160,20 +3887,25 @@ class PackagingRulePatchBody(BaseModel):
 
 
 @router.get("/packaging-rules")
-async def list_packaging_rules(db: AsyncSession = Depends(get_db)) -> dict:
-    """Все правила упаковки (включая неактивные). При пустой таблице — создание сидов."""
-    from app.services.order_logic import load_packaging_rules, PACKAGING_SEED
+async def list_packaging_rules(request: Request, db: AsyncSession = Depends(get_db)) -> dict:
+    """Правила упаковки арендатора (включая неактивные). При отсутствии — сиды для организации."""
+    from app.services.order_logic import PACKAGING_SEED
 
+    org_id = admin_org_from_session(request)
     result = await db.execute(
-        select(PackagingRule).order_by(PackagingRule.sort_order.desc(), PackagingRule.id)
+        select(PackagingRule)
+        .where(_packaging_tenant_clause(org_id))
+        .order_by(PackagingRule.sort_order.desc(), PackagingRule.id)
     )
     rows = list(result.scalars().all())
     if not rows:
         for seed in PACKAGING_SEED:
-            db.add(PackagingRule(**seed))
+            db.add(PackagingRule(**{**seed, "organization_id": org_id}))
         await db.flush()
         result2 = await db.execute(
-            select(PackagingRule).order_by(PackagingRule.sort_order.desc(), PackagingRule.id)
+            select(PackagingRule)
+            .where(_packaging_tenant_clause(org_id))
+            .order_by(PackagingRule.sort_order.desc(), PackagingRule.id)
         )
         rows = list(result2.scalars().all())
     return {"items": [_packaging_rule_dict(r) for r in rows]}
@@ -3181,14 +3913,23 @@ async def list_packaging_rules(db: AsyncSession = Depends(get_db)) -> dict:
 
 @router.post("/packaging-rules")
 async def create_packaging_rule(
+    request: Request,
     body: PackagingRuleCreateBody,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    existing = await db.scalar(select(PackagingRule).where(PackagingRule.kind == body.kind.strip()))
+    org_id = admin_org_from_session(request)
+    k = body.kind.strip()
+    existing = await db.scalar(
+        select(PackagingRule).where(
+            PackagingRule.organization_id == org_id,
+            PackagingRule.kind == k,
+        ),
+    )
     if existing:
-        raise HTTPException(status_code=409, detail=f"Правило с kind='{body.kind}' уже существует")
+        raise HTTPException(status_code=409, detail=f"Правило с kind='{k}' уже есть у этой организации")
     row = PackagingRule(
-        kind=body.kind.strip(),
+        organization_id=org_id,
+        kind=k,
         name=body.name.strip(),
         price=body.price,
         iiko_product_id=(body.iiko_product_id or "").strip() or None,
@@ -3204,12 +3945,14 @@ async def create_packaging_rule(
 
 @router.patch("/packaging-rules/{rule_id}")
 async def patch_packaging_rule(
+    request: Request,
     rule_id: int,
     body: PackagingRulePatchBody,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
+    org_id = admin_org_from_session(request)
     row = await db.get(PackagingRule, rule_id)
-    if row is None:
+    if row is None or int(row.organization_id) != org_id:
         raise HTTPException(status_code=404, detail="Правило не найдено")
     data = body.model_dump(exclude_unset=True)
     for key in ("kind", "name", "keywords", "option_key"):
@@ -3217,6 +3960,16 @@ async def patch_packaging_rule(
             data[key] = data[key].strip()
     if "iiko_product_id" in data:
         data["iiko_product_id"] = (data["iiko_product_id"] or "").strip() or None
+    if "kind" in data and data["kind"] is not None:
+        dup = await db.scalar(
+            select(PackagingRule).where(
+                PackagingRule.organization_id == org_id,
+                PackagingRule.kind == data["kind"],
+                PackagingRule.id != row.id,
+            ),
+        )
+        if dup:
+            raise HTTPException(status_code=409, detail="Такой kind уже занят у организации")
     for key, value in data.items():
         setattr(row, key, value)
     await db.flush()
@@ -3225,11 +3978,13 @@ async def patch_packaging_rule(
 
 @router.delete("/packaging-rules/{rule_id}")
 async def delete_packaging_rule(
+    request: Request,
     rule_id: int,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
+    org_id = admin_org_from_session(request)
     row = await db.get(PackagingRule, rule_id)
-    if row is None:
+    if row is None or int(row.organization_id) != org_id:
         raise HTTPException(status_code=404, detail="Правило не найдено")
     await db.delete(row)
     await db.flush()

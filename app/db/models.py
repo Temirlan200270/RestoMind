@@ -18,6 +18,7 @@ from sqlalchemy import (
     String,
     Text,
     Time,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -29,21 +30,95 @@ class Base(DeclarativeBase):
     pass
 
 
+class Tenant(Base):
+    """Сеть / плательщик (франшиза). Филиалы — ``Organization`` с ``tenant_id``."""
+
+    __tablename__ = "tenants"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, comment="Название сети или холдинга")
+    plan: Mapped[str] = mapped_column(
+        String(64), default="standard", server_default="standard", comment="Тарифный план (продуктовый)",
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    def __repr__(self) -> str:
+        return f"<Tenant id={self.id} name='{self.name}'>"
+
+
 class Organization(Base):
     """Ресторан / организация. Фундамент мультитенантности для SaaS."""
 
     __tablename__ = "organizations"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("tenants.id"), nullable=True, index=True,
+        comment="Сеть; NULL — одиночный ресторан до миграции",
+    )
     name: Mapped[str] = mapped_column(String(255), nullable=False, comment="Название ресторана")
-    iiko_api_login: Mapped[str] = mapped_column(String(255), default="", comment="API-логин iiko")
+    slug: Mapped[str] = mapped_column(
+        String(120), default="", server_default="", index=True, comment="URL-safe идентификатор арендатора",
+    )
+    timezone: Mapped[str] = mapped_column(
+        String(64), default="UTC", server_default="UTC", comment="IANA timezone (например Asia/Almaty)",
+    )
+    currency: Mapped[str] = mapped_column(String(8), default="KZT", server_default="KZT", comment="ISO код валюты")
+    iiko_api_login: Mapped[str] = mapped_column(
+        String(255), default="", comment="API-логин iiko (legacy plaintext; предпочтительно iiko_api_login_enc)",
+    )
+    iiko_api_login_enc: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Fernet-токен (строка) для apiLogin; при наличии имеет приоритет над iiko_api_login",
+    )
     iiko_organization_id: Mapped[str] = mapped_column(String(255), default="", comment="UUID организации в iiko")
+    iiko_terminal_group_id: Mapped[str] = mapped_column(
+        String(255), default="", server_default="", comment="UUID терминальной группы (стоп-лист, deliveries)",
+    )
     whatsapp_phone_number_id: Mapped[str] = mapped_column(String(100), default="", comment="ID номера WhatsApp")
+    prepayment_enforced: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+        comment="Ложь — не требовать предоплату по порогу; оператор подтверждает оплату вручную",
+    )
+    telegram_ops_chat_id: Mapped[str] = mapped_column(
+        String(32), default="", server_default="", comment="Telegram chat_id для алертов персоналу (приоритет над глобальным env)",
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     def __repr__(self) -> str:
         return f"<Organization id={self.id} name='{self.name}'>"
+
+
+class StaffRole(StrEnum):
+    """Роль сотрудника в админке."""
+
+    ADMIN = "admin"
+    OPERATOR = "operator"
+
+
+class StaffUser(Base):
+    """Сотрудник ресторана: вход в админку по email (не путать с клиентским User)."""
+
+    __tablename__ = "staff_users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id"), nullable=False, index=True,
+    )
+    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    password_hash: Mapped[str] = mapped_column(String(512), nullable=False)
+    role: Mapped[str] = mapped_column(
+        String(32), default=StaffRole.ADMIN.value, server_default=StaffRole.ADMIN.value,
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    def __repr__(self) -> str:
+        return f"<StaffUser id={self.id} email='{self.email}' org={self.organization_id}>"
 
 
 class OrderStatus(StrEnum):
@@ -60,14 +135,17 @@ class User(Base):
     """Пользователь (клиент ресторана), идентифицируется по номеру телефона."""
 
     __tablename__ = "users"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "phone", name="uq_users_organization_phone"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    organization_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("organizations.id"), nullable=True, index=True,
-        comment="ID организации (для мультитенантности)"
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id"), nullable=False, index=True,
+        comment="ID организации (мультитенантность)",
     )
     phone: Mapped[str] = mapped_column(
-        String(20), unique=True, nullable=False, index=True, comment="Номер телефона в формате E.164"
+        String(20), nullable=False, index=True, comment="Номер телефона в формате E.164 (уникален в пределах организации)"
     )
     name: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="Имя клиента")
     operator_note: Mapped[str] = mapped_column(
@@ -160,6 +238,23 @@ class Order(Base):
         nullable=True,
         comment="Ссылка на оплату; заполняет оператор или платёжный webhook",
     )
+    payment_provider: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        index=True,
+        comment="kaspi | manual | generic — источник подтверждения оплаты",
+    )
+    external_payment_id: Mapped[str | None] = mapped_column(
+        String(200),
+        nullable=True,
+        index=True,
+        comment="Внешний id транзакции (идемпотентность вебхука + сверка)",
+    )
+    payment_amount_captured: Mapped[float | None] = mapped_column(
+        Numeric(12, 2),
+        nullable=True,
+        comment="Сумма, зафиксированная при оплате (вебхук или ручное подтверждение)",
+    )
     # Optimistic locking: SQLAlchemy увеличивает при UPDATE; при конфликте — StaleDataError
     row_version: Mapped[int] = mapped_column(
         "version",
@@ -183,12 +278,38 @@ class Order(Base):
         return f"<Order id={self.id} status={self.status} total={self.total_price}>"
 
 
+class RecommendationEvent(Base):
+    """События допродажи по заказу (SQL-агрегаты ROI); синхронизируются из order_meta."""
+
+    __tablename__ = "recommendation_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id"), nullable=False, index=True,
+    )
+    order_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("orders.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    item_iiko_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    item_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    accepted: Mapped[bool] = mapped_column(Boolean, default=False)
+    reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    def __repr__(self) -> str:
+        return f"<RecommendationEvent order={self.order_id} accepted={self.accepted}>"
+
+
 class ChatLog(Base):
     """Лог сообщений диалога — хранит каждое сообщение для аналитики и восстановления контекста."""
 
     __tablename__ = "chat_logs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id"), nullable=False, index=True,
+        comment="Денормализация для фильтров админки",
+    )
     user_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -347,6 +468,12 @@ class KnowledgeItem(Base):
         index=True,
         comment="NULL — общие правила для всех; иначе только для выбранной организации",
     )
+    knowledge_kind: Mapped[str] = mapped_column(
+        String(32),
+        default="facility",
+        server_default="facility",
+        comment="facility — справочник заведения; persona — характер бота",
+    )
     category: Mapped[str] = mapped_column(
         String(120), default="", comment="Группа: Парковка, Банкеты, Общее…",
     )
@@ -372,13 +499,16 @@ class PackagingRule(Base):
     """
 
     __tablename__ = "packaging_rules"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "kind", name="uq_packaging_rules_org_kind"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    organization_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("organizations.id"), nullable=True, index=True,
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id"), nullable=False, index=True,
     )
     kind: Mapped[str] = mapped_column(
-        String(60), nullable=False, unique=True,
+        String(60), nullable=False,
         comment="Ключ правила: manty, shashlik, plov_half, plov_1kg_tabak, plov_1kg_foil, fries, standard, delivery",
     )
     name: Mapped[str] = mapped_column(String(200), nullable=False, comment="Отображаемое название контейнера/услуги")
@@ -405,6 +535,44 @@ class PackagingRule(Base):
         return f"<PackagingRule id={self.id} kind='{self.kind}' price={self.price}>"
 
 
+class UpsellRule(Base):
+    """Детерминированные правила допродажи (Strategy Engine v1)."""
+
+    __tablename__ = "upsell_rules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id"), nullable=False, index=True,
+    )
+    trigger_mode: Mapped[str] = mapped_column(
+        String(32), default="missing_category", server_default="missing_category",
+        comment="missing_category: в корзине нет строки с категорией trigger_category",
+    )
+    trigger_category: Mapped[str] = mapped_column(
+        String(120), default="", comment="Подстрока категории меню (без учёта регистра)",
+    )
+    suggest_category: Mapped[str] = mapped_column(
+        String(120), default="", comment="Категория кандидата для предложения",
+    )
+    min_order_sum: Mapped[float] = mapped_column(
+        Numeric(12, 2), default=0, comment="Минимальная сумма заказа (₸) для срабатывания",
+    )
+    max_order_sum: Mapped[float | None] = mapped_column(
+        Numeric(12, 2), nullable=True, comment="Верхняя граница суммы; NULL = без ограничения",
+    )
+    phrase_template: Mapped[str] = mapped_column(
+        Text,
+        default="К заказу отлично подойдёт {item_name} ({price} ₸). Добавить?",
+    )
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    def __repr__(self) -> str:
+        return f"<UpsellRule id={self.id} org={self.organization_id}>"
+
+
 class IntegrationEvent(Base):
     """
     Журнал последних событий синхронизации (меню, стоп-листы) для админки.
@@ -413,6 +581,9 @@ class IntegrationEvent(Base):
     __tablename__ = "integration_events"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("organizations.id"), nullable=True, index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True,
     )
@@ -430,6 +601,9 @@ class EscalationEvent(Base):
     __tablename__ = "escalation_events"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("organizations.id"), nullable=True, index=True,
+    )
     phone: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     user_message: Mapped[str] = mapped_column(Text, default="", comment="Последнее сообщение клиента")
     reason: Mapped[str] = mapped_column(Text, default="", comment="Текст ответа бота / контекст")
@@ -447,6 +621,9 @@ class FailedTask(Base):
     __tablename__ = "failed_tasks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("organizations.id"), nullable=True, index=True,
+    )
     phone: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     message_text: Mapped[str] = mapped_column(Text, default="")
     error: Mapped[str] = mapped_column(Text, default="", comment="Текст последней ошибки")
@@ -472,7 +649,7 @@ class PaymentEvent(Base):
     )
     event_type: Mapped[str] = mapped_column(
         String(50), nullable=False,
-        comment="prepayment_confirmed | prepayment_waived | webhook_paid | manual_reset",
+        comment="prepayment_confirmed | prepayment_waived | webhook_paid | webhook_failed | manual_reset",
     )
     actor: Mapped[str] = mapped_column(
         String(100), default="admin", comment="Кто инициировал: admin / webhook / system",

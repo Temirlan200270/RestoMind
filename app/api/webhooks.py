@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.pipeline_log import log_pipeline_stage
 from app.core.rate_limiter import check_rate_limit
-from app.db.models import ChatLog, EscalationEvent, FailedTask, Order, OrderStatus, User
+from app.db.models import ChatLog, EscalationEvent, FailedTask, Order, OrderStatus, Organization, User
 from app.db.session import async_session_factory, redis_client
 from app.integrations.iiko_client import IikoClient
 from app.integrations.telegram import EscalationAlertExtras, send_tg_fallback_alert
@@ -58,6 +58,7 @@ from app.services.dialog_mgr import (
     set_user_state,
 )
 from app.services.events import publish_event
+from app.services.org_resolve import organization_id_for_whatsapp_value
 from app.services.intent_router import (
     cancel_booking,
     cancel_order,
@@ -191,16 +192,25 @@ async def _save_chat_log(
     reply_text: str,
     assistant_meta: dict | None = None,
     *,
+    organization_id: int,
     outbound_whatsapp: bool = True,
 ) -> int | None:
     """
     Сохраняет пару сообщений (user + assistant) в ChatLog.
     Для исходящего ответа в WhatsApp — assistant со статусом sending; возвращает id строки assistant.
     """
-    user = await get_or_create_user(db, phone)
-    db.add(ChatLog(user_id=user.id, role="user", content=user_text))
+    user = await get_or_create_user(db, phone, organization_id)
+    db.add(
+        ChatLog(
+            organization_id=organization_id,
+            user_id=user.id,
+            role="user",
+            content=user_text,
+        ),
+    )
     now = datetime.now(timezone.utc)
     assistant_kwargs: dict[str, Any] = {
+        "organization_id": organization_id,
         "user_id": user.id,
         "role": "assistant",
         "content": reply_text,
@@ -237,6 +247,8 @@ async def _send_order_to_iiko(
     order_id: int,
     phone: str,
     items_json: dict[str, Any] | None,
+    *,
+    restaurant_organization_id: int,
 ) -> tuple[bool, str | None, dict[str, Any] | None]:
     """
     Попытка отправить подтверждённый заказ в iiko.
@@ -246,9 +258,18 @@ async def _send_order_to_iiko(
         (False, None, None) — iiko не настроен в .env (ошибку в БД не пишем).
         (False, msg, None) — настроен, но отправка не удалась (msg для админки).
     """
-    if not settings.iiko_api_login or not settings.iiko_organization_id:
-        logger.info("iiko не настроен — заказ сохранён только в БД")
-        log_pipeline_stage("iiko_skip", phone=phone, extra={"order_id": order_id, "reason": "not_configured"})
+    from app.services.org_iiko import resolve_org_iiko_credentials
+
+    try:
+        async with async_session_factory() as _db:
+            creds = await resolve_org_iiko_credentials(_db, int(restaurant_organization_id))
+    except Exception:
+        creds = None
+    if creds is None:
+        logger.info("iiko не настроен для org=%s — заказ сохранён только в БД", restaurant_organization_id)
+        log_pipeline_stage(
+            "iiko_skip", phone=phone, extra={"order_id": order_id, "reason": "not_configured"},
+        )
         return False, None, None
 
     try:
@@ -297,7 +318,7 @@ async def _send_order_to_iiko(
             comment_bits.append(f"адрес: {meta['delivery_address'][:200]}")
         comment = " · ".join(comment_bits)
 
-        terminal_group = (settings.iiko_terminal_group_id or "").strip()
+        terminal_group = (creds.terminal_group_id or "").strip()
         ot_raw = (meta.get("order_type") or "").strip().lower()
         ot = "hall" if settings.iiko_force_hall_for_ai_orders else ot_raw
         if ot == "delivery":
@@ -322,9 +343,9 @@ async def _send_order_to_iiko(
             msg = "Телефон клиента пустой — iiko deliveries/create требует customer.phone"
             logger.warning("Заказ #%d: %s", order_id, msg)
             return False, msg, None
-        async with IikoClient(api_login=settings.iiko_api_login) as client:
+        async with IikoClient(api_login=creds.api_login) as client:
             iiko_response = await client.create_delivery_order(
-                organization_id=settings.iiko_organization_id,
+                organization_id=creds.iiko_organization_id,
                 order_data={
                     "customer": {"phone": phone_e164},
                     # Некоторые конфигурации iiko валидируют телефон на верхнем уровне заказа.
@@ -351,17 +372,19 @@ async def _send_order_to_iiko(
         return False, msg[:500], None
 
 
-async def handle_confirmation(phone: str, message_text: str) -> str | None:
+async def handle_confirmation(
+    phone: str, message_text: str, organization_id: int,
+) -> str | None:
     """
     Обработка ответа на подтверждение заказа.
     При «Да» → подтверждаем. При «Нет» → отменяем.
     Иначе → None (клиент хочет изменить заказ — process_message перенаправит в LLM).
     """
     word = message_text.lower().strip().rstrip("!.,")
-    order_id = await get_pending_order(redis_client, phone)
+    order_id = await get_pending_order(redis_client, phone, organization_id=organization_id)
 
     if not order_id:
-        await clear_pending_order(redis_client, phone)
+        await clear_pending_order(redis_client, phone, organization_id=organization_id)
         return "Заказ не найден — возможно, истекло время ожидания. Назовите блюда заново."
 
     if word in CONFIRM_WORDS:
@@ -370,19 +393,22 @@ async def handle_confirmation(phone: str, message_text: str) -> str | None:
             if order_row and order_row.items_json:
                 om = (order_row.items_json.get("order_meta") or {})
                 if om.get("requires_order_prepayment"):
-                    pst = (order_row.prepayment_status or "").strip().lower()
-                    if pst not in ("paid", "waived"):
-                        return (
-                            "По сумме заказа нужна **предоплата**. Пока платёж не отмечен оператором, "
-                            "подтвердить заказ нельзя — как только оплатите, оператор отметит в системе, "
-                            "и вы сможете ответить «Да» ещё раз."
-                        )
+                    org_ent = await db.get(Organization, organization_id)
+                    prepay_enf = bool(org_ent.prepayment_enforced) if org_ent else True
+                    if prepay_enf:
+                        pst = (order_row.prepayment_status or "").strip().lower()
+                        if pst not in ("paid", "waived"):
+                            return (
+                                "По сумме заказа нужна **предоплата**. Пока платёж не отмечен оператором, "
+                                "подтвердить заказ нельзя — как только оплатите, оператор отметит в системе, "
+                                "и вы сможете ответить «Да» ещё раз."
+                            )
 
             order = await confirm_order(db, order_id)
             await db.commit()
 
         if not order:
-            await clear_pending_order(redis_client, phone)
+            await clear_pending_order(redis_client, phone, organization_id=organization_id)
             return "Заказ не найден. Попробуйте оформить заново."
 
         await publish_event("order_updated", {
@@ -391,9 +417,11 @@ async def handle_confirmation(phone: str, message_text: str) -> str | None:
             "phone": phone,
             "total_price": float(order.total_price),
             "iiko_last_error": None,
+            "organization_id": organization_id,
+            **({"created_at": order.created_at.isoformat()} if getattr(order, "created_at", None) else {}),
         })
 
-        await clear_pending_order(redis_client, phone)
+        await clear_pending_order(redis_client, phone, organization_id=organization_id)
         ij = order.items_json if isinstance(order.items_json, dict) else {}
         ij = merge_total_into_items_json(ij, float(order.total_price or 0))
         summary_core = build_summary_text_from_stored_items(ij)
@@ -410,10 +438,13 @@ async def handle_confirmation(phone: str, message_text: str) -> str | None:
             await db.commit()
 
         await publish_event("order_updated", {
-            "order_id": order_id, "status": OrderStatus.CANCELLED, "phone": phone,
+            "order_id": order_id,
+            "status": OrderStatus.CANCELLED,
+            "phone": phone,
+            "organization_id": organization_id,
         })
 
-        await clear_pending_order(redis_client, phone)
+        await clear_pending_order(redis_client, phone, organization_id=organization_id)
         return (
             "Заказ отменён. Вы можете:\n"
             "  • Назвать новые блюда — я оформлю новый заказ\n"
@@ -424,16 +455,18 @@ async def handle_confirmation(phone: str, message_text: str) -> str | None:
     return None  # не «Да» и не «Нет» — вернём None, process_message пропустит через LLM
 
 
-async def handle_booking_confirmation(phone: str, message_text: str) -> str:
+async def handle_booking_confirmation(
+    phone: str, message_text: str, organization_id: int,
+) -> str:
     """
     Обработка подтверждения бронирования.
     При «Да» → подтверждаем. При «Нет» → отменяем.
     """
     word = message_text.lower().strip().rstrip("!.,")
-    booking_id = await get_pending_booking(redis_client, phone)
+    booking_id = await get_pending_booking(redis_client, phone, organization_id=organization_id)
 
     if not booking_id:
-        await clear_pending_booking(redis_client, phone)
+        await clear_pending_booking(redis_client, phone, organization_id=organization_id)
         return "Бронирование не найдено. Назовите дату и время заново."
 
     if word in CONFIRM_WORDS:
@@ -442,17 +475,17 @@ async def handle_booking_confirmation(phone: str, message_text: str) -> str:
             await db.commit()
 
         if err == "vip_conflict":
-            await clear_pending_booking(redis_client, phone)
+            await clear_pending_booking(redis_client, phone, organization_id=organization_id)
             return (
                 "К сожалению, VIP-зал на это время только что заняли.\n"
                 "Напишите другую дату/время или выберите Зал 1 / Зал 2 — оформим бронь заново."
             )
 
         if not booking:
-            await clear_pending_booking(redis_client, phone)
+            await clear_pending_booking(redis_client, phone, organization_id=organization_id)
             return "Бронирование не найдено. Попробуйте заново."
 
-        await clear_pending_booking(redis_client, phone)
+        await clear_pending_booking(redis_client, phone, organization_id=organization_id)
         return (
             f"Отлично! Бронь #{booking.id} подтверждена! 🎉\n"
             f"Ждём вас {booking.booking_date.strftime('%d.%m.%Y')} "
@@ -465,7 +498,7 @@ async def handle_booking_confirmation(phone: str, message_text: str) -> str:
             await cancel_booking(db, booking_id)
             await db.commit()
 
-        await clear_pending_booking(redis_client, phone)
+        await clear_pending_booking(redis_client, phone, organization_id=organization_id)
         return (
             "Бронирование отменено. Вы можете:\n"
             "  • Назвать другую дату и время\n"
@@ -482,14 +515,16 @@ _PAYMENT_LABEL_RU = {
 }
 
 
-async def handle_order_payment_choice(phone: str, message_text: str) -> str | None:
+async def handle_order_payment_choice(
+    phone: str, message_text: str, organization_id: int,
+) -> str | None:
     """
     После черновика заказа: фиксируем способ оплаты в items_json, затем переход к Да/Нет.
     None → текст не распознан как оплата/отмена — process_message перенаправит в LLM.
     """
-    order_id = await get_pending_order(redis_client, phone)
+    order_id = await get_pending_order(redis_client, phone, organization_id=organization_id)
     if not order_id:
-        await clear_pending_order(redis_client, phone)
+        await clear_pending_order(redis_client, phone, organization_id=organization_id)
         return "Заказ не найден — возможно, истекло время. Назовите блюда заново."
 
     word = message_text.lower().strip().rstrip("!.,")
@@ -499,9 +534,12 @@ async def handle_order_payment_choice(phone: str, message_text: str) -> str | No
             await cancel_order(db, order_id)
             await db.commit()
         await publish_event("order_updated", {
-            "order_id": order_id, "status": OrderStatus.CANCELLED, "phone": phone,
+            "order_id": order_id,
+            "status": OrderStatus.CANCELLED,
+            "phone": phone,
+            "organization_id": organization_id,
         })
-        await clear_pending_order(redis_client, phone)
+        await clear_pending_order(redis_client, phone, organization_id=organization_id)
         return (
             "Заказ отменён. Вы можете:\n"
             "  • Назвать новые блюда — я оформлю новый заказ\n"
@@ -516,7 +554,7 @@ async def handle_order_payment_choice(phone: str, message_text: str) -> str | No
     async with async_session_factory() as db:
         order = await db.get(Order, order_id)
         if not order or order.status != OrderStatus.DRAFT:
-            await clear_pending_order(redis_client, phone)
+            await clear_pending_order(redis_client, phone, organization_id=organization_id)
             return "Заказ не найден или уже обработан. Начните оформление заново."
 
         raw_json = order.items_json
@@ -539,6 +577,9 @@ async def handle_order_payment_choice(phone: str, message_text: str) -> str | No
         total = float(order.total_price)
         meta_after = (order.items_json or {}).get("order_meta") or {}
         needs_prepay = bool(meta_after.get("requires_order_prepayment"))
+        org_ent = await db.get(Organization, organization_id)
+        if org_ent and not org_ent.prepayment_enforced:
+            needs_prepay = False
         prep_st = (order.prepayment_status or "").strip().lower()
 
         await publish_event("order_updated", {
@@ -547,10 +588,12 @@ async def handle_order_payment_choice(phone: str, message_text: str) -> str | No
             "phone": phone,
             "total_price": total,
             "payment_method": pm,
+            "organization_id": organization_id,
+            **({"created_at": order.created_at.isoformat()} if getattr(order, "created_at", None) else {}),
         })
 
     if needs_prepay and prep_st not in ("paid", "waived"):
-        await set_user_state(redis_client, phone, UserState.CHATTING)
+        await set_user_state(redis_client, phone, UserState.CHATTING, organization_id=organization_id)
         return (
             f"Принял способ оплаты: {pay_human}.\n\n"
             f"{body}\n\n"
@@ -558,18 +601,33 @@ async def handle_order_payment_choice(phone: str, message_text: str) -> str | No
             "Оператор пришлёт реквизиты или ссылку. После оплаты вы сможете подтвердить заказ ответом «Да»."
         )
 
-    await set_user_state(redis_client, phone, UserState.CONFIRMING_ORDER)
+    await set_user_state(redis_client, phone, UserState.CONFIRMING_ORDER, organization_id=organization_id)
     return reply
 
 
 MAX_RETRIES = 3
 
 
-async def _save_failed_task(phone: str, text: str, error: str, attempts: int) -> None:
+async def _save_failed_task(
+    phone: str,
+    text: str,
+    error: str,
+    attempts: int,
+    *,
+    organization_id: int | None = None,
+) -> None:
     """Best-effort: сохранить необработанное сообщение для диагностики."""
     try:
         async with async_session_factory() as db:
-            db.add(FailedTask(phone=phone, message_text=text[:4000], error=error[:2000], attempts=attempts))
+            db.add(
+                FailedTask(
+                    organization_id=organization_id,
+                    phone=phone,
+                    message_text=text[:4000],
+                    error=error[:2000],
+                    attempts=attempts,
+                ),
+            )
             await db.commit()
     except Exception as exc:
         logger.error("Не удалось сохранить FailedTask для %s: %s", phone, exc)
@@ -581,18 +639,28 @@ async def process_with_retry(
     *,
     whatsapp_message_id: str = "",
     voice_audio: tuple[bytes, str] | None = None,
+    webhook_value: dict[str, Any] | None = None,
 ) -> None:
     """
     Обёртка с retry + exponential backoff.
     После MAX_RETRIES неудач → сохраняет в FailedTask и извиняется перед клиентом.
     """
+    org_id = int(settings.default_organization_id)
+    if webhook_value is not None:
+        try:
+            async with async_session_factory() as db:
+                org_id = await organization_id_for_whatsapp_value(db, webhook_value)
+        except Exception as exc:
+            logger.warning("organization_id resolve: %s", exc)
     last_exc: BaseException | None = None
     for attempt in range(MAX_RETRIES):
         try:
             await process_message(
-                phone, message_text,
+                phone,
+                message_text,
                 whatsapp_message_id=whatsapp_message_id,
                 voice_audio=voice_audio,
+                organization_id=org_id,
             )
             return
         except Exception as exc:
@@ -609,7 +677,9 @@ async def process_with_retry(
         phone=phone,
         extra={"error": str(last_exc)[:500] if last_exc else "", "attempts": MAX_RETRIES},
     )
-    await _save_failed_task(phone, message_text, str(last_exc), MAX_RETRIES)
+    await _save_failed_task(
+        phone, message_text, str(last_exc), MAX_RETRIES, organization_id=org_id,
+    )
     try:
         await send_customer_text(phone, "Извините, произошла техническая ошибка. Мы уже работаем над ней — попробуйте написать чуть позже.")
     except Exception:
@@ -622,6 +692,7 @@ async def process_message(
     *,
     whatsapp_message_id: str = "",
     voice_audio: tuple[bytes, str] | None = None,
+    organization_id: int,
 ) -> None:
     """
     Полный цикл обработки входящего сообщения с учётом State Machine.
@@ -647,10 +718,15 @@ async def process_message(
         if voice_audio:
             voice_bytes, voice_mime = voice_audio
 
-        state = await get_user_state(redis_client, phone)
+        state = await get_user_state(redis_client, phone, organization_id=organization_id)
 
         async with async_session_factory() as db_u:
-            u_row = await db_u.scalar(select(User).where(User.phone == phone))
+            u_row = await db_u.scalar(
+                select(User).where(
+                    User.phone == phone,
+                    User.organization_id == organization_id,
+                ),
+            )
             ai_paused_db = bool(u_row and getattr(u_row, "ai_paused", False))
 
         # Голос без мультимодального чата: сначала текст (подтверждения, оператор)
@@ -682,7 +758,10 @@ async def process_message(
             "🎤 голосовое сообщение" if voice_bytes is not None else ""
         )
         await publish_event("new_message", {
-            "phone": phone, "role": "user", "content": user_evt,
+            "phone": phone,
+            "role": "user",
+            "content": user_evt,
+            "organization_id": organization_id,
         })
 
         # ─── HUMAN_MODE / ai_paused: AI молчит, только логируем ─────────
@@ -690,85 +769,122 @@ async def process_message(
         if state == UserState.HUMAN_MODE or ai_paused_db:
             async with async_session_factory() as db:
                 await _save_chat_log(
-                    db, phone, message_text, "[HUMAN_MODE — AI отключён]",
+                    db,
+                    phone,
+                    message_text,
+                    "[HUMAN_MODE — AI отключён]",
+                    organization_id=organization_id,
                     outbound_whatsapp=False,
                 )
                 await db.commit()
-            await append_to_history(redis_client, phone, "user", message_text)
+            await append_to_history(
+                redis_client, phone, "user", message_text, organization_id=organization_id,
+            )
             logger.info("HUMAN_MODE: сообщение от %s сохранено, AI не вызван", phone)
             return
 
         # ─── AWAITING_ORDER_PAYMENT: способ оплаты, правка заказа или Да/Нет ───
         if state == UserState.AWAITING_ORDER_PAYMENT:
-            final_reply = await handle_order_payment_choice(phone, message_text)
+            final_reply = await handle_order_payment_choice(
+                phone, message_text, organization_id,
+            )
 
             if final_reply is not None:
                 outbound_id: int | None = None
                 async with async_session_factory() as db:
-                    outbound_id = await _save_chat_log(db, phone, message_text, final_reply)
+                    outbound_id = await _save_chat_log(
+                        db, phone, message_text, final_reply, organization_id=organization_id,
+                    )
                     await db.commit()
 
-                await append_to_history(redis_client, phone, "user", message_text)
-                await append_to_history(redis_client, phone, "assistant", final_reply)
+                await append_to_history(
+                    redis_client, phone, "user", message_text, organization_id=organization_id,
+                )
+                await append_to_history(
+                    redis_client, phone, "assistant", final_reply, organization_id=organization_id,
+                )
                 await publish_event("new_message", {
                     "phone": phone,
                     "role": "assistant",
                     "content": final_reply,
                     "id": outbound_id,
                     "delivery_status": "sending",
+                    "organization_id": organization_id,
                 })
                 await send_customer_text(
                     phone, final_reply, outbound_chat_log_id=outbound_id,
                 )
                 return
             # None → клиент хочет изменить заказ; переключаем в CHATTING и идём в OpenAI
-            await set_user_state(redis_client, phone, UserState.CHATTING)
+            await set_user_state(
+                redis_client, phone, UserState.CHATTING, organization_id=organization_id,
+            )
             state = UserState.CHATTING
 
         # ─── CONFIRMING_ORDER: ждём Да/Нет или правку заказа ──────
         if state == UserState.CONFIRMING_ORDER:
-            final_reply = await handle_confirmation(phone, message_text)
+            final_reply = await handle_confirmation(
+                phone, message_text, organization_id,
+            )
 
             if final_reply is not None:
                 outbound_id_o: int | None = None
                 async with async_session_factory() as db:
-                    outbound_id_o = await _save_chat_log(db, phone, message_text, final_reply)
+                    outbound_id_o = await _save_chat_log(
+                        db, phone, message_text, final_reply, organization_id=organization_id,
+                    )
                     await db.commit()
 
-                await append_to_history(redis_client, phone, "user", message_text)
-                await append_to_history(redis_client, phone, "assistant", final_reply)
+                await append_to_history(
+                    redis_client, phone, "user", message_text, organization_id=organization_id,
+                )
+                await append_to_history(
+                    redis_client, phone, "assistant", final_reply, organization_id=organization_id,
+                )
                 await publish_event("new_message", {
                     "phone": phone,
                     "role": "assistant",
                     "content": final_reply,
                     "id": outbound_id_o,
                     "delivery_status": "sending",
+                    "organization_id": organization_id,
                 })
                 await send_customer_text(
                     phone, final_reply, outbound_chat_log_id=outbound_id_o,
                 )
                 return
             # None → клиент хочет изменить заказ; переключаем в CHATTING и идём в OpenAI
-            await set_user_state(redis_client, phone, UserState.CHATTING)
+            await set_user_state(
+                redis_client, phone, UserState.CHATTING, organization_id=organization_id,
+            )
             state = UserState.CHATTING
 
         # ─── CONFIRMING_BOOKING: ждём Да/Нет ─────────────────
         if state == UserState.CONFIRMING_BOOKING:
-            final_reply = await handle_booking_confirmation(phone, message_text)
+            final_reply = await handle_booking_confirmation(
+                phone, message_text, organization_id,
+            )
 
             outbound_id_b: int | None = None
             async with async_session_factory() as db:
-                outbound_id_b = await _save_chat_log(db, phone, message_text, final_reply)
+                outbound_id_b = await _save_chat_log(
+                    db, phone, message_text, final_reply, organization_id=organization_id,
+                )
                 await db.commit()
 
-            await append_to_history(redis_client, phone, "user", message_text)
-            await append_to_history(redis_client, phone, "assistant", final_reply)
+            await append_to_history(
+                redis_client, phone, "user", message_text, organization_id=organization_id,
+            )
+            await append_to_history(
+                redis_client, phone, "assistant", final_reply, organization_id=organization_id,
+            )
             await publish_event("new_message", {
                 "phone": phone,
                 "role": "assistant",
                 "content": final_reply,
                 "id": outbound_id_b,
                 "delivery_status": "sending",
+                "organization_id": organization_id,
             })
             await send_customer_text(
                 phone, final_reply, outbound_chat_log_id=outbound_id_b,
@@ -777,7 +893,7 @@ async def process_message(
 
         # ─── CHATTING: обычный AI-флоу ──────────────────────
         had_voice = voice_bytes is not None
-        history = await get_chat_history(redis_client, phone)
+        history = await get_chat_history(redis_client, phone, organization_id=organization_id)
 
         if had_voice:
             if not (settings.openai_api_key or "").strip():
@@ -787,18 +903,24 @@ async def process_message(
                 )
                 return
         else:
-            await append_to_history(redis_client, phone, "user", message_text)
+            await append_to_history(
+                redis_client, phone, "user", message_text, organization_id=organization_id,
+            )
 
         outbound_id_chat: int | None = None
         tg_alert_ctx: EscalationAlertExtras | None = None
         async with async_session_factory() as db:
             menu_items = await load_available_menu(db)
             menu_context = build_menu_context(menu_items)
-            u_row = await db.scalar(select(User).where(User.phone == phone))
-            org_id = u_row.organization_id if u_row else None
+            u_row = await db.scalar(
+                select(User).where(
+                    User.phone == phone,
+                    User.organization_id == organization_id,
+                ),
+            )
             customer_ctx = await build_customer_context(db, u_row)
-            kb_context = await load_knowledge_context_block(db, org_id)
-            draft_row = await get_open_draft_order(db, phone)
+            kb_context = await load_knowledge_context_block(db, organization_id)
+            draft_row = await get_open_draft_order(db, phone, organization_id)
             draft_ctx = format_draft_order_context_for_prompt(
                 draft_row.items_json if draft_row else None,
             )
@@ -828,7 +950,9 @@ async def process_message(
                     customer_context=customer_ctx,
                 )
                 user_log_text = (ai_response.recognized_speech or "").strip() or "🎤 голосовое сообщение"
-                await append_to_history(redis_client, phone, "user", user_log_text)
+                await append_to_history(
+                    redis_client, phone, "user", user_log_text, organization_id=organization_id,
+                )
             else:
                 user_log_text = message_text
                 ai_response = await call_openai(
@@ -847,7 +971,11 @@ async def process_message(
                 extra={"intent": ai_response.intent, "voice": had_voice},
             )
             result = await route_intent(
-                db, phone, ai_response, menu_items=menu_items,
+                db,
+                phone,
+                ai_response,
+                menu_items=menu_items,
+                organization_id=organization_id,
             )
             log_pipeline_stage(
                 "route_ok",
@@ -859,11 +987,17 @@ async def process_message(
             )
 
             if result.new_state:
-                await set_user_state(redis_client, phone, result.new_state)
+                await set_user_state(
+                    redis_client, phone, result.new_state, organization_id=organization_id,
+                )
             if result.pending_order_id:
-                await set_pending_order(redis_client, phone, result.pending_order_id)
+                await set_pending_order(
+                    redis_client, phone, result.pending_order_id, organization_id=organization_id,
+                )
             if result.pending_booking_id:
-                await set_pending_booking(redis_client, phone, result.pending_booking_id)
+                await set_pending_booking(
+                    redis_client, phone, result.pending_booking_id, organization_id=organization_id,
+                )
 
             assistant_meta = {
                 "intent": ai_response.intent,
@@ -873,11 +1007,17 @@ async def process_message(
                 ),
             }
             outbound_id_chat = await _save_chat_log(
-                db, phone, user_log_text, result.reply_text, assistant_meta,
+                db,
+                phone,
+                user_log_text,
+                result.reply_text,
+                assistant_meta,
+                organization_id=organization_id,
             )
             if result.new_state == UserState.HUMAN_MODE:
                 db.add(
                     EscalationEvent(
+                        organization_id=organization_id,
                         phone=phone,
                         user_message=(user_log_text or "")[:2000],
                         reason=(result.reply_text or "")[:2000],
@@ -890,8 +1030,12 @@ async def process_message(
                         draft_total_str = f"{n:,.0f}".replace(",", " ") + " \u20b8"
                     except (TypeError, ValueError):
                         draft_total_str = str(draft_row.total_price)
-                p_ord = await get_pending_order(redis_client, phone)
-                p_book = await get_pending_booking(redis_client, phone)
+                p_ord = await get_pending_order(
+                    redis_client, phone, organization_id=organization_id,
+                )
+                p_book = await get_pending_booking(
+                    redis_client, phone, organization_id=organization_id,
+                )
                 tg_alert_ctx = EscalationAlertExtras(
                     intent=ai_response.intent,
                     fsm_state=state.value,
@@ -907,7 +1051,9 @@ async def process_message(
                 )
             await db.commit()
 
-        await append_to_history(redis_client, phone, "assistant", result.reply_text)
+        await append_to_history(
+            redis_client, phone, "assistant", result.reply_text, organization_id=organization_id,
+        )
         await publish_event("new_message", {
             "phone": phone,
             "role": "assistant",
@@ -915,6 +1061,7 @@ async def process_message(
             "intent": ai_response.intent,
             "id": outbound_id_chat,
             "delivery_status": "sending",
+            "organization_id": organization_id,
         })
         await send_customer_text(
             phone, result.reply_text, outbound_chat_log_id=outbound_id_chat,
@@ -937,6 +1084,7 @@ async def process_message(
                 "reason": ai_response.reply_text,
                 "user_message": (user_log_text or "")[:500],
                 "intent": ai_response.intent,
+                "organization_id": organization_id,
             })
             try:
                 await send_tg_fallback_alert(
@@ -944,6 +1092,7 @@ async def process_message(
                     user_log_text,
                     result.reply_text,
                     extras=tg_alert_ctx,
+                    organization_id=organization_id,
                 )
             except Exception as tg_exc:
                 logger.warning("Telegram fallback alert не отправлен: %s", tg_exc)
@@ -964,6 +1113,7 @@ async def process_voice_message(
     media_id: str,
     *,
     whatsapp_message_id: str = "",
+    webhook_value: dict[str, Any] | None = None,
 ) -> None:
     """
     Голосовое WhatsApp: скачать → Whisper (STT) + чат OpenAI в CHATTING или только STT в подтверждениях.
@@ -992,6 +1142,7 @@ async def process_voice_message(
             "",
             whatsapp_message_id=whatsapp_message_id,
             voice_audio=(audio_bytes, mime_type),
+            webhook_value=webhook_value,
         )
     except Exception as exc:
         logger.exception("Ошибка обработки голосового от %s: %s", phone, exc)
@@ -1022,7 +1173,12 @@ async def _flush_twilio_voice_chunk(phone: str, call_sid: str, mulaw: bytes) -> 
     mid = f"twilio:{call_sid}:{uuid.uuid4().hex}"
     tok = twilio_call_context(call_sid)
     try:
-        await process_message(phone, text, whatsapp_message_id=mid)
+        await process_message(
+            phone,
+            text,
+            whatsapp_message_id=mid,
+            organization_id=int(settings.default_organization_id),
+        )
     finally:
         reset_twilio_call_context(tok)
 
@@ -1196,6 +1352,7 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks) -
                         phone,
                         media_id,
                         whatsapp_message_id=message_id,
+                        webhook_value=value,
                     )
                     logger.info("Голосовое от %s поставлено в очередь", phone)
             else:
@@ -1206,6 +1363,7 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks) -
                         phone,
                         message_text,
                         whatsapp_message_id=message_id,
+                        webhook_value=value,
                     )
                     logger.info("Сообщение от %s поставлено в очередь обработки", phone)
 

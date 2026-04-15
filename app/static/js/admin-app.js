@@ -98,6 +98,8 @@ function defaultIntegrationStatus() {
         whatsapp_verify_token_hint: '',
         last_stoplist: { at: null, ok: false, error: null },
         last_menu_sync: { at: null, ok: false, error: null },
+        iiko_secrets_encrypt_ready: false,
+        prepayment_enforced: true,
     };
 }
 
@@ -136,6 +138,11 @@ function adminMixinState() {
         uiConfirmInputRequired: false,
         uiConfirmError: '',
         uiConfirmSubmitting: false,
+        /** Многострочное поле в uiConfirm (JSON и длинный текст). */
+        uiConfirmInputMultiline: false,
+        uiConfirmInputRows: 6,
+        /** Кнопка «Форматировать JSON» в модалке (многострочный ввод). */
+        uiConfirmShowFormatJson: false,
 
         /** Вкладка «Стоп-лист»: только позиции с is_available=false */
         stopListItems: [],
@@ -167,6 +174,9 @@ function adminMixinState() {
         packagingRules: [],
         packagingLoading: false,
 
+        /** Филиал: автоматическая предоплата по порогу (см. PATCH /organization/prefs). */
+        orgPrepaymentEnforcedSaving: false,
+
         knowledgeItems: [],
         knowledgeLoading: false,
         knowledgeSaveLoading: false,
@@ -187,32 +197,42 @@ function adminMixinState() {
         /** Кэш сортировки таблицы «по дням» на аналитике (геттер не пересортировывает на каждый тик Alpine). */
         _analyticsDailySig: '',
         _analyticsDailySortedCache: [],
+        /** Инкремент при loadAnalytics — сигнатура сортировки без тяжёлого map/join по всем дням. */
+        analyticsDailyDataRev: 0,
+        /** Заголовки секций сайдбара (один x-for в шаблоне). */
+        navSections: [
+            { id: 'overview', title: 'Обзор' },
+            { id: 'operations', title: 'Операции' },
+            { id: 'settings', title: 'Настройки' },
+        ],
         navItems: [
-            { id: 'dashboard', label: 'Дашборд', desc: 'Общая статистика и последние заказы',
+            { id: 'dashboard', section: 'overview', label: 'Дашборд', desc: 'Общая статистика и последние заказы',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25A2.25 2.25 0 018.25 10.5H6A2.25 2.25 0 013.75 8.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z"/></svg>' },
-            { id: 'analytics', label: 'Аналитика', desc: 'Выручка, средний чек, динамика продаж',
+            { id: 'analytics', section: 'overview', label: 'Аналитика', desc: 'Выручка, средний чек, динамика продаж',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/></svg>' },
-            { id: 'orders', label: 'Заказы', desc: 'По этапам (черновик → подтверждён → кухня) или общий список',
+            { id: 'orders', section: 'operations', label: 'Заказы', desc: 'По этапам (черновик → подтверждён → кухня) или общий список',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z"/></svg>' },
-            { id: 'operator_queue', label: 'Очередь ошибок', desc: 'Сообщения после исчерпания retry',
+            { id: 'operator_queue', section: 'operations', label: 'Очередь ошибок', desc: 'Сообщения после исчерпания retry',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>' },
-            { id: 'bookings', label: 'Бронирования', desc: 'Столики и резервации',
+            { id: 'bookings', section: 'operations', label: 'Бронирования', desc: 'Столики и резервации',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/></svg>' },
-            { id: 'chats', label: 'Диалоги', desc: 'Live-чаты с клиентами',
+            { id: 'chats', section: 'operations', label: 'Диалоги', desc: 'Live-чаты с клиентами',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 01-.825-.242m9.345-8.334a21.05 21.05 0 00-1.889-2.403 19.7 19.7 0 00-1.6-1.562c-.642-.522-1.397-.957-2.23-1.25C16.247 1.872 14.747 1.5 12 1.5c-2.747 0-4.247.372-5.63.99-.833.293-1.588.728-2.23 1.25-.563.459-1.082 1-1.6 1.562A21.05 21.05 0 003.75 8.511"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5.25 8.511c-.884.284-1.5 1.128-1.5 2.097v4.286c0 1.136.847 2.1 1.98 2.193.34.027.68.052 1.02.072v3.091l3-3a11.63 11.63 0 014.02-.163 2.115 2.115 0 001.825-.242M9.378 5.378A21.05 21.05 0 0018.72 3.728"/></svg>' },
-            { id: 'menu', label: 'Меню', desc: 'Позиции меню ресторана',
+            { id: 'menu', section: 'operations', label: 'Меню', desc: 'Позиции меню ресторана',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8.25v-1.5m0 1.5c-1.355 0-2.697.056-4.024.166C6.845 8.51 6 9.473 6 10.608v2.513m6-4.871c1.355 0 2.697.055 4.024.165C17.155 8.51 18 9.473 18 10.608v2.513m-3 4.73v-1.59c0-.532-.21-1.042-.586-1.418L12 13.5m-3 4.73c.55.47 1.27.73 2 .73h6c.73 0 1.45-.26 2-.73m-8-4.73V10.6c0-1.12.856-2.08 2.09-2.19.64-.09 1.29-.14 1.91-.14m5 6.37v1.59c0 1.632-.875 3.11-2.25 3.89"/></svg>' },
-            { id: 'stoplist', label: 'Стоп-лист', desc: 'Нет в наличии и синхронизация с iiko',
+            { id: 'stoplist', section: 'operations', label: 'Стоп-лист', desc: 'Нет в наличии и синхронизация с iiko',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>' },
-            { id: 'integrations', label: 'Интеграции', desc: 'iiko, WhatsApp и принудительная синхронизация',
+            { id: 'integrations', section: 'settings', label: 'Интеграции', desc: 'iiko, WhatsApp и принудительная синхронизация',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m4.95-4.95l1.757-1.757a4.5 4.5 0 016.364 6.364l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757"/></svg>' },
-            { id: 'packaging', label: 'Упаковка', desc: 'Правила и цены контейнеров для доставки и самовывоза',
+            { id: 'packaging', section: 'settings', label: 'Упаковка', desc: 'Правила и цены контейнеров для доставки и самовывоза',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5m8.25 3v6.75m0 0l-3-3m3 3l3-3M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z"/></svg>' },
-            { id: 'knowledge', label: 'База знаний', desc: 'Справочник для AI: парковка, банкеты, правила',
+            { id: 'upsell', section: 'settings', label: 'Допродажи', desc: 'Правила Strategy Engine (без деплоя)',
+              icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.25 18L9 11.25l4.306 4.307a11.95 11.95 0 015.814-5.519l2.74-1.22m0 0l-5.94-2.28m5.94 2.28l-2.28 5.941"/></svg>' },
+            { id: 'knowledge', section: 'settings', label: 'База знаний', desc: 'Справочник для AI: парковка, банкеты, правила',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v15.128A9 9 0 009 18c0 1.518.39 2.948 1.082 4.192m3-16.15V18c0 1.518-.39 2.948-1.082 4.192M15 6.042a8.967 8.967 0 014.5 2.292v15.128A9 9 0 0015 18c0-1.518-.39-2.948-1.082-4.192"/></svg>' },
-            { id: 'settings', label: 'Настройки', desc: 'Опасная зона: сброс данных и удаление заказов',
+            { id: 'settings', section: 'settings', label: 'Настройки', desc: 'Опасная зона: сброс данных и удаление заказов',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>' },
-            { id: 'test', label: 'Тест бота', desc: 'Протестируйте AI-оператора вживую',
+            { id: 'test', section: 'settings', label: 'Тест бота', desc: 'Протестируйте AI-оператора вживую',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25zm.75-12h9v9h-9v-9z"/></svg>' },
         ],
 
@@ -227,6 +247,9 @@ function adminMixinState() {
 
         // Алерты
         alertQueue: [],
+
+        /** Последние события из WebSocket (дашборд). */
+        dashLiveFeed: [],
 
         // Дашборд
         dashStats: {},
@@ -256,6 +279,15 @@ function adminMixinState() {
         orderRebuildDraftJson: '',
         orderRebuildError: '',
         orderRebuildLoading: false,
+        orderCompositionOpen: false,
+        orderEditLines: [],
+        orderPayMode: 'single',
+        orderPayMethod: 'cash',
+        orderPaySplitCash: 0,
+        orderPaySplitCard: 0,
+        orderPaySplitRemote: 0,
+        orderPaymentError: '',
+        orderPaymentSaving: false,
 
         showBookingModal: false,
         selectedBooking: null,
@@ -328,6 +360,25 @@ function adminMixinState() {
         integrationStatus: defaultIntegrationStatus(),
         integrationSyncLoading: false,
         integrationEvents: [],
+        /** Онбординг (GET /api/admin/setup-status). */
+        setupStatus: { score: 0, steps: [], menu_items: 0, upsell_rules: 0 },
+        iikoOnboardApiLogin: '',
+        iikoOnboardOrgs: [],
+        iikoOnboardSelectedOrg: '',
+        iikoOnboardTerminal: '',
+        iikoOnboardVerifyLoading: false,
+        iikoOnboardSetupLoading: false,
+        /** Правила допродаж (CRUD). */
+        upsellRules: [],
+        upsellLoading: false,
+        upsellNew: {
+            trigger_category: 'напит',
+            suggest_category: 'напит',
+            min_order_sum: 0,
+            max_order_sum: '',
+            phrase_template: '',
+            sort_order: 0,
+        },
         sidebarOpen: false,
         globalSearchOpen: false,
         globalSearchQ: '',
@@ -505,7 +556,7 @@ function adminMixinMenuOrdersUi() {
                 this.analyticsDaySort,
                 this.analyticsDayDir,
                 raw.length,
-                raw.map((d) => `${d.date}:${d.orders}:${d.revenue}`).join('|'),
+                this.analyticsDailyDataRev,
             ].join('\u0001');
             if (this._analyticsDailySig === sig) return;
             this._analyticsDailySig = sig;
@@ -727,10 +778,40 @@ function adminMixinMenuOrdersUi() {
                 this.uiConfirmInputPlaceholder = inp && inp.placeholder != null ? String(inp.placeholder) : '';
                 this.uiConfirmInputValue = inp && inp.value != null ? String(inp.value) : '';
                 this.uiConfirmInputRequired = !!(inp && inp.required);
+                this.uiConfirmInputMultiline = !!(inp && inp.multiline);
+                this.uiConfirmInputRows = inp && Number(inp.rows) > 0 ? Number(inp.rows) : 6;
+                this.uiConfirmShowFormatJson = !!(inp && inp.multiline);
                 this.uiConfirmError = '';
                 this.uiConfirmSubmitting = false;
                 this.uiConfirmOpen = true;
+                queueMicrotask(() => {
+                    try {
+                        const root = document.querySelector('[data-ui-confirm-panel]');
+                        const t = this.uiConfirmInputMultiline
+                            ? root?.querySelector('textarea[data-ui-confirm-autofocus]')
+                            : root?.querySelector('input[data-ui-confirm-autofocus]');
+                        t?.focus?.({ preventScroll: true });
+                        if (t && t.select && typeof t.select === 'function' && !this.uiConfirmInputMultiline) {
+                            t.select();
+                        }
+                    } catch (_) { /* ignore */ }
+                });
             });
+        },
+        uiConfirmTryFormatJson() {
+            if (!this.uiConfirmShowFormatJson || this.uiConfirmSubmitting) return;
+            const raw = String(this.uiConfirmInputValue || '').trim();
+            if (!raw) {
+                this.uiConfirmError = 'Нет текста для форматирования';
+                return;
+            }
+            try {
+                const v = JSON.parse(raw);
+                this.uiConfirmInputValue = JSON.stringify(v, null, 2);
+                this.uiConfirmError = '';
+            } catch {
+                this.uiConfirmError = 'Не удалось разобрать JSON. Проверьте кавычки, запятые и скобки.';
+            }
         },
         uiConfirmBackdrop() {
             if (!this.uiConfirmOpen || this.uiConfirmSubmitting) return;
@@ -761,7 +842,9 @@ function adminMixinMenuOrdersUi() {
             if (this.uiConfirmShowInput) {
                 const raw = this.uiConfirmInputReadonly
                     ? String(this.uiConfirmInputValue || '')
-                    : (this.uiConfirmInputValue || '').trim();
+                    : (this.uiConfirmInputMultiline
+                        ? String(this.uiConfirmInputValue || '')
+                        : (this.uiConfirmInputValue || '').trim());
                 r({ ok: true, value: raw });
             } else {
                 r({ ok: true });
@@ -982,8 +1065,239 @@ function adminMixinMenuOrdersUi() {
             this.$nextTick(() => {
                 try {
                     this.initOrderRebuildFromSelected();
+                    this.syncOrderPaymentFormFromSelected();
                 } catch (e) { /* ignore */ }
             });
+        },
+
+        canEditOrderComposition(order) {
+            if (!order) return false;
+            const s = String(order.status || '').toLowerCase();
+            return s === 'draft' || s === 'confirmed';
+        },
+
+        syncOrderPaymentFormFromSelected() {
+            const o = this.selectedOrder;
+            this.orderPaymentError = '';
+            if (!o?.items?.order_meta) {
+                this.orderPayMode = 'single';
+                this.orderPayMethod = o?.payment_method || 'cash';
+                this.orderPaySplitCash = 0;
+                this.orderPaySplitCard = 0;
+                this.orderPaySplitRemote = 0;
+                return;
+            }
+            const m = o.items.order_meta;
+            const pm = m.payment_mode === 'mixed' ? 'mixed' : 'single';
+            this.orderPayMode = pm;
+            this.orderPayMethod = m.payment_method || o.payment_method || 'cash';
+            const pd = m.payment_details;
+            if (pm === 'mixed' && pd && typeof pd === 'object' && pd.type === 'mixed' && pd.split) {
+                const sp = pd.split;
+                this.orderPaySplitCash = Number(sp.cash) || 0;
+                this.orderPaySplitCard = Number(sp.card) || 0;
+                this.orderPaySplitRemote = Number(sp.remote) || 0;
+            } else {
+                this.orderPaySplitCash = 0;
+                this.orderPaySplitCard = 0;
+                this.orderPaySplitRemote = 0;
+            }
+        },
+
+        onOrderPayModeChange() {},
+
+        onOrderPayMethodQuickPick() {
+            this.orderPayMode = 'single';
+        },
+
+        async saveOrderPaymentSplit() {
+            if (!this.selectedOrder?.id) return;
+            this.orderPaymentSaving = true;
+            this.orderPaymentError = '';
+            try {
+                const body = {
+                    payment_mode: this.orderPayMode,
+                    payment_method: this.orderPayMethod,
+                    split_cash: this.orderPaySplitCash,
+                    split_card: this.orderPaySplitCard,
+                    split_remote: this.orderPaySplitRemote,
+                    expected_version: this.selectedOrder.row_version,
+                };
+                const { ok, data } = await this.apiJsonResponse(
+                    `/api/admin/orders/${this.selectedOrder.id}/payment-split`,
+                    {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(body),
+                    },
+                );
+                if (!ok) {
+                    this.orderPaymentError = typeof data.detail === 'string'
+                        ? data.detail
+                        : JSON.stringify(data.detail || data);
+                    return;
+                }
+                await this.loadOrders();
+                const updated = this.orders.find((o) => o.id === this.selectedOrder.id);
+                if (updated) {
+                    this.selectedOrder = updated;
+                    this.syncOrderPaymentFormFromSelected();
+                }
+            } catch {
+                this.orderPaymentError = 'Ошибка сети';
+            } finally {
+                this.orderPaymentSaving = false;
+            }
+        },
+
+        _emptyOrderEditLine() {
+            return {
+                name: '',
+                quantity: 1,
+                iiko_item_id: '',
+                packaging_plov_1kg: '',
+                exclude_ingredients: [],
+            };
+        },
+
+        initOrderCompositionLinesFromSelected() {
+            const items = this.selectedOrder?.items?.items;
+            if (!Array.isArray(items) || items.length === 0) {
+                this.orderEditLines = [this._emptyOrderEditLine()];
+                return;
+            }
+            this.orderEditLines = items.map((it) => ({
+                name: it.name || '',
+                quantity: Number(it.quantity) || 1,
+                iiko_item_id: it.iiko_id || '',
+                packaging_plov_1kg: it.packaging_plov_1kg || '',
+                exclude_ingredients: Array.isArray(it.exclude_ingredients) ? [...it.exclude_ingredients] : [],
+            }));
+        },
+
+        openOrderCompositionEditor() {
+            this.orderCompositionOpen = true;
+            this.initOrderCompositionLinesFromSelected();
+        },
+
+        closeOrderCompositionEditor() {
+            this.orderCompositionOpen = false;
+        },
+
+        addOrderEditLine() {
+            this.orderEditLines.push(this._emptyOrderEditLine());
+        },
+
+        removeOrderEditLine(idx) {
+            if (this.orderEditLines.length <= 1) return;
+            this.orderEditLines.splice(idx, 1);
+        },
+
+        async openOrderCompositionJsonModal() {
+            this.initOrderRebuildFromSelected();
+            const r = await this.openUiConfirm({
+                title: 'Редактор состава (JSON)',
+                message: 'Массив объектов: name, quantity, iiko_item_id (или iiko_id), packaging_plov_1kg, exclude_ingredients',
+                showInput: true,
+                showCancel: true,
+                confirmText: 'Применить',
+                input: {
+                    label: 'JSON позиций',
+                    value: this.orderRebuildDraftJson || '[]',
+                    multiline: true,
+                    rows: 14,
+                    required: false,
+                },
+            });
+            if (!r.ok) return;
+            const raw = String(r.value || '').trim();
+            try {
+                const parsed = JSON.parse(raw || '[]');
+                if (!Array.isArray(parsed)) {
+                    void this.showUiAlert('JSON должен быть массивом', 'Ошибка');
+                    return;
+                }
+                const lines = [];
+                for (const it of parsed) {
+                    if (!it || typeof it !== 'object') continue;
+                    lines.push({
+                        name: String(it.name || '').trim(),
+                        quantity: Math.min(99, Math.max(1, Number(it.quantity) || 1)),
+                        iiko_item_id: String(it.iiko_item_id || it.iiko_id || '').trim(),
+                        packaging_plov_1kg: String(it.packaging_plov_1kg || '').trim(),
+                        exclude_ingredients: Array.isArray(it.exclude_ingredients) ? it.exclude_ingredients : [],
+                    });
+                }
+                if (!lines.length) {
+                    void this.showUiAlert('Нужна хотя бы одна позиция', 'Ошибка');
+                    return;
+                }
+                this.orderCompositionOpen = true;
+                this.orderEditLines = lines;
+                this.orderRebuildDraftJson = JSON.stringify(lines, null, 2);
+            } catch {
+                void this.showUiAlert(
+                    'Текст не похож на JSON: проверьте кавычки, запятые и скобки. Кнопка «Форматировать JSON» в модалке поможет выровнять структуру.',
+                    'Ошибка',
+                );
+            }
+        },
+
+        async submitOrderCompositionFromLines() {
+            if (!this.selectedOrder) return;
+            const st = String(this.selectedOrder.status || '').toLowerCase();
+            if (st !== 'draft' && st !== 'confirmed') return;
+            this.orderRebuildLoading = true;
+            this.orderRebuildError = '';
+            const food_lines = [];
+            for (const line of this.orderEditLines) {
+                const name = (line.name || '').trim();
+                if (!name) continue;
+                food_lines.push({
+                    name,
+                    quantity: Math.min(99, Math.max(1, Number(line.quantity) || 1)),
+                    iiko_item_id: (line.iiko_item_id || '').trim(),
+                    packaging_plov_1kg: (line.packaging_plov_1kg || '').trim(),
+                    exclude_ingredients: Array.isArray(line.exclude_ingredients) ? line.exclude_ingredients : [],
+                });
+            }
+            if (food_lines.length === 0) {
+                this.orderRebuildError = 'Добавьте хотя бы одну позицию с названием';
+                this.orderRebuildLoading = false;
+                return;
+            }
+            try {
+                const { ok, data } = await this.apiJsonResponse(
+                    `/api/admin/orders/${this.selectedOrder.id}/rebuild-draft`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            food_lines,
+                            expected_version: this.selectedOrder.row_version,
+                        }),
+                    },
+                );
+                if (!ok) {
+                    const d = data.detail;
+                    this.orderRebuildError = typeof d === 'string' ? d : JSON.stringify(d || data);
+                    return;
+                }
+                await this.loadOrders();
+                const updated = this.orders.find((o) => o.id === this.selectedOrder.id);
+                if (updated) {
+                    this.selectedOrder = updated;
+                    this.initOrderRebuildFromSelected();
+                    this.initOrderCompositionLinesFromSelected();
+                    this.orderCompositionOpen = false;
+                    this.syncOrderPaymentFormFromSelected();
+                }
+                await this.loadDashStats();
+            } catch {
+                this.orderRebuildError = 'Ошибка сети';
+            } finally {
+                this.orderRebuildLoading = false;
+            }
         },
 
         async kanbanDrop(ev, targetCol) {
@@ -1003,13 +1317,12 @@ function adminMixinMenuOrdersUi() {
 
         async patchOrderStatus(orderId, status) {
             try {
-                const res = await this.apiFetch(`/api/admin/orders/${orderId}`, {
+                const { ok, data } = await this.apiJsonResponse(`/api/admin/orders/${orderId}`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ status }),
                 });
-                const data = await res.json().catch(() => ({}));
-                if (!res.ok) {
+                if (!ok) {
                     void this.showUiAlert(this.formatApiError(data.detail) || 'Не удалось обновить статус', 'Ошибка');
                     return false;
                 }
@@ -1027,13 +1340,13 @@ function adminMixinMenuOrdersUi() {
             if (!this.selectedOrder) return;
             const id = this.selectedOrder.id;
             try {
-                const res = await this.apiFetch(`/api/admin/orders/${id}/payment`, {
+                const { ok, data } = await this.apiJsonResponse(`/api/admin/orders/${id}/payment`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ prepayment_status: 'paid' }),
                 });
-                if (!res.ok) {
-                    void this.showUiAlert('Ошибка: ' + (await res.text()), 'Ошибка');
+                if (!ok) {
+                    void this.showUiAlert(this.formatApiError(data.detail) || 'Не удалось подтвердить предоплату', 'Ошибка');
                     return;
                 }
                 this.selectedOrder.prepayment_status = 'paid';
@@ -1081,13 +1394,12 @@ function adminMixinMenuOrdersUi() {
             try {
                 if (ids.length === 1) {
                     const id = ids[0];
-                    const res = await this.apiFetch(`/api/admin/orders/${id}/delete`, {
+                    const { ok, data } = await this.apiJsonResponse(`/api/admin/orders/${id}/delete`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ confirm: true }),
                     });
-                    const data = await res.json().catch(() => ({}));
-                    if (!res.ok) {
+                    if (!ok) {
                         await this.openUiConfirm({
                             title: 'Не удалось удалить',
                             message: this.formatApiError(data),
@@ -1103,13 +1415,12 @@ function adminMixinMenuOrdersUi() {
                     this.demoToastMessage = `Заказ #${id} удалён`;
                     setTimeout(() => { this.demoToastMessage = ''; }, 3500);
                 } else {
-                    const res = await this.apiFetch('/api/admin/orders/bulk-delete', {
+                    const { ok, data } = await this.apiJsonResponse('/api/admin/orders/bulk-delete', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ confirm: true, order_ids: ids }),
                     });
-                    const data = await res.json().catch(() => ({}));
-                    if (!res.ok) {
+                    if (!ok) {
                         await this.openUiConfirm({
                             title: 'Не удалось удалить',
                             message: this.formatApiError(data),
@@ -1543,11 +1854,13 @@ function adminMixinAuthKnowledge() {
             this.auth401AlertShown = false;
             this.loginLoading = true;
             try {
+                const u = this.loginUsername.trim();
                 const res = await this.apiFetch('/api/admin/auth/login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        username: this.loginUsername.trim(),
+                        username: u,
+                        email: u.includes('@') ? u : '',
                         password: this.loginPassword,
                     }),
                 });
@@ -1615,7 +1928,7 @@ function adminMixinAuthKnowledge() {
         integrationStoplistCaption() {
             const s = this.integrationStatus;
             if (!s?.iiko_configured) {
-                return 'Настройте iiko в .env, чтобы видеть статус стоп-листа.';
+                return 'Настройте iiko (филиал или .env), чтобы видеть статус стоп-листа.';
             }
             const ls = s.last_stoplist;
             if (!ls || !ls.at) {
@@ -1648,6 +1961,35 @@ function adminMixinAuthKnowledge() {
                 last_stoplist,
                 last_menu_sync,
             };
+        },
+
+        async onPrepaymentEnforcedToggle(ev) {
+            const el = ev && ev.target;
+            if (!el) return;
+            const nextVal = !!el.checked;
+            this.orgPrepaymentEnforcedSaving = true;
+            try {
+                const { ok, data } = await this.apiJsonResponse('/api/admin/organization/prefs', {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prepayment_enforced: nextVal }),
+                });
+                if (!ok) {
+                    el.checked = !nextVal;
+                    void this.showUiAlert(this.formatApiError(data.detail) || 'Не удалось сохранить', 'Ошибка');
+                    return;
+                }
+                this.mergeIntegrationStatus({
+                    ...this.integrationStatus,
+                    prepayment_enforced: data.prepayment_enforced !== false,
+                });
+            } catch (e) {
+                el.checked = !nextVal;
+                console.error('[admin] onPrepaymentEnforcedToggle', e);
+                void this.showUiAlert('Ошибка сети', 'Ошибка');
+            } finally {
+                this.orgPrepaymentEnforcedSaving = false;
+            }
         },
 
         async loadKnowledgeBase() {
@@ -1853,13 +2195,176 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
             } catch (e) { console.error('[admin] packagingAddNew', e); }
         },
 
+        async loadSetupStatus() {
+            try {
+                const r = await this.apiJsonResponse('/api/admin/setup-status');
+                if (r.ok && r.data) {
+                    this.setupStatus = {
+                        score: Number(r.data.score) || 0,
+                        steps: Array.isArray(r.data.steps) ? r.data.steps : [],
+                        menu_items: Number(r.data.menu_items) || 0,
+                        upsell_rules: Number(r.data.upsell_rules) || 0,
+                    };
+                }
+            } catch { /* ignore */ }
+        },
+
         async loadIntegrationStatus() {
             try {
                 const st = await this.apiJsonResponse('/api/admin/integrations/status');
                 if (st.ok) this.mergeIntegrationStatus(st.data);
                 const ev = await this.apiJsonResponse('/api/admin/integrations/events?limit=40');
                 if (ev.ok) this.integrationEvents = ev.data.events || [];
+                await this.loadSetupStatus();
             } catch { /* ignore */ }
+        },
+
+        async iikoVerifyOnboard() {
+            const login = (this.iikoOnboardApiLogin || '').trim();
+            if (!login) {
+                void this.showUiAlert('Вставьте API-ключ (apiLogin) из iiko Cloud', 'Подсказка');
+                return;
+            }
+            this.iikoOnboardVerifyLoading = true;
+            this.iikoOnboardOrgs = [];
+            try {
+                const { ok, data } = await this.apiJsonResponse('/api/admin/integrations/iiko/verify', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ api_login: login }),
+                });
+                if (!ok) {
+                    void this.showUiAlert(this.formatApiError(data.detail) || 'Проверка ключа не удалась', 'Ошибка');
+                    return;
+                }
+                this.iikoOnboardOrgs = data.organizations || [];
+                if (!this.iikoOnboardOrgs.length) {
+                    void this.showUiAlert('Список организаций пуст — проверьте ключ', 'Внимание');
+                } else if (!this.iikoOnboardSelectedOrg && this.iikoOnboardOrgs[0]) {
+                    this.iikoOnboardSelectedOrg = this.iikoOnboardOrgs[0].id || '';
+                }
+            } catch (e) {
+                console.error(e);
+                void this.showUiAlert('Ошибка сети', 'Ошибка');
+            } finally {
+                this.iikoOnboardVerifyLoading = false;
+            }
+        },
+
+        async iikoCompleteOnboard() {
+            const login = (this.iikoOnboardApiLogin || '').trim();
+            const orgId = (this.iikoOnboardSelectedOrg || '').trim();
+            if (!login || !orgId) {
+                void this.showUiAlert('Сначала проверьте ключ и выберите организацию iiko', 'Подсказка');
+                return;
+            }
+            this.iikoOnboardSetupLoading = true;
+            try {
+                const { ok, data } = await this.apiJsonResponse('/api/admin/integrations/iiko/setup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        api_login: login,
+                        iiko_organization_id: orgId,
+                        terminal_group_id: (this.iikoOnboardTerminal || '').trim(),
+                    }),
+                });
+                if (!ok) {
+                    void this.showUiAlert(this.formatApiError(data.detail) || 'Сохранение не удалось', 'Ошибка');
+                    return;
+                }
+                const st = data.stats || {};
+                void this.showUiAlert(
+                    `Меню импортировано: всего ${st.total ?? 0}, новых ${st.created ?? 0}. ` +
+                        (data.encrypted ? 'Ключ сохранён зашифрованно.' : 'Задайте APP_SECRETS_FERNET_KEY для шифрования.'),
+                    'Готово',
+                );
+                await this.loadIntegrationStatus();
+                this.menuViewRevision += 1;
+                await this.loadMenu();
+            } catch (e) {
+                console.error(e);
+                void this.showUiAlert('Ошибка сети', 'Ошибка');
+            } finally {
+                this.iikoOnboardSetupLoading = false;
+            }
+        },
+
+        async loadUpsellRules() {
+            this.upsellLoading = true;
+            try {
+                const { ok, data } = await this.apiJsonResponse('/api/admin/upsell-rules');
+                this.upsellRules = ok && Array.isArray(data.items) ? data.items : [];
+            } catch (e) {
+                console.error('[admin] loadUpsellRules', e);
+                this.upsellRules = [];
+            } finally {
+                this.upsellLoading = false;
+            }
+        },
+
+        async upsellAddRule() {
+            const t = this.upsellNew;
+            const trig = (t.trigger_category || '').trim();
+            const sug = (t.suggest_category || '').trim();
+            if (!trig || !sug) {
+                void this.showUiAlert('Укажите категорию-триггер и категорию предложения', 'Подсказка');
+                return;
+            }
+            const mx = t.max_order_sum;
+            const body = {
+                trigger_mode: 'missing_category',
+                trigger_category: trig,
+                suggest_category: sug,
+                min_order_sum: Number(t.min_order_sum) || 0,
+                max_order_sum: mx === '' || mx === null || mx === undefined ? null : Number(mx),
+                phrase_template: (t.phrase_template || '').trim(),
+                sort_order: Number(t.sort_order) || 0,
+                is_active: true,
+            };
+            try {
+                const { ok, data: d } = await this.apiJsonResponse('/api/admin/upsell-rules', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                if (ok) {
+                    await this.loadUpsellRules();
+                    await this.loadSetupStatus();
+                } else void this.showUiAlert(this.formatApiError(d.detail || d), 'Ошибка');
+            } catch (e) {
+                console.error('[admin] upsellAddRule', e);
+                void this.showUiAlert('Ошибка сети', 'Ошибка');
+            }
+        },
+
+        async upsellToggle(rule) {
+            try {
+                const { ok, data: d } = await this.apiJsonResponse(`/api/admin/upsell-rules/${rule.id}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ is_active: !rule.is_active }),
+                });
+                if (ok) {
+                    rule.is_active = !rule.is_active;
+                    await this.loadSetupStatus();
+                } else void this.showUiAlert(this.formatApiError(d), 'Ошибка');
+            } catch (e) { console.error(e); }
+        },
+
+        async upsellDeleteRule(rule) {
+            const { ok } = await this.openUiConfirm({
+                message: `Удалить правило #${rule.id}?`,
+                danger: true,
+            });
+            if (!ok) return;
+            try {
+                const { ok: delOk, data: d } = await this.apiJsonResponse(`/api/admin/upsell-rules/${rule.id}`, { method: 'DELETE' });
+                if (delOk) {
+                    this.upsellRules = this.upsellRules.filter(r => r.id !== rule.id);
+                    await this.loadSetupStatus();
+                } else void this.showUiAlert(this.formatApiError(d), 'Ошибка');
+            } catch (e) { console.error(e); }
         },
 
         async syncIntegrationsNow() {
@@ -1896,6 +2401,7 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                 this.menuViewRevision += 1;
                 await this.loadMenu();
                 if (this.currentTab === 'stoplist') await this.loadStopList();
+                await this.loadSetupStatus();
             } catch (e) {
                 console.error('[admin] integrations/sync', e);
                 void this.showUiAlert('Ошибка сети. Проверьте соединение.', 'Ошибка');
@@ -1907,7 +2413,7 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
         /** Только стоп-лист iiko → БД (учётные данные из .env). Доступна из шапки и вкладки «Стоп-лист». */
         async syncStopListOnly() {
             if (!this.integrationStatus.iiko_configured) {
-                void this.showUiAlert('Задайте IIKO_API_LOGIN и IIKO_ORGANIZATION_ID в .env', 'Подсказка');
+                void this.showUiAlert('Настройте iiko для филиала или задайте IIKO_* в .env', 'Подсказка');
                 return;
             }
             this.stopListSyncLoading = true;
@@ -2127,14 +2633,6 @@ function adminMixinWebSocketEvents() {
                 this.wsChannelReady = false;
                 this.wsEpoch++;
                 this._clearWsReadyTimer();
-                // Старые бэкенды без type=ws_ready: через 3 с считаем канал готовым.
-                this._wsReadyTimer = setTimeout(() => {
-                    this._wsReadyTimer = null;
-                    if (this.ws?.readyState === WebSocket.OPEN && !this.wsChannelReady) {
-                        this.wsChannelReady = true;
-                        this.wsEpoch++;
-                    }
-                }, 3000);
                 console.log('[WS] Socket open, ждём ws_ready…');
             };
 
@@ -2169,6 +2667,14 @@ function adminMixinWebSocketEvents() {
             }, this.wsReconnectDelay);
         },
 
+        _pushDashLiveFeed(type, text) {
+            const row = { type, text, ts: new Date().toISOString() };
+            this.dashLiveFeed.unshift(row);
+            if (this.dashLiveFeed.length > 40) {
+                this.dashLiveFeed.length = 40;
+            }
+        },
+
         handleWsEvent(msg) {
             const { type, data } = msg;
 
@@ -2181,11 +2687,24 @@ function adminMixinWebSocketEvents() {
 
             if (type === 'message_status_updated') {
                 this.onMessageStatusUpdated(data);
+                const st = String(data.delivery_status || '');
+                this._pushDashLiveFeed(
+                    type,
+                    `${st === 'failed' ? 'Сбой доставки' : 'Статус'} · ${data.phone || ''} · #${data.chat_log_id || ''}`,
+                );
             } else if (type === 'new_message') {
                 this.onNewMessage(data);
+                this._pushDashLiveFeed(
+                    type,
+                    `${data.role === 'user' ? 'Клиент' : (data.role === 'operator' ? 'Оператор' : 'Бот')} · ${data.phone || ''}`,
+                );
             } else if (type === 'order_updated') {
                 this.onOrderUpdated(data);
                 this.scheduleDashStatsRefreshDebounced();
+                this._pushDashLiveFeed(
+                    type,
+                    `Заказ #${data.order_id} → ${data.status} · ${data.phone || ''}`,
+                );
             } else if (type === 'order_deleted') {
                 const i = this.orders.findIndex((o) => o.id === data.order_id);
                 if (i >= 0) {
@@ -2205,9 +2724,25 @@ function adminMixinWebSocketEvents() {
                 this.scheduleDashStatsRefreshDebounced();
             } else if (type === 'human_needed') {
                 this.onHumanNeeded(data);
+                this._pushDashLiveFeed(type, `Нужен оператор · ${data.phone || ''}`);
             } else if (type === 'state_changed') {
                 this.onStateChanged(data);
             }
+        },
+
+        async resendFailedChatMessage(msg) {
+            if (!this.activeChatPhone || !msg || !msg.id) return;
+            const st = String(msg.delivery_status || '').toLowerCase();
+            if (st !== 'failed') return;
+            const { ok, status, data } = await this.apiJsonResponse(
+                `/api/admin/chats/${encodeURIComponent(this.activeChatPhone)}/messages/${msg.id}/resend`,
+                { method: 'POST' },
+            );
+            if (!ok) {
+                console.warn('resend', status, data);
+                return;
+            }
+            await this.selectChat(this.activeChatPhone);
         },
 
         // ─── Event Handlers ──────────────────────────
@@ -2317,7 +2852,8 @@ function adminMixinWebSocketEvents() {
                 applyPatch(this.orders[idx]);
             } else {
                 const nowIso = new Date().toISOString();
-                const createdAt = data.created_at || data.createdAt || data.updated_at || nowIso;
+                const payloadCreated = (data.created_at || data.createdAt || '').trim();
+                const createdAt = payloadCreated || nowIso;
                 const newRow = {
                     id: oid,
                     status: data.status,
@@ -2327,8 +2863,13 @@ function adminMixinWebSocketEvents() {
                     updated_at: nowIso,
                     iiko_last_error: data.iiko_last_error ?? null,
                 };
-                const tNew = this._orderListSortTs(newRow);
-                if (tNew == null) {
+                const sortRow = payloadCreated
+                    ? { created_at: payloadCreated, updated_at: null }
+                    : null;
+                const tNew = sortRow ? this._orderListSortTs(sortRow) : null;
+                const recentWindowMs = 20 * 60 * 1000;
+                const canInsertByTime = tNew != null && (Date.now() - tNew) <= recentWindowMs;
+                if (!canInsertByTime) {
                     this.orders.push(newRow);
                 } else {
                     const insertIdx = this.orders.findIndex((o) => {
@@ -2786,6 +3327,8 @@ function adminMixinDataChartsSettings() {
                     await this.loadKnowledgeBase();
                 } else if (this.currentTab === 'packaging') {
                     await this.loadPackagingRules();
+                } else if (this.currentTab === 'upsell') {
+                    await this.loadUpsellRules();
                 } else if (this.currentTab === 'settings') {
                     await Promise.all([this.loadSettingsOrders(), this.loadSettingsEnvironment()]);
                 } else if (this.currentTab === 'chats') {
@@ -3304,7 +3847,7 @@ function adminMixinDataChartsSettings() {
         async settingsClearMenuAndStopSnapshot() {
             if (this.settingsMenuStopClearLoading) return;
             let r = await this.openUiConfirm({
-                message: 'Удалить всё меню и сбросить в админке блок «последняя синхронизация стоп-листа»?',
+                message: 'Удалить все позиции меню, привязанные к этому филиалу? (Глобальный индикатор интеграций и legacy-меню без филиала не затрагиваются.)',
                 danger: true,
             });
             if (!r.ok) return;
@@ -3325,7 +3868,7 @@ function adminMixinDataChartsSettings() {
                     void this.showUiAlert(typeof data.detail === 'string' ? data.detail : 'Ошибка очистки', 'Ошибка');
                     return;
                 }
-                this.demoToastMessage = `Меню очищено (${data.menu_items_deleted ?? 0} поз.), снимок стопа сброшен`;
+                this.demoToastMessage = `Меню филиала очищено (${data.menu_items_deleted ?? 0} поз.)`;
                 setTimeout(() => { this.demoToastMessage = ''; }, 4500);
                 await Promise.all([
                     this.loadMenu(),
@@ -3626,9 +4169,11 @@ function adminMixinDataChartsSettings() {
                     changes: {},
                 };
                 console.warn('GET /api/admin/analytics', status, raw);
+                this.analyticsDailyDataRev = (this.analyticsDailyDataRev || 0) + 1;
                 return;
             }
             this.analyticsData = raw;
+            this.analyticsDailyDataRev = (this.analyticsDailyDataRev || 0) + 1;
         },
 
         /** Перерисовка графика аналитики после стабилизации layout (вызов из loadTabData или reloadAnalyticsForUi). */

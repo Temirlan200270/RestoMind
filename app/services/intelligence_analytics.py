@@ -1,7 +1,7 @@
 """
 Агрегаты для Intelligence Dashboard: Menu Engineering (ИИ-допродажи), география доставки.
 
-Использует только данные из orders.items_json / order_meta (без отдельной таблицы событий).
+Единый разбор recommendation_trace / recommendation из order_meta (без дублирования в admin).
 """
 
 from __future__ import annotations
@@ -10,11 +10,77 @@ import re
 from typing import Any
 
 
-def _order_meta_from_items_json(items_json: dict[str, Any] | None) -> dict[str, Any]:
+def order_meta_from_items_json(items_json: dict[str, Any] | None) -> dict[str, Any]:
+    """Метаданные заказа (v2) из items_json."""
     if not isinstance(items_json, dict):
         return {}
     raw = items_json.get("order_meta")
     return raw if isinstance(raw, dict) else {}
+
+
+def list_recommendation_events(items_json: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """
+    События допродажи из заказа: элементы trace с offered/offered_iiko_id
+    или одно событие из recommendation.
+    """
+    if not isinstance(items_json, dict):
+        return []
+    meta = order_meta_from_items_json(items_json)
+    trace = meta.get("recommendation_trace")
+    out: list[dict[str, Any]] = []
+    if isinstance(trace, list) and trace:
+        for ev in trace:
+            if isinstance(ev, dict) and (ev.get("offered") or ev.get("offered_iiko_id")):
+                out.append(ev)
+        return out
+    rec = meta.get("recommendation")
+    if isinstance(rec, dict) and (rec.get("offered") or rec.get("offered_iiko_id")):
+        out.append(rec)
+    return out
+
+
+def upsell_stats_from_items_json(items_json: dict[str, Any] | None) -> tuple[int, int, float]:
+    """
+    Число предложений допродаж, принятий и сумма по accepted_revenue_kzt за заказ.
+    Считает события в recommendation_trace; без трассы — fallback на recommendation + имя в позициях.
+    """
+    if not isinstance(items_json, dict):
+        return 0, 0, 0.0
+    meta = order_meta_from_items_json(items_json)
+    events = list_recommendation_events(items_json)
+    if not events:
+        return 0, 0, 0.0
+    trace = meta.get("recommendation_trace")
+    if isinstance(trace, list) and trace:
+        offers = 0
+        accepts = 0
+        revenue = 0.0
+        for ev in events:
+            if ev.get("offered") or ev.get("offered_iiko_id"):
+                offers += 1
+            if ev.get("accepted") is True:
+                accepts += 1
+                revenue += float(ev.get("accepted_revenue_kzt") or 0)
+        return offers, accepts, revenue
+    rec = events[0]
+    offers = 1
+    accepts = 0
+    revenue = 0.0
+    if rec.get("accepted") is True:
+        accepts = 1
+        revenue += float(rec.get("accepted_revenue_kzt") or 0)
+    else:
+        off = str(rec.get("offered") or "").strip().lower()
+        items = items_json.get("items")
+        if off and isinstance(items, list):
+            for it in items:
+                if not isinstance(it, dict):
+                    continue
+                nm = str(it.get("name") or "").lower()
+                if off and off in nm:
+                    accepts = 1
+                    break
+    return offers, accepts, revenue
 
 
 def normalize_address_bucket(addr: str) -> str:
@@ -24,7 +90,6 @@ def normalize_address_bucket(addr: str) -> str:
     """
     s = (addr or "").strip().lower()
     s = re.sub(r"\s+", " ", s)
-    # Часто «ул. X, 15, кв 7» — берём сегмент до второй запятой максимум для квартала
     parts = [p.strip() for p in s.split(",") if p.strip()]
     if len(parts) >= 2:
         s = ", ".join(parts[:2])
@@ -50,18 +115,7 @@ def menu_engineering_rows(orders: list[Any]) -> list[dict[str, Any]]:
         ij = o.items_json if isinstance(o.items_json, dict) else None
         if not ij:
             continue
-        meta = _order_meta_from_items_json(ij)
-        trace = meta.get("recommendation_trace")
-        events: list[dict[str, Any]] = []
-        if isinstance(trace, list) and trace:
-            for ev in trace:
-                if isinstance(ev, dict) and (ev.get("offered") or ev.get("offered_iiko_id")):
-                    events.append(ev)
-        else:
-            rec = meta.get("recommendation")
-            if isinstance(rec, dict) and (rec.get("offered") or rec.get("offered_iiko_id")):
-                events.append(rec)
-        for ev in events:
+        for ev in list_recommendation_events(ij):
             oid = (ev.get("offered_iiko_id") or "").strip()
             off = (ev.get("offered") or "").strip()
             if oid:
@@ -107,7 +161,7 @@ def delivery_geo_rows(orders: list[Any]) -> list[dict[str, Any]]:
 
     for o in orders:
         ij = o.items_json if isinstance(o.items_json, dict) else None
-        meta = _order_meta_from_items_json(ij)
+        meta = order_meta_from_items_json(ij)
         if (meta.get("order_type") or "").strip().lower() != "delivery":
             continue
         addr = (meta.get("delivery_address") or "").strip()

@@ -31,7 +31,9 @@ async def test_hall_preorder_creates_booking_and_order(db_with_menu) -> None:
             comment="у окна",
         ),
     )
-    r = await _handle_order(db_with_menu, "+77001234567", ai, menu_items=None)
+    r = await _handle_order(
+        db_with_menu, "+77001234567", ai, menu_items=None, organization_id=1,
+    )
     assert r.pending_order_id is not None
     # Оплата уже указана (cash) — сразу запрос подтверждения заказа.
     assert r.new_state == UserState.CONFIRMING_ORDER
@@ -61,7 +63,9 @@ async def test_hall_preorder_without_booking_details_fails_gracefully(db_with_me
         is_preorder=True,
         booking_details=None,
     )
-    r = await _handle_order(db_with_menu, "+77001234567", ai, menu_items=None)
+    r = await _handle_order(
+        db_with_menu, "+77001234567", ai, menu_items=None, organization_id=1,
+    )
     assert r.pending_order_id is None
     assert "дату" in (r.reply_text or "").lower() or "Дата" in (r.reply_text or "")
 

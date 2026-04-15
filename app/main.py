@@ -21,6 +21,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.api.admin import auth_router as admin_auth_router
 from app.api.admin import router as admin_router
 from app.api.admin import ws_router as admin_ws_router
+from app.api.payment_webhook import router as payment_webhook_router
 from app.api.webhooks import router as webhooks_router
 from app.core.config import settings
 from app.db.models import Base
@@ -102,10 +103,7 @@ async def _stop_list_sync_loop() -> None:
     """Фоновая задача: синхронизирует стоп-листы из iiko каждые 15 минут."""
     from app.services.integration_health import record_stoplist_sync
     from app.services.menu_sync import sync_stop_lists
-
-    if not settings.iiko_api_login or not settings.iiko_organization_id:
-        logger.info("iiko не настроен — синхронизация стоп-листов отключена")
-        return
+    from app.services.org_iiko import list_organizations_with_iiko_db, resolve_org_iiko_credentials
 
     first_cycle = True
     while True:
@@ -117,12 +115,45 @@ async def _stop_list_sync_loop() -> None:
             break
         async with async_session_factory() as db:
             try:
-                stats = await sync_stop_lists(
-                    db, settings.iiko_api_login, settings.iiko_organization_id,
-                )
-                await record_stoplist_sync(db, True, None)
+                targets: list[tuple[int, str, str, str]] = []
+                for org_row in await list_organizations_with_iiko_db(db):
+                    c = await resolve_org_iiko_credentials(db, int(org_row.id))
+                    if c is None:
+                        continue
+                    targets.append(
+                        (
+                            int(org_row.id),
+                            c.api_login,
+                            c.iiko_organization_id,
+                            c.terminal_group_id or "",
+                        ),
+                    )
+                if not targets and settings.iiko_api_login and settings.iiko_organization_id:
+                    targets.append(
+                        (
+                            int(settings.default_organization_id),
+                            settings.iiko_api_login.strip(),
+                            settings.iiko_organization_id.strip(),
+                            (settings.iiko_terminal_group_id or "").strip(),
+                        ),
+                    )
+                if not targets:
+                    continue
+                for oid, login, iorg, tg in targets:
+                    try:
+                        stats = await sync_stop_lists(
+                            db,
+                            login,
+                            iorg,
+                            terminal_group_id=tg or None,
+                            menu_organization_id=oid,
+                        )
+                        await record_stoplist_sync(db, True, None, organization_id=oid)
+                        logger.info("Стоп-листы org=%s: %s", oid, stats)
+                    except Exception as exc:
+                        logger.error("Стоп-листы org=%s: %s", oid, exc, exc_info=True)
+                        await record_stoplist_sync(db, False, str(exc), organization_id=oid)
                 await db.commit()
-                logger.info("Стоп-листы синхронизированы: %s", stats)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -347,6 +378,93 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception:
         pass
 
+    # Franchise / iiko в БД: create_all создаёт новые таблицы; для существующих SQLite — колонки.
+    for sql_sqlite, sql_pg in (
+        (
+            "ALTER TABLE organizations ADD COLUMN tenant_id INTEGER",
+            "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS tenant_id INTEGER",
+        ),
+        (
+            "ALTER TABLE organizations ADD COLUMN iiko_api_login_enc TEXT",
+            "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS iiko_api_login_enc TEXT",
+        ),
+        (
+            "ALTER TABLE organizations ADD COLUMN iiko_terminal_group_id VARCHAR(255) DEFAULT ''",
+            "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS iiko_terminal_group_id VARCHAR(255) DEFAULT ''",
+        ),
+    ):
+        try:
+            async with async_engine.begin() as conn:
+                if settings.db_mode == "sqlite":
+                    await conn.execute(text(sql_sqlite))
+                else:
+                    await conn.execute(text(sql_pg))
+        except Exception:
+            pass
+
+    try:
+        async with async_engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO tenants (name, plan) SELECT 'Default', 'standard' "
+                    "WHERE NOT EXISTS (SELECT 1 FROM tenants LIMIT 1)",
+                ),
+            )
+            await conn.execute(
+                text(
+                    "UPDATE organizations SET tenant_id = (SELECT id FROM tenants ORDER BY id ASC LIMIT 1) "
+                    "WHERE tenant_id IS NULL",
+                ),
+            )
+    except Exception:
+        pass
+
+    for sql_sqlite, sql_pg in (
+        (
+            "ALTER TABLE organizations ADD COLUMN prepayment_enforced INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS prepayment_enforced BOOLEAN NOT NULL DEFAULT true",
+        ),
+        (
+            "ALTER TABLE orders ADD COLUMN payment_provider VARCHAR(64)",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_provider VARCHAR(64)",
+        ),
+        (
+            "ALTER TABLE orders ADD COLUMN external_payment_id VARCHAR(200)",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS external_payment_id VARCHAR(200)",
+        ),
+        (
+            "ALTER TABLE orders ADD COLUMN payment_amount_captured NUMERIC(12,2)",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_amount_captured NUMERIC(12,2)",
+        ),
+    ):
+        try:
+            async with async_engine.begin() as conn:
+                if settings.db_mode == "sqlite":
+                    await conn.execute(text(sql_sqlite))
+                else:
+                    await conn.execute(text(sql_pg))
+        except Exception:
+            pass
+
+    try:
+        async with async_engine.begin() as conn:
+            if settings.db_mode == "sqlite":
+                await conn.execute(
+                    text("CREATE INDEX IF NOT EXISTS ix_orders_payment_provider ON orders (payment_provider)"),
+                )
+                await conn.execute(
+                    text("CREATE INDEX IF NOT EXISTS ix_orders_external_payment_id ON orders (external_payment_id)"),
+                )
+            else:
+                await conn.execute(
+                    text("CREATE INDEX IF NOT EXISTS ix_orders_payment_provider ON orders (payment_provider)"),
+                )
+                await conn.execute(
+                    text("CREATE INDEX IF NOT EXISTS ix_orders_external_payment_id ON orders (external_payment_id)"),
+                )
+    except Exception:
+        pass
+
     await init_redis_or_fallback()
 
     stop_list_task = asyncio.create_task(_stop_list_sync_loop())
@@ -385,6 +503,7 @@ app.add_middleware(
 
 # --- Подключение роутеров ---
 app.include_router(webhooks_router, prefix="/api")
+app.include_router(payment_webhook_router, prefix="/api")
 app.include_router(admin_auth_router, prefix="/api")
 app.include_router(admin_router, prefix="/api")
 app.include_router(admin_ws_router, prefix="/api")

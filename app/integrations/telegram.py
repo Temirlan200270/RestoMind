@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from app.core.config import settings
+from app.db.session import async_session_factory
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +91,39 @@ def _alert_time_lines() -> list[str]:
     return [f"<b>Время (UTC):</b> <code>{utc_hm}</code>"]
 
 
+async def _staff_chat_id_for_org(organization_id: int | None) -> str:
+    """Telegram chat_id персонала: из организации или глобальный env."""
+    if organization_id is not None:
+        from app.db.models import Organization
+
+        async with async_session_factory() as db:
+            org = await db.get(Organization, int(organization_id))
+            if org is not None:
+                cid = (org.telegram_ops_chat_id or "").strip()
+                if cid:
+                    return cid
+    return (settings.telegram_admin_chat_id or "").strip()
+
+
+async def send_ops_notification_html(text: str, *, organization_id: int | None = None) -> None:
+    """Короткое уведомление персоналу (HTML). Без токена/chat_id — no-op."""
+    token = (settings.telegram_bot_token or "").strip()
+    chat_id = await _staff_chat_id_for_org(organization_id)
+    if not token or not chat_id:
+        logger.debug("Telegram ops: пропуск (нет токена или chat_id)")
+        return
+    payload: dict = {
+        "chat_id": chat_id,
+        "text": text[:4000],
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+    }
+    api_url = f"https://api.telegram.org/bot{token}/sendMessage"
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        resp = await client.post(api_url, json=payload)
+        resp.raise_for_status()
+
+
 def _absolute_admin_dialog_url(phone: str) -> str | None:
     """
     Полный URL открытия админки на диалоге с клиентом.
@@ -111,13 +145,14 @@ async def send_tg_fallback_alert(
     bot_reply: str,
     *,
     extras: EscalationAlertExtras | None = None,
+    organization_id: int | None = None,
 ) -> None:
     """
     Уведомление администратору: клиент переведён в режим оператора (escalate).
     Если TELEGRAM_BOT_TOKEN / TELEGRAM_ADMIN_CHAT_ID не заданы — тихий no-op.
     """
     token = (settings.telegram_bot_token or "").strip()
-    chat_id = (settings.telegram_admin_chat_id or "").strip()
+    chat_id = await _staff_chat_id_for_org(organization_id)
     if not token or not chat_id:
         logger.debug("Telegram: токен или chat_id не заданы — алерт пропущен")
         return

@@ -89,6 +89,40 @@ def test_build_demo_order_payload_matches_v2_shape() -> None:
     assert float(payload["total_price"]) == grand
 
 
+def test_prepayment_enforced_false_skips_threshold(monkeypatch) -> None:
+    """Выключение предоплаты на филиале: флаг prepayment_enforced=False в build_order_items_json."""
+    monkeypatch.setattr(
+        "app.services.order_logic.settings.order_prepayment_threshold_kzt",
+        1000.0,
+    )
+    validated = ValidatedOrder(
+        valid_items=[
+            {
+                "name": "X",
+                "quantity": 1,
+                "price_per_unit": 5000.0,
+                "item_total": 5000.0,
+                "iiko_id": "u1",
+                "exclude_ingredients": [],
+            },
+        ],
+        unknown_items=[],
+        total_price=5000.0,
+        summary_text="x",
+    )
+    ai = AIBrainResponse(
+        intent="order",
+        reply_text="ok",
+        items=[],
+        order_type="pickup",
+        payment_method="cash",
+    )
+    payload_off, _ = build_order_items_json(validated, ai, prepayment_enforced=False)
+    assert payload_off["order_meta"]["requires_order_prepayment"] is False
+    payload_on, _ = build_order_items_json(validated, ai, prepayment_enforced=True)
+    assert payload_on["order_meta"]["requires_order_prepayment"] is True
+
+
 def test_finalize_order_draft_matches_build_merge() -> None:
     """finalize_order_draft — обёртка над build + merge."""
     validated = ValidatedOrder(

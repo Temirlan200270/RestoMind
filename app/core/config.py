@@ -142,6 +142,21 @@ class Settings(BaseSettings):
         ),
     )
 
+    # Fernet (URL-safe base64 32-byte key): python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    # Нужен для шифрования IIKO apiLogin в БД (organizations.iiko_api_login_enc).
+    app_secrets_fernet_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("APP_SECRETS_FERNET_KEY", "app_secrets_fernet_key"),
+    )
+    # Секрет для POST /api/webhooks/payment (Authorization: Bearer …). Пусто — эндпоинт отвечает 503.
+    payment_webhook_bearer_token: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "PAYMENT_WEBHOOK_BEARER_TOKEN",
+            "payment_webhook_bearer_token",
+        ),
+    )
+
     # --- iiko Cloud API ---
     iiko_api_login: str = Field(
         default="",
@@ -307,6 +322,11 @@ class Settings(BaseSettings):
     # --- Админ-панель ---
     admin_username: str = "admin"
     admin_password: str = "restomind"
+    # Организация по умолчанию (fallback вебхука и legacy-логина), если в БД одна запись — обычно 1
+    default_organization_id: int = Field(
+        default=1,
+        validation_alias=AliasChoices("DEFAULT_ORGANIZATION_ID", "default_organization_id"),
+    )
     # Версия для отображения в админке (можно переопределить при деплое)
     app_version: str = Field(
         default="0.1.0",

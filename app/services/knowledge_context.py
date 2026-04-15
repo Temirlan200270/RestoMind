@@ -50,22 +50,34 @@ async def load_knowledge_context_block(
     if not rows:
         return ""
 
-    parts: list[str] = []
-    total = 0
-    for row in rows:
-        cat = (row.category or "").strip()
-        q = (row.question or "").strip()
-        a = (row.answer or "").strip()
-        header = f"### [{cat}] {q}" if cat else f"### {q}"
-        block = f"{header}\n{a}\n"
-        if total + len(block) > MAX_KB_CONTEXT_CHARS:
-            logger.warning(
-                "База знаний обрезана по лимиту %s символов (всего записей: %d)",
-                MAX_KB_CONTEXT_CHARS,
-                len(rows),
-            )
-            break
-        parts.append(block)
-        total += len(block)
+    def _kind(row: KnowledgeItem) -> str:
+        k = (row.knowledge_kind or "facility").strip().lower()
+        return "persona" if k == "persona" else "facility"
 
-    return "\n".join(parts).strip()
+    facility_rows = [r for r in rows if _kind(r) == "facility"]
+    persona_rows = [r for r in rows if _kind(r) == "persona"]
+
+    def _build_section(title: str, section_rows: list[KnowledgeItem]) -> str:
+        if not section_rows:
+            return ""
+        parts: list[str] = [f"## {title}\n"]
+        total = len(parts[0])
+        for row in section_rows:
+            cat = (row.category or "").strip()
+            q = (row.question or "").strip()
+            a = (row.answer or "").strip()
+            header = f"### [{cat}] {q}" if cat else f"### {q}"
+            block = f"{header}\n{a}\n"
+            if total + len(block) > MAX_KB_CONTEXT_CHARS:
+                logger.warning(
+                    "База знаний обрезана по лимиту %s символов",
+                    MAX_KB_CONTEXT_CHARS,
+                )
+                break
+            parts.append(block)
+            total += len(block)
+        return "\n".join(parts).strip()
+
+    fac = _build_section("Справочник заведения", facility_rows)
+    per = _build_section("Характер и тон ответов (persona)", persona_rows)
+    return "\n\n".join(x for x in (fac, per) if x).strip()

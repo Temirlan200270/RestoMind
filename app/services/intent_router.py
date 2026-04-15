@@ -14,8 +14,9 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.services.recommendation_sync import sync_recommendation_events_for_order
 from app.core.pipeline_log import log_pipeline_stage
-from app.db.models import Booking, MenuItem, Order, OrderStatus, User
+from app.db.models import Booking, MenuItem, Order, OrderStatus, Organization, User
 from app.services.booking_halls import (
     BOOKING_HALL_VIP,
     HALL_LABEL_RU,
@@ -42,10 +43,13 @@ from app.services.order_logic import (
 logger = logging.getLogger(__name__)
 
 
-async def get_open_draft_order(db: AsyncSession, phone: str) -> Order | None:
+async def get_open_draft_order(
+    db: AsyncSession, phone: str, organization_id: int,
+) -> Order | None:
     """Последний заказ пользователя в статусе DRAFT (для merge и обновления корзины)."""
-    result = await db.execute(select(User).where(User.phone == phone))
-    user = result.scalar_one_or_none()
+    user = await db.scalar(
+        select(User).where(User.phone == phone, User.organization_id == organization_id),
+    )
     if user is None:
         return None
     q = await db.execute(
@@ -297,16 +301,20 @@ class RouteResult:
     new_state: UserState | None = None
 
 
-async def get_or_create_user(db: AsyncSession, phone: str) -> User:
-    """Находит пользователя по телефону или создаёт нового."""
-    result = await db.execute(select(User).where(User.phone == phone))
-    user = result.scalar_one_or_none()
+async def get_or_create_user(db: AsyncSession, phone: str, organization_id: int) -> User:
+    """Находит пользователя по телефону в организации или создаёт нового."""
+    user = await db.scalar(
+        select(User).where(User.phone == phone, User.organization_id == organization_id),
+    )
 
     if user is None:
-        user = User(phone=phone)
+        user = User(phone=phone, organization_id=organization_id)
         db.add(user)
         await db.flush()
-        logger.info("Создан новый пользователь: phone=%s, id=%d", phone, user.id)
+        logger.info(
+            "Создан новый пользователь: org=%s phone=%s, id=%d",
+            organization_id, phone, user.id,
+        )
 
     return user
 
@@ -316,6 +324,8 @@ async def _handle_order(
     phone: str,
     ai_response: AIBrainResponse,
     menu_items: list[MenuItem] | None = None,
+    *,
+    organization_id: int,
 ) -> RouteResult:
     """
     Обработка intent='order':
@@ -325,7 +335,7 @@ async def _handle_order(
     if menu_items is None:
         menu_items = await load_available_menu(db)
 
-    existing_draft = await get_open_draft_order(db, phone)
+    existing_draft = await get_open_draft_order(db, phone, organization_id)
     use_merge = bool(ai_response.order_actions) and existing_draft is not None
 
     ai_eff: AIBrainResponse
@@ -383,7 +393,7 @@ async def _handle_order(
             )
         )
 
-    user = await get_or_create_user(db, phone)
+    user = await get_or_create_user(db, phone, organization_id)
 
     for vi in validated.valid_items:
         pk = classify_packaging_kind(str(vi.get("name", "")), str(vi.get("category", "")))
@@ -437,6 +447,7 @@ async def _handle_order(
                 ),
             )
         booking_row = Booking(
+            organization_id=organization_id,
             user_id=user.id,
             booking_date=booking_date,
             booking_time=booking_time,
@@ -448,8 +459,12 @@ async def _handle_order(
         db.add(booking_row)
         await db.flush()
 
-    packaging_rules = await load_packaging_rules(db)
-    items_json, grand_total = finalize_order_draft(validated, ai_eff, packaging_rules=packaging_rules)
+    packaging_rules = await load_packaging_rules(db, organization_id)
+    org_row = await db.get(Organization, organization_id)
+    prepay_enf = bool(org_row.prepayment_enforced) if org_row else True
+    items_json, grand_total = finalize_order_draft(
+        validated, ai_eff, packaging_rules=packaging_rules, prepayment_enforced=prepay_enf,
+    )
     mix_err = validate_mixed_payment_total(ai_eff, grand_total)
     if mix_err:
         return RouteResult(
@@ -501,6 +516,7 @@ async def _handle_order(
                     total_price=grand_total,
                     prepayment_status=prepayment_status,
                     booking_id=new_booking_id,
+                    organization_id=organization_id,
                     row_version=Order.row_version + 1,
                 )
             )
@@ -522,6 +538,7 @@ async def _handle_order(
         order = existing_draft
     else:
         order = Order(
+            organization_id=organization_id,
             user_id=user.id,
             status=OrderStatus.DRAFT,
             items_json=items_json,
@@ -588,6 +605,20 @@ async def _handle_order(
         order.id, len(validated.valid_items), grand_total, log_hint,
     )
 
+    from app.services.strategy_engine import apply_db_upsell_rules
+
+    reply, items_json = await apply_db_upsell_rules(
+        db,
+        organization_id=organization_id,
+        reply_text=reply,
+        items_json=items_json,
+        grand_total=float(grand_total),
+        menu_items=menu_items,
+        ai_eff=ai_eff,
+    )
+    order.items_json = items_json
+    await db.flush()
+
     await publish_event("order_updated", {
         "order_id": order.id, "status": OrderStatus.DRAFT,
         "phone": phone, "total_price": grand_total,
@@ -595,6 +626,8 @@ async def _handle_order(
         "order_type": ai_eff.order_type,
         "payment_method": ai_eff.payment_method,
         "booking_id": booking_row.id if booking_row else None,
+        "organization_id": organization_id,
+        **({"created_at": order.created_at.isoformat()} if getattr(order, "created_at", None) else {}),
     })
 
     return RouteResult(
@@ -605,7 +638,11 @@ async def _handle_order(
 
 
 async def _handle_booking(
-    db: AsyncSession, phone: str, ai_response: AIBrainResponse
+    db: AsyncSession,
+    phone: str,
+    ai_response: AIBrainResponse,
+    *,
+    organization_id: int,
 ) -> RouteResult:
     """
     Обработка intent='book':
@@ -615,7 +652,7 @@ async def _handle_booking(
     if details is None:
         return RouteResult(reply_text=ai_response.reply_text)
 
-    user = await get_or_create_user(db, phone)
+    user = await get_or_create_user(db, phone, organization_id)
 
     try:
         booking_date = date.fromisoformat(details.date)
@@ -637,6 +674,7 @@ async def _handle_booking(
         )
 
     booking = Booking(
+        organization_id=organization_id,
         user_id=user.id,
         booking_date=booking_date,
         booking_time=booking_time,
@@ -706,6 +744,7 @@ async def confirm_order(db: AsyncSession, order_id: int) -> Order | None:
                 return None
         order.status = OrderStatus.CONFIRMED
         await db.flush()
+        await sync_recommendation_events_for_order(db, order)
         logger.info("Заказ #%d подтверждён клиентом", order_id)
     return order
 
@@ -763,6 +802,7 @@ async def route_intent(
     phone: str,
     ai_response: AIBrainResponse,
     menu_items: list[MenuItem] | None = None,
+    organization_id: int | None = None,
 ) -> RouteResult:
     """
     Главный маршрутизатор — вызывает обработчик в зависимости от intent.
@@ -772,11 +812,14 @@ async def route_intent(
         RouteResult с текстом ответа и опциональными сменами состояния.
     """
     intent = ai_response.intent
+    oid = int(organization_id) if organization_id is not None else int(settings.default_organization_id)
 
     if intent == "order":
-        return await _handle_order(db, phone, ai_response, menu_items=menu_items)
+        return await _handle_order(
+            db, phone, ai_response, menu_items=menu_items, organization_id=oid,
+        )
     elif intent == "book":
-        return await _handle_booking(db, phone, ai_response)
+        return await _handle_booking(db, phone, ai_response, organization_id=oid)
     elif intent == "escalate":
         return await _handle_escalate(phone, ai_response)
     else:

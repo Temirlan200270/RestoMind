@@ -28,7 +28,7 @@
                 <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Логин</label>
                 <input type="text" x-model="loginUsername" autocomplete="username"
                     class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-                    placeholder="admin" required>
+                    placeholder="Email сотрудника или admin" required>
             </div>
             <div>
                 <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Пароль</label>
@@ -67,30 +67,37 @@
             <button type="button" class="md:hidden p-2 rounded-lg text-blue-200 hover:bg-white/10 shrink-0" @click="sidebarOpen = false" aria-label="Закрыть меню">&times;</button>
         </div>
 
-        <nav class="admin-sidebar-scroll flex-1 min-h-0 overflow-y-auto px-3 py-4 space-y-1">
-            <template x-for="item in navItems" :key="item.id">
-                <button
-                    @click="currentTab = item.id; loadTabData(); sidebarOpen = false"
-                    :class="currentTab === item.id
-                        ? 'bg-white/15 text-white shadow-lg'
-                        : 'text-blue-200 hover:bg-white/10 hover:text-white'"
-                    class="w-full flex items-center gap-3 px-4 min-h-[44px] py-3 rounded-xl transition-all duration-200 text-left relative"
-                >
-                    <span x-html="item.icon" class="w-6 flex items-center justify-center flex-shrink-0 opacity-95"></span>
-                    <span x-text="item.label" class="font-medium text-sm"></span>
-                    <span x-show="item.id === 'chats' && unreadChats > 0"
-                        class="absolute right-3 top-2 min-w-[1.25rem] h-5 px-1 bg-red-500 rounded-full text-[10px] font-bold flex items-center justify-center"
-                        x-text="unreadChats"></span>
-                    <span x-show="item.id === 'orders' && ordersIikoErrorCount() > 0"
-                        class="absolute right-3 top-2 min-w-[1.25rem] h-5 px-1 bg-rose-600 rounded-full text-[10px] font-bold flex items-center justify-center"
-                        x-text="ordersIikoErrorCount()"></span>
-                    <span x-show="item.id === 'integrations' && integrationErrorBadge() > 0"
-                        class="absolute right-3 top-2 min-w-[1.25rem] h-5 px-1 bg-amber-500 rounded-full text-[10px] font-bold flex items-center justify-center"
-                        x-text="integrationErrorBadge()"></span>
-                    <span x-show="item.id === 'operator_queue' && (dashStats.failed_tasks_open || 0) > 0"
-                        class="absolute right-3 top-2 min-w-[1.25rem] h-5 px-1 bg-red-500 rounded-full text-[10px] font-bold flex items-center justify-center"
-                        x-text="dashStats.failed_tasks_open"></span>
-                </button>
+        <nav class="admin-sidebar-scroll flex-1 min-h-0 overflow-y-auto px-3 py-4 space-y-4">
+            <template x-for="sec in navSections" :key="sec.id">
+                <div>
+                    <div class="px-2 mb-1.5 text-[10px] font-bold uppercase tracking-wider text-blue-300/80" x-text="sec.title"></div>
+                    <div class="space-y-1">
+                        <template x-for="item in navItems.filter(i => i.section === sec.id)" :key="item.id">
+                            <button
+                                @click="currentTab = item.id; loadTabData(); sidebarOpen = false"
+                                :class="currentTab === item.id
+                                    ? 'bg-white/15 text-white shadow-lg'
+                                    : 'text-blue-200 hover:bg-white/10 hover:text-white'"
+                                class="w-full flex items-center gap-3 px-4 min-h-[44px] py-3 rounded-xl transition-all duration-200 text-left relative"
+                            >
+                                <span x-html="item.icon" class="w-6 flex items-center justify-center flex-shrink-0 opacity-95"></span>
+                                <span x-text="item.label" class="font-medium text-sm"></span>
+                                <span x-show="item.id === 'chats' && unreadChats > 0"
+                                    class="absolute right-3 top-2 min-w-[1.25rem] h-5 px-1 bg-red-500 rounded-full text-[10px] font-bold flex items-center justify-center"
+                                    x-text="unreadChats"></span>
+                                <span x-show="item.id === 'orders' && ordersIikoErrorCount() > 0"
+                                    class="absolute right-3 top-2 min-w-[1.25rem] h-5 px-1 bg-rose-600 rounded-full text-[10px] font-bold flex items-center justify-center"
+                                    x-text="ordersIikoErrorCount()"></span>
+                                <span x-show="item.id === 'operator_queue' && (dashStats.failed_tasks_open || 0) > 0"
+                                    class="absolute right-3 top-2 min-w-[1.25rem] h-5 px-1 bg-red-500 rounded-full text-[10px] font-bold flex items-center justify-center"
+                                    x-text="dashStats.failed_tasks_open"></span>
+                                <span x-show="item.id === 'integrations' && integrationErrorBadge() > 0"
+                                    class="absolute right-3 top-2 min-w-[1.25rem] h-5 px-1 bg-amber-500 rounded-full text-[10px] font-bold flex items-center justify-center"
+                                    x-text="integrationErrorBadge()"></span>
+                            </button>
+                        </template>
+                    </div>
+                </div>
             </template>
         </nav>
 
@@ -120,6 +127,15 @@
                             </button>
                         </div>
                         <p class="hidden sm:block text-sm text-gray-500 mt-0.5 line-clamp-2" x-text="navItems.find(i => i.id === currentTab)?.desc"></p>
+                        <div x-show="authenticated && (setupStatus.score ?? 100) < 100" x-cloak class="w-full max-w-md mt-2">
+                            <div class="flex justify-between text-[10px] text-gray-500 mb-0.5">
+                                <span>Готовность филиала</span>
+                                <span x-text="(setupStatus.score ?? 0) + '%'"></span>
+                            </div>
+                            <div class="h-1.5 rounded-full bg-gray-200 overflow-hidden">
+                                <div class="h-full bg-emerald-500 transition-all duration-500" :style="'width:' + (setupStatus.score || 0) + '%'"></div>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <div class="flex items-center gap-1.5 sm:gap-2 overflow-x-auto max-w-full shrink-0 pb-0.5 md:pb-0 md:flex-wrap md:overflow-visible md:justify-end admin-header-actions-scroll">
@@ -276,7 +292,7 @@
                         <p class="mt-3 text-xs text-gray-400">Неразрешённые failed_tasks (retry исчерпан)</p>
                     </div>
                     <div class="bg-white rounded-2xl p-6 border border-gray-100 shadow-[0_2px_10px_-3px_rgba(37,99,235,0.12)]">
-                        <p class="text-sm font-medium text-gray-500 mb-1">Допродажи (сегодня, UTC)</p>
+                        <p class="text-sm font-medium text-gray-500 mb-1">Допродажи / <span class="text-brand-600 font-semibold">AI Revenue</span> (сегодня, UTC)</p>
                         <h3 class="text-3xl font-bold text-gray-900">
                             <span x-text="dashStats.upsell_accepted_today ?? 0"></span>
                             <span class="text-lg font-semibold text-gray-400">/</span>
@@ -298,6 +314,50 @@
                             x-text="dashStats.iiko_errors_today ?? 0"></h3>
                         <p class="mt-3 text-xs text-gray-400">Заказы с непустым iiko_last_error за сегодня (UTC)</p>
                     </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-8">
+                    <div class="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm lg:col-span-2">
+                        <h3 class="text-sm font-semibold text-gray-900 mb-3">Живая лента</h3>
+                        <p class="text-xs text-gray-400 mb-3">События из WebSocket (новые сообщения, заказы, доставка).</p>
+                        <ul class="max-h-56 overflow-y-auto space-y-2 text-sm" x-show="dashLiveFeed.length">
+                            <template x-for="(ev, i) in dashLiveFeed" :key="i + ev.ts">
+                                <li class="flex gap-2 border-b border-gray-50 pb-2">
+                                    <span class="text-[10px] text-gray-400 tabular-nums shrink-0 w-14" x-text="fmt.time(ev.ts)"></span>
+                                    <span class="text-gray-700" x-text="ev.text"></span>
+                                </li>
+                            </template>
+                        </ul>
+                        <p x-show="!dashLiveFeed.length" class="text-sm text-gray-400 py-6">Пока нет событий — откройте вкладку и дождитесь активности.</p>
+                    </div>
+                    <div class="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
+                        <h3 class="text-sm font-semibold text-gray-900 mb-1">AI Value</h3>
+                        <p class="text-lg font-bold text-brand-700 tabular-nums" x-text="fmt.money(dashStats.upsell_revenue_today || 0)"></p>
+                        <p class="text-xs text-gray-500 mt-0.5">AI Revenue (допродажи, сегодня UTC)</p>
+                        <div class="mt-4 space-y-2 text-xs text-gray-600">
+                            <p x-show="dashStats.ai_avg_check_upsell_accepted != null">
+                                Средний чек с принятой допродажой: <span class="font-semibold tabular-nums" x-text="fmt.money(dashStats.ai_avg_check_upsell_accepted)"></span>
+                            </p>
+                            <p x-show="dashStats.ai_avg_check_no_upsell_offer != null">
+                                Средний чек без предложения допродажи: <span class="font-semibold tabular-nums" x-text="fmt.money(dashStats.ai_avg_check_no_upsell_offer)"></span>
+                            </p>
+                            <p x-show="dashStats.ai_avg_check_upsell_accepted == null && dashStats.ai_avg_check_no_upsell_offer == null" class="text-gray-400">Недостаточно заказов за сегодня для сравнения.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mb-8 bg-amber-50/80 border border-amber-100 rounded-2xl p-5" x-show="(dashStats.failed_tasks_open || 0) > 0 || (dashStats.iiko_errors_today || 0) > 0">
+                    <h3 class="text-sm font-semibold text-amber-900 mb-2">Требуют внимания</h3>
+                    <ul class="text-sm text-amber-900/90 space-y-1.5 list-disc list-inside">
+                        <li x-show="(dashStats.failed_tasks_open || 0) > 0">
+                            Очередь ошибок бота: <button type="button" class="underline font-medium" @click="currentTab = 'operator_queue'; loadTabData()">открыть</button>
+                            (<span x-text="dashStats.failed_tasks_open"></span>)
+                        </li>
+                        <li x-show="(dashStats.iiko_errors_today || 0) > 0">
+                            Ошибки iiko сегодня: <button type="button" class="underline font-medium" @click="currentTab = 'orders'; loadTabData()">заказы</button>
+                            (<span x-text="dashStats.iiko_errors_today"></span>)
+                        </li>
+                    </ul>
                 </div>
 
                 <!-- Динамика (мини-график, отдельный canvas от Аналитики) -->
@@ -1132,8 +1192,11 @@
                                     <div x-show="chat.unread" class="w-2 h-2 bg-brand-500 rounded-full mt-2 shrink-0" title="Непрочитано"></div>
                     </button>
                             </template>
-                            <div x-show="filteredChatList.length === 0" class="text-center py-14 px-4 text-gray-400 text-sm">
-                                Нет диалогов в списке
+                            <div x-show="filteredChatList.length === 0" class="text-center py-14 px-4 text-gray-400 text-sm space-y-3">
+                                <div class="mx-auto w-14 h-14 rounded-2xl bg-gray-100 flex items-center justify-center text-gray-300" aria-hidden="true">
+                                    <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+                                </div>
+                                <p>Нет диалогов в списке</p>
                             </div>
                         </div>
                         <div class="p-3 border-t border-gray-100 shrink-0 bg-gray-50/50">
@@ -1186,33 +1249,45 @@
                                             <p class="text-xs text-gray-400 font-mono truncate" x-text="activeChatPhone"></p>
                                         </div>
                                     </div>
-                                    <div class="flex flex-wrap items-center gap-1.5 px-3 pb-2 md:px-6">
-                                        <span x-show="activeChatState !== 'human_mode' && activeChatState !== 'confirming_order'"
-                                            class="inline-flex px-2 py-1 bg-emerald-50 text-emerald-700 text-xs font-medium rounded-md items-center gap-1 shrink-0">
-                                            ИИ отвечает
-                                        </span>
-                                        <span x-show="activeChatState === 'confirming_order'"
-                                            class="inline-flex px-2 py-1 bg-amber-50 text-amber-800 text-xs font-medium rounded-md shrink-0">
-                                            Подтверждение заказа
-                                        </span>
-                                        <span x-show="activeChatState === 'human_mode'"
-                                            class="inline-flex px-2 py-1 bg-orange-50 text-orange-700 text-xs font-medium rounded-md shrink-0">
-                                            Вы ведёте диалог
-                                        </span>
-                                    </div>
-                                    <div class="flex flex-col gap-2 px-3 pb-3 md:px-6 md:flex-row md:flex-wrap md:justify-end md:items-stretch">
-                                        <button type="button" x-show="customerSummary.user_exists" @click="toggleAiPaused()"
-                                            class="w-full min-h-[48px] md:w-auto md:max-w-[20rem] px-4 py-2.5 text-sm font-semibold rounded-xl border shadow-sm transition-colors touch-manipulation active:opacity-90"
-                                            :class="customerSummary.ai_paused ? 'bg-slate-800 text-white border-slate-700 hover:bg-slate-700' : 'bg-violet-50 text-violet-800 border-violet-200 hover:bg-violet-100'"
-                                            x-text="customerSummary.ai_paused ? 'Включить ИИ для клиента' : 'Заблокировать ИИ'"></button>
-                                        <div class="flex flex-col gap-1 w-full md:w-auto md:max-w-[20rem]">
-                                            <button type="button" @click="toggleTakeover()"
-                                                title="Переключает режим диалога: пока включён перехват, бот не отвечает клиенту — вы пишете сами."
-                                                class="w-full min-h-[48px] px-4 py-2.5 text-sm font-semibold rounded-xl transition-colors shadow-sm touch-manipulation active:opacity-90"
-                                                :class="chatIsBotActive() ? 'bg-orange-50 text-orange-700 hover:bg-orange-100 border border-orange-200' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200'"
-                                                x-text="chatIsBotActive() ? 'Перехватить диалог' : 'Вернуть ИИ'"></button>
-                                            <p x-show="activeChatState === 'human_mode'" class="text-[10px] text-gray-500 leading-snug text-center md:text-right px-0.5">Завершить помощь — снова отвечает бот</p>
+                                    <!-- Статус + действия: одна сетка, фиксированные отступы — не «плывёт» при human_mode -->
+                                    <div class="border-t border-gray-100 px-3 py-2 md:px-6">
+                                        <div class="flex flex-col gap-2 min-[520px]:flex-row min-[520px]:items-center min-[520px]:justify-between min-w-0">
+                                            <div class="flex flex-wrap items-center gap-1.5 min-w-0 min-h-[1.5rem]">
+                                                <span x-show="activeChatState !== 'human_mode' && activeChatState !== 'confirming_order'"
+                                                    class="inline-flex px-2 py-0.5 bg-emerald-50 text-emerald-700 text-[11px] font-medium rounded border border-emerald-100 shrink-0">
+                                                    ИИ отвечает
+                                                </span>
+                                                <span x-show="activeChatState === 'confirming_order'"
+                                                    class="inline-flex px-2 py-0.5 bg-amber-50 text-amber-800 text-[11px] font-medium rounded border border-amber-100 shrink-0">
+                                                    Подтверждение заказа
+                                                </span>
+                                                <span x-show="activeChatState === 'human_mode'"
+                                                    class="inline-flex px-2 py-0.5 bg-orange-50 text-orange-800 text-[11px] font-medium rounded border border-orange-100 shrink-0">
+                                                    Вы ведёте диалог
+                                                </span>
+                                            </div>
+                                            <div class="flex flex-wrap items-center gap-1.5 shrink-0 min-[520px]:justify-end">
+                                                <button type="button" x-show="customerSummary.user_exists" @click="toggleAiPaused()"
+                                                    class="px-2.5 py-1.5 text-xs font-medium rounded-lg border bg-white transition touch-manipulation active:opacity-90"
+                                                    :class="customerSummary.ai_paused
+                                                        ? 'border-slate-300 text-slate-800 hover:bg-slate-50'
+                                                        : 'border-violet-200 text-violet-800 hover:bg-violet-50/80'"
+                                                    x-text="customerSummary.ai_paused ? 'Включить ИИ' : 'Заблокировать ИИ'"></button>
+                                                <button type="button" @click="toggleTakeover()"
+                                                    :title="chatIsBotActive()
+                                                        ? 'Перехват: бот не отвечает, пишете вы.'
+                                                        : 'Вернуть бота: снова отвечает ИИ.'"
+                                                    class="px-2.5 py-1.5 text-xs font-medium rounded-lg border bg-white transition touch-manipulation active:opacity-90"
+                                                    :class="chatIsBotActive()
+                                                        ? 'border-amber-200 text-amber-800 hover:bg-amber-50/90'
+                                                        : 'border-emerald-200 text-emerald-800 hover:bg-emerald-50/90'"
+                                                    x-text="chatIsBotActive() ? 'Перехватить' : 'Вернуть ИИ'"></button>
+                                            </div>
                                         </div>
+                                        <p class="mt-1.5 text-[10px] text-gray-400 leading-tight min-[520px]:text-right"
+                                            x-show="activeChatState === 'human_mode'">
+                                            Завершите перехват кнопкой «Вернуть ИИ», чтобы снова отвечал бот.
+                                        </p>
                                     </div>
                                 </div>
 
@@ -1236,7 +1311,13 @@
                                                     class="text-[10px] leading-snug opacity-90 border-l-2 border-white/30 pl-2 mb-2 text-white/85 italic"
                                                     x-text="msg.meta?.monologue || ('Интент: ' + (msg.meta?.intent || ''))"></p>
                                                 <p class="text-sm whitespace-pre-line" x-text="msg.content"></p>
-                                                <div class="flex justify-end items-center gap-1 mt-1">
+                                                <div class="flex justify-end items-center gap-2 mt-1 flex-wrap">
+                                                    <button type="button"
+                                                        x-show="String(msg.delivery_status || '').toLowerCase() === 'failed' && (msg.role === 'operator' || msg.role === 'assistant')"
+                                                        @click="resendFailedChatMessage(msg)"
+                                                        class="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-md bg-white/20 hover:bg-white/30 border border-white/30">
+                                                        Переотправить
+                                                    </button>
                                                     <span class="text-[10px] opacity-80 tabular-nums" x-text="fmt.time(msg.created_at)"></span>
                                                     <span class="text-[11px] opacity-90 cursor-default shrink-0"
                                                         x-show="msg.role !== 'user' && msg.delivery_status"
@@ -1749,7 +1830,54 @@
             <div x-show="currentTab === 'integrations'" x-cloak class="fade-in max-w-3xl">
                 <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
                     <h3 class="font-semibold text-lg text-gray-900 mb-1">Связь с внешними сервисами</h3>
-                    <p class="text-sm text-gray-500 mb-6">Индикаторы по данным из .env и последним запросам к iiko (стоп-лист: сразу при старте сервера, затем каждые ~15 мин).</p>
+                    <p class="text-sm text-gray-500 mb-6">Индикаторы по настройкам филиала или .env; стоп-лист — при старте сервера и каждые ~15 мин (по всем филиалам с ключом).</p>
+
+                    <div class="rounded-xl border border-slate-200 bg-slate-50/50 p-4 mb-6">
+                        <label class="flex items-start gap-3 cursor-pointer select-none">
+                            <input type="checkbox" class="mt-1 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                                :checked="integrationStatus.prepayment_enforced !== false"
+                                :disabled="orgPrepaymentEnforcedSaving"
+                                @change="onPrepaymentEnforcedToggle($event)">
+                            <div>
+                                <div class="text-sm font-semibold text-gray-900">Автоматическая предоплата по порогу суммы</div>
+                                <p class="text-xs text-gray-600 mt-1 leading-relaxed">Если выключено, бот не удерживает подтверждение заказа из‑за крупной суммы: оператор отмечает оплату вручную в карточке заказа (или приходит вебхук оплаты).</p>
+                            </div>
+                        </label>
+                    </div>
+
+                    <div class="rounded-xl border border-brand-100 bg-brand-50/40 p-4 mb-6">
+                        <h4 class="text-sm font-bold text-gray-900 mb-2">Подключить iiko (без деплоя)</h4>
+                        <p class="text-xs text-gray-600 mb-3">Вставьте <strong>apiLogin</strong> из iiko Cloud — не логин/пароль от веб-интерфейса.</p>
+                        <div class="space-y-3 max-w-xl">
+                            <input type="password" autocomplete="off" x-model="iikoOnboardApiLogin" placeholder="API-ключ (apiLogin)"
+                                class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm font-mono">
+                            <div class="flex flex-wrap gap-2">
+                                <button type="button" @click="iikoVerifyOnboard()" :disabled="iikoOnboardVerifyLoading"
+                                    class="px-4 py-2 rounded-xl bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 disabled:opacity-40">
+                                    <span x-show="!iikoOnboardVerifyLoading">Проверить ключ</span>
+                                    <span x-show="iikoOnboardVerifyLoading" x-cloak>Запрос…</span>
+                                </button>
+                            </div>
+                            <div x-show="iikoOnboardOrgs.length" x-cloak class="space-y-2">
+                                <label class="block text-[11px] font-semibold text-gray-500 uppercase">Организация в iiko</label>
+                                <select x-model="iikoOnboardSelectedOrg" class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
+                                    <template x-for="o in iikoOnboardOrgs" :key="o.id">
+                                        <option :value="o.id" x-text="o.name + ' (' + o.id.slice(0,8) + '…)'"></option>
+                                    </template>
+                                </select>
+                                <input type="text" x-model="iikoOnboardTerminal" placeholder="Terminal group UUID (опционально)"
+                                    class="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs font-mono">
+                                <button type="button" @click="iikoCompleteOnboard()" :disabled="iikoOnboardSetupLoading"
+                                    class="px-4 py-2 rounded-xl bg-slate-800 text-white text-sm font-semibold hover:bg-slate-900 disabled:opacity-40">
+                                    <span x-show="!iikoOnboardSetupLoading">Сохранить и импортировать меню</span>
+                                    <span x-show="iikoOnboardSetupLoading" x-cloak>Импорт…</span>
+                                </button>
+                            </div>
+                            <p class="text-[10px] text-amber-800" x-show="integrationStatus.iiko_secrets_encrypt_ready === false">
+                                Для шифрования ключа в БД задайте <code class="bg-white px-1 rounded">APP_SECRETS_FERNET_KEY</code> в .env.
+                            </p>
+                        </div>
+                    </div>
 
                     <div class="space-y-5">
                         <!-- iiko -->
@@ -1766,7 +1894,7 @@
                             </div>
                             <div class="mt-3 flex flex-wrap items-center gap-2 pl-6">
                                 <span class="h-2 w-2 rounded-full shrink-0" :class="integrationStatus.iiko_configured ? 'bg-emerald-500' : 'bg-gray-300'"></span>
-                                <span class="text-xs text-gray-500" x-text="integrationStatus.iiko_configured ? 'Учётные данные заданы (IIKO_*)' : 'Не настроено: задайте IIKO_API_LOGIN и IIKO_ORGANIZATION_ID'"></span>
+                                <span class="text-xs text-gray-500" x-text="integrationStatus.iiko_configured ? 'Учётные данные заданы (филиал или IIKO_* в .env)' : 'Не настроено: мастер выше или IIKO_API_LOGIN и IIKO_ORGANIZATION_ID в .env'"></span>
                             </div>
                             <div class="mt-2 pl-6 text-xs text-gray-500" x-show="integrationStatus.last_menu_sync?.at">
                                 Последняя синхронизация <strong>меню</strong>:
@@ -1928,6 +2056,69 @@
                 </div>
             </div>
 
+            <!-- ========== ДОПРОДАЖИ (Strategy Engine) ========== -->
+            <div x-show="currentTab === 'upsell'" x-cloak class="fade-in max-w-4xl space-y-6 pb-16">
+                <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+                    <h3 class="text-lg font-bold text-gray-900">Правила допродаж</h3>
+                    <p class="text-sm text-gray-500 mt-1">Режим «нет категории в корзине» → предложить позицию из другой категории. Работает после ответа AI.</p>
+                    <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label class="text-[11px] font-semibold text-gray-500 uppercase">Если нет категории (подстрока)</label>
+                            <input type="text" x-model="upsellNew.trigger_category" placeholder="напит"
+                                class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
+                        </div>
+                        <div>
+                            <label class="text-[11px] font-semibold text-gray-500 uppercase">Предложить из категории</label>
+                            <input type="text" x-model="upsellNew.suggest_category" placeholder="напит"
+                                class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
+                        </div>
+                        <div>
+                            <label class="text-[11px] font-semibold text-gray-500 uppercase">Мин. сумма заказа ₸</label>
+                            <input type="number" x-model.number="upsellNew.min_order_sum" min="0" step="100"
+                                class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
+                        </div>
+                        <div>
+                            <label class="text-[11px] font-semibold text-gray-500 uppercase">Макс. сумма (пусто = нет)</label>
+                            <input type="number" x-model="upsellNew.max_order_sum" min="0" step="100" placeholder="15000"
+                                class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
+                        </div>
+                        <div class="md:col-span-2">
+                            <label class="text-[11px] font-semibold text-gray-500 uppercase">Шаблон фразы ({item_name}, {price})</label>
+                            <input type="text" x-model="upsellNew.phrase_template" placeholder="по умолчанию из сервера"
+                                class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
+                        </div>
+                    </div>
+                    <button type="button" @click="upsellAddRule()" class="mt-4 px-5 py-2.5 rounded-xl bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700">
+                        Добавить правило
+                    </button>
+                </div>
+                <p x-show="upsellLoading" class="text-sm text-gray-400">Загрузка…</p>
+                <div x-show="!upsellLoading && upsellRules.length" x-cloak class="space-y-3">
+                    <template x-for="r in upsellRules" :key="r.id">
+                        <div class="bg-white rounded-xl border border-gray-100 p-4 flex flex-wrap items-center justify-between gap-3">
+                            <div class="min-w-0">
+                                <div class="text-sm font-semibold text-gray-900">
+                                    Нет «<span x-text="r.trigger_category"></span>» → из «<span x-text="r.suggest_category"></span>»
+                                </div>
+                                <div class="text-xs text-gray-500 mt-1">
+                                    сумма <span x-text="r.min_order_sum"></span>–<span x-text="r.max_order_sum != null ? r.max_order_sum : '∞'"></span> ₸
+                                    · порядок <span x-text="r.sort_order"></span>
+                                </div>
+                            </div>
+                            <div class="flex gap-2 shrink-0">
+                                <button type="button" @click="upsellToggle(r)" class="px-3 py-1.5 rounded-lg text-xs font-semibold border"
+                                    :class="r.is_active ? 'border-emerald-200 text-emerald-800 bg-emerald-50' : 'border-gray-200 text-gray-600'"
+                                    x-text="r.is_active ? 'Вкл' : 'Выкл'"></button>
+                                <button type="button" @click="upsellDeleteRule(r)" class="px-3 py-1.5 rounded-lg text-xs font-semibold border border-red-200 text-red-700 bg-red-50">Удалить</button>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+                <p x-show="!upsellLoading && !upsellRules.length" x-cloak class="text-sm text-gray-500 text-center py-8 border border-dashed border-gray-200 rounded-xl">
+                    Правил пока нет — добавьте первое (например «напит» → «напит»).
+                </p>
+            </div>
+
             <!-- ========== УПАКОВКА (карточки) ========== -->
             <div x-show="currentTab === 'packaging'" x-cloak class="fade-in max-w-5xl space-y-6 pb-16">
                 <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-2">
@@ -1984,6 +2175,12 @@
                                         <div class="w-11 h-6 bg-gray-200 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-brand-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
                                     </label>
                                 </div>
+                            </div>
+
+                            <div class="mb-4 rounded-xl bg-slate-50 border border-slate-100 px-3 py-2.5 text-xs text-slate-700">
+                                <span class="font-semibold text-slate-500">Превью строки для клиента:</span>
+                                <span class="ml-1"
+                                    x-text="(rule.name || rule.kind || 'Упаковка') + ' — ' + fmt.money(rule.price || 0)"></span>
                             </div>
 
                             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -2305,7 +2502,7 @@
                 </div>
                 <div class="max-h-[60vh] overflow-y-auto p-3 text-sm">
                     <p x-show="globalSearchLoading" class="text-gray-400 text-xs px-2 py-3">Поиск…</p>
-                    <template x-if="!globalSearchLoading && (globalSearchQ || '').trim().length >= 2">
+                    <template x-if="!globalSearchLoading && (globalSearchQ || '').trim().length >= 3">
                         <div class="space-y-4">
                             <div x-show="(globalSearchResults.orders || []).length">
                                 <div class="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-2 mb-1">Заказы</div>
@@ -2342,7 +2539,7 @@
                                 class="text-gray-400 text-xs px-2 py-4 text-center">Ничего не найдено</p>
                         </div>
                     </template>
-                    <p x-show="(globalSearchQ || '').trim().length < 2 && !globalSearchLoading" class="text-gray-400 text-xs px-2 py-4 text-center">Введите минимум 2 символа</p>
+                    <p x-show="(globalSearchQ || '').trim().length < 3 && !globalSearchLoading" class="text-gray-400 text-xs px-2 py-4 text-center">Введите минимум 3 символа</p>
                 </div>
             </div>
         </div>
@@ -2439,20 +2636,33 @@
             class="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
             @click.self="uiConfirmBackdrop()"
             @keydown.escape.window="uiConfirmOpen && uiConfirmBackdrop()"
-            role="dialog" aria-modal="true">
-            <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 fade-in" @click.stop>
+            role="dialog" aria-modal="true" data-ui-confirm-panel>
+            <div class="bg-white rounded-2xl shadow-2xl w-full p-6 fade-in" :class="uiConfirmInputMultiline ? 'max-w-2xl' : 'max-w-md'" @click.stop>
                 <h3 class="text-lg font-bold text-gray-900" x-text="uiConfirmTitle"></h3>
                 <p class="mt-3 text-sm text-gray-600 whitespace-pre-wrap" x-show="uiConfirmMessage" x-text="uiConfirmMessage"></p>
                 <div x-show="uiConfirmShowInput" class="mt-4">
                     <label x-show="uiConfirmInputLabel" class="block text-xs font-semibold text-gray-500 mb-1" x-text="uiConfirmInputLabel"></label>
-                    <input type="text" x-model="uiConfirmInputValue"
+                    <input type="text" x-show="!uiConfirmInputMultiline" x-model="uiConfirmInputValue"
+                        data-ui-confirm-autofocus
                         :readonly="uiConfirmInputReadonly"
                         :placeholder="uiConfirmInputPlaceholder"
                         class="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500"
                         @keydown.enter="uiConfirmSubmit()" />
+                    <textarea x-show="uiConfirmInputMultiline" x-cloak x-model="uiConfirmInputValue"
+                        data-ui-confirm-autofocus
+                        :readonly="uiConfirmInputReadonly"
+                        :placeholder="uiConfirmInputPlaceholder"
+                        :rows="uiConfirmInputRows"
+                        class="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm font-mono leading-relaxed focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 min-h-[12rem]"></textarea>
                     <p x-show="uiConfirmError" class="mt-2 text-xs text-red-600" x-text="uiConfirmError"></p>
                 </div>
-                <div class="mt-6 flex flex-wrap gap-3 justify-end">
+                <div class="mt-6 flex flex-wrap gap-3 justify-end items-center">
+                    <button type="button" x-show="uiConfirmShowFormatJson" x-cloak
+                        @click="uiConfirmTryFormatJson()"
+                        :disabled="uiConfirmSubmitting"
+                        class="mr-auto py-2.5 px-4 rounded-xl border border-gray-200 text-gray-700 font-semibold text-sm hover:bg-gray-50 disabled:opacity-50">
+                        Форматировать JSON
+                    </button>
                     <button type="button" x-show="uiConfirmShowCancel"
                         @click="uiConfirmCancel()"
                         :disabled="uiConfirmSubmitting"
@@ -2632,10 +2842,14 @@
                         <div class="space-y-3">
                             <div class="flex flex-wrap items-center justify-between gap-2" x-show="canEditOrderComposition(selectedOrder)">
                                 <p class="text-xs font-bold text-gray-500 uppercase tracking-wide">Состав</p>
-                                <div class="flex items-center gap-2">
+                                <div class="flex flex-wrap items-center gap-2">
                                     <button type="button" x-show="!orderCompositionOpen" @click="openOrderCompositionEditor()"
                                         class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-brand-600 text-white hover:bg-brand-700 shadow-sm">
                                         Изменить состав
+                                    </button>
+                                    <button type="button" x-show="!orderCompositionOpen" @click="openOrderCompositionJsonModal()"
+                                        class="text-xs font-semibold px-3 py-1.5 rounded-lg border border-brand-200 text-brand-800 bg-white hover:bg-brand-50 shadow-sm">
+                                        JSON…
                                     </button>
                                     <button type="button" x-show="orderCompositionOpen" @click="closeOrderCompositionEditor()"
                                         class="text-xs font-semibold px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50">

@@ -13,12 +13,12 @@ from dataclasses import dataclass
 from difflib import get_close_matches
 from typing import Literal
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.data.plovxana_menu import build_mock_menu_dict
-from app.db.models import MenuItem, PackagingRule
+from app.db.models import MenuItem, Organization, PackagingRule
 from app.schemas.ai_schemas import AIBrainResponse, OrderAction, OrderItem
 
 logger = logging.getLogger(__name__)
@@ -593,16 +593,27 @@ async def calculate_total_and_fees(
     menu_items: list[MenuItem] | None = None,
     db: AsyncSession | None = None,
     packaging_rules: list[PackagingRule] | None = None,
+    organization_id: int | None = None,
+    prepayment_enforced: bool | None = None,
 ) -> tuple[ValidatedOrder, dict[str, object], float]:
     """
     Единая точка расчёта: цены и номенклатура из БД, упаковка и доставка через compute_fee_lines.
     """
     if packaging_rules is None and db is not None:
-        packaging_rules = await load_packaging_rules(db)
+        oid = int(organization_id if organization_id is not None else settings.default_organization_id)
+        packaging_rules = await load_packaging_rules(db, oid)
     enriched = enrich_merged_items_from_menu(food_items, menu_items)
     order_items = draft_food_lines_to_order_items(enriched)
     validated = await validate_order(order_items, menu_items=menu_items, db=db)
-    payload, grand_total = finalize_order_draft(validated, ai, packaging_rules=packaging_rules)
+    pe = True
+    if prepayment_enforced is not None:
+        pe = bool(prepayment_enforced)
+    elif db is not None and organization_id is not None:
+        org = await db.get(Organization, int(organization_id))
+        pe = bool(org.prepayment_enforced) if org else True
+    payload, grand_total = finalize_order_draft(
+        validated, ai, packaging_rules=packaging_rules, prepayment_enforced=pe,
+    )
     return validated, payload, grand_total
 
 
@@ -647,22 +658,26 @@ PACKAGING_SEED: list[dict[str, object]] = [
 ]
 
 
-async def load_packaging_rules(db: AsyncSession) -> list[PackagingRule]:
-    """Загрузить активные правила упаковки. При пустой таблице — создать сиды."""
+async def load_packaging_rules(db: AsyncSession, organization_id: int) -> list[PackagingRule]:
+    """Загрузить активные правила упаковки арендатора. При отсутствии строк — сиды для этой организации."""
+    tenant = or_(
+        PackagingRule.organization_id == organization_id,
+        PackagingRule.organization_id.is_(None),
+    )
     result = await db.execute(
         select(PackagingRule)
-        .where(PackagingRule.is_active.is_(True))
+        .where(PackagingRule.is_active.is_(True), tenant)
         .order_by(PackagingRule.sort_order.desc(), PackagingRule.id)
     )
     rules = list(result.scalars().all())
     if rules:
         return rules
     for seed in PACKAGING_SEED:
-        db.add(PackagingRule(**seed))
+        db.add(PackagingRule(**{**seed, "organization_id": int(organization_id)}))
     await db.flush()
     result2 = await db.execute(
         select(PackagingRule)
-        .where(PackagingRule.is_active.is_(True))
+        .where(PackagingRule.is_active.is_(True), tenant)
         .order_by(PackagingRule.sort_order.desc(), PackagingRule.id)
     )
     return list(result2.scalars().all())
@@ -912,6 +927,8 @@ def build_order_items_json(
     validated: ValidatedOrder,
     ai: AIBrainResponse,
     packaging_rules: list[PackagingRule] | None = None,
+    *,
+    prepayment_enforced: bool = True,
 ) -> tuple[dict[str, object], float]:
     """
     Собирает items_json для БД: блюда, наценки, метаданные заказа, итоговая сумма.
@@ -921,7 +938,9 @@ def build_order_items_json(
     fee_lines, extras = compute_fee_lines(foods, foods_subtotal, ai.order_type, packaging_rules=packaging_rules)
     grand_total = foods_subtotal + extras
 
-    requires_order_prepayment = grand_total >= float(settings.order_prepayment_threshold_kzt)
+    requires_order_prepayment = prepayment_enforced and (
+        grand_total >= float(settings.order_prepayment_threshold_kzt)
+    )
 
     if ai.payment_mode == "mixed":
         pay_details: dict[str, object] = {
@@ -1081,11 +1100,18 @@ def finalize_order_draft(
     validated: ValidatedOrder,
     ai: AIBrainResponse,
     packaging_rules: list[PackagingRule] | None = None,
+    *,
+    prepayment_enforced: bool = True,
 ) -> tuple[dict[str, object], float]:
     """
     Финальный ``items_json`` и сумма по ТЗ: блюда + контейнеры + доставка (см. ``compute_fee_lines``).
     """
-    payload, grand_total = build_order_items_json(validated, ai, packaging_rules=packaging_rules)
+    payload, grand_total = build_order_items_json(
+        validated,
+        ai,
+        packaging_rules=packaging_rules,
+        prepayment_enforced=prepayment_enforced,
+    )
     merged = merge_total_into_items_json(payload, grand_total)
     return merged, grand_total
 

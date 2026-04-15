@@ -58,17 +58,18 @@ async def publish_message_status_updated(
     *,
     provider_message_id: str | None = None,
     error_details: dict[str, Any] | list[Any] | None = None,
+    organization_id: int | None = None,
 ) -> None:
-    await publish_event(
-        "message_status_updated",
-        {
-            "phone": phone,
-            "chat_log_id": chat_log_id,
-            "delivery_status": delivery_status,
-            "provider_message_id": provider_message_id,
-            "error_details": error_details,
-        },
-    )
+    data: dict[str, Any] = {
+        "phone": phone,
+        "chat_log_id": chat_log_id,
+        "delivery_status": delivery_status,
+        "provider_message_id": provider_message_id,
+        "error_details": error_details,
+    }
+    if organization_id is not None:
+        data["organization_id"] = organization_id
+    await publish_event("message_status_updated", data)
 
 
 async def finalize_outbound_delivery(
@@ -107,6 +108,7 @@ async def finalize_outbound_delivery(
             log.delivery_status or "",
             provider_message_id=log.provider_message_id,
             error_details=log.error_details if isinstance(log.error_details, dict) else None,
+            organization_id=int(log.organization_id) if log.organization_id is not None else None,
         )
 
 
@@ -149,7 +151,12 @@ async def apply_whatsapp_status_webhook(
         await db.flush()
         if phone_s:
             await publish_message_status_updated(
-                phone_s, log.id, "failed", provider_message_id=mid, error_details=log.error_details,
+                phone_s,
+                log.id,
+                "failed",
+                provider_message_id=mid,
+                error_details=log.error_details,
+                organization_id=int(log.organization_id) if log.organization_id is not None else None,
             )
         return
 
@@ -162,5 +169,9 @@ async def apply_whatsapp_status_webhook(
     await db.flush()
     if phone_s:
         await publish_message_status_updated(
-            phone_s, log.id, norm, provider_message_id=mid,
+            phone_s,
+            log.id,
+            norm,
+            provider_message_id=mid,
+            organization_id=int(log.organization_id) if log.organization_id is not None else None,
         )

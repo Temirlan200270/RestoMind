@@ -1,6 +1,6 @@
 """
 Менеджер диалогов — управляет памятью разговора и состоянием пользователя через Redis.
-Каждый диалог привязан к номеру телефона и живёт 24 часа.
+Ключи изолированы по organization_id + phone (мультитенантность).
 
 State Recovery: при каждом изменении состояния дублируем его в User (БД).
 Если Redis потерял ключ (eviction / перезапуск), восстанавливаем из БД.
@@ -35,25 +35,43 @@ class UserState(StrEnum):
     HUMAN_MODE = "human_mode"
 
 
-def _history_key(phone: str) -> str:
-    return f"chat:history:{phone}"
+def _effective_org(organization_id: int | None) -> int:
+    """Если org не передан — default из настроек (тесты / legacy)."""
+    if organization_id is not None:
+        return int(organization_id)
+    from app.core.config import settings
+
+    return int(settings.default_organization_id)
 
 
-def _state_key(phone: str) -> str:
+def _scoped(organization_id: int | None, phone: str) -> str:
+    return f"{_effective_org(organization_id)}:{phone}"
+
+
+def _history_key(organization_id: int | None, phone: str) -> str:
+    return f"chat:history:{_scoped(organization_id, phone)}"
+
+
+def _state_key(organization_id: int | None, phone: str) -> str:
+    return f"user:state:{_scoped(organization_id, phone)}"
+
+
+def _legacy_state_key(phone: str) -> str:
+    """До мультитенанта: только phone."""
     return f"user:state:{phone}"
 
 
-def _pending_order_key(phone: str) -> str:
-    return f"user:pending_order:{phone}"
+def _pending_order_key(organization_id: int | None, phone: str) -> str:
+    return f"user:pending_order:{_scoped(organization_id, phone)}"
 
 
-def _pending_booking_key(phone: str) -> str:
-    return f"user:pending_booking:{phone}"
+def _pending_booking_key(organization_id: int | None, phone: str) -> str:
+    return f"user:pending_booking:{_scoped(organization_id, phone)}"
 
 
 # ─── DB sync (best-effort) ────────────────────────────────
 
-async def _db_sync(phone: str, **fields: Any) -> None:
+async def _db_sync(phone: str, organization_id: int | None, **fields: Any) -> None:
     """Best-effort: зеркалируем сессионные поля в User для восстановления после потери Redis."""
     if not fields:
         return
@@ -63,14 +81,19 @@ async def _db_sync(phone: str, **fields: Any) -> None:
         from app.db.models import User
         from app.db.session import async_session_factory
 
+        org = _effective_org(organization_id)
         async with async_session_factory() as db:
-            await db.execute(sa_update(User).where(User.phone == phone).values(**fields))
+            await db.execute(
+                sa_update(User)
+                .where(User.phone == phone, User.organization_id == org)
+                .values(**fields),
+            )
             await db.commit()
     except Exception as exc:
-        logger.warning("DB session sync for %s: %s", phone, exc)
+        logger.warning("DB session sync for %s org=%s: %s", phone, organization_id, exc)
 
 
-async def _db_recover_session(phone: str, redis: Any) -> UserState:
+async def _db_recover_session(phone: str, redis: Any, organization_id: int | None) -> UserState:
     """
     Полное восстановление сессии из БД при Redis miss.
     Возвращает UserState и восстанавливает все ключи Redis.
@@ -81,8 +104,11 @@ async def _db_recover_session(phone: str, redis: Any) -> UserState:
         from app.db.models import User
         from app.db.session import async_session_factory
 
+        org = _effective_org(organization_id)
         async with async_session_factory() as db:
-            user = await db.scalar(sa_select(User).where(User.phone == phone))
+            user = await db.scalar(
+                sa_select(User).where(User.phone == phone, User.organization_id == org),
+            )
             if not user:
                 return UserState.CHATTING
 
@@ -92,20 +118,20 @@ async def _db_recover_session(phone: str, redis: Any) -> UserState:
             except ValueError:
                 state = UserState.CHATTING
 
-            await redis.set(_state_key(phone), state.value, ex=STATE_TTL)
+            await redis.set(_state_key(org, phone), state.value, ex=STATE_TTL)
 
             pending_oid: int | None = getattr(user, "current_pending_order_id", None)
             if pending_oid is not None:
-                await redis.set(_pending_order_key(phone), str(pending_oid), ex=STATE_TTL)
+                await redis.set(_pending_order_key(org, phone), str(pending_oid), ex=STATE_TTL)
 
             pending_bid: int | None = getattr(user, "current_pending_booking_id", None)
             if pending_bid is not None:
-                await redis.set(_pending_booking_key(phone), str(pending_bid), ex=STATE_TTL)
+                await redis.set(_pending_booking_key(org, phone), str(pending_bid), ex=STATE_TTL)
 
             if state != UserState.CHATTING or pending_oid or pending_bid:
                 logger.info(
-                    "Session recovered from DB: %s state=%s order=%s booking=%s",
-                    phone, state.value, pending_oid, pending_bid,
+                    "Session recovered from DB: org=%s %s state=%s order=%s booking=%s",
+                    org, phone, state.value, pending_oid, pending_bid,
                 )
             return state
     except Exception as exc:
@@ -113,7 +139,7 @@ async def _db_recover_session(phone: str, redis: Any) -> UserState:
         return UserState.CHATTING
 
 
-async def _db_recover_pending_order(phone: str) -> int | None:
+async def _db_recover_pending_order(phone: str, organization_id: int | None) -> int | None:
     """Точечное восстановление pending_order_id из БД."""
     try:
         from sqlalchemy import select as sa_select
@@ -121,14 +147,17 @@ async def _db_recover_pending_order(phone: str) -> int | None:
         from app.db.models import User
         from app.db.session import async_session_factory
 
+        org = _effective_org(organization_id)
         async with async_session_factory() as db:
-            user = await db.scalar(sa_select(User).where(User.phone == phone))
+            user = await db.scalar(
+                sa_select(User).where(User.phone == phone, User.organization_id == org),
+            )
             return getattr(user, "current_pending_order_id", None) if user else None
     except Exception:
         return None
 
 
-async def _db_recover_pending_booking(phone: str) -> int | None:
+async def _db_recover_pending_booking(phone: str, organization_id: int | None) -> int | None:
     """Точечное восстановление pending_booking_id из БД."""
     try:
         from sqlalchemy import select as sa_select
@@ -136,8 +165,11 @@ async def _db_recover_pending_booking(phone: str) -> int | None:
         from app.db.models import User
         from app.db.session import async_session_factory
 
+        org = _effective_org(organization_id)
         async with async_session_factory() as db:
-            user = await db.scalar(sa_select(User).where(User.phone == phone))
+            user = await db.scalar(
+                sa_select(User).where(User.phone == phone, User.organization_id == org),
+            )
             return getattr(user, "current_pending_booking_id", None) if user else None
     except Exception:
         return None
@@ -145,73 +177,97 @@ async def _db_recover_pending_booking(phone: str) -> int | None:
 
 # ─── Управление состоянием пользователя ──────────────────
 
-async def get_user_state(redis: Any, phone: str) -> UserState:
+async def get_user_state(redis: Any, phone: str, organization_id: int | None = None) -> UserState:
     """Получить состояние. При Redis miss — восстановление из БД."""
-    raw = await redis.get(_state_key(phone))
+    org = _effective_org(organization_id)
+    key = _state_key(org, phone)
+    raw = await redis.get(key)
+    if raw is None:
+        raw_old = await redis.get(_legacy_state_key(phone))
+        if raw_old is not None:
+            await redis.set(key, raw_old, ex=STATE_TTL)
+            await redis.delete(_legacy_state_key(phone))
+            raw = raw_old
     if raw is not None:
         try:
             return UserState(raw)
         except ValueError:
             return UserState.CHATTING
-    return await _db_recover_session(phone, redis)
+    return await _db_recover_session(phone, redis, organization_id)
 
 
-async def set_user_state(redis: Any, phone: str, state: UserState) -> None:
+async def set_user_state(
+    redis: Any, phone: str, state: UserState, organization_id: int | None = None,
+) -> None:
     """Установить состояние с TTL 24 ч + зеркало в БД."""
-    await redis.set(_state_key(phone), state.value, ex=STATE_TTL)
-    logger.info("Состояние %s → %s", phone, state.value)
-    await _db_sync(phone, current_state=state.value)
+    org = _effective_org(organization_id)
+    await redis.set(_state_key(org, phone), state.value, ex=STATE_TTL)
+    await redis.delete(_legacy_state_key(phone))
+    logger.info("Состояние org=%s %s → %s", org, phone, state.value)
+    await _db_sync(phone, organization_id, current_state=state.value)
 
 
-async def set_pending_order(redis: Any, phone: str, order_id: int) -> None:
+async def set_pending_order(
+    redis: Any, phone: str, order_id: int, organization_id: int | None = None,
+) -> None:
     """Сохранить ID заказа, ожидающего подтверждения."""
-    await redis.set(_pending_order_key(phone), str(order_id), ex=STATE_TTL)
-    await _db_sync(phone, current_pending_order_id=order_id)
+    org = _effective_org(organization_id)
+    await redis.set(_pending_order_key(org, phone), str(order_id), ex=STATE_TTL)
+    await _db_sync(phone, organization_id, current_pending_order_id=order_id)
 
 
-async def get_pending_order(redis: Any, phone: str) -> int | None:
+async def get_pending_order(redis: Any, phone: str, organization_id: int | None = None) -> int | None:
     """Получить ID pending-заказа. При Redis miss — из БД."""
-    raw = await redis.get(_pending_order_key(phone))
+    org = _effective_org(organization_id)
+    raw = await redis.get(_pending_order_key(org, phone))
     if raw:
         return int(raw)
-    val = await _db_recover_pending_order(phone)
+    val = await _db_recover_pending_order(phone, organization_id)
     if val is not None:
-        await redis.set(_pending_order_key(phone), str(val), ex=STATE_TTL)
+        await redis.set(_pending_order_key(org, phone), str(val), ex=STATE_TTL)
     return val
 
 
-async def clear_pending_order(redis: Any, phone: str) -> None:
+async def clear_pending_order(redis: Any, phone: str, organization_id: int | None = None) -> None:
     """Очистить ожидающий заказ и вернуть состояние в CHATTING."""
-    await redis.delete(_pending_order_key(phone))
-    await set_user_state(redis, phone, UserState.CHATTING)
-    await _db_sync(phone, current_pending_order_id=None)
+    org = _effective_org(organization_id)
+    await redis.delete(_pending_order_key(org, phone))
+    await set_user_state(redis, phone, UserState.CHATTING, organization_id=organization_id)
+    await _db_sync(phone, organization_id, current_pending_order_id=None)
 
 
-async def set_pending_booking(redis: Any, phone: str, booking_id: int) -> None:
+async def set_pending_booking(
+    redis: Any, phone: str, booking_id: int, organization_id: int | None = None,
+) -> None:
     """Сохранить ID бронирования, ожидающего подтверждения."""
-    await redis.set(_pending_booking_key(phone), str(booking_id), ex=STATE_TTL)
-    await _db_sync(phone, current_pending_booking_id=booking_id)
+    org = _effective_org(organization_id)
+    await redis.set(_pending_booking_key(org, phone), str(booking_id), ex=STATE_TTL)
+    await _db_sync(phone, organization_id, current_pending_booking_id=booking_id)
 
 
-async def get_pending_booking(redis: Any, phone: str) -> int | None:
+async def get_pending_booking(redis: Any, phone: str, organization_id: int | None = None) -> int | None:
     """Получить ID pending-бронирования. При Redis miss — из БД."""
-    raw = await redis.get(_pending_booking_key(phone))
+    org = _effective_org(organization_id)
+    raw = await redis.get(_pending_booking_key(org, phone))
     if raw:
         return int(raw)
-    val = await _db_recover_pending_booking(phone)
+    val = await _db_recover_pending_booking(phone, organization_id)
     if val is not None:
-        await redis.set(_pending_booking_key(phone), str(val), ex=STATE_TTL)
+        await redis.set(_pending_booking_key(org, phone), str(val), ex=STATE_TTL)
     return val
 
 
-async def clear_pending_booking(redis: Any, phone: str) -> None:
+async def clear_pending_booking(redis: Any, phone: str, organization_id: int | None = None) -> None:
     """Очистить ожидающее бронирование и вернуть состояние в CHATTING."""
-    await redis.delete(_pending_booking_key(phone))
-    await set_user_state(redis, phone, UserState.CHATTING)
-    await _db_sync(phone, current_pending_booking_id=None)
+    org = _effective_org(organization_id)
+    await redis.delete(_pending_booking_key(org, phone))
+    await set_user_state(redis, phone, UserState.CHATTING, organization_id=organization_id)
+    await _db_sync(phone, organization_id, current_pending_booking_id=None)
 
 
-async def get_chat_history(redis: Any, phone: str) -> list[dict[str, str]]:
+async def get_chat_history(
+    redis: Any, phone: str, organization_id: int | None = None,
+) -> list[dict[str, str]]:
     """
     Получить историю последних сообщений диалога.
 
@@ -219,7 +275,7 @@ async def get_chat_history(redis: Any, phone: str) -> list[dict[str, str]]:
         Список словарей [{role: "user"/"assistant", content: "..."}],
         отсортированный хронологически (старые → новые).
     """
-    key = _history_key(phone)
+    key = _history_key(organization_id, phone)
     raw_messages = await redis.lrange(key, 0, -1)
 
     history = []
@@ -229,7 +285,7 @@ async def get_chat_history(redis: Any, phone: str) -> list[dict[str, str]]:
         except json.JSONDecodeError:
             logger.warning("Повреждённое сообщение в Redis для %s: %s", phone, raw)
 
-    logger.debug("Загружена история для %s: %d сообщений", phone, len(history))
+    logger.debug("Загружена история для org=%s %s: %d сообщений", organization_id, phone, len(history))
     return history
 
 
@@ -238,6 +294,7 @@ async def append_to_history(
     phone: str,
     role: str,
     text: str,
+    organization_id: int | None = None,
 ) -> None:
     """
     Добавить сообщение в историю диалога.
@@ -249,32 +306,37 @@ async def append_to_history(
         role: Роль отправителя — "user" или "assistant".
         text: Текст сообщения.
     """
-    key = _history_key(phone)
+    key = _history_key(organization_id, phone)
     message = json.dumps({"role": role, "content": text}, ensure_ascii=False)
 
     pipe = redis.pipeline()
     pipe.rpush(key, message)
-    # Оставляем только последние N сообщений
     pipe.ltrim(key, -MAX_HISTORY_LENGTH, -1)
-    # Продлеваем TTL при каждом сообщении
     pipe.expire(key, HISTORY_TTL)
     await pipe.execute()
 
-    logger.debug("Добавлено сообщение [%s] для %s", role, phone)
+    logger.debug("Добавлено сообщение [%s] для org=%s %s", role, organization_id, phone)
 
 
-async def clear_history(redis: Any, phone: str) -> None:
+async def clear_history(redis: Any, phone: str, organization_id: int | None = None) -> None:
     """Полностью очистить историю диалога (например, после завершения заказа)."""
-    key = _history_key(phone)
+    key = _history_key(organization_id, phone)
     await redis.delete(key)
-    logger.info("История очищена для %s", phone)
+    logger.info("История очищена для org=%s %s", organization_id, phone)
 
 
-async def purge_all_session_keys_for_phone(redis: Any, phone: str) -> None:
+async def purge_all_session_keys_for_phone(
+    redis: Any, phone: str, organization_id: int | None = None,
+) -> None:
     """
     Удалить из Redis/памяти все ключи сессии по номеру (история, state, pending).
     Вызывать при удалении пользователя из БД (например, демо-данные).
     """
+    org = _effective_org(organization_id)
     for key_fn in (_history_key, _state_key, _pending_order_key, _pending_booking_key):
-        await redis.delete(key_fn(phone))
-    logger.debug("Redis-сессия сброшена для %s", phone)
+        await redis.delete(key_fn(organization_id, phone))
+    await redis.delete(_legacy_state_key(phone))
+    await redis.delete(f"user:pending_order:{phone}")
+    await redis.delete(f"user:pending_booking:{phone}")
+    await redis.delete(f"chat:history:{phone}")
+    logger.debug("Redis-сессия сброшена для org=%s %s", org, phone)

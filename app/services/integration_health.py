@@ -4,7 +4,7 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import delete as sql_delete, func, select
+from sqlalchemy import delete as sql_delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import IntegrationEvent, IntegrationHealth
@@ -22,13 +22,21 @@ async def _get_or_create_row(db: AsyncSession) -> IntegrationHealth:
     return row
 
 
-async def _append_integration_event(db: AsyncSession, kind: str, ok: bool, message: str) -> None:
+async def _append_integration_event(
+    db: AsyncSession,
+    kind: str,
+    ok: bool,
+    message: str,
+    *,
+    organization_id: int | None = None,
+) -> None:
     """Добавить строку в журнал (с усечением хвоста при переполнении)."""
     db.add(
         IntegrationEvent(
             kind=kind[:40],
             ok=ok,
             message=(message or "")[:4000],
+            organization_id=organization_id,
         )
     )
     await db.flush()
@@ -51,6 +59,7 @@ async def record_stoplist_sync(
     error: str | None = None,
     *,
     detail: str | None = None,
+    organization_id: int | None = None,
 ) -> None:
     """Зафиксировать результат синхронизации стоп-листов (фон или кнопка в админке)."""
     row = await _get_or_create_row(db)
@@ -61,7 +70,7 @@ async def record_stoplist_sync(
         f"Стоп-листы: {'успех' if ok else 'ошибка'}"
         + (f" — {error[:300]}" if error and not ok else "")
     )
-    await _append_integration_event(db, "stoplist_sync", ok, msg)
+    await _append_integration_event(db, "stoplist_sync", ok, msg, organization_id=organization_id)
 
 
 async def record_menu_sync(
@@ -70,6 +79,7 @@ async def record_menu_sync(
     error: str | None = None,
     *,
     detail: str | None = None,
+    organization_id: int | None = None,
 ) -> None:
     """Зафиксировать результат синхронизации номенклатуры."""
     row = await _get_or_create_row(db)
@@ -80,17 +90,26 @@ async def record_menu_sync(
         f"Меню: {'успех' if ok else 'ошибка'}"
         + (f" — {error[:300]}" if error and not ok else "")
     )
-    await _append_integration_event(db, "menu_sync", ok, msg)
+    await _append_integration_event(db, "menu_sync", ok, msg, organization_id=organization_id)
 
 
-async def list_integration_events(db: AsyncSession, limit: int = 40) -> list[dict]:
+async def list_integration_events(
+    db: AsyncSession,
+    limit: int = 40,
+    *,
+    organization_id: int | None = None,
+) -> list[dict]:
     """Последние события для вкладки «Интеграции»."""
     lim = max(1, min(limit, 200))
-    res = await db.execute(
-        select(IntegrationEvent)
-        .order_by(IntegrationEvent.created_at.desc())
-        .limit(lim)
-    )
+    q = select(IntegrationEvent).order_by(IntegrationEvent.created_at.desc())
+    if organization_id is not None:
+        q = q.where(
+            or_(
+                IntegrationEvent.organization_id == organization_id,
+                IntegrationEvent.organization_id.is_(None),
+            ),
+        )
+    res = await db.execute(q.limit(lim))
     rows = res.scalars().all()
     return [
         {

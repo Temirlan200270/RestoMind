@@ -6,7 +6,6 @@
 import contextvars
 import logging
 
-from app.db.session import async_session_factory
 from app.integrations.whatsapp import send_message
 from app.services.chat_delivery import finalize_outbound_delivery
 
@@ -41,6 +40,8 @@ async def send_customer_text(
     Если открыт контекст Twilio-звонка — озвучить через REST; иначе WhatsApp.
     При outbound_chat_log_id обновляет chat_logs (sent/failed) и шлёт message_status_updated.
     """
+    from app.db.session import async_session_factory
+
     sid = current_twilio_call_sid()
     if sid:
         from app.integrations.twilio_client import twilio_speak_on_call

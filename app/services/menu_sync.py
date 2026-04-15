@@ -68,6 +68,7 @@ async def sync_menu_from_iiko(
     organization_id: str,
     *,
     only_dish_and_good: bool | None = None,
+    restomind_organization_id: int | None = None,
 ) -> dict[str, int]:
     """
     Полный цикл синхронизации: iiko API → таблица ``menu_items``.
@@ -95,7 +96,10 @@ async def sync_menu_from_iiko(
 
     products: list[dict[str, Any]] = nomenclature.get("products", [])
 
-    existing_result = await db.execute(select(MenuItem))
+    q = select(MenuItem)
+    if restomind_organization_id is not None:
+        q = q.where(MenuItem.organization_id == restomind_organization_id)
+    existing_result = await db.execute(q)
     existing_by_iiko: dict[str, MenuItem] = {
         mi.iiko_id: mi for mi in existing_result.scalars().all() if mi.iiko_id
     }
@@ -138,6 +142,7 @@ async def sync_menu_from_iiko(
             updated += 1
         else:
             item = MenuItem(
+                organization_id=restomind_organization_id,
                 iiko_id=iiko_id,
                 name=name,
                 category=category_name,
@@ -223,6 +228,7 @@ async def sync_stop_lists(
     organization_id: str,
     *,
     terminal_group_id: str | None = None,
+    menu_organization_id: int | None = None,
 ) -> dict[str, int]:
     """
     Синхронизация стоп-листов из iiko.
@@ -266,7 +272,10 @@ async def sync_stop_lists(
         len(stopped_ids),
     )
 
-    result = await db.execute(select(MenuItem))
+    qm = select(MenuItem)
+    if menu_organization_id is not None:
+        qm = qm.where(MenuItem.organization_id == menu_organization_id)
+    result = await db.execute(qm)
     all_items = result.scalars().all()
 
     stopped_count = 0

@@ -50,6 +50,12 @@ async def publish_event(event_type: str, data: dict[str, Any]) -> None:
         _broadcast_in_memory(payload)
 
     logger.debug("Event published: %s", event_type)
+    try:
+        from app.services.notification_router import notify_staff_from_event
+
+        await notify_staff_from_event(event_type, data)
+    except Exception:
+        logger.exception("Staff notification failed for %s", event_type)
 
 
 def _broadcast_in_memory(payload: str) -> None:

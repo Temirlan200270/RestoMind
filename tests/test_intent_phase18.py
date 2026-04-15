@@ -142,7 +142,7 @@ async def test_route_intent_upsell_trace_marks_accepted_on_follow_up(db_with_men
 
 @pytest.mark.asyncio
 async def test_get_open_draft_order_none_for_new_phone(db_with_menu: AsyncSession) -> None:
-    assert await get_open_draft_order(db_with_menu, "+77000000001") is None
+    assert await get_open_draft_order(db_with_menu, "+77000000001", 1) is None
 
 
 @pytest.mark.asyncio
