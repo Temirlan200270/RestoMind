@@ -18,28 +18,46 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "chat_logs",
-        sa.Column("provider_message_id", sa.String(length=128), nullable=True),
-    )
-    op.add_column(
-        "chat_logs",
-        sa.Column("delivery_status", sa.String(length=32), nullable=True),
-    )
-    op.add_column(
-        "chat_logs",
-        sa.Column("error_details", sa.JSON(), nullable=True),
-    )
-    op.add_column(
-        "chat_logs",
-        sa.Column("status_updated_at", sa.DateTime(timezone=True), nullable=True),
-    )
-    op.create_index(
-        op.f("ix_chat_logs_provider_message_id"),
-        "chat_logs",
-        ["provider_message_id"],
-        unique=False,
-    )
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    try:
+        cols = {c.get("name") for c in insp.get_columns("chat_logs")}
+    except Exception:
+        cols = set()
+
+    if "provider_message_id" not in cols:
+        op.add_column(
+            "chat_logs",
+            sa.Column("provider_message_id", sa.String(length=128), nullable=True),
+        )
+    if "delivery_status" not in cols:
+        op.add_column(
+            "chat_logs",
+            sa.Column("delivery_status", sa.String(length=32), nullable=True),
+        )
+    if "error_details" not in cols:
+        op.add_column(
+            "chat_logs",
+            sa.Column("error_details", sa.JSON(), nullable=True),
+        )
+    if "status_updated_at" not in cols:
+        op.add_column(
+            "chat_logs",
+            sa.Column("status_updated_at", sa.DateTime(timezone=True), nullable=True),
+        )
+
+    idx_name = op.f("ix_chat_logs_provider_message_id")
+    try:
+        idx = {i.get("name") for i in insp.get_indexes("chat_logs")}
+    except Exception:
+        idx = set()
+    if idx_name not in idx:
+        op.create_index(
+            idx_name,
+            "chat_logs",
+            ["provider_message_id"],
+            unique=False,
+        )
 
 
 def downgrade() -> None:
