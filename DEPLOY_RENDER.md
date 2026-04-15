@@ -22,6 +22,7 @@
 3. Укажите репозиторий и корень с `render.yaml`.
 4. Подтвердите создание ресурсов: **Web Service** `restomind` + **PostgreSQL** `restomind-db`.
 5. В интерфейсе Render задайте переменные с **sync: false** (если мастер их запросит):
+   - `SESSION_SECRET` — обязательный секрет для cookie-сессии и подписи `ws_token` (случайная длинная строка).
    - `OPENAI_API_KEY`
    - `ADMIN_PASSWORD` (и при желании смените `ADMIN_USERNAME` в Environment)
    - токены WhatsApp (`WHATSAPP_*`), когда подключите бота.
@@ -31,6 +32,20 @@
 
 ---
 
+## Зачем нужен `SESSION_SECRET` (и почему без него падает деплой)
+
+`SESSION_SECRET` используется для:
+
+- подписи cookie-сессии админки (чтобы её нельзя было подделать);
+- подписи WebSocket-токена (`ws_token`) для `/api/admin/ws`.
+
+В продакшене мы **обязательно** требуем задать `SESSION_SECRET`, чтобы:
+
+- не хранить “предсказуемый” ключ по умолчанию;
+- не допустить ситуации, когда злоумышленник подделывает сессию или токен и получает доступ к админке/чатам.
+
+На Render это проверяется автоматически, потому что наличие `DATABASE_URL` считается признаком прод-окружения.
+
 ## Вариант B: Вручную (без Blueprint)
 
 1. **New** → **PostgreSQL** — создайте БД, скопируйте **Internal Database URL** или **External**.
@@ -39,6 +54,7 @@
    - `DATABASE_URL` = вставьте URL из шага 1 (или соберите из полей, как в `.env.example`).
    - `APP_DEBUG=false`, `DB_MODE=postgres`, `REDIS_ENABLED=false` (или подключите Redis позже).
    - `SESSION_SECRET` — случайная длинная строка (`openssl rand -hex 32`).
+   - (временно, если нужно “разблокировать деплой”): `ALLOW_INSECURE_PROD_SETTINGS=true` — **небезопасно**, потом убрать.
    - `OPENAI_API_KEY`, `ADMIN_PASSWORD`, при необходимости WhatsApp/iiko.
 4. В настройках сервиса укажите **Pre-Deploy Command**: `alembic upgrade head`.
 5. **Start Command** оставьте из Dockerfile (uvicorn с `$PORT`) или пусто, если используется только `CMD` образа.

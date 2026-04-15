@@ -1,4 +1,3 @@
-/* eslint-disable max-lines */
 /**
  * RestoMind admin panel — Alpine x-data="adminApp()".
  * Подключать после Alpine и Chart.js.
@@ -81,7 +80,7 @@ function adminParseLocationHash() {
         const sp = new URLSearchParams(qs);
         const p = (sp.get('phone') || '').trim();
         phone = p || null;
-    } catch (e) {
+    } catch (_e) {
         phone = null;
     }
     return { tab: path || null, phone };
@@ -646,7 +645,7 @@ function adminMixinMenuOrdersUi() {
                 const m = window.matchMedia('(min-width: 768px)').matches;
                 this.menuCategoryChipsOpen = m;
                 this.menuToolbarExpanded = m;
-            } catch (e) {
+            } catch (_e) {
                 this.menuCategoryChipsOpen = true;
                 this.menuToolbarExpanded = true;
             }
@@ -658,7 +657,7 @@ function adminMixinMenuOrdersUi() {
             try {
                 this.$watch('stopListSearchQuery', () => this._recalcStopListFiltered());
                 this.$watch('stopListItems', () => this._recalcStopListFiltered());
-            } catch (e) {
+            } catch (_e) {
                 // no-op: на случай if Alpine $watch недоступен (не должно быть)
             }
         },
@@ -688,7 +687,7 @@ function adminMixinMenuOrdersUi() {
                 const m = window.matchMedia('(min-width: 768px)').matches;
                 this.menuCategoryChipsOpen = m;
                 this.menuToolbarExpanded = true;
-            } catch (e) {
+            } catch (_e) {
                 this.menuCategoryChipsOpen = false;
                 this.menuToolbarExpanded = true;
             }
@@ -720,7 +719,7 @@ function adminMixinMenuOrdersUi() {
                 try {
                     chart.resize();
                     chart.update('none');
-                } catch (e) { /* ignore */ }
+                } catch (_e) { /* ignore */ }
             };
             fix();
             [40, 120, 400].forEach((ms) => setTimeout(fix, ms));
@@ -731,7 +730,7 @@ function adminMixinMenuOrdersUi() {
                 });
                 ro.observe(parentEl);
                 setTimeout(() => {
-                    try { ro.disconnect(); } catch (e) { /* ignore */ }
+                    try { ro.disconnect(); } catch (_e) { /* ignore */ }
                     fix();
                 }, 1500);
             }
@@ -1080,7 +1079,7 @@ function adminMixinMenuOrdersUi() {
                 try {
                     this.initOrderRebuildFromSelected();
                     this.syncOrderPaymentFormFromSelected();
-                } catch (e) { /* ignore */ }
+                } catch (_e) { /* ignore */ }
             });
         },
 
@@ -2650,7 +2649,7 @@ function adminMixinWebSocketEvents() {
                     this.ws.onmessage = null;
                     this.ws.close();
                 }
-            } catch (e) { /* noop */ }
+            } catch (_e) { /* noop */ }
             const proto = location.protocol === 'https:' ? 'wss' : 'ws';
             const url = `${proto}://${location.host}/api/admin/ws?token=${encodeURIComponent(this.wsToken)}`;
 
@@ -3011,10 +3010,10 @@ function adminMixinLiveChat() {
             const url = `${path}#${frag}`;
             try {
                 window.history.replaceState(null, '', url);
-            } catch (e) {
+            } catch (_e) {
                 try {
                     window.location.hash = frag;
-                } catch (e2) { /* ignore */ }
+                } catch (_e2) { /* ignore */ }
             }
         },
 
@@ -3219,7 +3218,7 @@ function adminMixinLiveChat() {
                 this.activeChatState = targetState;
                 const idx = this.chatList.findIndex(c => c.phone === phone);
                 if (idx >= 0) this.chatList[idx].state = targetState;
-            } catch (e) {
+            } catch (_e) {
                 this.demoToastMessage = 'Не удалось изменить режим диалога. Проверьте соединение.';
                 setTimeout(() => { this.demoToastMessage = ''; }, 4500);
             }
@@ -3292,7 +3291,7 @@ function adminMixinLiveChat() {
                 });
                 if (!res.ok) throw new Error(`send_message ${res.status}`);
                 this.scrollChatToBottom();
-            } catch (e) {
+            } catch (_e) {
                 this.operatorInput = text;
                 void this.showUiAlert('Сообщение не отправлено. Текст возвращён в поле.', 'Ошибка');
             }
@@ -3350,13 +3349,13 @@ function adminMixinDataChartsSettings() {
             if (this.currentTab !== 'dashboard' && charts.dashboard) {
                 try {
                     charts.dashboard.destroy();
-                } catch (e) { /* ignore */ }
+                } catch (_e) { /* ignore */ }
                 charts.dashboard = null;
             }
             if (this.currentTab !== 'analytics' && charts.analytics) {
                 try {
                     charts.analytics.destroy();
-                } catch (e) { /* ignore */ }
+                } catch (_e) { /* ignore */ }
                 charts.analytics = null;
             }
             this.tabDataLoading = false;
@@ -4231,7 +4230,7 @@ function adminMixinDataChartsSettings() {
                 if (charts.analytics) {
                     try {
                         charts.analytics.destroy();
-                    } catch (e) { /* ignore */ }
+                    } catch (_e) { /* ignore */ }
                     charts.analytics = null;
                 }
                 return;
@@ -4241,7 +4240,7 @@ function adminMixinDataChartsSettings() {
             if (charts.analytics) {
                 try {
                     charts.analytics.destroy();
-                } catch (e) { /* ignore */ }
+                } catch (_e) { /* ignore */ }
                 charts.analytics = null;
             }
 
@@ -4350,7 +4349,7 @@ function adminMixinDataChartsSettings() {
             if (charts.dashboard) {
                 try {
                     charts.dashboard.destroy();
-                } catch (e) { /* ignore */ }
+                } catch (_e) { /* ignore */ }
                 charts.dashboard = null;
             }
 
@@ -4462,7 +4461,7 @@ function adminMixinDataChartsSettings() {
                 } else {
                     this.testMessages.push({ role: 'assistant', text: 'Ошибка: сервер вернул ' + status });
                 }
-            } catch (e) {
+            } catch (_e) {
                 this.testMessages.push({ role: 'assistant', text: 'Ошибка: не удалось получить ответ.' });
             }
             this.testLoading = false;
@@ -4508,3 +4507,5 @@ function adminApp() {
         adminMixinDataChartsSettings(),
     );
 }
+
+window.adminApp = adminApp;

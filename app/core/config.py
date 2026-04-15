@@ -4,10 +4,13 @@
 """
 
 import os
+import logging
 from typing import Self
 
 from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -370,6 +373,12 @@ class Settings(BaseSettings):
     # --- Сессии админки (cookie) и подпись WS-токена ---
     # В продакшене задайте длинную случайную строку (openssl rand -hex 32)
     session_secret: str = ""
+    # Временный аварийный флаг: разрешить старт без SESSION_SECRET / с дефолтными кредами.
+    # Нужен только чтобы "не блокировать деплой", затем выключить и задать нормальные секреты.
+    allow_insecure_prod_settings: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("ALLOW_INSECURE_PROD_SETTINGS", "allow_insecure_prod_settings"),
+    )
 
     @model_validator(mode="after")
     def _postgres_if_database_url(self) -> Self:
@@ -412,9 +421,22 @@ class Settings(BaseSettings):
         )
         if not self.app_debug and is_prod_like:
             if not self.session_secret.strip():
-                raise ValueError("SESSION_SECRET обязателен в продакшене (задайте длинную случайную строку).")
+                if not self.allow_insecure_prod_settings:
+                    raise ValueError("SESSION_SECRET обязателен в продакшене (задайте длинную случайную строку).")
+                logger.warning(
+                    "SECURITY WARNING: SESSION_SECRET не задан в prod-like окружении. "
+                    "Разрешено только потому, что включён ALLOW_INSECURE_PROD_SETTINGS=true. "
+                    "Сессии будут подписываться производным ключом (не для продакшена)."
+                )
             if (self.admin_username or "").strip().lower() == "admin" and (self.admin_password or "").strip() == "restomind":
-                raise ValueError("ADMIN_USERNAME/ADMIN_PASSWORD должны быть изменены в продакшене (дефолтные небезопасны).")
+                if not self.allow_insecure_prod_settings:
+                    raise ValueError(
+                        "ADMIN_USERNAME/ADMIN_PASSWORD должны быть изменены в продакшене (дефолтные небезопасны)."
+                    )
+                logger.warning(
+                    "SECURITY WARNING: Используются дефолтные ADMIN_USERNAME/ADMIN_PASSWORD в prod-like окружении. "
+                    "Разрешено только потому, что включён ALLOW_INSECURE_PROD_SETTINGS=true."
+                )
         return self
 
     @property

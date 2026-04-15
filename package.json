@@ -7,9 +7,13 @@
     "stagewise:bridge": "stagewise -b",
     "dev:stagewise": "stagewise -- python -m uvicorn app.main:app --reload",
     "build:admin-css": "tailwindcss -i ./src/css/admin-input.css -o ./app/static/css/admin.css --minify",
-    "check:admin-js": "node --check ./app/static/js/admin-app.js"
+    "check:admin-js": "node --check ./app/static/js/admin-app.js",
+    "lint:js": "eslint \"app/static/js/**/*.js\""
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "eslint": "^9.39.4",
+    "globals": "^17.5.0",
     "stagewise": "0.11.1",
     "tailwindcss": "^3.4.17"
   }
