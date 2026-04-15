@@ -20,49 +20,82 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     bind = op.get_bind()
     is_sqlite = bind.dialect.name == "sqlite"
+    insp = sa.inspect(bind)
 
-    op.add_column(
-        "organizations",
-        sa.Column("slug", sa.String(length=120), server_default="", nullable=False),
-    )
-    op.add_column(
-        "organizations",
-        sa.Column("timezone", sa.String(length=64), server_default="UTC", nullable=False),
-    )
-    op.add_column(
-        "organizations",
-        sa.Column("currency", sa.String(length=8), server_default="KZT", nullable=False),
-    )
-    op.add_column(
-        "organizations",
-        sa.Column("telegram_ops_chat_id", sa.String(length=32), server_default="", nullable=False),
-    )
-    op.create_index(op.f("ix_organizations_slug"), "organizations", ["slug"], unique=False)
+    def _cols(table: str) -> set[str]:
+        try:
+            return {c.get("name") for c in insp.get_columns(table)}
+        except Exception:
+            return set()
 
-    op.create_table(
-        "staff_users",
-        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column("organization_id", sa.Integer(), nullable=False),
-        sa.Column("email", sa.String(length=255), nullable=False),
-        sa.Column("password_hash", sa.String(length=512), nullable=False),
-        sa.Column("role", sa.String(length=32), server_default="admin", nullable=False),
-        sa.Column("is_active", sa.Boolean(), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=True),
-        sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"]),
-        sa.PrimaryKeyConstraint("id"),
-    )
-    op.create_index(op.f("ix_staff_users_organization_id"), "staff_users", ["organization_id"], unique=False)
-    op.create_index(op.f("ix_staff_users_email"), "staff_users", ["email"], unique=True)
+    def _has_index(table: str, name: str) -> bool:
+        try:
+            return any((i.get("name") == name) for i in insp.get_indexes(table))
+        except Exception:
+            return False
 
-    op.add_column(
-        "knowledge_items",
-        sa.Column(
-            "knowledge_kind",
-            sa.String(length=32),
-            server_default="facility",
-            nullable=False,
-        ),
-    )
+    def _has_fk(table: str, name: str) -> bool:
+        try:
+            return any((fk.get("name") == name) for fk in insp.get_foreign_keys(table))
+        except Exception:
+            return False
+
+    org_cols = _cols("organizations")
+    if "slug" not in org_cols:
+        op.add_column(
+            "organizations",
+            sa.Column("slug", sa.String(length=120), server_default="", nullable=False),
+        )
+    if "timezone" not in org_cols:
+        op.add_column(
+            "organizations",
+            sa.Column("timezone", sa.String(length=64), server_default="UTC", nullable=False),
+        )
+    if "currency" not in org_cols:
+        op.add_column(
+            "organizations",
+            sa.Column("currency", sa.String(length=8), server_default="KZT", nullable=False),
+        )
+    if "telegram_ops_chat_id" not in org_cols:
+        op.add_column(
+            "organizations",
+            sa.Column("telegram_ops_chat_id", sa.String(length=32), server_default="", nullable=False),
+        )
+    ix_org_slug = op.f("ix_organizations_slug")
+    if not _has_index("organizations", ix_org_slug):
+        op.create_index(ix_org_slug, "organizations", ["slug"], unique=False)
+
+    if not insp.has_table("staff_users"):
+        op.create_table(
+            "staff_users",
+            sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
+            sa.Column("organization_id", sa.Integer(), nullable=False),
+            sa.Column("email", sa.String(length=255), nullable=False),
+            sa.Column("password_hash", sa.String(length=512), nullable=False),
+            sa.Column("role", sa.String(length=32), server_default="admin", nullable=False),
+            sa.Column("is_active", sa.Boolean(), nullable=False),
+            sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=True),
+            sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"]),
+            sa.PrimaryKeyConstraint("id"),
+        )
+    ix_staff_org = op.f("ix_staff_users_organization_id")
+    if insp.has_table("staff_users") and not _has_index("staff_users", ix_staff_org):
+        op.create_index(ix_staff_org, "staff_users", ["organization_id"], unique=False)
+    ix_staff_email = op.f("ix_staff_users_email")
+    if insp.has_table("staff_users") and not _has_index("staff_users", ix_staff_email):
+        op.create_index(ix_staff_email, "staff_users", ["email"], unique=True)
+
+    kb_cols = _cols("knowledge_items")
+    if "knowledge_kind" not in kb_cols:
+        op.add_column(
+            "knowledge_items",
+            sa.Column(
+                "knowledge_kind",
+                sa.String(length=32),
+                server_default="facility",
+                nullable=False,
+            ),
+        )
 
     op.add_column(
         "integration_events",
@@ -148,10 +181,12 @@ def upgrade() -> None:
         ),
     )
 
-    op.add_column(
-        "chat_logs",
-        sa.Column("organization_id", sa.Integer(), nullable=True),
-    )
+    chat_cols = _cols("chat_logs")
+    if "organization_id" not in chat_cols:
+        op.add_column(
+            "chat_logs",
+            sa.Column("organization_id", sa.Integer(), nullable=True),
+        )
     op.execute(
         sa.text(
             "UPDATE chat_logs SET organization_id = (SELECT organization_id FROM users WHERE users.id = chat_logs.user_id) "
@@ -159,40 +194,53 @@ def upgrade() -> None:
         ),
     )
 
-    op.alter_column(
-        "chat_logs",
-        "organization_id",
-        existing_type=sa.Integer(),
-        nullable=False,
-    )
-    op.create_foreign_key(
-        "fk_chat_logs_organization_id",
-        "chat_logs",
-        "organizations",
-        ["organization_id"],
-        ["id"],
-    )
-    op.create_index(
-        op.f("ix_chat_logs_organization_id"),
-        "chat_logs",
-        ["organization_id"],
-        unique=False,
-    )
+    # Если колонка уже была создана и заполнена ранее — просто гарантируем ограничения/индексы.
+    if "organization_id" in _cols("chat_logs"):
+        try:
+            op.alter_column(
+                "chat_logs",
+                "organization_id",
+                existing_type=sa.Integer(),
+                nullable=False,
+            )
+        except Exception:
+            pass
+        fk_chat = "fk_chat_logs_organization_id"
+        if not _has_fk("chat_logs", fk_chat):
+            try:
+                op.create_foreign_key(
+                    fk_chat,
+                    "chat_logs",
+                    "organizations",
+                    ["organization_id"],
+                    ["id"],
+                )
+            except Exception:
+                pass
+        ix_chat_org = op.f("ix_chat_logs_organization_id")
+        if not _has_index("chat_logs", ix_chat_org):
+            op.create_index(
+                ix_chat_org,
+                "chat_logs",
+                ["organization_id"],
+                unique=False,
+            )
 
-    op.create_table(
-        "recommendation_events",
-        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column("organization_id", sa.Integer(), nullable=False),
-        sa.Column("order_id", sa.Integer(), nullable=False),
-        sa.Column("item_iiko_id", sa.String(length=100), nullable=True),
-        sa.Column("item_name", sa.String(length=255), nullable=True),
-        sa.Column("accepted", sa.Boolean(), nullable=False),
-        sa.Column("reasoning", sa.Text(), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=True),
-        sa.ForeignKeyConstraint(["order_id"], ["orders.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"]),
-        sa.PrimaryKeyConstraint("id"),
-    )
+    if not insp.has_table("recommendation_events"):
+        op.create_table(
+            "recommendation_events",
+            sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
+            sa.Column("organization_id", sa.Integer(), nullable=False),
+            sa.Column("order_id", sa.Integer(), nullable=False),
+            sa.Column("item_iiko_id", sa.String(length=100), nullable=True),
+            sa.Column("item_name", sa.String(length=255), nullable=True),
+            sa.Column("accepted", sa.Boolean(), nullable=False),
+            sa.Column("reasoning", sa.Text(), nullable=True),
+            sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=True),
+            sa.ForeignKeyConstraint(["order_id"], ["orders.id"], ondelete="CASCADE"),
+            sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"]),
+            sa.PrimaryKeyConstraint("id"),
+        )
     op.create_index(
         op.f("ix_recommendation_events_organization_id"),
         "recommendation_events",
