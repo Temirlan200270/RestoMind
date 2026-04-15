@@ -6,6 +6,7 @@ Lifespan управляет жизненным циклом подключени
 import asyncio
 import logging
 import logging.handlers
+import os
 from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
 from pathlib import Path
@@ -560,10 +561,13 @@ async def deep_health_check() -> dict:
 @app.get("/admin", response_class=HTMLResponse, tags=["Admin Panel"])
 async def admin_page(request: Request) -> HTMLResponse:
     """Главная страница — админ-панель."""
+    git_sha = (os.environ.get("RENDER_GIT_COMMIT") or os.environ.get("GIT_COMMIT") or "").strip()
+    sha7 = git_sha[:7] if git_sha else ""
+    asset_ver = settings.app_version + (f"-{sha7}" if sha7 else "")
     response = templates.TemplateResponse(
         request,
         "admin.html",
-        {"asset_ver": settings.app_version},
+        {"asset_ver": asset_ver},
     )
     # Чтобы браузер не держал устаревший HTML (Alpine/шаблон после деплоя).
     response.headers["Cache-Control"] = "no-store, max-age=0, must-revalidate"
