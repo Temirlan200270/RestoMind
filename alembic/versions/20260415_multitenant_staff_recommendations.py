@@ -156,7 +156,7 @@ def upgrade() -> None:
         sa.text(
             "INSERT INTO organizations (name, slug, timezone, currency, iiko_api_login, "
             "iiko_organization_id, whatsapp_phone_number_id, telegram_ops_chat_id, is_active) "
-            "SELECT 'Default', 'default', 'UTC', 'KZT', '', '', '', '', 1 "
+            "SELECT 'Default', 'default', 'UTC', 'KZT', '', '', '', '', TRUE "
             "WHERE NOT EXISTS (SELECT 1 FROM organizations LIMIT 1)",
         ),
     )
