@@ -2462,12 +2462,17 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                 // стоп-лист из уже загруженного меню (available_only=false).
                 if (apiItems.length > 0) {
                     this.stopListItems = apiItems;
+                    this.demoToastMessage = `Стоп-лист: ${apiItems.length} поз.`;
+                    setTimeout(() => { this.demoToastMessage = ''; }, 4000);
                     return;
                 }
                 if (!Array.isArray(this.menuItems) || this.menuItems.length === 0) {
                     await this.loadMenu();
                 }
-                this.stopListItems = (this.menuItems || []).filter((i) => i && i.is_available === false);
+                const derived = (this.menuItems || []).filter((i) => i && i.is_available === false);
+                this.stopListItems = derived;
+                this.demoToastMessage = `Стоп-лист: ${derived.length} поз.`;
+                setTimeout(() => { this.demoToastMessage = ''; }, 4000);
             } catch (e) {
                 console.error('[admin] loadStopList', e);
                 this.stopListItems = [];
