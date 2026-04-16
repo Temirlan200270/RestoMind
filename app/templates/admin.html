@@ -1,3 +1,4 @@
+{% from "_order_iiko_error.html" import iiko_error %}
 <!DOCTYPE html>
 <html lang="ru" x-data="adminApp()" x-init="init()" @keydown.window="handleGlobalKeydown($event)">
 <head>
@@ -41,6 +42,12 @@
                 <span x-show="!loginLoading">Войти</span>
                 <span x-show="loginLoading" x-cloak>Вход...</span>
             </button>
+            <div class="text-center text-sm text-gray-500">
+                Ещё нет аккаунта?
+                <a href="/onboarding" class="font-semibold text-brand-700 hover:text-brand-800 underline underline-offset-2">
+                    Зарегистрировать ресторан
+                </a>
+            </div>
         </form>
     </div>
 </div>
@@ -61,7 +68,7 @@
                 <div class="w-10 h-10 rounded-xl bg-brand-500 flex items-center justify-center text-xl font-bold shrink-0">R</div>
                 <div class="min-w-0">
                     <div class="font-bold text-lg leading-tight">RestoMind</div>
-                    <div class="text-xs text-blue-300 opacity-80">AI-оператор ресторана</div>
+                    <div class="text-xs text-blue-300 opacity-80">Панель управления рестораном</div>
                 </div>
             </div>
             <button type="button" class="md:hidden p-2 rounded-lg text-blue-200 hover:bg-white/10 shrink-0" @click="sidebarOpen = false" aria-label="Закрыть меню">&times;</button>
@@ -779,6 +786,7 @@
                             <option value="">Все статусы</option>
                             <option value="draft">Черновик</option>
                             <option value="confirmed">Подтверждён</option>
+                            <option value="sending_to_iiko">Отправляется на кухню</option>
                         <option value="sent_to_iiko">В iiko</option>
                             <option value="completed">Завершён</option>
                             <option value="cancelled">Отменён</option>
@@ -856,13 +864,7 @@
                                     <p class="text-[10px] mt-2 font-semibold leading-tight"
                                         :class="orderTimerWarn(order, 'draft') ? 'text-red-600' : 'text-gray-500'"
                                         x-text="orderTimerText(order, 'draft')"></p>
-                                    <div x-show="order.iiko_last_error" class="mt-3 flex gap-2.5 rounded-xl border-2 border-red-400 bg-red-50/95 px-3 py-2.5 shadow-inner" role="alert">
-                                        <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-red-600 text-white text-base font-black leading-none shadow-sm" aria-hidden="true">!</div>
-                                        <div class="min-w-0">
-                                            <p class="text-[10px] font-bold uppercase tracking-wider text-red-900">Ошибка iiko</p>
-                                            <p class="text-xs text-red-900 font-semibold leading-snug break-words mt-0.5" x-text="order.iiko_last_error"></p>
-                                        </div>
-                                    </div>
+                                    {{ iiko_error('order', 'mt-3') }}
                                 </div>
                             </template>
                             <div x-show="kanbanDraft.length === 0" class="text-center py-8 text-gray-400 text-xs">Пусто</div>
@@ -904,13 +906,7 @@
                                     <p class="text-[10px] mt-2 font-semibold leading-tight"
                                         :class="orderTimerWarn(order, 'confirmed') ? 'text-red-600' : 'text-gray-500'"
                                         x-text="orderTimerText(order, 'confirmed')"></p>
-                                    <div x-show="order.iiko_last_error" class="mt-3 flex gap-2.5 rounded-xl border-2 border-red-400 bg-red-50/95 px-3 py-2.5 shadow-inner" role="alert">
-                                        <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-red-600 text-white text-base font-black leading-none shadow-sm" aria-hidden="true">!</div>
-                                        <div class="min-w-0">
-                                            <p class="text-[10px] font-bold uppercase tracking-wider text-red-900">Ошибка iiko</p>
-                                            <p class="text-xs text-red-900 font-semibold leading-snug break-words mt-0.5" x-text="order.iiko_last_error"></p>
-                                        </div>
-                                    </div>
+                                    {{ iiko_error('order', 'mt-3') }}
                                 </div>
                             </template>
                             <div x-show="kanbanConfirmed.length === 0" class="text-center py-8 text-gray-400 text-xs">Пусто</div>
@@ -952,13 +948,7 @@
                                     <p class="text-[10px] mt-2 font-semibold leading-tight"
                                         :class="orderTimerWarn(order, 'sent') ? 'text-red-600' : 'text-gray-500'"
                                         x-text="orderTimerText(order, 'sent')"></p>
-                                    <div x-show="order.iiko_last_error" class="mt-3 flex gap-2.5 rounded-xl border-2 border-red-400 bg-red-50/95 px-3 py-2.5 shadow-inner" role="alert">
-                                        <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-red-600 text-white text-base font-black leading-none shadow-sm" aria-hidden="true">!</div>
-                                        <div class="min-w-0">
-                                            <p class="text-[10px] font-bold uppercase tracking-wider text-red-900">Ошибка iiko</p>
-                                            <p class="text-xs text-red-900 font-semibold leading-snug break-words mt-0.5" x-text="order.iiko_last_error"></p>
-                                        </div>
-                                    </div>
+                                    {{ iiko_error('order', 'mt-3') }}
                                 </div>
                             </template>
                             <div x-show="kanbanSent.length === 0" class="text-center py-8 text-gray-400 text-xs">Пусто</div>
@@ -1019,13 +1009,7 @@
                                         <td class="px-5 py-4 font-semibold" x-text="fmt.money(order.total_price)"></td>
                                         <td class="px-5 py-4">
                                             <span :class="statusConfig[order.status]?.class || 'bg-gray-100 text-gray-600'" x-text="statusConfig[order.status]?.label || order.status" class="px-2.5 py-1 rounded-full text-xs font-medium"></span>
-                                            <div x-show="order.iiko_last_error" class="mt-2 flex gap-2 rounded-xl border-2 border-red-400 bg-red-50/95 px-2.5 py-2" role="alert">
-                                                <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-red-600 text-white text-sm font-black" aria-hidden="true">!</div>
-                                                <div class="min-w-0">
-                                                    <p class="text-[10px] font-bold uppercase tracking-wider text-red-900">Ошибка iiko</p>
-                                                    <p class="text-xs text-red-900 font-semibold leading-snug break-words" x-text="order.iiko_last_error"></p>
-                                                </div>
-                                            </div>
+                                            {{ iiko_error('order', 'mt-2') }}
                                         </td>
                                         <td class="px-5 py-4 text-gray-500" x-text="fmt.date(order.created_at)"></td>
                                     </tr>
@@ -1760,11 +1744,11 @@
                 </div>
             </div>
 
-            <!-- ========== ИНТЕГРАЦИИ ========== -->
+            <!-- ========== ПОДКЛЮЧЕНИЯ ========== -->
             <div x-show="currentTab === 'integrations'" x-cloak class="fade-in max-w-3xl">
                 <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
-                    <h3 class="font-semibold text-lg text-gray-900 mb-1">Связь с внешними сервисами</h3>
-                    <p class="text-sm text-gray-500 mb-6">Индикаторы по настройкам филиала или .env; стоп-лист — при старте сервера и каждые ~15 мин (по всем филиалам с ключом).</p>
+                    <h3 class="font-semibold text-lg text-gray-900 mb-1">Подключения</h3>
+                    <p class="text-sm text-gray-500 mb-6">Подключите кассу и WhatsApp. Синхронизация меню и наличия выполняется автоматически.</p>
 
                     <div class="rounded-xl border border-slate-200 bg-slate-50/50 p-4 mb-6">
                         <label class="flex items-start gap-3 cursor-pointer select-none">
@@ -1780,26 +1764,26 @@
                     </div>
 
                     <div class="rounded-xl border border-brand-100 bg-brand-50/40 p-4 mb-6">
-                        <h4 class="text-sm font-bold text-gray-900 mb-2">Подключить iiko (без деплоя)</h4>
-                        <p class="text-xs text-gray-600 mb-3">Вставьте <strong>apiLogin</strong> из iiko Cloud — не логин/пароль от веб-интерфейса.</p>
+                        <h4 class="text-sm font-bold text-gray-900 mb-2">Подключить кассу (iiko)</h4>
+                        <p class="text-xs text-gray-600 mb-3">Вставьте ключ из iiko Cloud. Мы проверим его и импортируем меню.</p>
                         <div class="space-y-3 max-w-xl">
-                            <input type="password" autocomplete="off" x-model="iikoOnboardApiLogin" placeholder="API-ключ (apiLogin)"
+                            <input type="password" autocomplete="off" x-model="iikoOnboardApiLogin" placeholder="Ключ iiko Cloud"
                                 class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm font-mono">
                             <div class="flex flex-wrap gap-2">
                                 <button type="button" @click="iikoVerifyOnboard()" :disabled="iikoOnboardVerifyLoading"
                                     class="px-4 py-2 rounded-xl bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 disabled:opacity-40">
-                                    <span x-show="!iikoOnboardVerifyLoading">Проверить ключ</span>
+                                    <span x-show="!iikoOnboardVerifyLoading">Проверить</span>
                                     <span x-show="iikoOnboardVerifyLoading" x-cloak>Запрос…</span>
                                 </button>
                             </div>
                             <div x-show="iikoOnboardOrgs.length" x-cloak class="space-y-2">
-                                <label class="block text-[11px] font-semibold text-gray-500 uppercase">Организация в iiko</label>
+                                <label class="block text-[11px] font-semibold text-gray-500 uppercase">Филиал в iiko</label>
                                 <select x-model="iikoOnboardSelectedOrg" class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
                                     <template x-for="o in iikoOnboardOrgs" :key="o.id">
                                         <option :value="o.id" x-text="o.name + ' (' + o.id.slice(0,8) + '…)'"></option>
                                     </template>
                                 </select>
-                                <input type="text" x-model="iikoOnboardTerminal" placeholder="Terminal group UUID (опционально)"
+                                <input type="text" x-model="iikoOnboardTerminal" placeholder="ID терминальной группы (опционально)"
                                     class="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs font-mono">
                                 <button type="button" @click="iikoCompleteOnboard()" :disabled="iikoOnboardSetupLoading"
                                     class="px-4 py-2 rounded-xl bg-slate-800 text-white text-sm font-semibold hover:bg-slate-900 disabled:opacity-40">
@@ -1808,7 +1792,7 @@
                                 </button>
                             </div>
                             <p class="text-[10px] text-amber-800" x-show="integrationStatus.iiko_secrets_encrypt_ready === false">
-                                Для шифрования ключа в БД задайте <code class="bg-white px-1 rounded">APP_SECRETS_FERNET_KEY</code> в .env.
+                                Ключ можно хранить защищённо (шифрование). Если администратор сервера не включил шифрование, ключ сохранится как есть.
                             </p>
                         </div>
                     </div>
@@ -2415,6 +2399,99 @@
                             Бот определит намерение (заказ, бронь, вопрос) и ответит структурированно.
                         </div>
                     </details>
+                </div>
+            </div>
+
+            <!-- ========== КОМАНДА ========== -->
+            <div x-show="currentTab === 'team'" x-cloak class="fade-in max-w-3xl">
+                <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
+                    <h3 class="font-semibold text-lg text-gray-900 mb-1">Команда</h3>
+                    <p class="text-sm text-gray-500 mb-6">Добавляйте сотрудников и выдавайте доступ к панели управления.</p>
+
+                    <div class="grid sm:grid-cols-2 gap-4">
+                        <div class="sm:col-span-2">
+                            <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Email сотрудника</label>
+                            <input type="email" x-model="teamNewEmail" autocomplete="off"
+                                placeholder="employee@restaurant.com"
+                                class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Роль</label>
+                            <select x-model="teamNewRole" class="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm bg-white">
+                                <option value="operator">Сотрудник</option>
+                                <option value="admin">Администратор</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Пароль (опционально)</label>
+                            <input type="text" x-model="teamNewPassword" autocomplete="off"
+                                placeholder="Если пусто — создадим временный"
+                                class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+                        </div>
+                    </div>
+
+                    <div class="mt-5 flex items-center gap-3 flex-wrap">
+                        <button type="button" @click="createTeamMember()" :disabled="teamCreateLoading"
+                            class="px-5 py-3 rounded-xl bg-brand-600 text-white font-semibold text-sm hover:bg-brand-700 transition disabled:opacity-50">
+                            <span x-show="!teamCreateLoading">Добавить сотрудника</span>
+                            <span x-show="teamCreateLoading" x-cloak>Сохраняем…</span>
+                        </button>
+                        <button type="button" @click="loadTeam()" :disabled="teamLoading"
+                            class="px-5 py-3 rounded-xl border border-gray-200 bg-white text-gray-800 font-semibold text-sm hover:bg-gray-50 transition disabled:opacity-50">
+                            Обновить список
+                        </button>
+                    </div>
+
+                    <div class="mt-4" x-show="teamTempPassword" x-cloak>
+                        <div class="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
+                            <div class="font-semibold text-amber-900">Временный пароль создан</div>
+                            <div class="text-sm text-amber-800 mt-1">
+                                Передайте сотруднику пароль (показывается один раз):
+                                <span class="font-mono font-semibold" x-text="teamTempPassword"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                    <div class="flex items-center justify-between gap-3 mb-4">
+                        <h4 class="font-semibold text-gray-900">Сотрудники</h4>
+                        <div class="text-xs text-gray-500" x-show="teamLoading" x-cloak>Загрузка…</div>
+                    </div>
+
+                    <div x-show="teamError" x-cloak class="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" x-text="teamError"></div>
+
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full text-sm">
+                            <thead class="text-xs uppercase tracking-wide text-gray-500 bg-gray-50">
+                                <tr>
+                                    <th class="text-left px-3 py-2">Email</th>
+                                    <th class="text-left px-3 py-2">Роль</th>
+                                    <th class="text-left px-3 py-2">Активен</th>
+                                    <th class="text-left px-3 py-2">Создан</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="u in teamUsers" :key="'staff-' + u.id">
+                                    <tr class="border-b border-gray-100">
+                                        <td class="px-3 py-2 font-medium text-gray-900" x-text="u.email"></td>
+                                        <td class="px-3 py-2 text-gray-700" x-text="u.role === 'admin' ? 'Администратор' : 'Сотрудник'"></td>
+                                        <td class="px-3 py-2 text-gray-700">
+                                            <span class="inline-flex items-center gap-2">
+                                                <span class="h-2 w-2 rounded-full" :class="u.is_active ? 'bg-emerald-500' : 'bg-gray-300'"></span>
+                                                <span x-text="u.is_active ? 'да' : 'нет'"></span>
+                                            </span>
+                                        </td>
+                                        <td class="px-3 py-2 text-gray-500" x-text="u.created_at ? fmt.date(u.created_at) : '—'"></td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div x-show="!teamLoading && teamUsers.length === 0" x-cloak class="text-center py-10 text-gray-500">
+                        Пока нет сотрудников. Добавьте первого — и выдайте доступ к панели.
+                    </div>
                 </div>
             </div>
 

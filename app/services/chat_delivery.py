@@ -79,7 +79,7 @@ async def finalize_outbound_delivery(
     *,
     provider_message_id: str | None = None,
     error_details: dict[str, Any] | None = None,
-) -> None:
+) -> dict[str, Any] | None:
     """
     После отправки клиенту (WhatsApp Graph API или успешный Twilio Say): sent или failed.
     Для WhatsApp вебхук statuses позже может поднять до delivered/read.
@@ -101,15 +101,16 @@ async def finalize_outbound_delivery(
             log.error_details = error_details
     log.status_updated_at = now
     await db.flush()
-    if phone_s:
-        await publish_message_status_updated(
-            phone_s,
-            chat_log_id,
-            log.delivery_status or "",
-            provider_message_id=log.provider_message_id,
-            error_details=log.error_details if isinstance(log.error_details, dict) else None,
-            organization_id=int(log.organization_id) if log.organization_id is not None else None,
-        )
+    if not phone_s:
+        return None
+    return {
+        "phone": phone_s,
+        "chat_log_id": chat_log_id,
+        "delivery_status": log.delivery_status or "",
+        "provider_message_id": log.provider_message_id,
+        "error_details": log.error_details if isinstance(log.error_details, dict) else None,
+        "organization_id": int(log.organization_id) if log.organization_id is not None else None,
+    }
 
 
 async def apply_whatsapp_status_webhook(
@@ -117,7 +118,7 @@ async def apply_whatsapp_status_webhook(
     provider_message_id: str,
     meta_status: str,
     errors: Any,
-) -> None:
+) -> dict[str, Any] | None:
     """Обновление по вебхуку statuses от Meta."""
     mid = (provider_message_id or "").strip()
     if not mid:
@@ -139,7 +140,7 @@ async def apply_whatsapp_status_webhook(
     row = result.first()
     if row is None:
         logger.debug("WhatsApp status: нет chat_logs для wamid=%s", mid[:24])
-        return
+        return None
     log, phone = row
     phone_s = (phone or "").strip()
     old = log.delivery_status
@@ -149,29 +150,31 @@ async def apply_whatsapp_status_webhook(
             log.error_details = {"errors": errors} if not isinstance(errors, dict) else errors
         log.status_updated_at = datetime.now(timezone.utc)
         await db.flush()
-        if phone_s:
-            await publish_message_status_updated(
-                phone_s,
-                log.id,
-                "failed",
-                provider_message_id=mid,
-                error_details=log.error_details,
-                organization_id=int(log.organization_id) if log.organization_id is not None else None,
-            )
-        return
+        if not phone_s:
+            return None
+        return {
+            "phone": phone_s,
+            "chat_log_id": int(log.id),
+            "delivery_status": "failed",
+            "provider_message_id": mid,
+            "error_details": log.error_details,
+            "organization_id": int(log.organization_id) if log.organization_id is not None else None,
+        }
 
     if not should_upgrade_delivery_status(old, norm):
-        return
+        return None
     log.delivery_status = norm
     if norm != "failed":
         log.error_details = None
     log.status_updated_at = datetime.now(timezone.utc)
     await db.flush()
-    if phone_s:
-        await publish_message_status_updated(
-            phone_s,
-            log.id,
-            norm,
-            provider_message_id=mid,
-            organization_id=int(log.organization_id) if log.organization_id is not None else None,
-        )
+    if not phone_s:
+        return None
+    return {
+        "phone": phone_s,
+        "chat_log_id": int(log.id),
+        "delivery_status": norm,
+        "provider_message_id": mid,
+        "error_details": None,
+        "organization_id": int(log.organization_id) if log.organization_id is not None else None,
+    }

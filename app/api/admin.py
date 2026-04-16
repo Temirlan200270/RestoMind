@@ -23,7 +23,7 @@ from sqlalchemy.orm import joinedload
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
-from app.core.passwords import verify_password
+from app.core.passwords import hash_password, verify_password
 from app.db.models import (
     Booking,
     ChatLog,
@@ -38,6 +38,7 @@ from app.db.models import (
     Organization,
     PackagingRule,
     PaymentEvent,
+    StaffRole,
     StaffUser,
     UpsellRule,
     User,
@@ -67,6 +68,7 @@ from app.services.dialog_mgr import (
     set_pending_booking,
     set_pending_order,
     set_user_state,
+    update_user_session_fields_in_db,
 )
 from app.services.events import publish_event, subscribe_events
 from app.services.booking_halls import BOOKING_HALL_KEYS, BOOKING_HALL_VIP, vip_slot_occupied
@@ -128,6 +130,23 @@ def require_admin_session(request: Request) -> None:
     """Доступ только после успешного входа (cookie-сессия)."""
     if not request.session.get("admin_ok"):
         raise HTTPException(status_code=401, detail="Требуется вход в админку")
+
+
+async def require_staff_admin(request: Request, db: AsyncSession = Depends(get_db)) -> None:
+    """
+    Доступ только для admin-ролей staff (или legacy admin без staff_id).
+    Нужен для чувствительных действий (команда/права).
+    """
+    require_admin_session(request)
+    sid = request.session.get("staff_id")
+    if sid is None:
+        return
+    org_id = admin_org_from_session(request)
+    staff = await db.get(StaffUser, int(sid))
+    if staff is None or int(staff.organization_id) != int(org_id) or not staff.is_active:
+        raise HTTPException(status_code=403, detail="Недостаточно прав")
+    if (staff.role or "").strip().lower() != StaffRole.ADMIN.value:
+        raise HTTPException(status_code=403, detail="Недостаточно прав")
 
 
 def admin_org_from_session(request: Request) -> int:
@@ -223,6 +242,15 @@ class LoginBody(BaseModel):
     password: str = ""
 
 
+class SignupBody(BaseModel):
+    """Self-serve регистрация ресторана и первого администратора."""
+
+    restaurant_name: str = Field(..., min_length=2, max_length=255)
+    network_name: str = Field(default="", max_length=255, description="Опционально: название сети/холдинга")
+    email: str = Field(..., min_length=3, max_length=255)
+    password: str = Field(..., min_length=8, max_length=128)
+
+
 @auth_router.post("/login")
 async def admin_login(request: Request, body: LoginBody, db: AsyncSession = Depends(get_db)) -> dict:
     """Staff по email или legacy ADMIN_USERNAME / ADMIN_PASSWORD."""
@@ -276,6 +304,69 @@ async def admin_login(request: Request, body: LoginBody, db: AsyncSession = Depe
         }
 
     raise HTTPException(status_code=401, detail="Неверный логин или пароль")
+
+
+@auth_router.post("/signup")
+async def admin_signup(request: Request, body: SignupBody, db: AsyncSession = Depends(get_db)) -> dict:
+    """
+    PLG-регистрация: создаёт Tenant (опционально), Organization, StaffUser(admin) и авторизует в cookie-сессии.
+    """
+    email = (body.email or "").strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="Укажите корректный email")
+    restaurant_name = (body.restaurant_name or "").strip()
+    if not restaurant_name:
+        raise HTTPException(status_code=400, detail="Укажите название ресторана")
+    password = body.password or ""
+
+    request.session.clear()
+
+    existing = await db.scalar(select(StaffUser.id).where(StaffUser.email == email))
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="Пользователь с таким email уже зарегистрирован")
+
+    tenant_id: int | None = None
+    network_name = (body.network_name or "").strip()
+    if network_name:
+        t = Tenant(name=network_name)
+        db.add(t)
+        await db.flush()
+        tenant_id = int(t.id)
+
+    org = Organization(name=restaurant_name, tenant_id=tenant_id)
+    db.add(org)
+    await db.flush()
+
+    staff = StaffUser(
+        organization_id=int(org.id),
+        email=email,
+        password_hash=hash_password(password),
+        role=StaffRole.ADMIN.value,
+        is_active=True,
+    )
+    db.add(staff)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Не удалось создать пользователя (email занят)") from None
+
+    request.session["admin_ok"] = True
+    request.session["admin_user"] = staff.email
+    request.session["staff_id"] = int(staff.id)
+    request.session["organization_id"] = int(org.id)
+
+    ws_token = create_admin_ws_token(
+        organization_id=int(org.id),
+        email=staff.email,
+        staff_id=int(staff.id),
+    )
+    return {
+        "ok": True,
+        "username": staff.email,
+        "organization_id": int(org.id),
+        "ws_token": ws_token,
+    }
 
 
 @auth_router.post("/logout")
@@ -994,7 +1085,7 @@ async def rebuild_order_draft(
                 exclude_ingredients=list(line.exclude_ingredients or []),
             ),
         )
-    validated = await validate_order(items_in, db=db)
+    validated = await validate_order(items_in, db=db, organization_id=int(order.organization_id))
     if validated.unknown_items:
         raise HTTPException(
             status_code=400,
@@ -1146,7 +1237,7 @@ async def create_manual_order(
         )
 
     user = await get_or_create_user(db, phone, org_id)
-    menu_items = await load_available_menu(db)
+    menu_items = await load_available_menu(db, organization_id=org_id)
     rules = await load_packaging_rules(db, org_id)
 
     items_in: list[OrderItem] = []
@@ -1187,7 +1278,7 @@ async def create_manual_order(
             ),
         )
 
-    validated = await validate_order(items_in, db=db)
+    validated = await validate_order(items_in, db=db, organization_id=org_id)
     if validated.unknown_items:
         raise HTTPException(
             status_code=400,
@@ -1410,6 +1501,15 @@ class OrganizationPrefsPatchBody(BaseModel):
     )
 
 
+class OrganizationProfilePatchBody(BaseModel):
+    """Профиль ресторана/филиала (для UI, без секретов)."""
+
+    name: str | None = Field(default=None, min_length=2, max_length=255)
+    timezone: str | None = Field(default=None, max_length=64)
+    currency: str | None = Field(default=None, max_length=8)
+    whatsapp_phone_number_id: str | None = Field(default=None, max_length=100)
+
+
 @router.get("/organization/prefs")
 async def get_organization_prefs(request: Request, db: AsyncSession = Depends(get_db)) -> dict:
     org_id = admin_org_from_session(request)
@@ -1439,6 +1539,132 @@ async def patch_organization_prefs(
     await db.commit()
     await db.refresh(org)
     return {"ok": True, "prepayment_enforced": bool(getattr(org, "prepayment_enforced", True))}
+
+
+@router.get("/organization/profile")
+async def get_organization_profile(request: Request, db: AsyncSession = Depends(get_db)) -> dict:
+    """Данные «Мой ресторан» для текущей админ-сессии."""
+    org_id = admin_org_from_session(request)
+    org = await db.get(Organization, org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    return {
+        "id": int(org.id),
+        "organization_id": int(org.id),
+        "name": org.name,
+        "timezone": org.timezone,
+        "currency": org.currency,
+        "whatsapp_phone_number_id": (org.whatsapp_phone_number_id or "").strip(),
+    }
+
+
+@router.patch("/organization/profile")
+async def patch_organization_profile(
+    request: Request,
+    body: OrganizationProfilePatchBody,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Обновить профиль ресторана/филиала."""
+    org_id = admin_org_from_session(request)
+    org = await db.get(Organization, org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    if body.name is not None:
+        nm = (body.name or "").strip()
+        if not nm:
+            raise HTTPException(status_code=400, detail="Название не должно быть пустым")
+        org.name = nm
+    if body.timezone is not None:
+        org.timezone = (body.timezone or "").strip() or org.timezone
+    if body.currency is not None:
+        org.currency = (body.currency or "").strip().upper() or org.currency
+    if body.whatsapp_phone_number_id is not None:
+        org.whatsapp_phone_number_id = (body.whatsapp_phone_number_id or "").strip()
+    await db.commit()
+    await db.refresh(org)
+    return {
+        "ok": True,
+        "organization_id": int(org.id),
+        "name": org.name,
+        "timezone": org.timezone,
+        "currency": org.currency,
+        "whatsapp_phone_number_id": (org.whatsapp_phone_number_id or "").strip(),
+    }
+
+
+class StaffCreateBody(BaseModel):
+    email: str = Field(..., min_length=3, max_length=255)
+    role: str = Field(default=StaffRole.OPERATOR.value, description="admin | operator")
+    password: str = Field(default="", max_length=128, description="Опционально: если пусто — сгенерируем временный")
+
+
+@router.get("/staff")
+async def list_staff(
+    request: Request,
+    _perm: None = Depends(require_staff_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    org_id = admin_org_from_session(request)
+    rows = (
+        await db.execute(
+            select(StaffUser)
+            .where(StaffUser.organization_id == org_id)
+            .order_by(StaffUser.created_at.desc(), StaffUser.id.desc())
+        )
+    ).scalars().all()
+    out: list[dict] = []
+    for u in rows:
+        out.append(
+            {
+                "id": int(u.id),
+                "email": u.email,
+                "role": u.role,
+                "is_active": bool(u.is_active),
+                "created_at": u.created_at.isoformat() if u.created_at else None,
+            }
+        )
+    return {"ok": True, "users": out}
+
+
+@router.post("/staff")
+async def create_staff(
+    request: Request,
+    body: StaffCreateBody,
+    _perm: None = Depends(require_staff_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    org_id = admin_org_from_session(request)
+    email = (body.email or "").strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="Укажите корректный email")
+    role = (body.role or "").strip().lower() or StaffRole.OPERATOR.value
+    if role not in (StaffRole.ADMIN.value, StaffRole.OPERATOR.value):
+        raise HTTPException(status_code=400, detail="Некорректная роль")
+    pwd = (body.password or "").strip()
+    if not pwd:
+        # временный пароль: покажем в UI один раз
+        pwd = secrets.token_urlsafe(9)
+    if len(pwd) < 8:
+        raise HTTPException(status_code=400, detail="Пароль должен быть минимум 8 символов")
+
+    exists = await db.scalar(select(StaffUser.id).where(StaffUser.email == email))
+    if exists is not None:
+        raise HTTPException(status_code=409, detail="Пользователь с таким email уже существует")
+
+    u = StaffUser(
+        organization_id=org_id,
+        email=email,
+        password_hash=hash_password(pwd),
+        role=role,
+        is_active=True,
+    )
+    db.add(u)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Не удалось создать пользователя") from None
+    return {"ok": True, "user": {"id": int(u.id), "email": u.email, "role": u.role}, "temp_password": pwd}
 
 
 @router.get("/integrations/events")
@@ -3661,8 +3887,11 @@ async def admin_send_message(
         status_updated_at=now,
     )
     db.add(op_log)
-    await db.flush()
+    await db.commit()
+    await db.refresh(op_log)
     log_id = int(op_log.id)
+
+    # UI-event только после commit: иначе фантомная запись, если транзакция упадёт.
     await publish_event("new_message", {
         "phone": phone,
         "role": "operator",
@@ -3671,10 +3900,16 @@ async def admin_send_message(
         "delivery_status": "sending",
         "organization_id": org_id,
     })
+
     wa = await send_message(phone, body.text)
-    await finalize_outbound_delivery(
+
+    # finalize после внешнего I/O, но в той же сессии (важно для тестов/фикстур)
+    evt = await finalize_outbound_delivery(
         db, log_id, wa.ok, provider_message_id=wa.message_id, error_details=wa.error,
     )
+    await db.commit()
+    if evt is not None:
+        await publish_event("message_status_updated", evt)
     logger.info("Оператор отправил сообщение в %s: %s", phone, body.text[:50])
     return {"status": "sent" if wa.ok else "failed", "phone": phone, "chat_log_id": log_id}
 
@@ -3706,7 +3941,7 @@ async def resend_failed_chat_message(
     log.delivery_status = "sending"
     log.error_details = None
     log.status_updated_at = now
-    await db.flush()
+    await db.commit()
     await publish_event("new_message", {
         "phone": phone,
         "role": log.role,
@@ -3716,10 +3951,12 @@ async def resend_failed_chat_message(
         "organization_id": org_id,
     })
     wa = await send_message(phone, text)
-    await finalize_outbound_delivery(
+    evt = await finalize_outbound_delivery(
         db, chat_log_id, wa.ok, provider_message_id=wa.message_id, error_details=wa.error,
     )
     await db.commit()
+    if evt is not None:
+        await publish_event("message_status_updated", evt)
     return {"status": "sent" if wa.ok else "failed", "phone": phone, "chat_log_id": chat_log_id}
 
 
@@ -3779,7 +4016,7 @@ async def test_bot(request: Request, body: TextRequest) -> dict:
     await append_to_history(redis_client, phone, "user", message_text, organization_id=org_id)
 
     async with async_session_factory() as db:
-        menu_items = await load_available_menu(db)
+        menu_items = await load_available_menu(db, organization_id=org_id)
         menu_context = build_menu_context(menu_items)
         u_row = await db.scalar(
             select(User).where(User.phone == phone, User.organization_id == org_id),
@@ -3810,6 +4047,7 @@ async def test_bot(request: Request, body: TextRequest) -> dict:
             draft_order_context=draft_ctx,
             sales_strategy_context=strategy_ctx,
             customer_context=customer_ctx,
+            raise_on_transient=False,
         )
         inbound_mid = f"admin-test-bot:{secrets.token_hex(8)}"
         result = await route_intent(
@@ -3820,6 +4058,24 @@ async def test_bot(request: Request, body: TextRequest) -> dict:
             organization_id=org_id,
             inbound_message_id=inbound_mid,
         )
+        await update_user_session_fields_in_db(
+            db,
+            phone=phone,
+            organization_id=org_id,
+            current_state=(result.new_state.value if result.new_state else None),
+            **(
+                {"current_pending_order_id": result.pending_order_id}
+                if result.pending_order_id is not None
+                else {}
+            ),
+            **(
+                {"current_pending_booking_id": result.pending_booking_id}
+                if result.pending_booking_id is not None
+                else {}
+            ),
+        )
+
+        await db.commit()
 
         if result.new_state:
             await set_user_state(redis_client, phone, result.new_state, organization_id=org_id)
@@ -3827,8 +4083,8 @@ async def test_bot(request: Request, body: TextRequest) -> dict:
             await set_pending_order(redis_client, phone, result.pending_order_id, organization_id=org_id)
         if result.pending_booking_id:
             await set_pending_booking(redis_client, phone, result.pending_booking_id, organization_id=org_id)
-
-        await db.commit()
+        for evt_type, evt_data in (result.events or []):
+            await publish_event(evt_type, evt_data)
 
     await append_to_history(redis_client, phone, "assistant", result.reply_text, organization_id=org_id)
 

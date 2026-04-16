@@ -11,6 +11,8 @@ import logging
 from enum import StrEnum
 from typing import Any
 
+_NOCHANGE = object()
+
 logger = logging.getLogger(__name__)
 
 MAX_HISTORY_LENGTH = 20
@@ -69,28 +71,40 @@ def _pending_booking_key(organization_id: int | None, phone: str) -> str:
     return f"user:pending_booking:{_scoped(organization_id, phone)}"
 
 
-# ─── DB sync (best-effort) ────────────────────────────────
+# ─── Durable DB updates (must be called in caller txn) ─────
 
-async def _db_sync(phone: str, organization_id: int | None, **fields: Any) -> None:
-    """Best-effort: зеркалируем сессионные поля в User для восстановления после потери Redis."""
-    if not fields:
+async def update_user_session_fields_in_db(
+    db: Any,
+    *,
+    phone: str,
+    organization_id: int | None,
+    current_state: str | None = None,
+    current_pending_order_id: int | None | object = _NOCHANGE,
+    current_pending_booking_id: int | None | object = _NOCHANGE,
+) -> None:
+    """
+    Обновляет durable-поля сессии в таблице User *в рамках текущей DB-транзакции*.
+    Никаких отдельный сессий/commit здесь быть не должно: иначе возможен рассинхрон Redis↔БД при падении.
+    """
+    from sqlalchemy import update as sa_update
+
+    from app.db.models import User
+
+    org = _effective_org(organization_id)
+    patch: dict[str, Any] = {}
+    if current_state is not None:
+        patch["current_state"] = str(current_state)
+    if current_pending_order_id is not _NOCHANGE:
+        patch["current_pending_order_id"] = current_pending_order_id
+    if current_pending_booking_id is not _NOCHANGE:
+        patch["current_pending_booking_id"] = current_pending_booking_id
+    if not patch:
         return
-    try:
-        from sqlalchemy import update as sa_update
-
-        from app.db.models import User
-        from app.db.session import async_session_factory
-
-        org = _effective_org(organization_id)
-        async with async_session_factory() as db:
-            await db.execute(
-                sa_update(User)
-                .where(User.phone == phone, User.organization_id == org)
-                .values(**fields),
-            )
-            await db.commit()
-    except Exception as exc:
-        logger.warning("DB session sync for %s org=%s: %s", phone, organization_id, exc)
+    await db.execute(
+        sa_update(User)
+        .where(User.phone == phone, User.organization_id == org)
+        .values(**patch),
+    )
 
 
 async def _db_recover_session(phone: str, redis: Any, organization_id: int | None) -> UserState:
@@ -199,12 +213,11 @@ async def get_user_state(redis: Any, phone: str, organization_id: int | None = N
 async def set_user_state(
     redis: Any, phone: str, state: UserState, organization_id: int | None = None,
 ) -> None:
-    """Установить состояние с TTL 24 ч + зеркало в БД."""
+    """Установить состояние в Redis (cache only) с TTL 24 ч."""
     org = _effective_org(organization_id)
     await redis.set(_state_key(org, phone), state.value, ex=STATE_TTL)
     await redis.delete(_legacy_state_key(phone))
     logger.info("Состояние org=%s %s → %s", org, phone, state.value)
-    await _db_sync(phone, organization_id, current_state=state.value)
 
 
 async def set_pending_order(
@@ -213,7 +226,6 @@ async def set_pending_order(
     """Сохранить ID заказа, ожидающего подтверждения."""
     org = _effective_org(organization_id)
     await redis.set(_pending_order_key(org, phone), str(order_id), ex=STATE_TTL)
-    await _db_sync(phone, organization_id, current_pending_order_id=order_id)
 
 
 async def get_pending_order(redis: Any, phone: str, organization_id: int | None = None) -> int | None:
@@ -233,7 +245,6 @@ async def clear_pending_order(redis: Any, phone: str, organization_id: int | Non
     org = _effective_org(organization_id)
     await redis.delete(_pending_order_key(org, phone))
     await set_user_state(redis, phone, UserState.CHATTING, organization_id=organization_id)
-    await _db_sync(phone, organization_id, current_pending_order_id=None)
 
 
 async def set_pending_booking(
@@ -242,7 +253,6 @@ async def set_pending_booking(
     """Сохранить ID бронирования, ожидающего подтверждения."""
     org = _effective_org(organization_id)
     await redis.set(_pending_booking_key(org, phone), str(booking_id), ex=STATE_TTL)
-    await _db_sync(phone, organization_id, current_pending_booking_id=booking_id)
 
 
 async def get_pending_booking(redis: Any, phone: str, organization_id: int | None = None) -> int | None:
@@ -262,7 +272,6 @@ async def clear_pending_booking(redis: Any, phone: str, organization_id: int | N
     org = _effective_org(organization_id)
     await redis.delete(_pending_booking_key(org, phone))
     await set_user_state(redis, phone, UserState.CHATTING, organization_id=organization_id)
-    await _db_sync(phone, organization_id, current_pending_booking_id=None)
 
 
 async def get_chat_history(

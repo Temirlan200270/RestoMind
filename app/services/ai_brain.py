@@ -11,7 +11,7 @@ import io
 import logging
 from typing import Any
 
-from openai import APIError, AsyncOpenAI, RateLimitError
+from openai import APIConnectionError, APIError, APITimeoutError, AsyncOpenAI, RateLimitError
 from pydantic import ValidationError
 
 from app.core.config import settings
@@ -145,6 +145,8 @@ async def call_openai(
     draft_order_context: str = "",
     sales_strategy_context: str = "",
     customer_context: str = "",
+    *,
+    raise_on_transient: bool = True,
 ) -> AIBrainResponse:
     """
     Отправляет контекст диалога в OpenAI и получает структурированный ответ.
@@ -222,7 +224,7 @@ async def call_openai(
             )
             last_error = exc
 
-        except (APIError, RateLimitError) as exc:
+        except (APIError, RateLimitError, APIConnectionError, APITimeoutError) as exc:
             logger.error(
                 "Ошибка API OpenAI (попытка %d/%d): %s",
                 attempt,
@@ -247,7 +249,18 @@ async def call_openai(
         MAX_RETRIES,
         last_error,
     )
+    if raise_on_transient and isinstance(
+        last_error,
+        (APIError, RateLimitError, APIConnectionError, APITimeoutError),
+    ):
+        raise TransientAiError(str(last_error)) from last_error
     return _FALLBACK_RESPONSE
+
+
+class TransientAiError(RuntimeError):
+    """Временная ошибка внешнего AI-провайдера: нужно ретраить задачу/вебхук."""
+
+    pass
 
 
 async def openai_transcribe_voice(audio_bytes: bytes, audio_mime: str) -> str:

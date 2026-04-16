@@ -8,6 +8,7 @@ import logging
 
 from app.integrations.whatsapp import send_message
 from app.services.chat_delivery import finalize_outbound_delivery
+from app.services.events import publish_event
 
 logger = logging.getLogger(__name__)
 
@@ -51,18 +52,20 @@ async def send_customer_text(
             logger.warning("Не удалось озвучить ответ в Twilio (CallSid=%s)", sid[:8])
         if outbound_chat_log_id is not None:
             async with async_session_factory() as db:
-                await finalize_outbound_delivery(
+                evt = await finalize_outbound_delivery(
                     db, outbound_chat_log_id, send_ok=ok,
                     error_details=None if ok else {"channel": "twilio", "detail": "speak_failed"},
                 )
                 await db.commit()
+            if evt is not None:
+                await publish_event("message_status_updated", evt)
         return
 
     wa = await send_message(phone, text)
     if outbound_chat_log_id is None:
         return
     async with async_session_factory() as db:
-        await finalize_outbound_delivery(
+        evt = await finalize_outbound_delivery(
             db,
             outbound_chat_log_id,
             send_ok=wa.ok,
@@ -70,3 +73,5 @@ async def send_customer_text(
             error_details=wa.error,
         )
         await db.commit()
+    if evt is not None:
+        await publish_event("message_status_updated", evt)

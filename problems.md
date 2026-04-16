@@ -1,458 +1,302 @@
-• Backend
+﻿# Backend
 
-  🔴 Критичность: High Backend WhatsApp dedupe ломает retry и теряет сообщения
-  Где: /C:/Users/Gulmira/Desktop/RestoMind/app/api/webhooks.py:636, /C:/Users/Gulmira/Desktop/RestoMind/app/api/
-  webhooks.py:706, /C:/Users/Gulmira/Desktop/RestoMind/app/services/whatsapp_idempotency.py:18
-  Угроза: process_with_retry() повторяет process_message() с тем же whatsapp_message_id. Первая попытка на строках 708-
-  714 сразу пишет message_id в dedupe и коммитит. Если дальше упадет OpenAI/БД/WhatsApp, вторая попытка увидит дубль и
-  вернется как успешная. Итог: ARQ/FastAPI считают сообщение обработанным, FailedTask не создается, заказ/чат теряются.
-  Как исправить: dedupe должен иметь состояния processing/done/failed, а не “вставил значит обработано”. Минимальный
-  паттерн:
+🔴 Критичность: High Backend Утечка данных меню между организациями
+Где: app/services/order_logic.py:197, app/api/webhooks.py:942, app/api/admin.py:3782, app/services/intent_router.py:347
+Угроза: `load_available_menu()` читает все доступные позиции без фильтра по `organization_id`. В multi-tenant SaaS это прямой data leak: оператор и ИИ одной точки могут видеть меню другой точки, собирать заказ из чужих SKU и отправлять некорректный payload в iiko.
+Как исправить:
+```python
+# app/services/order_logic.py
+async def load_available_menu(
+    db: AsyncSession,
+    *,
+    organization_id: int | None = None,
+) -> list[MenuItem]:
+    stmt = select(MenuItem).where(MenuItem.available == True)
+    if organization_id is not None:
+        stmt = stmt.where(MenuItem.organization_id == organization_id)
+    stmt = stmt.order_by(MenuItem.category, MenuItem.name)
+    res = await db.execute(stmt)
+    return list(res.scalars().all())
 
-  # app/db/models.py
-  class WhatsappInboundDedupe(Base):
-      __tablename__ = "whatsapp_inbound_dedupe"
+# call sites
+menu_items = await load_available_menu(db, organization_id=organization_id)
+```
 
-      message_id: Mapped[str] = mapped_column(String(128), primary_key=True)
-      phone: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
-      status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="processing")
-      attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
-      error: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
-      created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-      processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+🔴 Критичность: High Backend Dedupe WhatsApp ломает идемпотентность и может терять входящие сообщения
+Где: app/api/webhooks.py:140, app/api/webhooks.py:659, app/api/webhooks.py:1384, app/services/whatsapp_idempotency.py:53
+Угроза: входящий webhook сначала помечается в Redis, а durable dedupe в БД либо происходит позже, либо при ошибке просто логируется warning. Если процесс падает между preclaim и нормальной обработкой, повторная доставка может быть отброшена как дубль, хотя сообщение реально не обработано. Обратная сторона тоже плохая: при падении БД код продолжает обработку без dedupe и допускает дубли заказа/чат-лога.
+Как исправить:
+```python
+# app/api/webhooks.py
+async def process_with_retry(...):
+    org_id = ...
+    if whatsapp_message_id:
+        async with async_session_factory() as db:
+            can_process = await try_start_whatsapp_inbound_in_db(
+                db,
+                message_id=whatsapp_message_id,
+                organization_id=org_id,
+                phone=phone,
+            )
+            await db.commit()
+        if not can_process:
+            return
 
-  # app/services/whatsapp_idempotency.py
-  async def try_start_whatsapp_message(db: AsyncSession, *, message_id: str, phone: str) -> bool:
-      mid = (message_id or "").strip()
-      if not mid:
-          return True
+    last_exc = None
+    for attempt in range(MAX_RETRIES):
+        try:
+            await process_message(...)
+            if whatsapp_message_id:
+                async with async_session_factory() as db:
+                    await mark_whatsapp_inbound_done(db, whatsapp_message_id)
+                    await db.commit()
+            return
+        except Exception as exc:
+            last_exc = exc
+            ...
 
-      stmt = (
-          pg_insert(WhatsappInboundDedupe)
-          .values(message_id=mid, phone=phone, status="processing", attempts=1)
-          .on_conflict_do_update(
-              index_elements=["message_id"],
-              set_={
-                  "attempts": WhatsappInboundDedupe.attempts + 1,
-                  "status": "processing",
-                  "error": "",
-              },
-              where=WhatsappInboundDedupe.status != "done",
-          )
-      )
-      res = await db.execute(stmt)
-      return (res.rowcount or 0) == 1
+    if whatsapp_message_id:
+        async with async_session_factory() as db:
+            await mark_whatsapp_inbound_failed(db, whatsapp_message_id, str(last_exc))
+            await db.commit()
+```
+И отдельно: не делать Redis-preclaim до durable handoff, либо использовать его только как soft-cache после записи в БД.
 
+🔴 Критичность: High Backend OpenAI таймауты маскируются как успешная обработка
+Где: app/services/ai_brain.py:141
+Угроза: после исчерпания retry `call_openai()` возвращает fallback-ответ вместо исключения. Для ARQ и webhook pipeline это выглядит как success. Под rate limit/timeout вы не получаете retry очереди, а массово эскалируете оператору то, что должно было переждаться автоматически.
+Как исправить:
+```python
+# app/services/ai_brain.py
+from openai import APIConnectionError, APIError, APITimeoutError, RateLimitError
 
-  async def mark_whatsapp_done(db: AsyncSession, message_id: str) -> None:
-      await db.execute(
-          update(WhatsappInboundDedupe)
-          .where(WhatsappInboundDedupe.message_id == message_id)
-          .values(status="done", processed_at=func.now(), error="")
-      )
+class TransientAiError(RuntimeError):
+    pass
 
+async def call_openai(..., raise_on_transient: bool = True) -> AiResponse:
+    ...
+    except (APIError, RateLimitError, APIConnectionError, APITimeoutError) as exc:
+        last_exc = exc
+        if attempt < max_retries - 1:
+            await asyncio.sleep(backoff)
+            continue
+        if raise_on_transient:
+            raise TransientAiError(str(exc)) from exc
+        return _FALLBACK_RESPONSE
+```
+Worker/webhook должны пропускать `TransientAiError` вверх, чтобы сработал retry.
 
-  async def mark_whatsapp_failed(db: AsyncSession, message_id: str, error: str) -> None:
-      await db.execute(
-          update(WhatsappInboundDedupe)
-          .where(WhatsappInboundDedupe.message_id == message_id)
-          .values(status="failed", error=error[:2000])
-      )
+🔴 Критичность: High Backend Redis state и БД расходятся при падении между двумя транзакциями
+Где: app/services/dialog_mgr.py:74, app/api/webhooks.py:1023
+Угроза: `set_user_state()`/`set_pending_order()` внутри основной обработки пишут Redis и параллельно делают best-effort `_db_sync()` в отдельной сессии. Основная транзакция по заказу и чату коммитится позже. Если процесс упадет между `_db_sync()` и главным commit, Redis и `users.current_state` будут говорить одно, а `orders/chat_logs` в БД другое. Это ломает продолжение диалога, повторную доставку и ручную обработку оператором.
+Как исправить:
+```python
+# внутри основной транзакции webhooks
+user.current_state = result.new_state.value if result.new_state else user.current_state
+user.current_pending_order_id = result.pending_order_id
+user.current_pending_booking_id = result.pending_booking_id
+await db.commit()
 
-  # app/api/webhooks.py
-  async def process_with_retry(...):
-      org_id = ...
-      if whatsapp_message_id:
-          async with async_session_factory() as db:
-              can_process = await try_start_whatsapp_message(
-                  db, message_id=whatsapp_message_id, phone=phone
-              )
-              await db.commit()
-          if not can_process:
-              return
+# после commit только cache update
+if result.new_state:
+    await redis.set(state_key, result.new_state.value, ex=STATE_TTL)
+```
+`dialog_mgr` должен уметь режим `cache_only`, а source of truth для durable state должна быть одна транзакция БД.
 
-      last_exc = None
-      for attempt in range(MAX_RETRIES):
-          try:
-              await process_message(..., whatsapp_message_id="")
-              if whatsapp_message_id:
-                  async with async_session_factory() as db:
-                      await mark_whatsapp_done(db, whatsapp_message_id)
-                      await db.commit()
-              return
-          except Exception as exc:
-              last_exc = exc
-              ...
+🔴 Критичность: High Backend Исходящее сообщение оператора отправляется наружу до фиксации ChatLog
+Где: app/api/admin.py:3641, app/api/admin.py:3682, app/api/admin.py:3781
+Угроза: в `admin_send_message` и resend flow сообщение уходит в WhatsApp при еще незафиксированном `ChatLog(status='sending')`. Если commit потом упадет, клиент получил сообщение, а система не знает об отправке. Повторный resend создаст дубль, история чата и audit trail разъедутся. В `admin test-bot` OpenAI тоже вызывается внутри живой DB-сессии, удерживая connection во время внешнего I/O.
+Как исправить:
+```python
+# phase 1
+chat = ChatLog(..., delivery_status='sending')
+db.add(chat)
+await db.commit()
 
-      if whatsapp_message_id:
-          async with async_session_factory() as db:
-              await mark_whatsapp_failed(db, whatsapp_message_id, str(last_exc))
-              await db.commit()
+# phase 2
+provider_id = await send_message(...)
 
-  🔴 Критичность: High Backend Внешний OpenAI вызывается внутри открытой DB-сессии
-  Где: /C:/Users/Gulmira/Desktop/RestoMind/app/api/webhooks.py:912, /C:/Users/Gulmira/Desktop/RestoMind/app/api/
-  webhooks.py:958, /C:/Users/Gulmira/Desktop/RestoMind/app/api/webhooks.py:1053
-  Угроза: на строке 912 открывается AsyncSession, затем в этой же сессии выполняются SELECT’ы и идет await
-  call_openai(...). Под нагрузкой медленный OpenAI держит соединение/транзакцию PostgreSQL до строки 1053. При 20-30
-  параллельных вебхуках пул pool_size=20, max_overflow=10 будет забит ожиданием внешнего API, а не работой БД. Это дает
-  очередь запросов, таймауты и лавину повторных webhook delivery.
-  Как исправить: разделить фазы “прочитать контекст”, “вызвать OpenAI”, “коротко записать результат”:
+# phase 3
+async with async_session_factory() as db2:
+    row = await db2.get(ChatLog, chat.id)
+    row.delivery_status = 'sent'
+    row.provider_message_id = provider_id
+    await db2.commit()
+```
+Для test-bot: сначала вычитать контекст из БД, закрыть сессию, потом вызывать OpenAI.
 
-  # 1. DB только для чтения контекста
-  async with async_session_factory() as db:
-      menu_items = await load_available_menu(db, organization_id=organization_id)
-      u_row = await db.scalar(
-          select(User).where(User.phone == phone, User.organization_id == organization_id)
-      )
-      customer_ctx = await build_customer_context(db, u_row)
-      kb_context = await load_knowledge_context_block(db, organization_id)
-      draft_row = await get_open_draft_order(db, phone, organization_id)
-      draft_ctx = format_draft_order_context_for_prompt(
-          draft_row.items_json if draft_row else None
-      )
+🟠 Критичность: Medium Backend События публикуются в UI до commit и создают phantom state
+Где: app/api/webhooks.py:780, app/services/intent_router.py:661, app/api/admin.py:3666
+Угроза: WebSocket может показать новый message/order update, которого еще нет в committed БД. Следующий REST reload откатит интерфейс назад. Под нагрузкой оператор увидит "мигающие" заказы и статусы, а часть действий уйдет по устаревшим данным.
+Как исправить:
+```python
+await db.commit()
+await publish_event(...)
+```
+Нормальный production-вариант: outbox table + отдельный publisher worker.
 
-  # 2. Внешний API без удержания DB connection
-  ai_response = await call_openai(
-      history,
-      message_text,
-      build_menu_context(menu_items),
-      kb_context,
-      draft_order_context=draft_ctx,
-      sales_strategy_context=strategy_ctx,
-      customer_context=customer_ctx,
-  )
+🟠 Критичность: Medium Backend `publish_event()` открывает новый Redis client на каждое событие
+Где: app/services/events.py:38, app/services/events.py:53
+Угроза: под шквалом webhook/admin actions это создает лишние TCP/Redis handshake, повышает latency и расходует connection budget. Там же синхронно дергается staff notification, что расширяет критический путь пользовательского запроса.
+Как исправить:
+```python
+# app/services/events.py
+_event_redis: Redis | None = None
 
-  # 3. DB только для мутации
-  async with async_session_factory() as db:
-      result = await route_intent(
-          db,
-          phone,
-          ai_response,
-          menu_items=menu_items,
-          organization_id=organization_id,
-          inbound_message_id=wmid,
-      )
-      outbound_id_chat = await _save_chat_log(...)
-      await db.commit()
+async def get_event_redis() -> Redis:
+    global _event_redis
+    if _event_redis is None:
+        _event_redis = Redis.from_url(settings.redis_url, decode_responses=True)
+    return _event_redis
 
-  🔴 Критичность: High Backend Отправка в iiko не защищена от двойного клика/двух операторов
-  Где: /C:/Users/Gulmira/Desktop/RestoMind/app/api/admin.py:702, /C:/Users/Gulmira/Desktop/RestoMind/app/api/
-  admin.py:766, /C:/Users/Gulmira/Desktop/RestoMind/app/api/admin.py:789
-  Угроза: PATCH /orders/{id} не принимает expected_version, не делает атомарный UPDATE ... WHERE status='confirmed', и
-  вызывает _send_order_to_iiko() до фиксации нового состояния в БД. Два параллельных запроса видят confirmed, оба
-  вызывают iiko, оба могут напечатать заказ на кухне. Это прямые потери денег и операционный хаос.
-  Как исправить: сначала атомарно перевести заказ в промежуточное состояние sending_to_iiko или поставить lock, затем
-  отправлять. Для начала достаточно optimistic update:
+async def publish_event(...):
+    redis = await get_event_redis()
+    await redis.publish(channel, payload)
+```
+Staff notification лучше вынести в очередь.
 
-  # schema
-  class OrderPatchBody(BaseModel):
-      status: str
-      expected_version: int | None = None
+🟠 Критичность: Medium Backend Payload `order_updated` недостаточен для version-guard на клиенте
+Где: app/api/admin.py:730, app/services/intent_router.py:661
+Угроза: часть событий приходит без полной сериализации заказа и без актуального `row_version`. Клиент вынужден делать `loadOrders()`, а это снова открывает окно гонки между WS и REST.
+Как исправить:
+```python
+await publish_event(
+    org_id,
+    {
+        "type": "order_updated",
+        "order": serialize_order(order),
+        "row_version": int(order.row_version),
+    },
+)
+```
 
-  # endpoint
-  if cur == OrderStatus.CONFIRMED.value and want == OrderStatus.SENT_TO_IIKO.value:
-      expected = body.expected_version if body.expected_version is not None else int(order.row_version)
+🟡 Критичность: Low Backend Дублирование логики upsell уже начало расходиться
+Где: app/services/sales_strategy.py, app/services/strategy_engine.py, app/services/upsell_utils.py
+Угроза: две ветки считают состав корзины, rejected/offered items и eligibility по-разному. Бот начнет повторно предлагать отклоненные позиции, а аналитика и фактический диалог будут видеть разные состояния.
+Как исправить:
+```python
+# app/services/upsell_utils.py
+def cart_iiko_ids(items: list[dict[str, Any]]) -> set[str]: ...
+def rejected_upsell_iiko_ids(meta: dict[str, Any]) -> set[str]: ...
+def offered_upsell_iiko_ids(meta: dict[str, Any]) -> set[str]: ...
+```
+Оставить один модуль и перевести обе стратегии на него.
 
-      claimed = (
-          await db.execute(
-              update(Order)
-              .where(
-                  Order.id == order.id,
-                  Order.organization_id == org_id,
-                  Order.status == OrderStatus.CONFIRMED.value,
-                  Order.row_version == expected,
-              )
-              .values(
-                  status="sending_to_iiko",
-                  row_version=Order.row_version + 1,
-                  iiko_last_error=None,
-              )
-          )
-      ).rowcount
-      if claimed != 1:
-          raise HTTPException(status_code=409, detail="Заказ уже изменен или отправляется в iiko")
+🟡 Критичность: Low Backend Подозрительный лишний файл-интеграция
+Где: app/integrations/telephony.py
+Угроза: файл выглядит как runtime-stub без реального использования. Такие полуинтеграции дают ложный сигнал, что канал поддерживается, и повышают шанс, что кто-то начнет опираться на мертвый код.
+Как исправить: либо удалить файл, либо явно пометить его как draft/dev-only и исключить из production surface.
 
-      await db.commit()
+# Frontend
 
-      sent, err, raw = await _send_order_to_iiko(...)
-
-      async with async_session_factory() as db2:
-          locked = await db2.get(Order, order.id)
-          if sent:
-              locked.status = OrderStatus.SENT_TO_IIKO.value
-              locked.iiko_last_error = None
-              locked.row_version = int(locked.row_version) + 1
-          else:
-              locked.status = OrderStatus.CONFIRMED.value
-              locked.iiko_last_error = err or "iiko: неизвестная ошибка"
-              locked.row_version = int(locked.row_version) + 1
-          await db2.commit()
-
-  🔴 Критичность: High Backend Payment webhook idempotency не атомарна
-  Где: /C:/Users/Gulmira/Desktop/RestoMind/app/services/payment_webhook.py:53, /C:/Users/Gulmira/Desktop/RestoMind/app/
-  db/models.py:643
-  Угроза: проверка select(PaymentEvent.id) и последующий db.add(PaymentEvent(...)) не защищены unique constraint’ом. Два
-  одинаковых webhook’а одновременно оба увидят “нет события”, оба вставят webhook_paid, оба могут поставить оплату и
-  отправить клиенту уведомление.
-  Как исправить: добавить уникальность и использовать insert-on-conflict:
-
-  # app/db/models.py
-  class PaymentEvent(Base):
-      __tablename__ = "payment_events"
-      __table_args__ = (
-          UniqueConstraint("order_id", "event_type", "note", name="uq_payment_event_idempotency"),
-      )
-
-  # app/services/payment_webhook.py
-  stmt = (
-      pg_insert(PaymentEvent)
-      .values(
-          order_id=order.id,
-          event_type="webhook_paid",
-          actor="webhook",
-          amount=amt,
-          note=note_key,
-      )
-      .on_conflict_do_nothing(
-          index_elements=["order_id", "event_type", "note"],
-      )
-  )
-  res = await db.execute(stmt)
-  if (res.rowcount or 0) == 0:
-      return {"ok": True, "duplicate": True, "prepayment_status": order.prepayment_status}
-
-  order.prepayment_status = "paid"
-  order.payment_provider = prov
-  order.external_payment_id = ext_id
-  order.payment_amount_captured = amt
-
-  🔴 Критичность: High Backend Уведомление об оплате ставится в очередь до commit
-  Где: /C:/Users/Gulmira/Desktop/RestoMind/app/api/payment_webhook.py:77, /C:/Users/Gulmira/Desktop/RestoMind/app/api/
-  payment_webhook.py:83, /C:/Users/Gulmira/Desktop/RestoMind/app/db/session.py:50
-  Угроза: get_db() коммитит после возврата endpoint’а. Но _run_payment_webhook() ставит payment_notify_customer в ARQ/
-  background на строках 83-87 до commit. Worker может прочитать старый prepayment_status, а при ошибке commit клиент все
-  равно получит уведомление об оплате.
-  Как исправить: в webhook endpoint делать явный commit до enqueue:
-
-  async def _run_payment_webhook(...):
-      ...
-      should_notify = (
-          out.get("ok")
-          and not out.get("duplicate")
-          and body.status == "paid"
-          and (out.get("prepayment_status") or "").strip().lower() == "paid"
-      )
-
-      await db.commit()
-
-      if should_notify:
-          ok = await enqueue_job("payment_notify_customer", order_id=int(body.order_id))
-          if not ok:
-              background_tasks.add_task(run_payment_received_customer_notify, body.order_id)
-
-      return out
-
-  🔴 Критичность: Medium Backend OpenAI failures превращаются в “успешную” обработку, ARQ не retry’ит
-  Где: /C:/Users/Gulmira/Desktop/RestoMind/app/services/ai_brain.py:225, /C:/Users/Gulmira/Desktop/RestoMind/app/
-  services/ai_brain.py:245, /C:/Users/Gulmira/Desktop/RestoMind/app/api/webhooks.py:973
-  Угроза: после всех ошибок OpenAI call_openai() возвращает fallback intent="escalate", не бросает исключение. Для ARQ
-  это успешная задача. Временный сбой OpenAI превращается в эскалацию оператору, хотя retry очереди мог бы обработать
-  сообщение через минуту. При массовом rate limit операторский поток будет завален.
-  Как исправить: разделить transient и deterministic fallback:
-
-  class TransientAiError(RuntimeError):
-      pass
-
-  async def call_openai(..., raise_on_transient: bool = True) -> A:
-
-
-  # внутри route_intent или сразу перед commit
-  user.current_state = result.new_state.value if result.new_state else user.current_state
-  user.current_pending_order_id = result.pending_order_id
-
-  await db.commit()
-
-  # после commit только кеш
-  if result.new_state:
-      await redis_client.set(state_key, result.new_state.value, ex=STATE_TTL)
-
-  🔴 Критичность: Low Backend Дублирование sales strategy даст разные допродажи в разных ветках
-  Где: /C:/Users/Gulmira/Desktop/RestoMind/app/services/sales_strategy.py:53, /C:/Users/Gulmira/Desktop/RestoMind/app/
-  services/strategy_engine.py:28
-  Угроза: две реализации _cart_iiko_ids, _rejected_iiko_ids/_rejected_iiko, _offered... расходятся по правилам. В проде
-  это означает: бот может повторно предлагать уже отклоненную позицию или аналитика/синхронизация рекомендаций будет
-  считать другое состояние, чем диалог.
-  Как исправить: оставить один модуль доменной логики, например app/services/upsell_state.py:
-
-  def cart_iiko_ids(items: list[dict[str, Any]]) -> set[str]:
-      return {
-          str(it.get("iiko_id") or "").strip().lower()
-          for it in items
-          if str(it.get("iiko_id") or "").strip()
-      }
-
-  def rejected_upsell_iiko_ids(meta: dict[str, Any]) -> set[str]:
-      raw = meta.get("upsell_rejected_iiko_ids") or []
-      return {str(x).strip().lower() for x in raw if str(x).strip()}
-
-  def offered_upsell_iiko_ids(meta: dict[str, Any]) -> set[str]:
-      ...
-
-  Frontend
-
-  🔴 Критичность: High Frontend REST/WS гонка перетирает свежие данные заказа
-  Где: /C:/Users/Gulmira/Desktop/RestoMind/app/static/js/admin-app.js:2746, /C:/Users/Gulmira/Desktop/RestoMind/app/
-  static/js/admin-app.js:2881, /C:/Users/Gulmira/Desktop/RestoMind/app/static/js/admin-app.js:3522
-  Угроза: ws_ready запускает loadOrders(), а onOrderUpdated() без проверки версии делает splice(..., data.order). Любой
-  старый REST-ответ может присвоить this.orders = data.orders || [] после более свежего WS-события. Оператор увидит
-  старый статус/row_version, отправит неверный PATCH или повторит iiko.
-  Как исправить: хранить монотонный номер загрузки и не применять старые ответы; при WS применять только если
-  row_version не старее локальной:
-
-  async loadOrders() {
-      const reqId = ++this._ordersLoadSeq;
-      const { ok, status, data } = await this.apiJsonResponse(`/api/admin/orders?${p.toString()}`);
-      if (reqId !== this._ordersLoadSeq) return;
-      if (!ok) {
-          this.ordersLoadError = this.formatApiError(data.detail) || `Не удалось загрузить заказы (${status})`;
-          return;
-      }
-
-      const incoming = data.orders || [];
-      const byId = new Map(this.orders.map((o) => [Number(o.id), o]));
-      this.orders = incoming.map((next) => {
-          const prev = byId.get(Number(next.id));
-          if (prev && Number(prev.row_version || 0) > Number(next.row_version || 0)) {
-              return prev;
-          }
-          return next;
-      });
+🔴 Критичность: High Frontend `loadOrders()` может перетереть более свежие WS-данные
+Где: app/static/js/admin-app.js:2895, app/static/js/admin-app.js:3509
+Угроза: текущая защита по `row_version` работает только для пересекающихся id, но финальное `this.orders = incoming.map(...)` выбрасывает локальные более свежие заказы, которых не было в REST snapshot. Результат: оператор видит откат статуса, может повторно отправить заказ в iiko или принять решение по устаревшим данным.
+Как исправить:
+```javascript
+async loadOrders() {
+  const reqId = ++this._ordersLoadSeq;
+  const { ok, status, data } = await this.apiJsonResponse(`/api/admin/orders?${p.toString()}`);
+  if (reqId !== this._ordersLoadSeq) return;
+  if (!ok) {
+    this.ordersLoadError = this.formatApiError(data.detail) || `Не удалось загрузить заказы (${status})`;
+    return;
   }
 
-  onOrderUpdated(data) {
-      if (!data.order) {
-          void this.loadOrders();
-          return;
-      }
-      const oid = Number(data.order.id);
-      const idx = this.orders.findIndex((o) => Number(o.id) === oid);
-      const prev = idx >= 0 ? this.orders[idx] : null;
-
-      if (prev && Number(prev.row_version || 0) > Number(data.order.row_version || 0)) {
-          return;
-      }
-
-      if (idx >= 0) this.orders.splice(idx, 1, data.order);
-      else this.orders.unshift(data.order);
+  const incoming = Array.isArray(data.orders) ? data.orders : [];
+  const merged = new Map(this.orders.map((o) => [Number(o.id), o]));
+  for (const next of incoming) {
+    const id = Number(next.id);
+    const prev = merged.get(id);
+    if (!prev || Number(next.row_version || 0) >= Number(prev.row_version || 0)) {
+      merged.set(id, next);
+    }
   }
+  this.orders = Array.from(merged.values());
+}
+```
 
-  🔴 Критичность: High Frontend Смена статуса заказа не отправляет expected_version
-  Где: /C:/Users/Gulmira/Desktop/RestoMind/app/static/js/admin-app.js:1331, /C:/Users/Gulmira/Desktop/RestoMind/app/api/
-  admin.py:702
-  Угроза: rebuild/payment split используют expected_version, а самый денежный сценарий confirmed → sent_to_iiko нет. UI
-  может отправить устаревший статус после WS/REST гонки, а backend сейчас тоже это принимает.
-  Как исправить: передавать версию и на backend проверять ее:
+🟠 Критичность: Medium Frontend `order_updated` без полного заказа делает version-guard почти бесполезным
+Где: app/static/js/admin-app.js:2728, app/static/js/admin-app.js:2895
+Угроза: когда WS payload не несет `data.order`, клиент падает обратно в `loadOrders()`. Это возвращает ту же race-condition, которую versioning должен был убрать.
+Как исправить:
+```javascript
+onOrderUpdated(data) {
+  if (!data.order) return;
+  const oid = Number(data.order.id);
+  const idx = this.orders.findIndex((o) => Number(o.id) === oid);
+  const prev = idx >= 0 ? this.orders[idx] : null;
+  if (prev && Number(prev.row_version || 0) > Number(data.order.row_version || 0)) return;
+  if (idx >= 0) this.orders.splice(idx, 1, data.order);
+  else this.orders.unshift(data.order);
+}
+```
+И на backend всегда отправлять сериализованный `order`.
 
-  async patchOrderStatus(orderId, status) {
-      const order = this.orders.find((o) => Number(o.id) === Number(orderId));
-      const { ok, data } = await this.apiJsonResponse(`/api/admin/orders/${orderId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-              status,
-              expected_version: order?.row_version ?? null,
-          }),
-      });
-      ...
+🟠 Критичность: Medium Frontend Silent fail в административных действиях
+Где: app/static/js/admin-app.js:2793, app/static/js/admin-app.js:3061, app/static/js/admin-app.js:3543
+Угроза: `resendFailedChatMessage`, `loadChatList`, `loadFailedTasks` в ряде веток ограничиваются `console.warn` или тихим сбросом loading-state. Для оператора это выглядит как "кнопка нажалась и ничего не произошло". На проде это рождает повторные клики, дубли отправки и ручной хаос.
+Как исправить:
+```javascript
+if (!ok) {
+  const message = this.formatApiError(data.detail) || `Ошибка (${status})`;
+  this.failedTasksError = message;
+  await this.showUiAlert(message, 'Ошибка');
+  return;
+}
+```
+И аналогично для chat list / resend flows.
+
+🟠 Критичность: Medium Frontend Статус `sending_to_iiko` не доведен до UI-модели
+Где: app/static/js/admin-app.js:399, app/templates/admin.html:777
+Угроза: backend уже использует промежуточный статус, но `statusConfig`, фильтры и части шаблона его не знают. Оператор видит пропавший или странно размеченный заказ, а значит повторно жмет действие, которое уже выполняется.
+Как исправить:
+```javascript
+sending_to_iiko: {
+  label: 'Отправляется в iiko',
+  badge: 'bg-amber-100 text-amber-800',
+  column: 'confirmed',
+},
+```
+И добавить его в фильтры/легенду.
+
+🟡 Критичность: Low Frontend Дублирование карточек заказа в шаблоне уже создает риск функционального расхождения
+Где: app/templates/admin.html:823, app/templates/admin.html:999, app/templates/admin.html:1042
+Угроза: kanban/table/mobile рендерят почти один и тот же order summary разными блоками. Любая правка по `iiko_last_error`, prepayment, клиентским полям или action-buttons очень легко попадет только в одну ветку. Итог: desktop и mobile дают оператору разную картину по одному и тому же заказу.
+Как исправить:
+```jinja2
+{# app/templates/admin/_order_bits.html #}
+{% macro order_status_bits(order_expr) %}
+<div x-show="{{ order_expr }}.iiko_last_error" class="mt-2 rounded border border-red-300 bg-red-50 px-2 py-2">
+  <p class="text-[10px] font-bold uppercase text-red-900">Ошибка iiko</p>
+  <p class="text-xs text-red-900" x-text="{{ order_expr }}.iiko_last_error"></p>
+</div>
+<div class="font-mono text-xs text-gray-700" x-text="{{ order_expr }}.user_phone || '—'"></div>
+{% endmacro %}
+```
+И переиспользовать макрос во всех представлениях.
+
+🟡 Критичность: Low Frontend Две JS-функции делают один и тот же rebuild заказа
+Где: app/static/js/admin-app.js:1261, app/static/js/admin-app.js:3596
+Угроза: `submitOrderCompositionFromLines` и `submitOrderRebuildDraft` дублируют почти одинаковый сценарий. Любая правка валидации, expected_version или post-success sync очень быстро разойдется и даст разные результаты для двух кнопок одного workflow.
+Как исправить:
+```javascript
+async submitOrderRebuild({ closeComposition = false } = {}) {
+  ...
+  if (updated) {
+    this.selectedOrder = updated;
+    this.initOrderRebuildFromSelected();
+    this.initOrderCompositionLinesFromSelected();
+    this.syncOrderPaymentFormFromSelected();
+    if (closeComposition) this.orderCompositionOpen = false;
   }
+}
+```
+Обе кнопки должны вызывать одну функцию с разным флагом.
 
-  if body.expected_version is not None and int(order.row_version) != int(body.expected_version):
-      raise HTTPException(status_code=409, detail="Заказ изменился. Обновите список.")
+# Лишние и сомнительные файлы
 
-  🔴 Критичность: Medium Frontend Ошибки загрузки заказов уходят только в console.warn
-  Где: /C:/Users/Gulmira/Desktop/RestoMind/app/static/js/admin-app.js:3536, /C:/Users/Gulmira/Desktop/RestoMind/app/
-  static/js/admin-app.js:3552, [app/static/js/admin-app.js](/C:/ его в шаб:
-
-  async loadOrders() {
-      this.ordersLoadError = '';
-      const { ok, status, data } = await this.apiJsonResponse(`/api/admin/orders?${p.toString()}`);
-      if (!ok) {
-          this.ordersLoadError = this.formatApiError(data.detail) || `Не удалось загрузить заказы (${status})`;
-          void this.showUiAlert(this.ordersLoadError, 'Ошибка');
-          return;
-      }
-      this.orders = data.orders || [];
-  }
-
-  <div x-show="ordersLoadError" class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
-      <span x-text="ordersLoadError"></span>
-  </div>
-
-  🔴 Критичность: Medium Frontend Reconnect timers WebSocket могут накапливаться
-  Где: /C:/Users/Gulmira/Desktop/RestoMind/app/static/js/admin-app.js:2704, /C:/Users/Gulmira/Desktop/RestoMind/app/
-  static/js/admin-app.js:2726
-  Угроза: scheduleReconnect() создает setTimeout, но id не хранится и не очищается при ручном connectWebSocket(),
-  logout/login или смене токена. После нестабильной сети несколько таймеров могут параллельно открывать сокеты. Код
-  закрывает старый сокет, но события/коннекты будут дергаться лишний раз, что усиливает WS/REST гонки.
-  Как исправить:
-
-  scheduleReconnect() {
-      if (this._wsReconnectTimer) clearTimeout(this._wsReconnectTimer);
-      this._wsReconnectTimer = setTimeout(() => {
-          this._wsReconnectTimer = null;
-          if (!this.authenticated || !this.wsToken) return;
-          this.wsEpoch++;
-          this.wsReconnectDelay = Math.min(this.wsReconnectDelay * 1.5, 15000);
-          this.connectWebSocket();
-      }, this.wsReconnectDelay);
-  },
-
-  disconnectWebSocket() {
-      if (this._wsReconnectTimer) {
-          clearTimeout(this._wsReconnectTimer);
-          this._wsReconnectTimer = null;
-      }
-      this._clearWsReadyTimer();
-      if (this.ws) {
-          this.ws.onopen = this.ws.onclose = this.ws.onerror = this.ws.onmessage = null;
-          this.ws.close();
-          this.ws = null;
-      }
-      this.wsChannelReady = false;
-  }
-
-  🔴 Критичность: Low Frontend Дублирование карточек заказов повышает риск разных действий на desktop/mobile
-  Где: /C:/Users/Gulmira/Desktop/RestoMind/app/templates/admin.html:823, /C:/Users/Gulmira/Desktop/RestoMind/app/
-  templates/admin.html:871, /C:/Users/Gulmira/Desktop/RestoMind/app/templates/admin.html:919, /C:/Users/Gulmira/Desktop/
-  RestoMind/app/templates/admin.html:959, /C:/Users/Gulmira/Desktop/RestoMind/app/templates/admin.html:1030
-  Угроза: iiko error badge, payment/prepayment fields, row_version-dependent buttons и клиентские данные повторяются в
-  kanban/table/mobile ветках. При следующей правке одно место легко забыть, и мобильный оператор будет принимать решение
-  по неполному статусу.
-  Как исправить: вынести повторяемый order summary в Jinja macro:
-
-  {# app/templates/admin/_order_card.html #}
-  {% macro order_status_bits(order_expr) %}
-  <div x-show="{{ order_expr }}.iiko_last_error" class="mt-2 rounded-lg border border-red-300 bg-red-50 px-2 py-2">
-      <p class="text-[10px] font-bold uppercase text-red-900">Ошибка iiko</p>
-      <p class="text-xs text-red-900" x-text="{{ order_expr }}.iiko_last_error"></p>
-  </div>
-  <div class="font-mono text-xs text-gray-700" x-text="{{ order_expr }}.user_phone || '—'"></div>
-  {% from "admin/_order_card.html" import order_status_bits %}
-  {{ order_status_bits("order") }}
-
-  static/js/admin-app.js:3615, /C:/Users/Gulmira/Desktop/RestoMind/app/api/admin.py:872
-  Угроза: две JS-функции отправляют один и тотКак исправить: оставить одну функцию
-  submitOrderRebuild({ closeComposition }) и использовать ее из обеих кнопок:
-
-  async submitOrderRebuild({ closeComposition = false } = {}) {
-      ...
-      if (updated) {
-          this.selectedOrder = updated;
-          this.initOrderRebuildFromSelected();
-          this.initOrderCompositionLinesFromSelected();
-          this.syncOrderPaymentFormFromSelected();
-          if (closeComposition) this.orderCompositionOpen = false;
-      }
-  }
-
-Исправь всё это, но перед этим пройдись по плану проекта и просмотри другие файлы чтобы ничего не сломать 
+🔴 Критичность: Low Backend/Frontend Рабочие артефакты и временные файлы в корне проекта
+Где: problems.md, возможные черновые миграции и незавершенные service-файлы
+Угроза: такие файлы начинают жить как будто это production-документация или рабочий код, хотя по факту отражают промежуточное состояние аудита/рефакторинга. Это повышает риск, что следующая разработка будет опираться на устаревший документ или полусобранную миграцию.
+Как исправить: оставить только те артефакты, которые реально входят в процесс разработки, остальное либо удалить, либо перенести в отдельную папку `docs/audits/` и назвать явно как временный отчет.

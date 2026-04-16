@@ -171,6 +171,16 @@ function adminMixinState() {
         settingsBulkCancelLoading: false,
         settingsRetentionRunLoading: false,
 
+        // Команда
+        teamUsers: [],
+        teamLoading: false,
+        teamCreateLoading: false,
+        teamError: '',
+        teamNewEmail: '',
+        teamNewRole: 'operator',
+        teamNewPassword: '',
+        teamTempPassword: '',
+
         packagingRules: [],
         packagingLoading: false,
 
@@ -203,7 +213,7 @@ function adminMixinState() {
         navSections: [
             { id: 'overview', title: 'Обзор' },
             { id: 'operations', title: 'Операции' },
-            { id: 'settings', title: 'Настройки' },
+            { id: 'settings', title: 'Управление' },
         ],
         navItems: [
             { id: 'dashboard', section: 'overview', label: 'Дашборд', desc: 'Общая статистика и последние заказы',
@@ -212,7 +222,7 @@ function adminMixinState() {
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/></svg>' },
             { id: 'orders', section: 'operations', label: 'Заказы', desc: 'По этапам (черновик → подтверждён → кухня) или общий список',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z"/></svg>' },
-            { id: 'operator_queue', section: 'operations', label: 'Очередь ошибок', desc: 'Сообщения после исчерпания retry',
+            { id: 'operator_queue', section: 'operations', label: 'Помощь бота', desc: 'Запросы, где нужна помощь человека',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>' },
             { id: 'bookings', section: 'operations', label: 'Бронирования', desc: 'Столики и резервации',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/></svg>' },
@@ -222,18 +232,20 @@ function adminMixinState() {
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8.25v-1.5m0 1.5c-1.355 0-2.697.056-4.024.166C6.845 8.51 6 9.473 6 10.608v2.513m6-4.871c1.355 0 2.697.055 4.024.165C17.155 8.51 18 9.473 18 10.608v2.513m-3 4.73v-1.59c0-.532-.21-1.042-.586-1.418L12 13.5m-3 4.73c.55.47 1.27.73 2 .73h6c.73 0 1.45-.26 2-.73m-8-4.73V10.6c0-1.12.856-2.08 2.09-2.19.64-.09 1.29-.14 1.91-.14m5 6.37v1.59c0 1.632-.875 3.11-2.25 3.89"/></svg>' },
             { id: 'stoplist', section: 'operations', label: 'Стоп-лист', desc: 'Нет в наличии и синхронизация с iiko',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>' },
-            { id: 'integrations', section: 'settings', label: 'Интеграции', desc: 'iiko, WhatsApp и принудительная синхронизация',
+            { id: 'integrations', section: 'settings', label: 'Подключения', desc: 'Касса, WhatsApp и синхронизация',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m4.95-4.95l1.757-1.757a4.5 4.5 0 016.364 6.364l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757"/></svg>' },
-            { id: 'packaging', section: 'settings', label: 'Упаковка', desc: 'Правила и цены контейнеров для доставки и самовывоза',
+            { id: 'packaging', section: 'settings', label: 'Доставка и упаковка', desc: 'Правила упаковки и доп. услуги',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5m8.25 3v6.75m0 0l-3-3m3 3l3-3M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z"/></svg>' },
-            { id: 'upsell', section: 'settings', label: 'Допродажи', desc: 'Правила Strategy Engine (без деплоя)',
+            { id: 'upsell', section: 'settings', label: 'Стратегия продаж', desc: 'Допродажи и предложения к заказу',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.25 18L9 11.25l4.306 4.307a11.95 11.95 0 015.814-5.519l2.74-1.22m0 0l-5.94-2.28m5.94 2.28l-2.28 5.941"/></svg>' },
-            { id: 'knowledge', section: 'settings', label: 'База знаний', desc: 'Справочник для AI: парковка, банкеты, правила',
+            { id: 'knowledge', section: 'settings', label: 'Информация о ресторане', desc: 'Адрес, часы работы и ответы клиентам',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v15.128A9 9 0 009 18c0 1.518.39 2.948 1.082 4.192m3-16.15V18c0 1.518-.39 2.948-1.082 4.192M15 6.042a8.967 8.967 0 014.5 2.292v15.128A9 9 0 0015 18c0-1.518-.39-2.948-1.082-4.192"/></svg>' },
-            { id: 'settings', section: 'settings', label: 'Настройки', desc: 'Опасная зона: сброс данных и удаление заказов',
+            { id: 'settings', section: 'settings', label: 'Данные и безопасность', desc: 'Администрирование и расширенные действия',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>' },
             { id: 'test', section: 'settings', label: 'Тест бота', desc: 'Протестируйте AI-оператора вживую',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25zm.75-12h9v9h-9v-9z"/></svg>' },
+            { id: 'team', section: 'settings', label: 'Команда', desc: 'Доступ сотрудников к панели управления',
+              icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M18 18.72a9.094 9.094 0 00-6-2.28c-2.334 0-4.477.88-6 2.28M15 10.5a3 3 0 11-6 0 3 3 0 016 0z"/></svg>' },
         ],
 
         // WebSocket (статус в сайдбаре: readyState + ws_ready с сервера)
@@ -399,6 +411,7 @@ function adminMixinState() {
         statusConfig: {
             draft: { label: 'Черновик', class: 'bg-gray-100 text-gray-600' },
             confirmed: { label: 'Подтверждён', class: 'bg-blue-50 text-blue-600' },
+            sending_to_iiko: { label: 'Отправляется на кухню', class: 'bg-amber-50 text-amber-700' },
             sent_to_iiko: { label: 'На кухне', class: 'bg-emerald-50 text-emerald-600' },
             completed: { label: 'Завершён', class: 'bg-emerald-50 text-emerald-600' },
             cancelled: { label: 'Отменён', class: 'bg-red-50 text-red-500' },
@@ -3324,6 +3337,8 @@ function adminMixinDataChartsSettings() {
                     await this.loadUpsellRules();
                 } else if (this.currentTab === 'settings') {
                     await Promise.all([this.loadSettingsOrders(), this.loadSettingsEnvironment()]);
+                } else if (this.currentTab === 'team') {
+                    await this.loadTeam();
                 } else if (this.currentTab === 'chats') {
                     await this.loadChatList();
                 }
@@ -3496,14 +3511,16 @@ function adminMixinDataChartsSettings() {
                 return;
             }
             const incoming = Array.isArray(data.orders) ? data.orders : [];
-            const byId = new Map((this.orders || []).map((o) => [Number(o.id), o]));
-            this.orders = incoming.map((next) => {
-                const prev = byId.get(Number(next?.id));
-                if (prev && Number(prev.row_version || 0) > Number(next?.row_version || 0)) {
-                    return prev;
+            const merged = new Map((this.orders || []).map((o) => [Number(o.id), o]));
+            for (const next of incoming) {
+                const id = Number(next?.id);
+                if (!Number.isFinite(id)) continue;
+                const prev = merged.get(id);
+                if (!prev || Number(next?.row_version || 0) >= Number(prev?.row_version || 0)) {
+                    merged.set(id, next);
                 }
-                return next;
-            });
+            }
+            this.orders = Array.from(merged.values());
         },
 
         async loadFailedTasks() {
@@ -3523,6 +3540,56 @@ function adminMixinDataChartsSettings() {
                 this.failedTasksTotal = data.total ?? (data.tasks || []).length;
             } finally {
                 this.failedTasksLoading = false;
+            }
+        },
+
+        async loadTeam() {
+            this.teamLoading = true;
+            this.teamError = '';
+            try {
+                const { ok, data } = await this.apiJsonResponse('/api/admin/staff');
+                if (!ok) {
+                    this.teamUsers = [];
+                    this.teamError = this.formatApiError(data.detail) || 'Не удалось загрузить список сотрудников';
+                    return;
+                }
+                this.teamUsers = Array.isArray(data.users) ? data.users : [];
+            } finally {
+                this.teamLoading = false;
+            }
+        },
+
+        async createTeamMember() {
+            this.teamError = '';
+            this.teamTempPassword = '';
+            const email = (this.teamNewEmail || '').trim();
+            if (!email) {
+                this.teamError = 'Введите email сотрудника';
+                return;
+            }
+            this.teamCreateLoading = true;
+            try {
+                const { ok, data } = await this.apiJsonResponse('/api/admin/staff', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email,
+                        role: (this.teamNewRole || 'operator'),
+                        password: (this.teamNewPassword || ''),
+                    }),
+                });
+                if (!ok) {
+                    this.teamError = this.formatApiError(data.detail) || 'Не удалось добавить сотрудника';
+                    return;
+                }
+                if (data.temp_password) {
+                    this.teamTempPassword = String(data.temp_password);
+                }
+                this.teamNewEmail = '';
+                this.teamNewPassword = '';
+                await this.loadTeam();
+            } finally {
+                this.teamCreateLoading = false;
             }
         },
 

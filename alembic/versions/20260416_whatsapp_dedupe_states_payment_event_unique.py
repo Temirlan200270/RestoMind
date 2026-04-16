@@ -1,6 +1,6 @@
 """whatsapp_inbound_dedupe states + payment_event idempotency unique
 
-Revision ID: 20260416_dedupe_states_payment_uq
+Revision ID: 20260416_dedupe_states_pay_uq
 Revises: 20260419_menu_iiko_org
 Create Date: 2026-04-16
 
@@ -13,7 +13,7 @@ from typing import Sequence, Union
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "20260416_dedupe_states_payment_uq"
+revision: str = "20260416_dedupe_states_pay_uq"
 down_revision: Union[str, None] = "20260419_menu_iiko_org"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

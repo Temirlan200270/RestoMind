@@ -56,6 +56,7 @@ from app.services.dialog_mgr import (
     set_pending_booking,
     set_pending_order,
     set_user_state,
+    update_user_session_fields_in_db,
 )
 from app.services.events import publish_event
 from app.services.org_resolve import organization_id_for_whatsapp_value
@@ -241,8 +242,10 @@ async def _process_whatsapp_status_batch(statuses: list[Any]) -> None:
         errs = raw.get("errors")
         try:
             async with async_session_factory() as db:
-                await apply_whatsapp_status_webhook(db, mid, st, errs)
+                evt = await apply_whatsapp_status_webhook(db, mid, st, errs)
                 await db.commit()
+            if evt is not None:
+                await publish_event("message_status_updated", evt)
         except Exception as exc:
             logger.warning("WhatsApp status update failed for %s: %s", mid[:20], exc)
 
@@ -939,7 +942,7 @@ async def process_message(
         customer_ctx = ""
         u_row: User | None = None
         async with async_session_factory() as db:
-            menu_items = await load_available_menu(db)
+            menu_items = await load_available_menu(db, organization_id=organization_id)
             menu_context = build_menu_context(menu_items)
             u_row = await db.scalar(
                 select(User).where(
@@ -993,6 +996,7 @@ async def process_message(
                 draft_order_context=draft_ctx,
                 sales_strategy_context=strategy_ctx,
                 customer_context=customer_ctx,
+                raise_on_transient=True,
             )
 
         log_pipeline_stage(
@@ -1002,6 +1006,9 @@ async def process_message(
         )
 
         # 3) DB: короткая мутация/запись результатов
+        post_commit_state: UserState | None = None
+        post_commit_pending_order: int | None = None
+        post_commit_pending_booking: int | None = None
         async with async_session_factory() as db:
             result = await route_intent(
                 db,
@@ -1020,18 +1027,25 @@ async def process_message(
                 },
             )
 
-            if result.new_state:
-                await set_user_state(
-                    redis_client, phone, result.new_state, organization_id=organization_id,
+            # Durable state (source of truth) — в этой же транзакции БД.
+            db_state_kwargs: dict[str, Any] = {
+                "phone": phone,
+                "organization_id": organization_id,
+                "current_state": (result.new_state.value if result.new_state else None),
+            }
+            if result.pending_order_id is not None:
+                db_state_kwargs["current_pending_order_id"] = (
+                    int(result.pending_order_id) if result.pending_order_id else None
                 )
-            if result.pending_order_id:
-                await set_pending_order(
-                    redis_client, phone, result.pending_order_id, organization_id=organization_id,
+            if result.pending_booking_id is not None:
+                db_state_kwargs["current_pending_booking_id"] = (
+                    int(result.pending_booking_id) if result.pending_booking_id else None
                 )
-            if result.pending_booking_id:
-                await set_pending_booking(
-                    redis_client, phone, result.pending_booking_id, organization_id=organization_id,
-                )
+            await update_user_session_fields_in_db(db, **db_state_kwargs)
+
+            post_commit_state = result.new_state
+            post_commit_pending_order = result.pending_order_id
+            post_commit_pending_booking = result.pending_booking_id
 
             assistant_meta = {
                 "intent": ai_response.intent,
@@ -1084,6 +1098,17 @@ async def process_message(
                     pending_booking_id=p_book,
                 )
             await db.commit()
+
+        # Cache update после commit — иначе риск рассинхрона Redis↔БД при падении процесса
+        if post_commit_state:
+            await set_user_state(redis_client, phone, post_commit_state, organization_id=organization_id)
+        if post_commit_pending_order:
+            await set_pending_order(redis_client, phone, post_commit_pending_order, organization_id=organization_id)
+        if post_commit_pending_booking:
+            await set_pending_booking(redis_client, phone, post_commit_pending_booking, organization_id=organization_id)
+
+        for evt_type, evt_data in (result.events or []):
+            await publish_event(evt_type, evt_data)
 
         await append_to_history(
             redis_client, phone, "assistant", result.reply_text, organization_id=organization_id,

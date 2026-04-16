@@ -20,6 +20,27 @@ CHANNEL_NAME = "admin_events"
 
 # Хранилище подключённых WebSocket-подписчиков (in-memory fallback)
 _subscribers: set[asyncio.Queue[str]] = set()
+_pub_client: Any | None = None
+_cached_redis_url: str = ""
+
+
+async def _get_pub_client():
+    """Ленивый Redis client для publish (переиспользуется между вызовами)."""
+    global _pub_client, _cached_redis_url
+    from redis.asyncio import Redis
+
+    url = (settings.redis_url or "").strip()
+    if not url:
+        return None
+    if _pub_client is None or _cached_redis_url != url:
+        try:
+            if _pub_client is not None:
+                await _pub_client.aclose()
+        except Exception:
+            pass
+        _cached_redis_url = url
+        _pub_client = Redis.from_url(url, **redis_connection_kwargs())
+    return _pub_client
 
 
 async def publish_event(event_type: str, data: dict[str, Any]) -> None:
@@ -37,12 +58,10 @@ async def publish_event(event_type: str, data: dict[str, Any]) -> None:
 
     if redis_pubsub_available():
         try:
-            from redis.asyncio import Redis
-            pub_client = Redis.from_url(settings.redis_url, **redis_connection_kwargs())
-            try:
-                await pub_client.publish(CHANNEL_NAME, payload)
-            finally:
-                await pub_client.aclose()
+            pub_client = await _get_pub_client()
+            if pub_client is None:
+                raise RuntimeError("Redis URL not configured")
+            await pub_client.publish(CHANNEL_NAME, payload)
         except Exception as exc:
             logger.error("Redis publish error: %s", exc)
             _broadcast_in_memory(payload)

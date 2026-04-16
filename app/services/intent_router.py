@@ -9,6 +9,7 @@
 
 import logging
 from dataclasses import dataclass
+from dataclasses import field
 from datetime import date, time
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,7 +26,6 @@ from app.services.booking_halls import (
 )
 from app.schemas.ai_schemas import AIBrainResponse, PaymentSplit
 from app.services.dialog_mgr import UserState
-from app.services.events import publish_event
 from app.services.order_logic import (
     ValidatedOrder,
     applied_order_action_ids_from_items_json,
@@ -302,6 +302,7 @@ class RouteResult:
     pending_order_id: int | None = None
     pending_booking_id: int | None = None
     new_state: UserState | None = None
+    events: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
 
 
 async def get_or_create_user(
@@ -344,7 +345,7 @@ async def _handle_order(
     При активном черновике и непустом order_actions — merge с items_json (Phase 18).
     """
     if menu_items is None:
-        menu_items = await load_available_menu(db)
+        menu_items = await load_available_menu(db, organization_id=organization_id)
 
     existing_draft = await get_open_draft_order(db, phone, organization_id)
     use_merge = bool(ai_response.order_actions) and existing_draft is not None
@@ -379,10 +380,14 @@ async def _handle_order(
         )
         enriched = enrich_merged_items_from_menu(merged, menu_items)
         order_items = draft_food_lines_to_order_items(enriched)
-        validated = await validate_order(order_items, menu_items=menu_items, db=db)
+        validated = await validate_order(
+            order_items, menu_items=menu_items, db=db, organization_id=organization_id,
+        )
     elif ai_response.items:
         ai_eff = ai_response
-        validated = await validate_order(ai_response.items, menu_items=menu_items, db=db)
+        validated = await validate_order(
+            ai_response.items, menu_items=menu_items, db=db, organization_id=organization_id,
+        )
         if not validated.valid_items:
             unknown_list = ", ".join(validated.unknown_items) if validated.unknown_items else "—"
             return RouteResult(
@@ -658,21 +663,25 @@ async def _handle_order(
         order.id, len(validated.valid_items), grand_total, log_hint,
     )
 
-    await publish_event("order_updated", {
-        "order_id": order.id, "status": OrderStatus.DRAFT,
-        "phone": phone, "total_price": grand_total,
+    evt_data: dict[str, Any] = {
+        "order_id": order.id,
+        "status": OrderStatus.DRAFT,
+        "phone": phone,
+        "total_price": grand_total,
         "items": validated.valid_items,
         "order_type": ai_eff.order_type,
         "payment_method": ai_eff.payment_method,
         "booking_id": booking_row.id if booking_row else None,
         "organization_id": organization_id,
-        **({"created_at": order.created_at.isoformat()} if getattr(order, "created_at", None) else {}),
-    })
+    }
+    if getattr(order, "created_at", None):
+        evt_data["created_at"] = order.created_at.isoformat()
 
     return RouteResult(
         reply_text=reply,
         pending_order_id=order.id,
         new_state=next_state,
+        events=[("order_updated", evt_data)],
     )
 
 

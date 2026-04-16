@@ -635,3 +635,18 @@ async def admin_page(request: Request) -> HTMLResponse:
     # Чтобы браузер не держал устаревший HTML (Alpine/шаблон после деплоя).
     response.headers["Cache-Control"] = "no-store, max-age=0, must-revalidate"
     return response
+
+
+@app.get("/onboarding", response_class=HTMLResponse, tags=["Admin Panel"])
+async def onboarding_page(request: Request) -> HTMLResponse:
+    """Self-serve мастер настройки (регистрация → интеграции → готово)."""
+    git_sha = (os.environ.get("RENDER_GIT_COMMIT") or os.environ.get("GIT_COMMIT") or "").strip()
+    sha7 = git_sha[:7] if git_sha else ""
+    asset_ver = settings.app_version + (f"-{sha7}" if sha7 else "")
+    response = templates.TemplateResponse(
+        request,
+        "onboarding.html",
+        {"asset_ver": asset_ver},
+    )
+    response.headers["Cache-Control"] = "no-store, max-age=0, must-revalidate"
+    return response

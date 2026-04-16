@@ -77,7 +77,7 @@ class TelephonyRouter:
         from app.db.session import redis_client
 
         history = await get_chat_history(redis_client, session.phone)
-        ai_response = await call_openai(history, transcript)
+        ai_response = await call_openai(history, transcript, raise_on_transient=True)
 
         await append_to_history(redis_client, session.phone, "user", transcript)
         await append_to_history(redis_client, session.phone, "assistant", ai_response.reply_text)

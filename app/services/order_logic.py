@@ -194,13 +194,28 @@ class MenuEntry:
     category: str = ""
 
 
-async def load_available_menu(db: AsyncSession) -> list[MenuItem]:
-    """Один запрос на весь цикл обработки — загрузка доступных позиций."""
-    result = await db.execute(
-        select(MenuItem)
-        .where(MenuItem.is_available.is_(True))
-        .order_by(MenuItem.category, MenuItem.name)
-    )
+async def load_available_menu(
+    db: AsyncSession,
+    *,
+    organization_id: int | None = None,
+) -> list[MenuItem]:
+    """
+    Один запрос на весь цикл обработки — загрузка доступных позиций.
+
+    В multi-tenant режиме обязателен фильтр по organization_id, иначе это data leak меню между филиалами.
+    Для legacy-данных (MenuItem.organization_id IS NULL) разрешаем чтение только для default organization.
+    """
+    stmt = select(MenuItem).where(MenuItem.is_available.is_(True))
+    if organization_id is not None:
+        from app.core.config import settings
+
+        org_id = int(organization_id)
+        if org_id == int(settings.default_organization_id):
+            stmt = stmt.where(or_(MenuItem.organization_id == org_id, MenuItem.organization_id.is_(None)))
+        else:
+            stmt = stmt.where(MenuItem.organization_id == org_id)
+    stmt = stmt.order_by(MenuItem.category, MenuItem.name)
+    result = await db.execute(stmt)
     return list(result.scalars().all())
 
 
@@ -227,6 +242,8 @@ async def validate_order(
     items: list[OrderItem],
     menu_items: list[MenuItem] | None = None,
     db: AsyncSession | None = None,
+    *,
+    organization_id: int | None = None,
 ) -> ValidatedOrder:
     """
     Проверяет каждую позицию заказа по таблице MenuItem в БД.
@@ -234,7 +251,7 @@ async def validate_order(
     или db-сессию для ленивой загрузки. Fallback на MOCK_MENU.
     """
     if menu_items is None and db is not None:
-        menu_items = await load_available_menu(db)
+        menu_items = await load_available_menu(db, organization_id=organization_id)
     menu_lookup = _build_menu_lookup(menu_items or [])
     menu_names = list(menu_lookup.keys())
 
