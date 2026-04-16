@@ -998,8 +998,78 @@ function adminMixinMenuOrdersUi() {
 
         orderHasUpsell(order) {
             const meta = order?.items?.order_meta;
-            const r = meta && meta.recommendation;
-            return !!(r && (r.offered || r.reason));
+            if (!meta || typeof meta !== 'object') return false;
+            const r = meta.recommendation;
+            if (r && typeof r === 'object' && (r.offered || r.reason || r.offered_iiko_id)) return true;
+            const tr = meta.recommendation_trace;
+            if (!Array.isArray(tr) || !tr.length) return false;
+            return tr.some((ev) => ev && typeof ev === 'object' && (ev.offered || ev.offered_iiko_id));
+        },
+
+        /** События допродажи для UI (trace + legacy recommendation). */
+        orderSalesInsightSteps(order) {
+            const meta = order?.items?.order_meta;
+            if (!meta || typeof meta !== 'object') return [];
+            const tr = meta.recommendation_trace;
+            const out = [];
+            if (Array.isArray(tr)) {
+                for (const ev of tr) {
+                    if (!ev || typeof ev !== 'object') continue;
+                    if (!ev.offered && !ev.offered_iiko_id) continue;
+                    out.push(ev);
+                }
+            }
+            const rec = meta.recommendation;
+            if (!out.length && rec && typeof rec === 'object' && (rec.offered || rec.offered_iiko_id)) {
+                out.push(rec);
+            }
+            return out;
+        },
+
+        /** Человекочитаемая «причина» шага для персонала. */
+        salesInsightWhy(trace) {
+            if (!trace || typeof trace !== 'object') return '';
+            const reason = String(trace.reason || trace.upsell_reasoning || '').trim();
+            if (reason) return reason;
+            const src = String(trace.source || '').trim();
+            if (src === 'upsell_rule') {
+                const rid = trace.rule_id;
+                return rid != null && rid !== ''
+                    ? `Правило допродаж №${rid}`
+                    : 'Правило допродаж из настроек';
+            }
+            if (src) return src;
+            return 'Предложение в диалоге';
+        },
+
+        salesInsightSourceLabel(trace) {
+            if (!trace || typeof trace !== 'object') return 'ИИ';
+            const src = String(trace.source || '').trim();
+            if (src === 'upsell_rule') return 'Правило';
+            if (src) return src;
+            return 'ИИ';
+        },
+
+        /** Сумма принятых допродаж по trace (accepted_revenue_kzt). */
+        orderAcceptedUpsellRevenueSum(order) {
+            let rev = 0;
+            for (const s of this.orderSalesInsightSteps(order)) {
+                if (s && s.accepted === true && s.accepted_revenue_kzt != null) {
+                    rev += Number(s.accepted_revenue_kzt) || 0;
+                }
+            }
+            return Math.round(rev * 100) / 100;
+        },
+
+        /**
+         * Доля выручки заказа, пришедшая с принятых допродаж ИИ (по учтённой сумме в trace).
+         * null — если нет суммы или итог заказа нулевой.
+         */
+        orderAiEfficiencyPct(order) {
+            const rev = this.orderAcceptedUpsellRevenueSum(order);
+            const total = Number(order?.total_price);
+            if (!Number.isFinite(total) || total <= 0 || rev <= 0) return null;
+            return Math.min(100, Math.round((rev / total) * 1000) / 10);
         },
 
         kanbanOrderSurfaceClass(order, normalClass) {
@@ -3708,7 +3778,7 @@ function adminMixinDataChartsSettings() {
                     requestAnimationFrame(() => {
                         try {
                             this.renderDashboardMiniChart();
-                            const canvas = document.getElementById('dashboardMiniChart');
+                            const canvas = document.getElementById('dashboardHeroChart');
                             const parent = canvas?.parentElement;
                             if (charts.dashboard && parent) {
                                 this._attachChartLayoutFix(charts.dashboard, parent);
@@ -4845,7 +4915,7 @@ function adminMixinDataChartsSettings() {
         /** Плавная area-линия с градиентом под кривой (премиум-дашборд). */
         renderDashboardMiniChart() {
             if (this.currentTab !== 'dashboard') return;
-            const canvas = document.getElementById('dashboardMiniChart');
+            const canvas = document.getElementById('dashboardHeroChart');
             if (!canvas) return;
             const series = this.dashStats.daily_series || [];
             // Пустая серия: не вызываем destroy() — иначе график исчезает навсегда до следующего успешного /stats.
@@ -4863,9 +4933,42 @@ function adminMixinDataChartsSettings() {
                 const dt = new Date(d.date + 'T12:00:00Z');
                 return dt.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' });
             });
-            const isRev = this.dashMiniMetric === 'revenue';
-            const data = series.map((d) => (isRev ? d.revenue : d.orders));
-            const label = isRev ? 'Выручка (₸)' : 'Заказов';
+            const metric = this.dashMiniMetric === 'orders' ? 'orders'
+                : this.dashMiniMetric === 'ai_profit' ? 'ai_profit'
+                    : 'revenue';
+            const data = series.map((d) => {
+                if (metric === 'revenue') return Number(d.revenue) || 0;
+                if (metric === 'ai_profit') return Number(d.ai_profit ?? 0);
+                return Number(d.orders) || 0;
+            });
+            const isMoney = metric === 'revenue' || metric === 'ai_profit';
+            const label = metric === 'revenue' ? 'Выручка (₸)'
+                : metric === 'ai_profit' ? 'Прибыль ИИ (₸)'
+                    : 'Заказов';
+
+            const palette = metric === 'revenue'
+                ? {
+                    border: '#2563eb',
+                    point: '#2563eb',
+                    fillFallback: 'rgba(37, 99, 235, 0.08)',
+                    g0: 'rgba(37, 99, 235, 0.32)',
+                    g1: 'rgba(37, 99, 235, 0.02)',
+                }
+                : metric === 'ai_profit'
+                    ? {
+                        border: '#7c3aed',
+                        point: '#a855f7',
+                        fillFallback: 'rgba(124, 58, 237, 0.08)',
+                        g0: 'rgba(168, 85, 247, 0.35)',
+                        g1: 'rgba(124, 58, 237, 0.02)',
+                    }
+                    : {
+                        border: '#0f766e',
+                        point: '#14b8a6',
+                        fillFallback: 'rgba(15, 118, 110, 0.08)',
+                        g0: 'rgba(20, 184, 166, 0.28)',
+                        g1: 'rgba(15, 118, 110, 0.02)',
+                    };
 
             const self = this;
             /** Заливка через scriptable option: chartArea на первом кадре может быть пустым (документация Chart.js). */
@@ -4877,24 +4980,24 @@ function adminMixinDataChartsSettings() {
                     datasets: [{
                         label,
                         data,
-                        borderColor: '#2563eb',
+                        borderColor: palette.border,
                         borderWidth: 2,
                         fill: true,
                         backgroundColor: (context) => {
                             const chart = context.chart;
                             const { ctx: cctx, chartArea } = chart;
                             if (!chartArea) {
-                                return 'rgba(37, 99, 235, 0.08)';
+                                return palette.fillFallback;
                             }
                             const g = cctx.createLinearGradient(0, chartArea.bottom, 0, chartArea.top);
-                            g.addColorStop(0, 'rgba(37, 99, 235, 0.32)');
-                            g.addColorStop(1, 'rgba(37, 99, 235, 0.02)');
+                            g.addColorStop(0, palette.g0);
+                            g.addColorStop(1, palette.g1);
                             return g;
                         },
                         tension: 0.4,
                         pointRadius: 3,
                         pointHoverRadius: 5,
-                        pointBackgroundColor: '#2563eb',
+                        pointBackgroundColor: palette.point,
                         pointBorderColor: '#ffffff',
                         pointBorderWidth: 2,
                     }],
@@ -4912,8 +5015,9 @@ function adminMixinDataChartsSettings() {
                             callbacks: {
                                 label(c) {
                                     const raw = c.raw;
-                                    if (self.dashMiniMetric === 'revenue') {
-                                        return 'Выручка: ' + adminFormat.moneyAmount(raw) + ' ₸';
+                                    if (self.dashMiniMetric === 'revenue' || self.dashMiniMetric === 'ai_profit') {
+                                        const prefix = self.dashMiniMetric === 'ai_profit' ? 'Прибыль ИИ' : 'Выручка';
+                                        return prefix + ': ' + adminFormat.moneyAmount(raw) + ' ₸';
                                     }
                                     return 'Заказов: ' + raw;
                                 },
@@ -4932,7 +5036,7 @@ function adminMixinDataChartsSettings() {
                             border: { display: false },
                             ticks: {
                                 font: { size: 11 },
-                                callback: (v) => (self.dashMiniMetric === 'revenue'
+                                callback: (v) => (isMoney
                                     ? adminFormat.moneyAmount(v)
                                     : v),
                             },

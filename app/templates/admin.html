@@ -255,101 +255,87 @@
             :class="currentTab === 'chats' ? 'flex flex-col overflow-hidden px-3 sm:px-4 md:px-6 pb-3 sm:pb-4 md:pb-6' : 'overflow-y-auto overflow-x-hidden min-w-0 px-4 sm:px-6 md:px-8 py-4 md:py-6'"
         >
             <!-- ========== ДАШБОРД ========== -->
-            <div x-show="currentTab === 'dashboard'" x-cloak class="fade-in">
-                <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 mb-8">
-                    <!-- AI ROI (главный блок) -->
-                    <div class="lg:col-span-7 rounded-2xl p-6 shadow-sm ring-1 ring-slate-900/5 bg-gradient-to-br from-brand-600 via-brand-600 to-violet-700 text-white">
-                        <div class="flex items-start justify-between gap-4">
-                            <div class="min-w-0">
-                                <div class="text-xs font-bold uppercase tracking-wider text-white/80">AI ROI · Сегодня</div>
-                                <div class="mt-2 flex flex-wrap items-end gap-x-4 gap-y-1">
-                                    <div x-show="dashStatsLoading && !dashStatsLoadedOnce" class="w-44 h-10 rounded-xl bg-white/20 animate-pulse"></div>
-                                    <div x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak class="text-3xl sm:text-4xl font-extrabold tabular-nums" x-text="fmt.money(dashStats.ai_revenue_today ?? dashStats.upsell_revenue_today ?? 0)"></div>
-                                    <div class="text-sm text-white/80" x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak>добавочная выручка от «умных продаж»</div>
-                                </div>
-                                <div class="mt-4 flex flex-wrap items-center gap-2 text-sm">
-                                    <template x-if="dashStatsLoading && !dashStatsLoadedOnce">
-                                        <div class="flex flex-wrap items-center gap-2">
-                                            <div class="h-8 w-28 rounded-lg bg-white/15 animate-pulse"></div>
-                                            <div class="h-8 w-28 rounded-lg bg-white/10 animate-pulse"></div>
-                                            <div class="h-8 w-40 rounded-lg bg-white/10 animate-pulse"></div>
-                                        </div>
-                                    </template>
-                                    <template x-if="!(dashStatsLoading && !dashStatsLoadedOnce)">
-                                        <div class="flex flex-wrap items-center gap-2">
-                                            <span class="inline-flex items-center px-2.5 py-1 rounded-lg bg-white/15 text-white font-semibold">
-                                                Конверсия <span class="ml-1 tabular-nums" x-text="(dashStats.upsell_conversion_pct ?? '—') + (dashStats.upsell_conversion_pct != null ? '%' : '')"></span>
-                                            </span>
-                                            <span class="inline-flex items-center px-2.5 py-1 rounded-lg bg-white/10 text-white/90">
-                                                Доля выручки <span class="ml-1 tabular-nums" x-text="(dashStats.ai_revenue_share_pct ?? '—') + (dashStats.ai_revenue_share_pct != null ? '%' : '')"></span>
-                                            </span>
-                                            <span class="inline-flex items-center px-2.5 py-1 rounded-lg bg-white/10 text-white/90">
-                                                Принято/предложено <span class="ml-1 tabular-nums" x-text="(dashStats.upsell_accepted_today ?? 0) + '/' + (dashStats.upsell_offered_today ?? 0)"></span>
-                                            </span>
-                                        </div>
-                                    </template>
-                                </div>
-                            </div>
-                            <div class="shrink-0 rounded-2xl bg-white/15 p-3 ring-1 ring-white/20">
-                                <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.25 18L9 11.25l4.306 4.307a11.95 11.95 0 015.814-5.519l2.74-1.22m0 0l-5.94-2.28m5.94 2.28l-2.28 5.941"/></svg>
-                            </div>
-                        </div>
-                        <div class="mt-6 grid grid-cols-2 sm:grid-cols-3 gap-3">
-                            <div class="rounded-2xl bg-white/10 p-4 ring-1 ring-white/15">
-                                <div class="text-[11px] font-bold uppercase tracking-wider text-white/70">Выручка сегодня</div>
-                                <div x-show="dashStatsLoading && !dashStatsLoadedOnce" class="mt-2 h-7 w-24 rounded-lg bg-white/15 animate-pulse"></div>
-                                <div x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak class="mt-2 text-xl font-bold tabular-nums" x-text="fmt.money(dashStats.today_revenue || 0)"></div>
-                            </div>
-                            <div class="rounded-2xl bg-white/10 p-4 ring-1 ring-white/15">
-                                <div class="text-[11px] font-bold uppercase tracking-wider text-white/70">Заказов сегодня</div>
-                                <div x-show="dashStatsLoading && !dashStatsLoadedOnce" class="mt-2 h-7 w-16 rounded-lg bg-white/15 animate-pulse"></div>
-                                <div x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak class="mt-2 text-xl font-bold tabular-nums" x-text="dashStats.today_orders || 0"></div>
-                            </div>
-                            <div class="hidden sm:block rounded-2xl bg-white/10 p-4 ring-1 ring-white/15">
-                                <div class="text-[11px] font-bold uppercase tracking-wider text-white/70">Динамика к вчера</div>
-                                <div x-show="dashStatsLoading && !dashStatsLoadedOnce" class="mt-2 h-7 w-20 rounded-lg bg-white/15 animate-pulse"></div>
-                                <div x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak class="mt-2 text-xl font-bold tabular-nums" x-text="dashStats.revenue_change_pct != null ? formatTrendPct(dashStats.revenue_change_pct) : '—'"></div>
-                            </div>
+            <div x-show="currentTab === 'dashboard'" x-cloak class="fade-in space-y-6">
+                <div class="flex flex-wrap items-end justify-between gap-4">
+                    <div class="min-w-0">
+                        <h2 class="text-xl sm:text-2xl font-extrabold tracking-tight text-slate-900">Главная</h2>
+                        <p class="text-sm text-slate-500 mt-0.5">Выручка, допродажи ИИ и сэкономленное время — за пару секунд (UTC).</p>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <button type="button" class="min-h-[40px] px-3.5 py-2 rounded-xl text-sm font-semibold bg-white text-slate-800 ring-1 ring-slate-900/10 hover:bg-slate-50 transition"
+                            @click="currentTab = 'analytics'; loadTabData()">
+                            Подробная аналитика
+                        </button>
+                    </div>
+                </div>
+
+                <!-- KPI: выручка · прибыль ИИ · время ИИ -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div class="rounded-2xl bg-white p-5 sm:p-6 shadow-sm ring-1 ring-slate-900/5">
+                        <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Выручка сегодня</div>
+                        <div x-show="dashStatsLoading && !dashStatsLoadedOnce" class="mt-3 h-10 w-36 rounded-xl bg-slate-100 animate-pulse"></div>
+                        <div x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak class="mt-3 text-2xl sm:text-3xl font-extrabold text-slate-900 tabular-nums" x-text="fmt.money(dashStats.today_revenue || 0)"></div>
+                        <div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500" x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak>
+                            <span class="tabular-nums font-semibold text-slate-700" x-text="dashStats.today_orders || 0"></span> заказов
+                            <span class="text-slate-300">·</span>
+                            <span class="tabular-nums" x-text="dashStats.revenue_change_pct != null ? formatTrendPct(dashStats.revenue_change_pct) : '—'"></span> к вчера
                         </div>
                     </div>
-
-                    <!-- Сэкономленное время -->
-                    <div class="lg:col-span-5 bg-white rounded-2xl p-6 shadow-sm ring-1 ring-slate-900/5">
-                        <div class="flex items-start justify-between gap-4">
-                            <div>
-                                <div class="text-xs font-bold uppercase tracking-wider text-slate-500">Экономия ресурсов</div>
-                                <div x-show="dashStatsLoading && !dashStatsLoadedOnce" class="mt-2 h-10 w-28 rounded-xl bg-slate-100 animate-pulse"></div>
-                                <div x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak class="mt-2 text-3xl font-extrabold text-slate-900 tabular-nums" x-text="(dashStats.ai_time_saved_hours ?? 0) + ' ч'"></div>
-                                <div class="mt-1 text-sm text-slate-500" x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak>
-                                    Сэкономлено примерно <span class="font-semibold tabular-nums" x-text="dashStats.ai_time_saved_minutes ?? 0"></span> мин
-                                    · <span class="font-semibold tabular-nums" x-text="dashStats.ai_messages_today ?? 0"></span> сообщений ИИ
-                                </div>
-                            </div>
-                            <div class="shrink-0 rounded-2xl bg-emerald-50 p-3 text-emerald-700 ring-1 ring-emerald-100">
-                                <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6v6l4 2"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                            </div>
+                    <div class="rounded-2xl p-5 sm:p-6 shadow-sm ring-1 ring-violet-200/80 bg-gradient-to-br from-violet-600 via-fuchsia-600 to-brand-600 text-white">
+                        <div class="text-[11px] font-bold uppercase tracking-wider text-white/80">Сколько заработал ИИ</div>
+                        <div x-show="dashStatsLoading && !dashStatsLoadedOnce" class="mt-3 h-10 w-40 rounded-xl bg-white/20 animate-pulse"></div>
+                        <div x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak class="mt-3 text-2xl sm:text-3xl font-extrabold tabular-nums" x-text="fmt.money(dashStats.ai_revenue_today ?? dashStats.upsell_revenue_today ?? 0)"></div>
+                        <div class="mt-2 flex flex-wrap gap-2 text-[11px] sm:text-xs text-white/90" x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak>
+                            <span class="inline-flex items-center rounded-lg bg-white/15 px-2 py-0.5 font-semibold">доля <span class="ml-1 tabular-nums" x-text="(dashStats.ai_revenue_share_pct ?? '—') + (dashStats.ai_revenue_share_pct != null ? '%' : '')"></span></span>
+                            <span class="inline-flex items-center rounded-lg bg-white/10 px-2 py-0.5">конв. <span class="ml-1 tabular-nums" x-text="(dashStats.upsell_conversion_pct ?? '—') + (dashStats.upsell_conversion_pct != null ? '%' : '')"></span></span>
+                            <span class="inline-flex items-center rounded-lg bg-white/10 px-2 py-0.5 tabular-nums" x-text="'принято ' + (dashStats.upsell_accepted_today ?? 0) + '/' + (dashStats.upsell_offered_today ?? 0)"></span>
                         </div>
-                        <div class="mt-6 grid grid-cols-2 gap-3">
-                            <button type="button" class="min-h-[44px] rounded-xl px-4 py-2 text-sm font-semibold bg-slate-50 text-slate-900 ring-1 ring-slate-900/5 hover:bg-slate-100 transition"
-                                @click="currentTab = 'operator_queue'; loadTabData()">
-                                Помощь клиентам
-                                <span class="ml-1 tabular-nums" x-text="'(' + (dashStats.failed_tasks_open ?? 0) + ')'"></span>
-                            </button>
-                            <button type="button" class="min-h-[44px] rounded-xl px-4 py-2 text-sm font-semibold bg-slate-50 text-slate-900 ring-1 ring-slate-900/5 hover:bg-slate-100 transition"
-                                @click="currentTab = 'orders'; loadTabData()">
-                                Заказы
-                            </button>
+                    </div>
+                    <div class="rounded-2xl bg-white p-5 sm:p-6 shadow-sm ring-1 ring-slate-900/5">
+                        <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Сколько часов сэкономил ИИ</div>
+                        <div x-show="dashStatsLoading && !dashStatsLoadedOnce" class="mt-3 h-10 w-28 rounded-xl bg-slate-100 animate-pulse"></div>
+                        <div x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak class="mt-3 text-2xl sm:text-3xl font-extrabold text-slate-900 tabular-nums" x-text="(dashStats.ai_time_saved_hours ?? 0) + ' ч'"></div>
+                        <div class="mt-2 text-xs text-slate-500" x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak>
+                            ≈ <span class="font-semibold tabular-nums text-slate-700" x-text="dashStats.ai_time_saved_minutes ?? 0"></span> мин
+                            · <span class="font-semibold tabular-nums text-slate-700" x-text="dashStats.ai_messages_today ?? 0"></span> сообщений ИИ
+                        </div>
+                        <div class="mt-3 text-xs text-emerald-700 font-medium" x-show="!(dashStatsLoading && !dashStatsLoadedOnce) && dashStats.ai_profit_per_saved_hour_kzt != null" x-cloak>
+                            ≈ <span class="tabular-nums" x-text="fmt.money(dashStats.ai_profit_per_saved_hour_kzt)"></span> доп. выручки ИИ на каждый «час сэкономленного» времени
                         </div>
                     </div>
                 </div>
 
-                <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 mb-8">
+                <!-- Hero chart -->
+                <div class="bg-white rounded-2xl p-5 sm:p-6 shadow-sm ring-1 ring-slate-900/5">
+                    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+                        <div>
+                            <h3 class="text-sm font-bold text-slate-900">Динамика за 7 дней</h3>
+                            <p class="text-xs text-slate-500 mt-0.5">UTC · переключите метрику</p>
+                        </div>
+                        <div class="inline-flex rounded-xl bg-slate-100 p-1 ring-1 ring-slate-900/5" role="group" aria-label="Метрика графика">
+                            <button type="button" class="min-h-[40px] px-3 sm:px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold transition"
+                                :class="dashMiniMetric === 'revenue' ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-900/10' : 'text-slate-600 hover:text-slate-900'"
+                                @click="dashMiniMetric = 'revenue'; scheduleDashboardChartRender()">Выручка</button>
+                            <button type="button" class="min-h-[40px] px-3 sm:px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold transition"
+                                :class="dashMiniMetric === 'ai_profit' ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-900/10' : 'text-slate-600 hover:text-slate-900'"
+                                @click="dashMiniMetric = 'ai_profit'; scheduleDashboardChartRender()">Прибыль ИИ</button>
+                            <button type="button" class="min-h-[40px] px-3 sm:px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold transition"
+                                :class="dashMiniMetric === 'orders' ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-900/10' : 'text-slate-600 hover:text-slate-900'"
+                                @click="dashMiniMetric = 'orders'; scheduleDashboardChartRender()">Заказы</button>
+                        </div>
+                    </div>
+                    <div class="h-64 sm:h-72 md:h-80 w-full relative">
+                        <canvas id="dashboardHeroChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
                     <!-- Activity Feed -->
-                    <div class="lg:col-span-7 bg-white rounded-2xl p-6 shadow-sm ring-1 ring-slate-900/5">
+                    <div class="lg:col-span-8 bg-white rounded-2xl p-6 shadow-sm ring-1 ring-slate-900/5">
                         <div class="flex items-center justify-between gap-3 mb-4">
                             <div>
                                 <h3 class="text-sm font-bold text-slate-900">Лента событий</h3>
-                                <p class="text-xs text-slate-500 mt-0.5">Сводка по важным действиям: заказы, помощь, доставка.</p>
+                                <p class="text-xs text-slate-500 mt-0.5">Заказы, помощь, доставка — что требует внимания.</p>
                             </div>
                             <button type="button" class="min-h-[40px] px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-50 text-slate-700 ring-1 ring-slate-900/5 hover:bg-slate-100 transition"
                                 @click="loadDashActivity()">
@@ -382,35 +368,28 @@
                         </div>
                     </div>
 
-                    <!-- Mini chart + health -->
-                    <div class="lg:col-span-5 space-y-5">
-                        <div class="bg-white rounded-2xl p-6 shadow-sm ring-1 ring-slate-900/5">
-                            <div class="flex flex-wrap justify-between items-center gap-3 mb-4">
-                                <div>
-                                    <h3 class="text-sm font-bold text-slate-900">Динамика</h3>
-                                    <p class="text-xs text-slate-500 mt-0.5">Последние 7 дней (UTC)</p>
-                                </div>
-                                <select x-model="dashMiniMetric" @change="scheduleDashboardChartRender()"
-                                    class="bg-slate-50 ring-1 ring-slate-900/5 text-slate-700 text-sm rounded-xl focus:ring-brand-500 focus:border-brand-500 block px-3 py-2">
-                                    <option value="revenue">Выручка</option>
-                                    <option value="orders">Заказы</option>
-                                </select>
-                            </div>
-                            <div class="h-56 w-full relative">
-                                <canvas id="dashboardMiniChart"></canvas>
-                            </div>
-                        </div>
-
-                        <div class="grid grid-cols-2 gap-5">
+                    <div class="lg:col-span-4 space-y-4">
+                        <div class="grid grid-cols-2 gap-4">
                             <div class="bg-white rounded-2xl p-5 shadow-sm ring-1 ring-slate-900/5">
                                 <div class="text-xs font-bold uppercase tracking-wider text-slate-500">Помощь</div>
                                 <div class="mt-2 text-2xl font-extrabold tabular-nums" :class="(dashStats.failed_tasks_open || 0) > 0 ? 'text-rose-600' : 'text-slate-900'" x-text="dashStats.failed_tasks_open ?? 0"></div>
-                                <div class="mt-2 text-xs text-slate-500">Требуют вмешательства</div>
+                                <div class="mt-2 text-xs text-slate-500">Открыто</div>
                             </div>
                             <div class="bg-white rounded-2xl p-5 shadow-sm ring-1 ring-slate-900/5">
                                 <div class="text-xs font-bold uppercase tracking-wider text-slate-500">iiko</div>
                                 <div class="mt-2 text-2xl font-extrabold tabular-nums" :class="(dashStats.iiko_errors_today || 0) > 0 ? 'text-rose-600' : 'text-slate-900'" x-text="dashStats.iiko_errors_today ?? 0"></div>
-                                <div class="mt-2 text-xs text-slate-500">Ошибки сегодня (UTC)</div>
+                                <div class="mt-2 text-xs text-slate-500">Ошибки сегодня</div>
+                            </div>
+                        </div>
+                        <div class="bg-slate-50 rounded-2xl p-5 ring-1 ring-slate-900/5">
+                            <div class="text-xs font-bold uppercase tracking-wider text-slate-500">Быстрые действия</div>
+                            <div class="mt-3 grid grid-cols-1 gap-2">
+                                <button type="button" class="min-h-[44px] w-full rounded-xl px-4 py-2 text-sm font-semibold bg-white text-slate-900 ring-1 ring-slate-900/10 hover:bg-slate-50 transition text-left"
+                                    @click="currentTab = 'operator_queue'; loadTabData()">
+                                    Помощь клиентам <span class="tabular-nums text-slate-500" x-text="'(' + (dashStats.failed_tasks_open ?? 0) + ')'"></span>
+                                </button>
+                                <button type="button" class="min-h-[44px] w-full rounded-xl px-4 py-2 text-sm font-semibold bg-white text-slate-900 ring-1 ring-slate-900/10 hover:bg-slate-50 transition text-left"
+                                    @click="currentTab = 'orders'; loadTabData()">Заказы</button>
                             </div>
                         </div>
                     </div>
@@ -2971,38 +2950,57 @@
                             <span x-text="orderPaymentSaving ? 'Сохраняем…' : 'Сохранить оплату'"></span>
                         </button>
                     </div>
-                    <template x-if="selectedOrder?.items?.order_meta?.recommendation || selectedOrder?.items?.order_meta?.recommendation_trace?.length">
-                        <div class="mb-4 rounded-xl border border-blue-200 bg-blue-50/50 p-4 shadow-sm relative overflow-hidden">
-                            <div class="absolute -right-4 -top-4 w-16 h-16 bg-blue-100 rounded-full opacity-50 blur-lg"></div>
-                            <div class="flex items-start gap-3 relative z-10">
-                                <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-100 text-blue-600 shadow-sm border border-blue-200">
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                    <template x-if="orderSalesInsightSteps(selectedOrder).length">
+                        <div class="mb-4 rounded-2xl border border-violet-200/80 bg-gradient-to-br from-violet-50/90 via-white to-indigo-50/50 p-4 shadow-sm ring-1 ring-violet-900/5 relative overflow-hidden">
+                            <div class="absolute -right-6 -top-6 w-24 h-24 bg-violet-200/40 rounded-full blur-2xl pointer-events-none"></div>
+                            <div class="relative z-10 space-y-3">
+                                <div class="flex flex-wrap items-start justify-between gap-2">
+                                    <div>
+                                        <p class="text-[10px] font-bold uppercase tracking-wider text-violet-800">Sales Insight</p>
+                                        <p class="text-sm font-bold text-gray-900">Работа ИИ‑продавца</p>
+                                        <p class="text-xs text-gray-500 mt-0.5">Что предложили гостю и что оказалось в чеке</p>
+                                    </div>
+                                    <div x-show="orderAiEfficiencyPct(selectedOrder) != null" class="shrink-0 rounded-xl bg-violet-600 text-white px-3 py-2 text-center shadow-sm">
+                                        <p class="text-[9px] font-semibold uppercase tracking-wide text-violet-100">ИИ в чеке</p>
+                                        <p class="text-lg font-extrabold tabular-nums leading-tight" x-text="orderAiEfficiencyPct(selectedOrder) + '%'"></p>
+                                    </div>
                                 </div>
-                                <div class="min-w-0 flex-1">
-                                    <p class="text-xs font-bold uppercase tracking-wider text-blue-800 mb-1">Допродажи бота (§4.8)</p>
-                                    <template x-if="selectedOrder.items.order_meta.recommendation_trace?.length">
-                                        <ul class="space-y-2 text-sm">
-                                            <template x-for="(trace, tidx) in selectedOrder.items.order_meta.recommendation_trace" :key="'rec-tr-' + tidx">
-                                                <li class="rounded-lg border border-blue-100 bg-white/80 px-3 py-2">
-                                                    <div class="font-semibold text-gray-900" x-text="trace.offered || '—'"></div>
-                                                    <div class="text-xs text-gray-600 mt-0.5" x-show="trace.reason" x-text="trace.reason"></div>
-                                                    <div class="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1.5 text-xs">
-                                                        <span x-show="trace.accepted" class="inline-flex items-center gap-1 font-semibold text-emerald-700">✓ В заказе</span>
-                                                        <span x-show="!trace.accepted" class="text-gray-400">Не добавлено</span>
-                                                        <span x-show="trace.accepted && trace.accepted_revenue_kzt != null && trace.accepted_revenue_kzt > 0"
+                                <p class="text-xs text-gray-600" x-show="orderAcceptedUpsellRevenueSum(selectedOrder) > 0">
+                                    Принятые допродажи:
+                                    <span class="font-semibold text-violet-900 tabular-nums" x-text="fmt.money(orderAcceptedUpsellRevenueSum(selectedOrder))"></span>
+                                    из
+                                    <span class="font-semibold tabular-nums" x-text="fmt.money(selectedOrder.total_price)"></span>
+                                </p>
+                                <div class="relative pl-1">
+                                    <div class="absolute left-[11px] top-2 bottom-2 w-0.5 bg-violet-200 rounded-full" aria-hidden="true"></div>
+                                    <ul class="space-y-0">
+                                        <template x-for="(trace, tidx) in orderSalesInsightSteps(selectedOrder)" :key="'si-' + tidx">
+                                            <li class="relative flex gap-3 pb-4 last:pb-0">
+                                                <div class="relative z-10 mt-0.5 flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full border-2 border-white bg-violet-500 text-[10px] font-bold text-white shadow-sm" x-text="tidx + 1"></div>
+                                                <div class="min-w-0 flex-1 rounded-xl border border-gray-100 bg-white/90 px-3 py-2.5 shadow-sm">
+                                                    <div class="flex flex-wrap items-center gap-2 gap-y-1">
+                                                        <span class="text-sm font-semibold text-gray-900" x-text="trace.offered || 'Позиция'"></span>
+                                                        <span class="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-600 border border-slate-200" x-text="salesInsightSourceLabel(trace)"></span>
+                                                    </div>
+                                                    <p class="text-xs text-gray-600 mt-1 leading-snug" x-text="salesInsightWhy(trace)"></p>
+                                                    <div class="flex flex-wrap items-center gap-x-2 gap-y-1 mt-2 text-xs">
+                                                        <template x-if="trace.accepted === true">
+                                                            <span class="inline-flex items-center gap-1 font-semibold text-emerald-700">✅ Принято в заказ</span>
+                                                        </template>
+                                                        <template x-if="trace.accepted === false">
+                                                            <span class="inline-flex items-center gap-1 font-semibold text-rose-600">❌ Не добавлено</span>
+                                                        </template>
+                                                        <template x-if="trace.accepted !== true && trace.accepted !== false">
+                                                            <span class="text-gray-400">Нет данных о принятии</span>
+                                                        </template>
+                                                        <span x-show="trace.accepted === true && trace.accepted_revenue_kzt != null && Number(trace.accepted_revenue_kzt) > 0"
                                                             class="text-emerald-800 font-semibold tabular-nums"
                                                             x-text="'+' + fmt.money(trace.accepted_revenue_kzt)"></span>
                                                     </div>
-                                                </li>
-                                            </template>
-                                        </ul>
-                                    </template>
-                                    <template x-if="!selectedOrder.items.order_meta.recommendation_trace?.length && selectedOrder.items.order_meta.recommendation">
-                                        <div>
-                                            <p class="text-sm font-semibold text-gray-900 leading-snug" x-text="selectedOrder.items.order_meta.recommendation.offered || 'Предложено'"></p>
-                                            <p class="text-xs text-gray-600 mt-1 italic" x-text="selectedOrder.items.order_meta.recommendation.reason || 'Без обоснования'"></p>
-                                        </div>
-                                    </template>
+                                                </div>
+                                            </li>
+                                        </template>
+                                    </ul>
                                 </div>
                             </div>
                         </div>

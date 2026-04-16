@@ -3464,26 +3464,31 @@ async def dashboard_stats(
         (today_start - timedelta(days=6 - i)).strftime("%Y-%m-%d") for i in range(7)
     ]
     valid_set = set(valid_keys)
+    bucket: dict[str, dict[str, float | int]] = defaultdict(
+        lambda: {"revenue": 0.0, "orders": 0, "ai_profit": 0.0},
+    )
     rows = await db.execute(
-        select(Order.created_at, Order.total_price).where(
+        select(Order.created_at, Order.total_price, Order.items_json).where(
             not_cancelled,
             org_orders,
             Order.created_at.isnot(None),
         ),
     )
-    bucket: dict[str, dict[str, float | int]] = defaultdict(
-        lambda: {"revenue": 0.0, "orders": 0},
-    )
-    for created_at, total_price in rows.all():
+    for created_at, total_price, items_json in rows.all():
         dk = _order_day_key_utc(created_at)
         if dk and dk in valid_set:
             bucket[dk]["revenue"] += float(total_price or 0)
             bucket[dk]["orders"] += 1
+            _off, _acc, rev_ai = upsell_stats_from_items_json(
+                items_json if isinstance(items_json, dict) else None,
+            )
+            bucket[dk]["ai_profit"] += float(rev_ai or 0.0)
     daily_series = [
         {
             "date": k,
             "revenue": float(bucket[k]["revenue"]),
             "orders": int(bucket[k]["orders"]),
+            "ai_profit": round(float(bucket[k]["ai_profit"]), 2),
         }
         for k in valid_keys
     ]
@@ -3587,6 +3592,10 @@ async def dashboard_stats(
     minutes_per_message = 1.5
     ai_time_saved_minutes = round(ai_messages_today * minutes_per_message, 1)
     ai_time_saved_hours = round(ai_time_saved_minutes / 60.0, 2)
+    # Простой «ROI-индикатор» для CEO: сколько ₸ допродаж ИИ на каждый «час сэкономленного» времени (без себестоимости LLM).
+    ai_profit_per_saved_hour_kzt: float | None = None
+    if ai_time_saved_hours and float(ai_time_saved_hours) > 0 and ai_revenue_today > 0:
+        ai_profit_per_saved_hour_kzt = round(float(ai_revenue_today) / float(ai_time_saved_hours), 2)
 
     return {
         "total_orders": total_orders,
@@ -3610,6 +3619,7 @@ async def dashboard_stats(
         "ai_messages_today": ai_messages_today,
         "ai_time_saved_minutes": ai_time_saved_minutes,
         "ai_time_saved_hours": ai_time_saved_hours,
+        "ai_profit_per_saved_hour_kzt": ai_profit_per_saved_hour_kzt,
         "iiko_errors_today": iiko_errors_today,
         "ai_avg_check_upsell_accepted": ai_avg_check_upsell_accepted,
         "ai_avg_check_no_upsell_offer": ai_avg_check_no_upsell_offer,
@@ -4367,7 +4377,10 @@ async def test_bot(request: Request, body: TextRequest) -> dict:
             meta_d = om if isinstance(om, dict) else {}
             total = float(draft_row.total_price or 0)
             strategy_ctx = format_strategy_for_prompt(
-                build_sales_strategy(cart, total, meta_d, menu_items),
+                build_sales_strategy(
+                    cart, total, meta_d, menu_items,
+                    u_row.meta_json if u_row is not None else None,
+                ),
             )
         ai_response = await call_openai(
             history,

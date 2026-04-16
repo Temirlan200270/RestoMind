@@ -27,6 +27,7 @@ from app.services.booking_halls import (
 )
 from app.schemas.ai_schemas import AIBrainResponse, PaymentSplit
 from app.services.dialog_mgr import UserState
+from app.services.upsell_utils import record_upsell_rejections_on_user
 from app.services.order_logic import (
     ValidatedOrder,
     applied_order_action_ids_from_items_json,
@@ -510,6 +511,8 @@ async def _handle_order(
     )
     items_json = _merge_recommendation_into_order_meta(items_json, ai_eff)
     items_json = _merge_rejected_upsell_into_order_meta(items_json, ai_eff)
+    if ai_eff.rejected_upsell_iiko_ids:
+        record_upsell_rejections_on_user(user, ai_eff.rejected_upsell_iiko_ids)
     items_json = _mark_recommendation_accepted_in_trace(
         items_json,
         prev_items_list,

@@ -39,6 +39,10 @@
       title="Upsell">UPSELL</span>
     <span class="text-[10px] text-gray-400" x-text="fmt.date({{ order_var }}.created_at)"></span>
   </div>
+  <p x-show="orderHasUpsell({{ order_var }})" class="text-[10px] font-semibold text-violet-700 tabular-nums mt-0.5">
+    <span x-show="orderAiEfficiencyPct({{ order_var }}) != null" x-text="'ИИ в чеке: ' + orderAiEfficiencyPct({{ order_var }}) + '%'"></span>
+    <span x-show="orderAiEfficiencyPct({{ order_var }}) == null">ИИ предлагал допродажу</span>
+  </p>
 </button>
 {%- endmacro %}
 
@@ -63,6 +67,10 @@
   <div class="text-xs font-mono text-gray-600 mb-1 truncate" x-show="order.user_phone" x-text="order.user_phone"></div>
   <div class="text-xs text-gray-500 mb-2" x-text="(order.items?.items?.length || 0) + ' позиций'"></div>
   <div class="text-sm font-bold text-gray-900" x-text="fmt.money(order.total_price)"></div>
+  <p x-show="orderHasUpsell(order)" class="text-[10px] mt-1.5 font-semibold text-violet-700 tabular-nums leading-tight">
+    <span x-show="orderAiEfficiencyPct(order) != null" x-text="'ИИ в чеке: ' + orderAiEfficiencyPct(order) + '%'"></span>
+    <span x-show="orderAiEfficiencyPct(order) == null" class="text-violet-600">ИИ предлагал допродажу</span>
+  </p>
   <p class="text-[10px] mt-2 font-semibold leading-tight"
     :class="orderTimerWarn(order, '{{ stage_key }}') ? 'text-red-600' : 'text-gray-500'"
     x-text="orderTimerText(order, '{{ stage_key }}')"></p>

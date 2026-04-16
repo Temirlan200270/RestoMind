@@ -10,7 +10,13 @@ import re
 from dataclasses import dataclass, field
 
 from app.db.models import MenuItem
-from app.services.upsell_utils import cart_iiko_ids, rejected_upsell_iiko_ids
+from app.services.upsell_utils import (
+    cart_iiko_ids,
+    collect_cart_tag_profile,
+    find_pairing_by_tag,
+    rejected_upsell_iiko_ids,
+    upsell_rejection_ids_in_cooldown,
+)
 
 
 def _norm_name(s: str) -> str:
@@ -27,6 +33,8 @@ class StrategyDecision:
     target_iiko_ids: list[str] = field(default_factory=list)
     target_name_hints: list[str] = field(default_factory=list)
     restriction: str = ""
+    gastro_hint: str = ""
+    """Краткая подсказка для LLM: логика по тегам меню (Strategy Engine v2)."""
 
 
 # Ключевые слова в названии позиции корзины → подстроки для поиска кандидата в меню (как в меню ресторана)
@@ -153,6 +161,7 @@ def build_sales_strategy(
     total_price: float,
     order_meta: dict,
     menu_items: list[MenuItem],
+    user_meta: dict | None = None,
 ) -> StrategyDecision:
     """
     Мозг продаж: до LLM решаем цель и кандидатов; модель формулирует reply_text и JSON.
@@ -174,6 +183,7 @@ def build_sales_strategy(
         _cart_iiko_ids(cart_items)
         | _offered_iiko_ids(meta)
         | _rejected_iiko_ids(meta)
+        | upsell_rejection_ids_in_cooldown(user_meta, cooldown_hours=48.0)
     )
     skip_names = offered | rejected
 
@@ -186,6 +196,22 @@ def build_sales_strategy(
         )
 
     candidates: list[MenuItem] = []
+    gastro_hint = ""
+
+    cart_union_tags, cart_has_side_tag, cart_has_drink_tag = collect_cart_tag_profile(
+        [x for x in cart_items if isinstance(x, dict)],
+        menu_items,
+    )
+    tag_pair = find_pairing_by_tag(
+        cart_union_tags,
+        menu_items,
+        skip_iiko=skip_iiko,
+        skip_names=skip_names,
+        has_drink_in_cart_heuristic=_has_drink_in_cart(cart_items) or cart_has_drink_tag,
+        cart_has_side_dish_tag=cart_has_side_tag,
+    )
+    gastro_hint = tag_pair.gastro_hint
+    candidates.extend([m for m in tag_pair.candidates if m is not None])
 
     # Нет явного напитка в корзине
     if not _has_drink_in_cart(cart_items):
@@ -237,15 +263,19 @@ def build_sales_strategy(
 
     top = uniq[0]
     iid = (top.iiko_id or "").strip()
+    restriction = (
+        "Максимум **одна** рекомендация в этом сообщении. Объясни коротко «почему к этому заказу». "
+        "Если предлагаешь — заполни is_recommendation, upsell_offered (как в меню), "
+        "upsell_offered_id (UUID из меню, если есть) и upsell_reasoning."
+    )
+    if gastro_hint:
+        restriction += " Используй **теги блюд** из меню в формулировке `upsell_reasoning` (связь вкуса/категории), не общие фразы вроде «добавить что-нибудь?»."
     return StrategyDecision(
         goal="upsell",
         target_iiko_ids=[iid] if iid else [],
         target_name_hints=[top.name],
-        restriction=(
-            "Максимум **одна** рекомендация в этом сообщении. Объясни коротко «почему к этому заказу». "
-            "Если предлагаешь — заполни is_recommendation, upsell_offered (как в меню), "
-            "upsell_offered_id (UUID из меню, если есть) и upsell_reasoning."
-        ),
+        restriction=restriction,
+        gastro_hint=gastro_hint,
     )
 
 
@@ -267,6 +297,8 @@ def format_strategy_for_prompt(decision: StrategyDecision) -> str:
             f"- **iiko_id для поля upsell_offered_id (если рекомендуешь):** "
             f"{', '.join(decision.target_iiko_ids)}",
         )
+    if decision.gastro_hint:
+        lines.append(f"- **Гастро-логика (теги):** {decision.gastro_hint}")
     if decision.restriction:
         lines.append(f"- **Ограничение:** {decision.restriction}")
     if decision.goal == "close_order":

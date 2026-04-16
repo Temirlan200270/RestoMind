@@ -972,7 +972,10 @@ async def process_message(
                 meta_d = om if isinstance(om, dict) else {}
                 total = float(draft_row.total_price or 0)
                 strategy_ctx = format_strategy_for_prompt(
-                    build_sales_strategy(cart, total, meta_d, menu_items),
+                    build_sales_strategy(
+                        cart, total, meta_d, menu_items,
+                        u_row.meta_json if u_row is not None else None,
+                    ),
                 )
 
         # 2) OpenAI: без DB-сессии

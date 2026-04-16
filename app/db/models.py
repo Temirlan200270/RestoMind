@@ -176,6 +176,11 @@ class User(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+    meta_json: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON,
+        nullable=True,
+        comment="Персистентные флаги клиента (отказы от допродаж upsell_rejections → ISO UTC и др.)",
+    )
 
     # Связи
     orders: Mapped[list["Order"]] = relationship(back_populates="user", lazy="selectin")
