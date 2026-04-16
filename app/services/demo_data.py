@@ -20,12 +20,15 @@ logger = logging.getLogger(__name__)
 DEMO_PHONE_PREFIX = "demo7700"
 
 
-async def demo_data_exists(db: AsyncSession) -> bool:
-    """Есть ли в БД хотя бы один демо-пользователь."""
+async def demo_data_exists(db: AsyncSession, *, organization_id: int) -> bool:
+    """Есть ли в БД хотя бы один демо-пользователь у данного филиала."""
     q = await db.execute(
         select(func.count())
         .select_from(User)
-        .where(User.phone.startswith(DEMO_PHONE_PREFIX)),
+        .where(
+            User.phone.startswith(DEMO_PHONE_PREFIX),
+            User.organization_id == int(organization_id),
+        ),
     )
     return (q.scalar() or 0) > 0
 
@@ -131,12 +134,13 @@ def _extra_month_history_orders(users: list[User]) -> list[tuple[int, str, dict,
     return out
 
 
-async def seed_demo_data(db: AsyncSession) -> dict[str, int | bool]:
+async def seed_demo_data(db: AsyncSession, *, organization_id: int) -> dict[str, int | bool]:
     """
     Добавить фиктивных пользователей, заказы, брони и сообщения.
     Не очищает существующие данные. Меню из встроенного каталога не подмешивается.
     """
-    if await demo_data_exists(db):
+    org_id = int(organization_id)
+    if await demo_data_exists(db, organization_id=org_id):
         return {
             "skipped": True,
             "menu_items_added": 0,
@@ -160,16 +164,23 @@ async def seed_demo_data(db: AsyncSession) -> dict[str, int | bool]:
     created_users = 0
 
     for phone, name in users_data:
-        existing = await db.execute(select(User).where(User.phone == phone))
+        existing = await db.execute(
+            select(User).where(User.phone == phone, User.organization_id == org_id),
+        )
         if existing.scalar_one_or_none():
             continue
-        db.add(User(phone=phone, name=name))
+        db.add(User(organization_id=org_id, phone=phone, name=name))
         created_users += 1
 
     await db.flush()
 
     all_demo = await db.scalars(
-        select(User).where(User.phone.startswith(DEMO_PHONE_PREFIX)).order_by(User.phone),
+        select(User)
+        .where(
+            User.phone.startswith(DEMO_PHONE_PREFIX),
+            User.organization_id == org_id,
+        )
+        .order_by(User.phone),
     )
     demo_users = list(all_demo.all())
     if not demo_users:
@@ -288,6 +299,7 @@ async def seed_demo_data(db: AsyncSession) -> dict[str, int | bool]:
     for idx, (uid, status, items_json, days_ago) in enumerate(orders_spec):
         total = float(items_json["total_price"])
         o = Order(
+            organization_id=org_id,
             user_id=uid,
             status=status,
             total_price=total,
@@ -322,6 +334,7 @@ async def seed_demo_data(db: AsyncSession) -> dict[str, int | bool]:
     for uid, d, t_, guests, st, comment, hall in bookings_spec:
         db.add(
             Booking(
+                organization_id=org_id,
                 user_id=uid,
                 booking_date=d,
                 booking_time=t_,
@@ -368,7 +381,15 @@ async def seed_demo_data(db: AsyncSession) -> dict[str, int | bool]:
     log_anchor = now - timedelta(hours=30)
     for i, (uid, role, content) in enumerate(logs_spec):
         ts = log_anchor + timedelta(minutes=i * 6)
-        db.add(ChatLog(user_id=uid, role=role, content=content, created_at=ts))
+        db.add(
+            ChatLog(
+                organization_id=org_id,
+                user_id=uid,
+                role=role,
+                content=content,
+                created_at=ts,
+            ),
+        )
         created_logs += 1
 
     await db.commit()
@@ -386,7 +407,7 @@ async def seed_demo_data(db: AsyncSession) -> dict[str, int | bool]:
     }
 
 
-async def clear_demo_data(db: AsyncSession) -> dict[str, int]:
+async def clear_demo_data(db: AsyncSession, *, organization_id: int) -> dict[str, int]:
     """
     Удалить всех пользователей с префиксом DEMO_PHONE_PREFIX и связанные записи.
 
@@ -394,8 +415,12 @@ async def clear_demo_data(db: AsyncSession) -> dict[str, int]:
     и при SQLite без PRAGMA foreign_keys, и при любом поведении ORM-каскада.
     Плюс очистка Redis/InMemory-ключей сессии по каждому демо-номеру.
     """
+    org_id = int(organization_id)
     res = await db.execute(
-        select(User.id, User.phone).where(User.phone.startswith(DEMO_PHONE_PREFIX)),
+        select(User.id, User.phone).where(
+            User.phone.startswith(DEMO_PHONE_PREFIX),
+            User.organization_id == org_id,
+        ),
     )
     rows = res.all()
     if not rows:

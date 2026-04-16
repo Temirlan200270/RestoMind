@@ -28,13 +28,16 @@ from app.services.dialog_mgr import UserState
 from app.services.events import publish_event
 from app.services.order_logic import (
     ValidatedOrder,
+    applied_order_action_ids_from_items_json,
     classify_packaging_kind,
     draft_food_lines_to_order_items,
     enrich_merged_items_from_menu,
+    filter_order_actions_idempotent,
     finalize_order_draft,
     format_whatsapp_order_card,
     load_available_menu,
     load_packaging_rules,
+    merge_applied_order_action_ids_into_items_json,
     merge_cart_actions,
     validate_mixed_payment_total,
     validate_order,
@@ -301,7 +304,13 @@ class RouteResult:
     new_state: UserState | None = None
 
 
-async def get_or_create_user(db: AsyncSession, phone: str, organization_id: int) -> User:
+async def get_or_create_user(
+    db: AsyncSession,
+    phone: str,
+    organization_id: int,
+    *,
+    defer_flush: bool = False,
+) -> User:
     """Находит пользователя по телефону в организации или создаёт нового."""
     user = await db.scalar(
         select(User).where(User.phone == phone, User.organization_id == organization_id),
@@ -310,10 +319,11 @@ async def get_or_create_user(db: AsyncSession, phone: str, organization_id: int)
     if user is None:
         user = User(phone=phone, organization_id=organization_id)
         db.add(user)
-        await db.flush()
+        if not defer_flush:
+            await db.flush()
         logger.info(
-            "Создан новый пользователь: org=%s phone=%s, id=%d",
-            organization_id, phone, user.id,
+            "Создан новый пользователь: org=%s phone=%s%s",
+            organization_id, phone, "" if defer_flush else f", id={user.id}",
         )
 
     return user
@@ -326,6 +336,7 @@ async def _handle_order(
     menu_items: list[MenuItem] | None = None,
     *,
     organization_id: int,
+    inbound_message_id: str = "",
 ) -> RouteResult:
     """
     Обработка intent='order':
@@ -337,6 +348,7 @@ async def _handle_order(
 
     existing_draft = await get_open_draft_order(db, phone, organization_id)
     use_merge = bool(ai_response.order_actions) and existing_draft is not None
+    new_action_ids_batch: list[str] = []
 
     ai_eff: AIBrainResponse
     validated: ValidatedOrder
@@ -344,7 +356,15 @@ async def _handle_order(
     if use_merge:
         raw_list = (existing_draft.items_json or {}).get("items")
         current_items = [x for x in (raw_list or []) if isinstance(x, dict)]
-        merged = merge_cart_actions(current_items, ai_response.order_actions)
+        applied_ids = applied_order_action_ids_from_items_json(
+            existing_draft.items_json if existing_draft else None,
+        )
+        actions_for_merge, new_action_ids_batch = filter_order_actions_idempotent(
+            ai_response.order_actions,
+            applied=applied_ids,
+            inbound_message_id=inbound_message_id,
+        )
+        merged = merge_cart_actions(current_items, actions_for_merge)
         if not merged:
             return RouteResult(
                 reply_text=(
@@ -393,7 +413,9 @@ async def _handle_order(
             )
         )
 
-    user = await get_or_create_user(db, phone, organization_id)
+    user = await get_or_create_user(db, phone, organization_id, defer_flush=True)
+    if user.id is None:
+        await db.flush()
 
     for vi in validated.valid_items:
         pk = classify_packaging_kind(str(vi.get("name", "")), str(vi.get("category", "")))
@@ -457,7 +479,6 @@ async def _handle_order(
             status="draft",
         )
         db.add(booking_row)
-        await db.flush()
 
     packaging_rules = await load_packaging_rules(db, organization_id)
     org_row = await db.get(Organization, organization_id)
@@ -488,6 +509,23 @@ async def _handle_order(
         prev_items_list,
         validated.valid_items,
     )
+    reset_applied_action_ids = bool(
+        existing_draft is not None
+        and bool(ai_response.items)
+        and not ai_response.order_actions,
+    )
+    if use_merge and new_action_ids_batch and not validated.unknown_items:
+        items_json = merge_applied_order_action_ids_into_items_json(
+            items_json,
+            new_ids=new_action_ids_batch,
+            reset=False,
+        )
+    elif reset_applied_action_ids:
+        items_json = merge_applied_order_action_ids_into_items_json(
+            items_json,
+            new_ids=[],
+            reset=True,
+        )
     log_pipeline_stage(
         "merge_ok",
         phone=phone,
@@ -499,6 +537,8 @@ async def _handle_order(
     prepayment_status = (
         "pending" if (booking_row or requires_big_order_prepay) else "not_required"
     )
+
+    await db.flush()
 
     if existing_draft and (use_merge or ai_response.items):
         expected_ver = int(existing_draft.row_version)
@@ -548,7 +588,6 @@ async def _handle_order(
             row_version=1,
         )
         db.add(order)
-        await db.flush()
 
     body_text = format_whatsapp_order_card(items_json, validated.summary_text)
     reply = ai_response.reply_text + "\n\n" + body_text
@@ -600,11 +639,6 @@ async def _handle_order(
         next_state = UserState.CONFIRMING_ORDER
         log_hint = "ждём подтверждение"
 
-    logger.info(
-        "Заказ #%d (DRAFT): %d позиций блюд, %.2f ₸ — %s",
-        order.id, len(validated.valid_items), grand_total, log_hint,
-    )
-
     from app.services.strategy_engine import apply_db_upsell_rules
 
     reply, items_json = await apply_db_upsell_rules(
@@ -618,6 +652,11 @@ async def _handle_order(
     )
     order.items_json = items_json
     await db.flush()
+
+    logger.info(
+        "Заказ #%d (DRAFT): %d позиций блюд, %.2f ₸ — %s",
+        order.id, len(validated.valid_items), grand_total, log_hint,
+    )
 
     await publish_event("order_updated", {
         "order_id": order.id, "status": OrderStatus.DRAFT,
@@ -803,6 +842,7 @@ async def route_intent(
     ai_response: AIBrainResponse,
     menu_items: list[MenuItem] | None = None,
     organization_id: int | None = None,
+    inbound_message_id: str = "",
 ) -> RouteResult:
     """
     Главный маршрутизатор — вызывает обработчик в зависимости от intent.
@@ -816,7 +856,12 @@ async def route_intent(
 
     if intent == "order":
         return await _handle_order(
-            db, phone, ai_response, menu_items=menu_items, organization_id=oid,
+            db,
+            phone,
+            ai_response,
+            menu_items=menu_items,
+            organization_id=oid,
+            inbound_message_id=inbound_message_id,
         )
     elif intent == "book":
         return await _handle_booking(db, phone, ai_response, organization_id=oid)

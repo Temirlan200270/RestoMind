@@ -5,6 +5,7 @@ MOCK_MENU используется как fallback, если таблица пу
 Нечёткий поиск (fuzzy matching) через difflib.
 """
 
+import hashlib
 import logging
 import re
 import uuid
@@ -448,6 +449,86 @@ def merge_cart_actions(
                 cart[target]["quantity"] = qset
 
     return [deepcopy(cart[k]) for k in order_keys if k in cart]
+
+
+APPLIED_ORDER_ACTION_IDS_KEY = "applied_order_action_ids"
+_APPLIED_ORDER_ACTION_IDS_CAP = 200
+
+
+def applied_order_action_ids_from_items_json(items_json: dict | None) -> set[str]:
+    """Множество уже применённых к черновику id дельт (идемпотентность merge)."""
+    if not items_json or not isinstance(items_json, dict):
+        return set()
+    meta = items_json.get("order_meta")
+    if not isinstance(meta, dict):
+        return set()
+    raw = meta.get(APPLIED_ORDER_ACTION_IDS_KEY)
+    if not isinstance(raw, list):
+        return set()
+    return {str(x).strip() for x in raw if str(x).strip()}
+
+
+def compute_order_action_stable_id(
+    act: OrderAction,
+    idx: int,
+    inbound_message_id: str,
+) -> str:
+    """Явный action_id от модели или детерминированный fingerprint (в т.ч. для одного WA message_id)."""
+    explicit = (act.action_id or "").strip()
+    if explicit:
+        return explicit[:128]
+    mid = (inbound_message_id or "").strip()
+    basis = f"{mid}|{idx}|{act.item_id}|{act.action}|{int(act.quantity)}"
+    return hashlib.sha256(basis.encode("utf-8")).hexdigest()[:32]
+
+
+def filter_order_actions_idempotent(
+    actions: list[OrderAction],
+    *,
+    applied: set[str],
+    inbound_message_id: str,
+) -> tuple[list[OrderAction], list[str]]:
+    """
+    Отбрасывает дельты, уже применённые к черновику, и дубликаты внутри одного ответа модели.
+    Возвращает (действия для merge, новые id для записи в order_meta).
+    """
+    out: list[OrderAction] = []
+    new_ids: list[str] = []
+    seen_batch: set[str] = set()
+    for idx, act in enumerate(actions):
+        aid = compute_order_action_stable_id(act, idx, inbound_message_id)
+        if aid in applied or aid in seen_batch:
+            continue
+        seen_batch.add(aid)
+        out.append(act)
+        new_ids.append(aid)
+    return out, new_ids
+
+
+def merge_applied_order_action_ids_into_items_json(
+    items_json: dict[str, object],
+    *,
+    new_ids: list[str],
+    reset: bool,
+) -> dict[str, object]:
+    """Дописывает applied_order_action_ids в order_meta или сбрасывает при полной пересборке items."""
+    meta_raw = items_json.get("order_meta")
+    meta = dict(meta_raw) if isinstance(meta_raw, dict) else {}
+    if reset:
+        merged: list[str] = []
+    else:
+        prev = meta.get(APPLIED_ORDER_ACTION_IDS_KEY)
+        merged = [str(x).strip() for x in prev if str(x).strip()] if isinstance(prev, list) else []
+    for aid in new_ids:
+        s = str(aid).strip()
+        if s and s not in merged:
+            merged.append(s)
+    if len(merged) > _APPLIED_ORDER_ACTION_IDS_CAP:
+        merged = merged[-_APPLIED_ORDER_ACTION_IDS_CAP:]
+    meta[APPLIED_ORDER_ACTION_IDS_KEY] = merged
+    out = dict(items_json)
+    out["order_meta"] = meta
+    return out
 
 
 # Синоним для документации / ТЗ (транзакционный merge — одна реализация)

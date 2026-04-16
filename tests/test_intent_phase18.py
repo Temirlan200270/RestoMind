@@ -3,9 +3,10 @@ Phase 18: merge order_actions с существующим DRAFT (intent_router).
 """
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Order, OrderStatus
+from app.db.models import Order, OrderStatus, User
 from app.schemas.ai_schemas import AIBrainResponse, OrderAction, OrderItem
 from app.services.intent_router import get_open_draft_order, route_intent
 from app.services.order_logic import load_available_menu
@@ -289,3 +290,145 @@ async def test_route_intent_remove_plov_1kg_drops_plov_packaging_fee_lines(
     names = {x.get("name") for x in ij1.get("items", []) if isinstance(x, dict)}
     assert "Плов 1 кг" not in names
     assert "Лагман" in names
+
+
+@pytest.mark.asyncio
+async def test_route_intent_merge_skips_duplicate_explicit_action_id(db_with_menu: AsyncSession) -> None:
+    """Повтор того же action_id на черновике не удваивает количество."""
+    phone = "+77005554433"
+    menu = await load_available_menu(db_with_menu)
+    await route_intent(
+        db_with_menu,
+        phone,
+        AIBrainResponse(
+            intent="order",
+            reply_text="Плов",
+            items=[OrderItem(name="Плов", quantity=1, iiko_item_id="uuid-plov")],
+            order_type="delivery",
+            payment_method="cash",
+            delivery_address="ул. Тест 5",
+        ),
+        menu_items=menu,
+        organization_id=1,
+    )
+    await db_with_menu.commit()
+    add_cap = OrderAction(
+        action_id="idem-cap-1",
+        item_id="Капучино",
+        action="add",
+        quantity=2,
+    )
+    await route_intent(
+        db_with_menu,
+        phone,
+        AIBrainResponse(
+            intent="order",
+            reply_text="добавил кофе",
+            items=[],
+            order_actions=[add_cap],
+            order_type="delivery",
+            payment_method="cash",
+        ),
+        menu_items=menu,
+        inbound_message_id="wa-1",
+        organization_id=1,
+    )
+    await db_with_menu.commit()
+    await route_intent(
+        db_with_menu,
+        phone,
+        AIBrainResponse(
+            intent="order",
+            reply_text="повтор той же дельты",
+            items=[],
+            order_actions=[add_cap],
+            order_type="delivery",
+            payment_method="cash",
+        ),
+        menu_items=menu,
+        inbound_message_id="wa-2",
+        organization_id=1,
+    )
+    await db_with_menu.commit()
+    uid = await db_with_menu.scalar(
+        select(User.id).where(User.phone == phone, User.organization_id == 1),
+    )
+    assert uid is not None
+    oid = await db_with_menu.scalar(
+        select(Order.id).where(Order.user_id == uid, Order.status == OrderStatus.DRAFT).order_by(Order.id.desc()),
+    )
+    assert oid is not None
+    row = await db_with_menu.get(Order, oid)
+    cap = next(
+        x for x in (row.items_json or {}).get("items", []) if isinstance(x, dict) and x.get("name") == "Капучино"
+    )
+    assert int(cap.get("quantity", 0)) == 2
+
+
+@pytest.mark.asyncio
+async def test_route_intent_merge_skips_duplicate_synthetic_fingerprint(db_with_menu: AsyncSession) -> None:
+    """Один и тот же inbound_message_id + те же дельты без action_id — вторая обработка no-op."""
+    phone = "+77005554444"
+    menu = await load_available_menu(db_with_menu)
+    await route_intent(
+        db_with_menu,
+        phone,
+        AIBrainResponse(
+            intent="order",
+            reply_text="Плов",
+            items=[OrderItem(name="Плов", quantity=1, iiko_item_id="uuid-plov")],
+            order_type="delivery",
+            payment_method="cash",
+            delivery_address="ул. Тест 6",
+        ),
+        menu_items=menu,
+        organization_id=1,
+    )
+    await db_with_menu.commit()
+    dup_actions = [
+        OrderAction(item_id="Капучино", action="add", quantity=3),
+    ]
+    mid = "wamid.duplicate.test"
+    await route_intent(
+        db_with_menu,
+        phone,
+        AIBrainResponse(
+            intent="order",
+            reply_text="кофе",
+            items=[],
+            order_actions=list(dup_actions),
+            order_type="delivery",
+            payment_method="cash",
+        ),
+        menu_items=menu,
+        inbound_message_id=mid,
+        organization_id=1,
+    )
+    await db_with_menu.commit()
+    await route_intent(
+        db_with_menu,
+        phone,
+        AIBrainResponse(
+            intent="order",
+            reply_text="повтор обработки",
+            items=[],
+            order_actions=list(dup_actions),
+            order_type="delivery",
+            payment_method="cash",
+        ),
+        menu_items=menu,
+        inbound_message_id=mid,
+        organization_id=1,
+    )
+    await db_with_menu.commit()
+    uid2 = await db_with_menu.scalar(select(User.id).where(User.phone == phone, User.organization_id == 1))
+    assert uid2 is not None
+    oid2 = await db_with_menu.scalar(
+        select(Order.id).where(Order.user_id == uid2, Order.status == OrderStatus.DRAFT).order_by(Order.id.desc()),
+    )
+    assert oid2 is not None
+    row2 = await db_with_menu.get(Order, oid2)
+    cap2 = next(
+        x for x in (row2.items_json or {}).get("items", []) if isinstance(x, dict) and x.get("name") == "Капучино"
+    )
+    assert int(cap2.get("quantity", 0)) == 3

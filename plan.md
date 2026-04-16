@@ -156,18 +156,18 @@ RestoMind/
 
 | Задача (prompt.md) | Зачем | Состояние в репозитории | В техплане |
 |--------------------|-------|-------------------------|------------|
-| **Статусы исходящих сообщений** (отправка / доставлено / ошибка, повтор) | Оператор и продукт видят, дошёл ли ответ до WhatsApp | `chat_logs` хранит роль и текст; **нет** устойчивой модели `provider_message_id` + `delivery_status` и обработки вебхука статусов Meta | Новая линия: **«Messaging reliability»** (БД + вебхук statuses + отображение в админке / WebSocket) |
-| **Multi-tenant на уровне продукта** | Продажа нескольким заведениям | Есть **`organizations`**, `organization_id` у пользователей, заказов, броней, меню, KB, правил упаковки; **нет** полноценного онбординга организаций, брендинга (название в шапке, лого, тема) как в prompt | Расширение **v3 §12** + спринт «организации в админке» |
+| **Статусы исходящих сообщений** (отправка / доставлено / ошибка, повтор) | Оператор и продукт видят, дошёл ли ответ до WhatsApp | **Сделано:** в `chat_logs` — `provider_message_id`, `delivery_status`, `error_details`, `status_updated_at`; после отправки — `finalize_outbound_delivery`; вебхук Meta `statuses` → `apply_whatsapp_status_webhook` (`app/services/chat_delivery.py`); в админке — метки доставки + WebSocket `message_status_updated` (`admin-app.js`). **Остаётся продуктово:** явный UI «повторить отправку» при `failed` (сейчас — диагностика и статусы) | §4.11 / observability |
+| **Multi-tenant на уровне продукта** | Продажа нескольким заведениям | Есть **`organizations`**, изоляция по `organization_id`; в БД — **`tenants`** и **`organizations.tenant_id`** (миграция `20260417_franchise_upsell`). **Нет** ещё «продаваемого» слоя: онбординг сети, роль владельца франшизы, брендинг (лого/тема в шапке) как в prompt | Расширение **v3 §12** + админка «несколько филиалов» |
 | **Dashboard: деньги + вклад ИИ** (сегодня: заказы, выручка, доля через бота, upsell) | Ответ: «сколько приносит бот» | Аналитика и канбан есть; блок **AI Value** и конверсия советов — осмысленны после трассировки рекомендаций | **После / параллельно** §4.8 и стабильных полей `order_meta` / `recommendation_trace` |
 
 #### P1 — UX продукта
 
 | Задача | Примечание |
 |--------|------------|
-| Три уровня админки: **Overview → Операции → Настройки** (меньше шума на одном экране) | Сейчас — монолитная админка (Jinja2 + Alpine); целевая структура — в prompt (sidebar как у Stripe / Notion) |
+| Три уровня админки: **Overview → Операции → Настройки** (меньше шума на одном экране) | **Частично:** в `admin-app.js` сайдбар с секциями «Обзор / Операции / Настройки» и группировкой пунктов; всё ещё один Jinja2-шаблон. Дальше — визуальная близость к макетам prompt (отдельные экраны KPI, плотность) |
 | **Настройки** группами: основное, интеграции, ИИ, оплата, уведомления; флаги вроде upsell | Частично в `.env`; цель — пер-организационные настройки |
 | **Упаковка:** наглядные карточки правил + превью расчёта (пример: 2 порции мант → доп. сумма к заказу) | Логика и CRUD в БД есть; усилить визуальный UX |
-| **Удаление заказа:** модалка с номером, суммой, телефоном | Мелкий, но важный trust UX |
+| **Удаление заказа:** модалка с номером, суммой, телефоном | **Частично:** двойное подтверждение через `uiConfirm` (`confirmAndDeleteOrders`); в тексте — номер(а), без явного вывода суммы и телефона в первом шаге |
 | **Мобильная адаптация** заказов и диалогов | Приоритет для работы с телефона на кухне / в зале |
 
 #### P2 — рост
@@ -202,7 +202,7 @@ RestoMind/
 
 Этот этап превращает бота в профессиональную систему приема заказов с учетом специфики упаковки, логистики и безопасности платежей.
 
-**Состояние в коде (на 2026-04):** всё из снимка 2026-03 **плюс:** правила упаковки из таблицы `packaging_rules` (с fallback на legacy `.env` при пустой таблице), резерв state пользователя в `users`, журнал `payment_events`, retry + `failed_tasks`, контроль mixed split при правках заказа оператором. Отдельный статус `AWAITING_PREPAYMENT` в Redis **не используется** — ожидание выражено через `CHATTING` + `prepayment_status` и метаданные заказа.
+**Состояние в коде (на 2026-04):** всё из снимка 2026-03 **плюс:** правила упаковки из таблицы `packaging_rules` (с fallback на legacy `.env` при пустой таблице), резерв state пользователя в `users`, журнал `payment_events`, retry + `failed_tasks`, контроль mixed split при правках заказа оператором, **статусы доставки исходящих WhatsApp** в `chat_logs` + обработка вебхука Meta `statuses`, **платёжный webhook** с колонками `orders.payment_provider` / `orders.external_payment_id` и уведомлением клиента в WA после `paid`, **опциональная очередь ARQ** (Redis) для вебхука WA и уведомления об оплате с fallback на `BackgroundTasks`, **онбординг iiko в админке** (`verify` → выбор org → `setup` + шифрование ключа). Отдельный статус `AWAITING_PREPAYMENT` в Redis **не используется** — ожидание выражено через `CHATTING` + `prepayment_status` и метаданные заказа.
 
 ### Деньги: валидация расчётов и подтверждение оплаты
 
@@ -222,7 +222,7 @@ RestoMind/
 | Фиксация намерения | `payment_details`, `total_price`, `prepayment_status` в `Order` | То же |
 | «Деньги на счёте заведения» | Оператор вручную: `PATCH /api/admin/orders/{id}/payment` (`prepayment_status`: `paid` / `waived`, при необходимости `payment_link_url`) | Webhook от эквайринга / Kaspi / агрегатора → тот же переход статуса, **идемпотентность** по `payment_id` |
 | Блокировка клиентского «Да» | WhatsApp: если `requires_order_prepayment` и статус не `paid`/`waived` — отказ | То же + (опционально) уведомление клиенту при смене статуса |
-| Аудит | Таблица **`payment_events`** при смене предоплаты через админку (`event_type`, `actor`, сумма, заметка) | Расширение: **провайдер**, **raw payload** вебхука, внешний `payment_id` для дедупа |
+| Аудит | Таблица **`payment_events`** при смене предоплаты через админку (`event_type`, `actor`, сумма, заметка) | Webhook: идемпотентность по `note` = `provider:payment_id`; на заказе — **`payment_provider`**, **`external_payment_id`**. **Дальше:** хранить **raw payload** события и верификацию подписи провайдера (не только Bearer на `/api/webhooks/payment`) |
 
 #### Конфигуратор упаковки (Mapping) — реализовано
 
@@ -311,7 +311,7 @@ RestoMind/
 - Ошибки iiko: выделение карточки при `iiko_last_error` (как ранее).
 - **Запланировано (активный продавец):** блок **«Рекомендации бота»** — что предложено, принял ли клиент (см. §4.8), чтобы видеть ценность ИИ в деньгах.
 
-#### 3.3. Онбординг iiko через Cloud API (SaaS-уровень, цель)
+#### 3.3. Онбординг iiko через Cloud API (SaaS-уровень)
 
 **Принцип:** автоподключение делается **только** через официальный **iiko Cloud API** (`apiLogin` → токен), как уже реализовано в `app/integrations/iiko_client.py` (`POST /api/1/access_token`, `organizations`, номенклатура). **Не** использовать логин/пароль от веб-интерфейса iiko: это не API, возможны 2FA/captcha, риск блокировки и небезопасное хранение пароля — «хак», а не продукт.
 
@@ -328,11 +328,11 @@ RestoMind/
 
 **Обновление меню:** периодический job (каждые X минут) и/или кнопка **«Обновить меню»** (тот же sync, что `POST /api/admin/integrations/sync` сегодня, но с ключом из БД организации, а не только из `.env`).
 
-**Реализация (ориентир по коду):** сервис уровня `iiko_onboarding_service` (или расширение `menu_sync`): `connect(api_login) → token → orgs → nomenclature → save_to_db`; админский эндпоинт `POST /api/admin/integrations/iiko/connect` + опционально `GET .../iiko/orgs` для выбора. Логику разбора номенклатуры **не дублировать** — вызывать те же функции, что и при текущей синхронизации.
+**Реализация в коде:** `app/services/iiko_onboarding.py` (`verify_iiko_api_login`, `setup_organization_iiko`); API `POST /api/admin/integrations/iiko/verify` и `POST /api/admin/integrations/iiko/setup`; UI на вкладке «Интеграции» (поле apiLogin → «Проверить ключ» → выбор организации → «Сохранить и импортировать меню», опционально terminal group). Парсер номенклатуры — тот же пайплайн, что и при `sync_menu_from_iiko`.
 
 #### 3.4. Хранение учётных данных и кэш токена
 
-**Сейчас:** `IIKO_API_LOGIN`, `IIKO_ORGANIZATION_ID` в **`.env`** / `settings` — fallback для single-tenant; в БД у **`organizations`** уже есть поля **`iiko_api_login`**, **`iiko_organization_id`** (пока в открытом виде — см. `app/db/models.py`).
+**Сейчас:** `IIKO_API_LOGIN`, `IIKO_ORGANIZATION_ID` в **`.env`** / `settings` — fallback для dev и legacy single-tenant; у **`organizations`** — **`iiko_organization_id`**, открытый **`iiko_api_login`** (legacy) и/или **`iiko_api_login_enc`** при заданном **`APP_SECRETS_FERNET_KEY`** (сохранение из мастера админки).
 
 **Цель SaaS / franchise:** хранить **apiLogin только в зашифрованном виде**; UUID организации и прочие идентификаторы iiko — открыто (это не секреты).
 
@@ -358,7 +358,7 @@ RestoMind/
 
 **Пример весов (настраиваемо):** iiko + выбранная org (25%) · меню импортировано N>0 (25%) · ≥3 правила upsell или включён дефолтный стратегия (25%) · тестовый диалог пройден / WhatsApp верифицирован (25%). Для **одной кофейни** достаточно упростить до 2–3 шагов — те же компоненты, меньше визуального шума.
 
-**Фронт:** метод вроде `getSetupScore()` в Alpine (`admin-app.js`) + `GET /api/admin/setup-status` (агрегирует флаги без тяжёлой логики в браузере).
+**Фронт:** прогресс в шапке админки + **`GET /api/admin/setup-status`** (агрегирует флаги); доработки весов/копирайта — по продукту.
 
 #### 3.7. Franchise-ready: tenant (сеть) и филиалы
 
@@ -367,20 +367,20 @@ RestoMind/
 | Сущность | Назначение | Примечание |
 |----------|------------|------------|
 | **`tenants`** (aka accounts) | Сеть: «Додо», холдинг | `id` (PK как в остальной БД можно оставить **Integer** для простоты FK; **UUID** — опционально для публичных ссылок), `name`, `plan`, биллинг позже |
-| **`organizations`** (филиал) | Текущая таблица, **расширить** | `tenant_id` → FK `tenants.id` (**nullable** на миграции: `NULL` = legacy одиночный ресторан). Поля iiko: зашифрованный `api_login`, `iiko_organization_id`, при необходимости **`terminal_group_id`** (куда уходит заказ в iiko — уточнить по вашему сценарию `deliveries/create`) |
+| **`organizations`** (филиал) | Текущая таблица | **`tenant_id`** → FK `tenants.id` (nullable для legacy). iiko: **`iiko_api_login` / `iiko_api_login_enc`**, **`iiko_organization_id`**, **`iiko_terminal_group_id`** |
 | **Пользователи админки** | `staff_users` | Уже привязаны к `organization_id`; при росте сети — опционально роль «владелец сети» с доступом ко всем org одного `tenant_id` (отдельная фаза) |
 
 **Простой кафе:** один `tenant`, одна `organization`, тот же UX без лишних экранов. **Сеть:** один `tenant`, много `organizations`, у каждой свой зашифрованный ключ (или общий apiLogin на сеть — продуктовое решение: один ключ iiko часто даёт список org, филиалы выбираются при онбординге).
 
-**Onboarding без деплоя (уточнение к §3.3):**
+**Onboarding (реализовано; уточнение к §3.3):**
 
-1. `POST /api/admin/integrations/iiko/verify` — тело: `{ "api_login": "..." }` (ключ **не** сохранять); бэкенд: временный `IikoClient` → список организаций → ответ `{ organizations: [{ id, name }] }`.
-2. Пользователь выбирает филиал в UI.
-3. `POST /api/admin/integrations/iiko/setup` — `{ "api_login": "...", "iiko_organization_id": "..." }` → шифрование, запись в текущую `organization`, фоновая **`sync_menu_task`** (BackgroundTasks / очередь v3), ответ с job id или сразу счётчики при быстром импорте.
+1. `POST /api/admin/integrations/iiko/verify` — ключ **не** сохраняется; ответ `{ organizations: [{ id, name }] }`.
+2. Выбор филиала в UI админки (вкладка «Интеграции»).
+3. `POST /api/admin/integrations/iiko/setup` — сохранение ключа (Fernet при `APP_SECRETS_FERNET_KEY`), импорт меню в том же запросе, опционально `terminal_group_id`.
 
-Имена путей можно согласовать с существующим `POST /api/admin/integrations/sync` — главное разделить **«только проверить ключ»** и **«сохранить и импортировать»**.
+Повторный импорт: `POST /api/admin/integrations/sync` и скрипты — без повторного ввода ключа.
 
-**Сервис:** `IikoOnboardingService` (тонкий слой): `verify_api_login(raw) -> list[OrgRef]`, `finalize(org_id, encrypted_login, iiko_org_id) -> None`, делегирует синхронизацию в `menu_sync` без дублирования парсера номенклатуры.
+**Сервис:** `app/services/iiko_onboarding.py` — `verify_iiko_api_login`, `setup_organization_iiko`; парсер номенклатуры не дублируется (`menu_sync`).
 
 ---
 
@@ -388,8 +388,8 @@ RestoMind/
 
 | Шаг | Содержание |
 |-----|------------|
-| **1. БД и безопасность** | Миграция: `tenants`; `organizations.tenant_id`; при необходимости `terminal_group_id`; Fernet-сервис; бэкфилл: существующие org → дефолтный tenant. Расшифровка только в сервисном слое при вызове iiko. |
-| **2. Onboarding API** | `verify` + `setup` (см. §3.7); аудит в лог / таблица `admin_audit_log` (опционально). |
+| **1. БД и безопасность** | **`tenants`**, **`organizations.tenant_id`**, **`iiko_api_login_enc`**, **`iiko_terminal_group_id`** — в миграции; Fernet при `APP_SECRETS_FERNET_KEY`. **Дальше:** роли «владелец сети», биллинг tenant. |
+| **2. Onboarding API** | **`verify` + `setup`** — в проде; аудит нажатий (опционально). |
 | **3. IikoClient / menu_sync** | Резолв учётных данных: приоритет **настройки текущей organization** (из БД), fallback **settings/.env** для dev и legacy. |
 | **4. Strategy Engine v1 + БД** | Таблица **`upsell_rules`** (`organization_id`, условия: категории/теги/min_sum, `phrase_template`, `sort_order`, `is_active`). Движок в `intent_router` после LLM (§4.12). Не плодить `recommendation_attempts` отдельным полём без нужды — **считать попытки по `order_meta.recommendation_trace`** или расширить мета одним счётчиком, если trace не покрывает. |
 | **5. UI** | Мастер «Настройка филиала», Upsell Manager (CRUD правил), прогресс Auto Setup в шапке (§3.6). |
@@ -468,14 +468,14 @@ RestoMind/
 | **Phase 16 (добить)** | ✅ Редактор состава в модалке (`Изменить состав` → `POST /orders/{id}/rebuild-draft`, draft и confirmed). Опционально: ещё UX вокруг split / предоплаты. |
 | **Phase 17 (добить)** | ~~Mapping в БД~~ — сделано. Остаётся: при необходимости **редактирование позиций заказа** в админке с пересборкой `items_json` и `payment_details` (сейчас — валидация и блок подтверждения без полного CRUD строк). |
 | **Phase 18 (§4)** | ✅ Инкрементальная корзина, merge, **теги**, upsell, **§4.8** трасса + дашборд; расширенные тесты §4.7, optional `replace` в схеме. |
-| **Деньги «вперёд»** | **Webhook** оплаты: `POST /api/webhooks/payment` (Bearer `PAYMENT_WEBHOOK_BEARER_TOKEN`) → `prepayment_status=paid` + `payment_events` (`webhook_paid` / `webhook_failed`), идемпотентность по `provider:payment_id` в `note`. Уведомление клиенту в WA — следующий шаг. |
+| **Деньги «вперёд»** | **Webhook:** `POST /api/webhooks/payment` (Bearer) → `prepayment_status=paid` + `payment_events`, идемпотентность; на заказе — `payment_provider`, `external_payment_id`. **Уведомление клиенту в WhatsApp** после успешного webhook — `run_payment_received_customer_notify` (очередь `payment_notify_customer` или BackgroundTasks). **Остаётся:** raw payload в БД, HMAC/подпись конкретного эквайринга, адаптеры в `payment_adapters` для не-JSON провайдеров. |
 | **Фаза 13.1** | Latency PSTN: streaming TTS, filler-фразы, метрики этапов. |
-| **Операторка** | UI для очереди **`failed_tasks`** (просмотр, отметка resolved). |
+| **Операторка** | Вкладка **«Очередь ошибок»** — список **`failed_tasks`**, фильтр, `PATCH` resolved (см. `/api/admin/failed-tasks`). |
 
-**Статус:** «вау»-слой, **ядро Phase 18** и **§4.8** (трасса + дашборд) **в коде**. **Дальше по приоритету:** доработки webhook (подпись провайдера, сырой payload, уведомление клиента) → нагрузочные тесты диалога → TTS/шаблоны WA по бюджету.
+**Статус:** «вау»-слой, **ядро Phase 18** и **§4.8** (трасса + дашборд) **в коде**. **Дальше по приоритету:** платёжный webhook «как у банка» (подпись, сырой payload) → нагрузочные тесты диалога → TTS/шаблоны WA по бюджету.
 
-- **Закрыто:** персонализация (`customer_context`), теги меню, инкрементальная корзина, оформление итога в WhatsApp, аналитика допродаж (§4.8), ручное изменение состава заказа в админке (Phase 16 / rebuild-draft).
-- **Открыто:** расширение платёжного webhook (HMAC провайдера, колонка `external_payment_id`), опционально доработки split/предоплаты в модалке, премиум-голос и шаблоны Meta.
+- **Закрыто:** персонализация (`customer_context`), теги меню, инкрементальная корзина, оформление итога в WhatsApp, аналитика допродаж (§4.8), ручное изменение состава заказа в админке (Phase 16 / rebuild-draft), базовый платёжный webhook + колонки провайдера + WA-уведомление об оплате.
+- **Открыто:** расширение платёжного webhook (HMAC провайдера, persisted raw payload), опционально доработки split/предоплаты в модалке, премиум-голос и шаблоны Meta, UI «повтор отправки» при сбое доставки WA.
 
 ---
 
@@ -491,13 +491,14 @@ RestoMind/
 
 **Опционально «бесплатный» первый шаг:** усилить системный промпт (персона эксперта + 1–2 few-shot) **до** merge в коде — быстрый выигрыш в тоне; устойчивость корзины всё равно требует шагов 1–3.
 
-#### 4.11. Phase 18.1 — надёжный merge и доставка сообщений (частично в коде)
+#### 4.11. Phase 18.1 — надёжный merge и доставка сообщений
 
 | Задача | Статус |
 |--------|--------|
 | Колонка **`orders.version`** + optimistic update при правке **существующего** DRAFT из чата (`intent_router`) | ✅ |
 | Таблица **`whatsapp_inbound_dedupe`** + `try_claim_whatsapp_inbound_in_db` + вызов из `process_message` | ✅ |
 | Alembic-ревизия `alembic/versions/20260401_order_version_whatsapp_dedupe.py` + `ALTER` в `main.py` для SQLite/совместимости | ✅ |
+| Исходящие WhatsApp: **`chat_logs.provider_message_id`**, **`delivery_status`**, вебхук Meta **`statuses`**, UI + WS в админке (`chat_delivery.py`, `admin-app.js`) | ✅ |
 | **action_id** на каждую дельту (расширение схемы / дедуп на уровне действий) | запланировано |
 | Один атомарный `BEGIN … merge + fee + commit` без промежуточных flush (упростить транзакцию) | запланировано |
 | Повторная валидация **mixed** после `PATCH` заказа в админке | ✅ (предупреждение + блок `draft`→`confirmed` при расхождении) |
@@ -549,7 +550,7 @@ RestoMind/
 
 ### 3. Очереди вместо только `BackgroundTasks`
 
-Сейчас: FastAPI **BackgroundTasks** для `process_message`; поверх — **`process_with_retry`** (несколько попыток, затем запись в **`failed_tasks`** и сообщение клиенту). Цель v3: **Redis Queue / RQ / Celery** (или аналог) — `Webhook → enqueue → worker → process_message` с персистентным retry (OpenAI/iiko 5xx), масштабированием воркеров и переживанием рестарта процесса API.
+**Гибрид:** при `ARQ_ENABLED` и рабочем **Redis** вебхук WhatsApp ставит задачи в **ARQ** (`app/services/task_queue.py`, воркер `app/worker.py`: `whatsapp_process_text` / `voice` / `statuses`, `payment_notify_customer`); иначе — **BackgroundTasks** и тот же **`process_with_retry`** → **`failed_tasks`**. Цель v3: везде очередь, политики retry на уровне job, горизонтальное масштабирование воркеров без дублирования с API-процессом.
 
 ### 4. STATE: БД vs Redis
 
@@ -563,7 +564,7 @@ RestoMind/
 
 ### 6. Payment (уровень финтеха)
 
-- Таблица **`payment_events`** — **есть** (админка + **`POST /api/webhooks/payment`**: `webhook_paid` / `webhook_failed`, идемпотентность по `note` = `provider_slug:payment_id`). **Цель v3:** отдельные колонки provider / `external_payment_id`, raw payload, подпись провайдера.
+- Таблица **`payment_events`** — **есть** (админка + **`POST /api/webhooks/payment`**: `webhook_paid` / `webhook_failed`, идемпотентность по `note` = `provider_slug:payment_id`). На **`orders`**: колонки **`payment_provider`**, **`external_payment_id`** (заполняются при успешном webhook). **Цель v3:** журналировать **raw payload**, проверка **подписи/HMAC** провайдера, адаптеры под форматы эквайринга.
 - **Инварианты:** нельзя подтвердить заказ при обязательной предоплате без `paid`/`waived`; при mixed — контроль расхождения split с итогом (в админке — валидация и блок подтверждения; полный пересчёт строк заказа — при появлении редактора состава).
 
 ### 7. AI: контроль
@@ -601,8 +602,8 @@ RestoMind/
 ### 14. Roadmap v3 (порядок)
 
 1. **Ядро:** versioning + idempotency входящих WhatsApp — **готово**; **merge `order_actions`** — **готово**; резерв state в **`users`** — **готово**.
-2. **Очередь** (RQ/Celery) **+** при необходимости расширенная таблица state — **впереди**.
-3. **Расширение `payment_events`** (колонки провайдера, сырой payload) поверх текущего webhook и ручного контура.
+2. **Очередь:** **ARQ** (Redis) — **опционально включена**; полный отказ от BackgroundTasks как fallback — **впереди**; при необходимости — расширенная таблица state.
+3. **Расширение аудита оплаты:** **сырой payload** вебхука (и/или отдельная таблица событий) поверх текущих `payment_events` и колонок на заказе.
 4. **Разделение AI-модулей.**
 5. **Recommendation trace + аналитика.**
 6. **Полноценный event bus + масштабирование воркеров.**
@@ -625,7 +626,7 @@ RestoMind/
 | **Phase 16** | Канбан, iiko, split/предоплата в модалке; **редактор состава** (rebuild-draft) | частично ✅ (состав; split — по необходимости) |
 | **Phase 17** | Таблица **`packaging_rules`**, админка «Упаковка», учёт в `compute_fee_lines`; **повторная валидация mixed** при `PATCH` заказа + блок подтверждения при расхождении | ✅ сделано; **добить:** редактирование позиций заказа в админке с пересборкой split (если нужно в продукте) |
 | **Phase 18** | **Chat CRUD** + **теги** + промпт + **§4.8** дашборд/трасса: ✅ | ✅ |
-| **Phase 18.1** | Версия заказа + БД-дедуп WhatsApp + резерв state в `users` + retry/`failed_tasks` — §4.11 | ✅ |
+| **Phase 18.1** | Версия заказа + БД-дедуп WhatsApp + резерв state в `users` + retry/`failed_tasks` + **статусы исходящих WA** — §4.11 | ✅ |
 
 ### Совет по развитию
 

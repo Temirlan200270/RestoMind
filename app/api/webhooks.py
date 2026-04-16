@@ -976,6 +976,7 @@ async def process_message(
                 ai_response,
                 menu_items=menu_items,
                 organization_id=organization_id,
+                inbound_message_id=wmid,
             )
             log_pipeline_stage(
                 "route_ok",

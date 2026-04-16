@@ -86,6 +86,14 @@ class OrderAction(BaseModel):
     item_id — UUID из контекста меню [id: …] или каноничное название блюда, как в меню.
     """
 
+    action_id: str = Field(
+        default="",
+        max_length=128,
+        description=(
+            "Необязательный устойчивый id дельты (uuid или короткий ключ). "
+            "Повтор того же id на том же черновике игнорируется. Пусто — сервер вычислит fingerprint."
+        ),
+    )
     item_id: str = Field(
         ...,
         min_length=1,
@@ -104,6 +112,15 @@ class OrderAction(BaseModel):
         default=None,
         description="Краткое обоснование, если действие связано с рекомендацией бота",
     )
+
+    @field_validator("action_id", mode="before")
+    @classmethod
+    def _strip_action_id(cls, v: object) -> object:
+        if v is None:
+            return ""
+        if isinstance(v, str):
+            return v.strip()[:128]
+        return v
 
     @field_validator("item_id", mode="before")
     @classmethod

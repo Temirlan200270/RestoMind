@@ -12,12 +12,15 @@ from app.services.order_logic import (
     build_menu_context,
     build_summary_text_from_stored_items,
     calculate_total_and_fees,
+    compute_order_action_stable_id,
     detect_payment_method_from_text,
     draft_food_lines_to_order_items,
     enrich_merged_items_from_menu,
+    filter_order_actions_idempotent,
     format_draft_order_context_for_prompt,
     format_whatsapp_order_card,
     load_available_menu,
+    merge_applied_order_action_ids_into_items_json,
     merge_cart_actions,
     validate_order,
 )
@@ -277,6 +280,43 @@ def test_merge_cart_actions_add_remove_set() -> None:
     cleared = merge_cart_actions(out, [OrderAction(item_id="Капучино", action="set_quantity", quantity=0)])
     assert len(cleared) == 1
     assert cleared[0]["name"] == "Плов"
+
+
+def test_filter_order_actions_idempotent_explicit_id() -> None:
+    actions = [
+        OrderAction(action_id="a1", item_id="uuid-x", action="add", quantity=1),
+        OrderAction(action_id="a1", item_id="uuid-x", action="add", quantity=9),
+        OrderAction(action_id="a2", item_id="uuid-y", action="add", quantity=1),
+    ]
+    out, new_ids = filter_order_actions_idempotent(
+        actions,
+        applied=set(),
+        inbound_message_id="wa-1",
+    )
+    assert len(out) == 2
+    assert new_ids == ["a1", "a2"]
+    out2, ids2 = filter_order_actions_idempotent(
+        actions,
+        applied={"a1", "a2"},
+        inbound_message_id="wa-1",
+    )
+    assert out2 == []
+    assert ids2 == []
+
+
+def test_compute_order_action_stable_id_without_explicit() -> None:
+    a = OrderAction(item_id="uuid-cap", action="add", quantity=2)
+    id1 = compute_order_action_stable_id(a, 0, "msg-99")
+    id2 = compute_order_action_stable_id(a, 0, "msg-99")
+    id3 = compute_order_action_stable_id(a, 1, "msg-99")
+    assert id1 == id2
+    assert id1 != id3
+
+
+def test_merge_applied_order_action_ids_resets() -> None:
+    ij: dict = {"order_meta": {"applied_order_action_ids": ["x", "y"], "k": 1}}
+    out = merge_applied_order_action_ids_into_items_json(ij, new_ids=[], reset=True)
+    assert (out.get("order_meta") or {}).get("applied_order_action_ids") == []
 
 
 def test_merge_cart_actions_resolve_by_iiko_id_string() -> None:

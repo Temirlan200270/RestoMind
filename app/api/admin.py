@@ -2398,15 +2398,17 @@ async def sync_stop_lists_from_env(
 
 
 @router.get("/demo/status")
-async def demo_status(db: AsyncSession = Depends(get_db)) -> dict:
+async def demo_status(request: Request, db: AsyncSession = Depends(get_db)) -> dict:
     """Есть ли в БД пакет демо-пользователей (префикс телефона)."""
-    return {"has_demo": await demo_data_exists(db)}
+    oid = admin_org_from_session(request)
+    return {"has_demo": await demo_data_exists(db, organization_id=oid)}
 
 
 @router.post("/demo/seed")
-async def demo_seed(db: AsyncSession = Depends(get_db)) -> dict:
+async def demo_seed(request: Request, db: AsyncSession = Depends(get_db)) -> dict:
     """Заполнить БД фальшивыми заказами, бронями и чатами (идемпотентно)."""
-    stats = await seed_demo_data(db)
+    oid = admin_org_from_session(request)
+    stats = await seed_demo_data(db, organization_id=oid)
     if stats.get("skipped"):
         menu_n = int(stats.get("menu_items_added") or 0)
         if menu_n > 0:
@@ -2423,27 +2425,27 @@ async def demo_seed(db: AsyncSession = Depends(get_db)) -> dict:
     return {"ok": True, **{k: v for k, v in stats.items() if k != "skipped"}}
 
 
-async def _demo_delete_core(db: AsyncSession) -> dict:
+async def _demo_delete_core(db: AsyncSession, organization_id: int) -> dict:
     """Общая логика удаления демо (БД + Redis-ключи сессий)."""
-    if not await demo_data_exists(db):
+    if not await demo_data_exists(db, organization_id=organization_id):
         raise HTTPException(status_code=404, detail="Демо-данных нет")
-    cleared = await clear_demo_data(db)
+    cleared = await clear_demo_data(db, organization_id=organization_id)
     return {"ok": True, **cleared}
 
 
 @router.delete("/demo")
-async def demo_delete(db: AsyncSession = Depends(get_db)) -> dict:
+async def demo_delete(request: Request, db: AsyncSession = Depends(get_db)) -> dict:
     """Удалить всех демо-пользователей и связанные заказы/брони/логи."""
-    return await _demo_delete_core(db)
+    return await _demo_delete_core(db, admin_org_from_session(request))
 
 
 @router.post("/demo/delete")
-async def demo_delete_post(db: AsyncSession = Depends(get_db)) -> dict:
+async def demo_delete_post(request: Request, db: AsyncSession = Depends(get_db)) -> dict:
     """
     То же, что DELETE /admin/demo.
     Нужен для сред, где HTTP DELETE режется прокси/CDN (удаление «не работает», а POST проходит).
     """
-    return await _demo_delete_core(db)
+    return await _demo_delete_core(db, admin_org_from_session(request))
 
 
 # ─── Настройки: опасные операции с БД ───────────────────
@@ -3728,8 +3730,14 @@ async def test_bot(request: Request, body: TextRequest) -> dict:
             sales_strategy_context=strategy_ctx,
             customer_context=customer_ctx,
         )
+        inbound_mid = f"admin-test-bot:{secrets.token_hex(8)}"
         result = await route_intent(
-            db, phone, ai_response, menu_items=menu_items, organization_id=org_id,
+            db,
+            phone,
+            ai_response,
+            menu_items=menu_items,
+            organization_id=org_id,
+            inbound_message_id=inbound_mid,
         )
 
         if result.new_state:
