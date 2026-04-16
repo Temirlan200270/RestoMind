@@ -1,28 +1,34 @@
 """
-AI Brain — ядро интеллекта бота.
-Асинхронный вызов OpenAI (Chat Completions + structured output) с возвратом Pydantic-схемы.
-Включает retry при сбоях и fallback при невалидном ответе.
-Голос: Whisper (transcriptions) + structured chat; опционально OPENAI_BASE_URL для прокси/Azure.
+AI Brain — точка входа AI-Engine v2.0.
+
+- `call_ai(...)` — AI-агностичный диспетчер провайдеров (OpenAI/Gemini).
+- `call_openai(...)` — обратная совместимость (alias на `call_ai`).
+- Голос (Whisper STT) пока реализован через OpenAI (опциональный компонент).
 """
 
 from __future__ import annotations
 
 import io
 import logging
+import time
 from typing import Any
 
-from openai import APIConnectionError, APIError, APITimeoutError, AsyncOpenAI, RateLimitError
-from pydantic import ValidationError
+from openai import AsyncOpenAI
 
 from app.core.config import settings
 from app.schemas.ai_schemas import AIBrainResponse
-from app.services.prompts import RESTAURANT_SYSTEM_PROMPT
+from app.services.ai_engine.errors import TransientAiError
+from app.services.ai_engine.gemini_p import GeminiProvider
+from app.services.ai_engine.openai_p import OpenAIProvider
 
 logger = logging.getLogger(__name__)
 
 _openai_client: AsyncOpenAI | None = None
 _cached_openai_key: str = ""
 _cached_openai_base: str = ""
+
+_openai_provider: OpenAIProvider | None = None
+_gemini_provider: GeminiProvider | None = None
 
 
 def _ensure_openai_client() -> AsyncOpenAI | None:
@@ -42,7 +48,6 @@ def _ensure_openai_client() -> AsyncOpenAI | None:
     return _openai_client
 
 
-DEFAULT_CHAT_MODEL = "gpt-4o-mini"
 MAX_RETRIES = 2
 
 _FALLBACK_RESPONSE = AIBrainResponse(
@@ -99,48 +104,82 @@ def _system_prompt_with_context(
     customer_context: str = "",
     current_time_context: str = "",
 ) -> str:
-    system_prompt = RESTAURANT_SYSTEM_PROMPT
-    if (customer_context or "").strip():
-        system_prompt += (
-            "\n\n# Досье гостя (только факты с сервера; для тона и узнавания)\n"
-            f"{customer_context.strip()}"
-        )
-    if (current_time_context or "").strip():
-        system_prompt += (
-            "\n\n# Текущее время заведения\n"
-            f"{current_time_context.strip()}"
-        )
-    if kb_context:
-        system_prompt += f"\n\n# Справочник заведения (база знаний)\n{kb_context}"
-    if menu_context:
-        system_prompt += f"\n\n# Актуальное меню ресторана\n{menu_context}"
-    if (draft_order_context or "").strip():
-        system_prompt += f"\n\n{draft_order_context.strip()}"
-    if (sales_strategy_context or "").strip():
-        system_prompt += f"\n\n{sales_strategy_context.strip()}"
-    return system_prompt
+    # Backward-compat: keep signature used by callers/tests, but delegate to shared builder.
+    from app.services.ai_engine.prompting import build_system_prompt
 
-
-def _history_to_openai_messages(history: list[dict[str, str]]) -> list[dict[str, str]]:
-    out: list[dict[str, str]] = []
-    for msg in history:
-        role = msg["role"]
-        if role == "model":
-            role = "assistant"
-        if role not in ("user", "assistant", "system"):
-            role = "user"
-        out.append({"role": role, "content": msg["content"]})
-    return out
-
-
-def _chat_model() -> str:
-    m = (settings.openai_model or "").strip()
-    return m if m else DEFAULT_CHAT_MODEL
+    return build_system_prompt(
+        menu_context=menu_context,
+        kb_context=kb_context,
+        draft_order_context=draft_order_context,
+        sales_strategy_context=sales_strategy_context,
+        customer_context=customer_context,
+        current_time_context=current_time_context,
+    )
 
 
 def _transcription_model() -> str:
     m = (settings.openai_transcription_model or "").strip()
     return m if m else "whisper-1"
+
+
+def get_ai_client() -> object:
+    """
+    Фабрика провайдеров AI-Engine v2.0.
+    Выбор — только по settings.AI_PROVIDER (gemini|openai).
+    """
+    global _openai_provider, _gemini_provider
+    prov = (getattr(settings, "ai_provider", "") or "").strip().lower()
+    if prov == "gemini":
+        if _gemini_provider is None:
+            _gemini_provider = GeminiProvider()
+        return _gemini_provider
+    if _openai_provider is None:
+        _openai_provider = OpenAIProvider()
+    return _openai_provider
+
+
+async def call_ai(
+    history: list[dict[str, str]],
+    user_text: str,
+    menu_context: str = "",
+    kb_context: str = "",
+    draft_order_context: str = "",
+    sales_strategy_context: str = "",
+    customer_context: str = "",
+    current_time_context: str = "",
+    *,
+    raise_on_transient: bool = True,
+) -> AIBrainResponse:
+    """AI-агностичный вызов: провайдер выбирается по AI_PROVIDER."""
+    provider = get_ai_client()
+    t0 = time.perf_counter()
+    try:
+        result = await provider.generate_response(
+            history=history,
+            user_text=user_text,
+            menu_context=menu_context,
+            kb_context=kb_context,
+            draft_order_context=draft_order_context,
+            sales_strategy_context=sales_strategy_context,
+            customer_context=customer_context,
+            current_time_context=current_time_context,
+        )
+        logger.info(
+            "[AI] dispatch provider=%s status=SUCCESS latency_ms=%d intent=%s",
+            type(provider).__name__,
+            int((time.perf_counter() - t0) * 1000),
+            result.intent,
+        )
+        return result
+    except TransientAiError:
+        logger.warning(
+            "[AI] dispatch provider=%s status=TRANSIENT latency_ms=%d",
+            type(provider).__name__,
+            int((time.perf_counter() - t0) * 1000),
+        )
+        if raise_on_transient:
+            raise
+        return _FALLBACK_RESPONSE
 
 
 async def call_openai(
@@ -155,120 +194,18 @@ async def call_openai(
     *,
     raise_on_transient: bool = True,
 ) -> AIBrainResponse:
-    """
-    Отправляет контекст диалога в OpenAI и получает структурированный ответ.
-    При сбое — до MAX_RETRIES повторных попыток, затем fallback на escalate.
-    """
-    system_prompt = _system_prompt_with_context(
+    """Backward-compat alias (AI-Engine v2.0)."""
+    return await call_ai(
+        history,
+        user_text,
         menu_context,
         kb_context,
         draft_order_context,
         sales_strategy_context,
         customer_context=customer_context,
         current_time_context=current_time_context,
+        raise_on_transient=raise_on_transient,
     )
-    messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
-    messages.extend(_history_to_openai_messages(history))
-    messages.append({"role": "user", "content": user_text})
-
-    logger.debug(
-        "Запрос к OpenAI: %d сообщений в контексте, новое: '%s'",
-        len(messages),
-        user_text[:100],
-    )
-
-    client = _ensure_openai_client()
-    if client is None:
-        logger.error("OPENAI_API_KEY не задан — ответ недоступен, используем fallback")
-        return _FALLBACK_RESPONSE
-
-    last_error: Exception | None = None
-    model = _chat_model()
-
-    for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            completion = await client.beta.chat.completions.parse(
-                model=model,
-                messages=messages,
-                response_format=AIBrainResponse,
-                temperature=0.3,
-            )
-            msg = completion.choices[0].message
-            if getattr(msg, "refusal", None):
-                logger.warning(
-                    "OpenAI отказ (попытка %d/%d): %s",
-                    attempt,
-                    MAX_RETRIES,
-                    msg.refusal,
-                )
-                last_error = ValueError("Model refusal")
-                continue
-            parsed = msg.parsed
-            if parsed is not None:
-                logger.info(
-                    "Ответ OpenAI: intent=%s, reply='%s'",
-                    parsed.intent,
-                    parsed.reply_text[:80],
-                )
-                return parsed
-            raw = (msg.content or "").strip()
-            if raw:
-                result = AIBrainResponse.model_validate_json(raw)
-                logger.info(
-                    "Ответ OpenAI (из content): intent=%s, reply='%s'",
-                    result.intent,
-                    result.reply_text[:80],
-                )
-                return result
-            logger.warning("OpenAI вернул пустой ответ (попытка %d/%d)", attempt, MAX_RETRIES)
-            last_error = ValueError("Empty response")
-
-        except ValidationError as exc:
-            logger.error(
-                "OpenAI: невалидная схема (попытка %d/%d): %s",
-                attempt,
-                MAX_RETRIES,
-                exc,
-            )
-            last_error = exc
-
-        except (APIError, RateLimitError, APIConnectionError, APITimeoutError) as exc:
-            logger.error(
-                "Ошибка API OpenAI (попытка %d/%d): %s",
-                attempt,
-                MAX_RETRIES,
-                exc,
-                exc_info=True,
-            )
-            last_error = exc
-
-        except Exception as exc:
-            logger.error(
-                "Ошибка при вызове OpenAI (попытка %d/%d): %s",
-                attempt,
-                MAX_RETRIES,
-                exc,
-                exc_info=True,
-            )
-            last_error = exc
-
-    logger.error(
-        "Все %d попыток вызова OpenAI провалились. Последняя ошибка: %s",
-        MAX_RETRIES,
-        last_error,
-    )
-    if raise_on_transient and isinstance(
-        last_error,
-        (APIError, RateLimitError, APIConnectionError, APITimeoutError),
-    ):
-        raise TransientAiError(str(last_error)) from last_error
-    return _FALLBACK_RESPONSE
-
-
-class TransientAiError(RuntimeError):
-    """Временная ошибка внешнего AI-провайдера: нужно ретраить задачу/вебхук."""
-
-    pass
 
 
 async def openai_transcribe_voice(audio_bytes: bytes, audio_mime: str) -> str:

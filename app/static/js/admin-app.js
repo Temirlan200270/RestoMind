@@ -268,6 +268,11 @@ function adminMixinState() {
         orders: [],
         _ordersLoadSeq: 0,
         ordersLoadError: '',
+        ordersPage: 1,
+        ordersSize: 50,
+        ordersPages: 1,
+        ordersTotal: 0,
+        ordersHasMore: false,
         bookings: [],
         menuItems: [],
 
@@ -326,10 +331,17 @@ function adminMixinState() {
         chatSearch: '',
         chatPhone: '',
         activeChatPhone: '',
+        chatListLoading: false,
+        chatListHasMore: true,
+        chatListCursorAt: null,
+        chatListCursorId: null,
         /** На планшетах/мобилке: выезжающая панель «О клиенте» (на lg — колонка справа) */
         chatMobileInfoOpen: false,
         activeChatState: 'chatting',
         chatMessages: [],
+        chatMessagesHasMore: false,
+        chatMessagesBeforeId: null,
+        chatMessagesLoadingOlder: false,
         operatorInput: '',
         unreadChats: 0,
         /** Кабина оператора: сводка по клиенту */
@@ -2519,28 +2531,23 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
         async loadStopList() {
             this.stopListLoadError = '';
             try {
-                const { ok, data } = await this.apiJsonResponse('/api/admin/menu?stopped_only=true');
+                // Стоп-лист строим из того же источника, что и «Меню»: полный список (available_only=false).
+                // Так мы не зависим от отдельной серверной ветки stopped_only=true, которая может “пустеть”
+                // из-за tenant/session edge-case'ов после деплоя.
+                const { ok, data } = await this.apiJsonResponse('/api/admin/menu?available_only=false');
                 if (!ok) {
                     this.stopListItems = [];
                     this.stopListFilteredItems = [];
                     this.stopListLoadError = this.formatApiError(data.detail) || 'Не удалось загрузить стоп-лист';
                     return;
                 }
-                const apiItems = Array.isArray(data.items) ? data.items : [];
-                // Иногда после миграций org-контекст в админке может “поплыть”, а также бывают
-                // edge-case'ы с legacy данными. В таких случаях быстрее и надёжнее восстановить
-                // стоп-лист из уже загруженного меню (available_only=false).
-                if (apiItems.length > 0) {
-                    this.stopListItems = apiItems;
-                    this.demoToastMessage = `Стоп-лист: ${apiItems.length} поз.`;
-                    setTimeout(() => { this.demoToastMessage = ''; }, 4000);
-                    this._recalcStopListFiltered();
-                    return;
-                }
-                if (!Array.isArray(this.menuItems) || this.menuItems.length === 0) {
-                    await this.loadMenu();
-                }
-                const derived = (this.menuItems || []).filter((i) => i && i.is_available === false);
+                const fullMenu = Array.isArray(data.items) ? data.items : [];
+                // Синхронизируем локальный кэш меню: вкладка «Стоп-лист» должна быть консистентной с «Меню».
+                this.menuItems = fullMenu;
+                this.menuViewRevision += 1;
+
+                // В JS лучше считать стопом любое "не доступно": false или 0.
+                const derived = fullMenu.filter((i) => i && !i.is_available);
                 this.stopListItems = derived;
                 this.demoToastMessage = `Стоп-лист: ${derived.length} поз.`;
                 setTimeout(() => { this.demoToastMessage = ''; }, 4000);
@@ -3146,9 +3153,18 @@ function adminMixinLiveChat() {
         },
 
         // ─── Live Chat ───────────────────────────────
-        async loadChatList() {
+        async loadChatList(reset = true) {
+            if (this.chatListLoading) return;
+            if (!reset && !this.chatListHasMore) return;
+            this.chatListLoading = true;
             try {
-                const res = await this.apiFetch('/api/admin/chats?limit=200');
+                const limit = 60;
+                let url = `/api/admin/chats?limit=${limit}`;
+                if (!reset) {
+                    if (this.chatListCursorAt) url += `&cursor_at=${encodeURIComponent(String(this.chatListCursorAt))}`;
+                    if (this.chatListCursorId) url += `&cursor_id=${encodeURIComponent(String(this.chatListCursorId))}`;
+                }
+                const res = await this.apiFetch(url);
                 if (!res.ok) {
                     console.warn('GET /api/admin/chats', res.status);
                     return;
@@ -3158,7 +3174,8 @@ function adminMixinLiveChat() {
                 const preserved = new Map(
                     this.chatList.filter((c) => c.unread).map((c) => [c.phone, c]),
                 );
-                this.chatList = incoming.map((c) => {
+
+                const mapped = incoming.map((c) => {
                     const prev = preserved.get(c.phone);
                     return {
                         phone: c.phone,
@@ -3169,9 +3186,41 @@ function adminMixinLiveChat() {
                         userName: c.userName ?? prev?.userName,
                     };
                 });
+
+                if (reset) {
+                    this.chatList = mapped;
+                } else {
+                    const seen = new Set(this.chatList.map((c) => c.phone));
+                    for (const c of mapped) {
+                        if (!c?.phone || seen.has(c.phone)) continue;
+                        this.chatList.push(c);
+                        seen.add(c.phone);
+                    }
+                }
+
+                this.chatListHasMore = !!data.has_more;
+                this.chatListCursorAt = data.next_cursor?.cursor_at ?? null;
+                this.chatListCursorId = data.next_cursor?.cursor_id ?? null;
                 this.unreadChats = this.chatList.filter((c) => c.unread).length;
             } catch (e) {
                 console.warn('loadChatList', e);
+            } finally {
+                this.chatListLoading = false;
+            }
+        },
+
+        async loadMoreChats() {
+            await this.loadChatList(false);
+        },
+
+        onChatListScroll(e) {
+            const el = e?.target;
+            if (!el) return;
+            if (this.chatListLoading || !this.chatListHasMore) return;
+            // Near bottom.
+            const remaining = (el.scrollHeight - el.scrollTop - el.clientHeight);
+            if (remaining < 260) {
+                void this.loadMoreChats();
             }
         },
 
@@ -3182,6 +3231,9 @@ function adminMixinLiveChat() {
             this._selectChatRequestId = requestId;
             this.chatMobileInfoOpen = false;
             this.activeChatPhone = phone;
+            this.chatMessagesHasMore = false;
+            this.chatMessagesBeforeId = null;
+            this.chatMessagesLoadingOlder = false;
             this.customerSummaryLoading = true;
             this.customerSummary = {
                 user_exists: false,
@@ -3215,11 +3267,13 @@ function adminMixinLiveChat() {
             } catch {}
 
             try {
-                const res = await this.apiFetch(`/api/admin/chats/${encodeURIComponent(phone)}`);
+                const res = await this.apiFetch(`/api/admin/chats/${encodeURIComponent(phone)}?limit=50`);
                 if (this._selectChatRequestId !== requestId || this.activeChatPhone !== phone) return;
                 if (res.ok) {
                     const data = await res.json();
                     this.chatMessages = data.messages || [];
+                    this.chatMessagesHasMore = !!data.has_more;
+                    this.chatMessagesBeforeId = data.next_before_id ?? null;
                     const uix = this.chatList.findIndex(c => c.phone === phone);
                     if (uix >= 0 && data.user_name) {
                         this.chatList[uix].userName = data.user_name;
@@ -3234,6 +3288,55 @@ function adminMixinLiveChat() {
             this.scrollChatToBottom();
             await this.loadCustomerSummary(phone);
             this.syncAdminChatsHash(phone);
+        },
+
+        async loadOlderChatMessages() {
+            if (!this.activeChatPhone) return;
+            if (!this.chatMessagesHasMore) return;
+            if (this.chatMessagesLoadingOlder) return;
+            const beforeId = this.chatMessagesBeforeId;
+            if (!beforeId) return;
+
+            const area = document.getElementById('admin-chat-messages');
+            const prevScrollHeight = area ? area.scrollHeight : 0;
+            const prevScrollTop = area ? area.scrollTop : 0;
+
+            this.chatMessagesLoadingOlder = true;
+            try {
+                const phone = this.activeChatPhone;
+                const res = await this.apiFetch(`/api/admin/chats/${encodeURIComponent(phone)}?limit=50&before_id=${encodeURIComponent(String(beforeId))}`);
+                if (!res.ok) return;
+                const data = await res.json();
+                const older = data.messages || [];
+                if (!older.length) {
+                    this.chatMessagesHasMore = false;
+                    this.chatMessagesBeforeId = null;
+                    return;
+                }
+                this.chatMessages = [...older, ...this.chatMessages];
+                this.chatMessagesHasMore = !!data.has_more;
+                this.chatMessagesBeforeId = data.next_before_id ?? null;
+            } catch (_e) {
+                // ignore
+            } finally {
+                this.chatMessagesLoadingOlder = false;
+                this.$nextTick(() => {
+                    const a = document.getElementById('admin-chat-messages');
+                    if (!a) return;
+                    const newScrollHeight = a.scrollHeight;
+                    const delta = newScrollHeight - prevScrollHeight;
+                    a.scrollTop = Math.max(0, prevScrollTop + delta);
+                });
+            }
+        },
+
+        onChatMessagesScroll(e) {
+            const el = e?.target;
+            if (!el) return;
+            if (this.chatMessagesLoadingOlder || !this.chatMessagesHasMore) return;
+            if (el.scrollTop < 80) {
+                void this.loadOlderChatMessages();
+            }
         },
 
         /** Мобилка: вернуться к списку диалогов */
@@ -3649,7 +3752,11 @@ function adminMixinDataChartsSettings() {
             const reqId = ++this._ordersLoadSeq;
             this.ordersLoadError = '';
             const p = new URLSearchParams();
-            p.set('limit', '200');
+            const tableMode = this.ordersView === 'table';
+            const size = tableMode ? Number(this.ordersSize || 50) : 500;
+            const page = tableMode ? Number(this.ordersPage || 1) : 1;
+            p.set('page', String(Number.isFinite(page) && page > 0 ? page : 1));
+            p.set('size', String(Number.isFinite(size) && size > 0 ? Math.min(500, size) : 50));
             if (this.orderFilter) p.set('status', this.orderFilter);
             const q = (this.orderSearchQ || '').trim();
             if (q) p.set('q', q);
@@ -3668,7 +3775,11 @@ function adminMixinDataChartsSettings() {
                 void this.showUiAlert(this.ordersLoadError, 'Ошибка');
                 return;
             }
-            const incoming = Array.isArray(data.orders) ? data.orders : [];
+            const incoming = Array.isArray(data.items) ? data.items : (Array.isArray(data.orders) ? data.orders : []);
+            this.ordersTotal = Number(data.total ?? incoming.length) || 0;
+            this.ordersPages = Number(data.pages ?? 1) || 1;
+            this.ordersPage = Number(data.page ?? this.ordersPage) || 1;
+            this.ordersHasMore = !!data.has_more;
             const merged = new Map((this.orders || []).map((o) => [Number(o.id), o]));
             for (const next of incoming) {
                 const id = Number(next?.id);
@@ -3679,6 +3790,25 @@ function adminMixinDataChartsSettings() {
                 }
             }
             this.orders = Array.from(merged.values());
+        },
+
+        ordersPrevPage() {
+            if (this.ordersView !== 'table') return;
+            const p = Number(this.ordersPage || 1);
+            if (p <= 1) return;
+            this.ordersPage = p - 1;
+            window.scrollTo({ top: 0 });
+            void this.loadOrders();
+        },
+
+        ordersNextPage() {
+            if (this.ordersView !== 'table') return;
+            const p = Number(this.ordersPage || 1);
+            const pages = Number(this.ordersPages || 1);
+            if (p >= pages) return;
+            this.ordersPage = p + 1;
+            window.scrollTo({ top: 0 });
+            void this.loadOrders();
         },
 
         async loadFailedTasks() {

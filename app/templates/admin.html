@@ -924,7 +924,7 @@
                             class="text-sm font-semibold px-3 py-2 rounded-xl border border-brand-200 text-brand-800 bg-brand-50 hover:bg-brand-100 transition whitespace-nowrap">
                             + Новый заказ (тест)
                         </button>
-                        <select x-show="ordersView === 'table'" x-model="orderFilter" @change="loadOrders()"
+                        <select x-show="ordersView === 'table'" x-model="orderFilter" @change="ordersPage = 1; loadOrders()"
                             class="text-sm border border-gray-200 rounded-xl px-3 py-2 bg-gray-50">
                             <option value="">Все статусы</option>
                             <option value="draft">Черновик</option>
@@ -940,19 +940,19 @@
                 <div x-show="ordersView === 'table'" class="flex flex-wrap items-end gap-3 mb-5">
                     <div class="flex-1 min-w-[220px] max-w-md">
                         <label class="block text-xs font-medium text-gray-500 mb-1">Поиск</label>
-                        <input type="search" x-model="orderSearchQ" @input.debounce.400ms="loadOrders()"
+                        <input type="search" x-model="orderSearchQ" @input.debounce.400ms="ordersPage = 1; loadOrders()"
                             placeholder="Телефон, имя или № заказа"
                             class="w-full text-sm border border-gray-200 rounded-xl px-3 py-2 bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
                     </div>
                     <div>
                         <label class="block text-xs font-medium text-gray-500 mb-1">Сумма от</label>
-                        <input type="number" min="0" step="1" x-model="orderSumMin" @change="loadOrders()"
+                        <input type="number" min="0" step="1" x-model="orderSumMin" @change="ordersPage = 1; loadOrders()"
                             placeholder="—" inputmode="decimal"
                             class="w-32 text-sm border border-gray-200 rounded-xl px-3 py-2 bg-gray-50">
                     </div>
                     <div>
                         <label class="block text-xs font-medium text-gray-500 mb-1">до</label>
-                        <input type="number" min="0" step="1" x-model="orderSumMax" @change="loadOrders()"
+                        <input type="number" min="0" step="1" x-model="orderSumMax" @change="ordersPage = 1; loadOrders()"
                             placeholder="—" inputmode="decimal"
                             class="w-32 text-sm border border-gray-200 rounded-xl px-3 py-2 bg-gray-50">
                     </div>
@@ -1102,6 +1102,28 @@
                             {{ order_card_mobile("order") }}
                         </template>
                     </div>
+
+                    <!-- Stripe-style pagination -->
+                    <div class="px-5 py-4 border-t border-gray-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                        <div class="text-xs text-gray-500">
+                            Всего: <span class="font-semibold tabular-nums text-gray-700" x-text="ordersTotal"></span>
+                            <span class="mx-2 text-gray-300">•</span>
+                            Стр. <span class="font-semibold tabular-nums text-gray-700" x-text="ordersPage"></span>
+                            из <span class="font-semibold tabular-nums text-gray-700" x-text="ordersPages"></span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <button type="button" @click="ordersPrevPage()"
+                                :disabled="ordersPage <= 1"
+                                class="min-h-[40px] px-4 rounded-xl bg-white border border-gray-200 text-gray-700 text-sm font-semibold hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition">
+                                Назад
+                            </button>
+                            <button type="button" @click="ordersNextPage()"
+                                :disabled="ordersPage >= ordersPages"
+                                class="min-h-[40px] px-4 rounded-xl bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed transition shadow-sm shadow-brand-600/20">
+                                Вперёд
+                            </button>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -1233,7 +1255,7 @@
                                 </svg>
                             </div>
                         </div>
-                        <div class="flex-1 min-h-0 overflow-y-auto">
+                        <div class="flex-1 min-h-0 overflow-y-auto" @scroll.passive="onChatListScroll($event)">
                             <template x-for="chat in filteredChatList" :key="chat.phone">
                                 <button type="button" @click="selectChat(chat.phone)"
                                     class="w-full text-left p-4 border-b border-gray-50 hover:bg-gray-50 transition-colors flex items-start gap-3"
@@ -1261,6 +1283,15 @@
                                     <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
                                 </div>
                                 <p>Нет диалогов в списке</p>
+                            </div>
+                            <div class="py-4 px-4" x-show="chatListLoading" x-cloak>
+                                <div class="h-10 rounded-xl bg-slate-100 animate-pulse"></div>
+                            </div>
+                            <div class="py-3 px-4" x-show="!chatListLoading && chatListHasMore && !chatSearch.trim()" x-cloak>
+                                <button type="button" @click="loadMoreChats()"
+                                    class="w-full min-h-[44px] rounded-xl bg-white ring-1 ring-slate-200/70 hover:ring-slate-300 text-slate-700 text-sm font-semibold transition">
+                                    Показать ещё
+                                </button>
                             </div>
                         </div>
                         <div class="p-3 border-t border-gray-100 shrink-0 bg-gray-50/50">
@@ -1355,7 +1386,16 @@
                                     </div>
                                 </div>
 
-                                <div class="flex-1 min-h-0 overflow-y-auto p-4 md:p-6 space-y-4" id="admin-chat-messages">
+                                <div class="flex-1 min-h-0 overflow-y-auto p-4 md:p-6 space-y-4" id="admin-chat-messages" @scroll.passive="onChatMessagesScroll($event)">
+                                    <div x-show="chatMessagesLoadingOlder" x-cloak class="flex justify-center py-2">
+                                        <div class="h-8 w-36 rounded-full bg-slate-100 animate-pulse"></div>
+                                    </div>
+                                    <div x-show="!chatMessagesLoadingOlder && chatMessagesHasMore" x-cloak class="flex justify-center pb-2">
+                                        <button type="button" @click="loadOlderChatMessages()"
+                                            class="min-h-[40px] px-4 rounded-full bg-white ring-1 ring-slate-200/70 hover:ring-slate-300 text-slate-700 text-xs font-bold uppercase tracking-wide transition">
+                                            Загрузить выше
+                                        </button>
+                                    </div>
                                     <template x-for="(msg, idx) in chatMessages" :key="msg.id != null ? 'm-' + msg.id : 'i-' + idx">
                                         <div class="flex w-full msg-new"
                                             :class="msg.role === 'user' ? 'justify-start' : 'justify-end'">

@@ -91,6 +91,17 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("OPENAI_BASE_URL", "openai_base_url"),
     )
 
+    # --- AI Engine v2 (provider switch + Gemini) ---
+    ai_provider: str = Field(
+        default="openai",
+        validation_alias=AliasChoices("AI_PROVIDER", "ai_provider"),
+        description="openai | gemini",
+    )
+    gemini_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("GEMINI_API_KEY", "gemini_api_key"),
+    )
+
     # --- WhatsApp (Meta API) ---
     whatsapp_api_token: str = ""
     whatsapp_verify_token: str = ""

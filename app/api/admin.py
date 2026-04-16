@@ -577,24 +577,28 @@ async def list_orders(
     q: str | None = Query(None, description="Поиск по № заказа, телефону или имени клиента"),
     sum_min: float | None = Query(None, ge=0, description="Мин. сумма заказа"),
     sum_max: float | None = Query(None, ge=0, description="Макс. сумма заказа"),
-    limit: int = Query(50, ge=1, le=200),
+    # New pagination (Stripe-style)
+    page: int | None = Query(None, ge=1),
+    size: int | None = Query(None, ge=1, le=500),
+    # Backward-compat aliases
+    limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Список заказов с пагинацией; телефон/имя — из связанного пользователя (WhatsApp)."""
     org_id = admin_org_from_session(request)
-    query = (
+    base_query = (
         select(Order, User.phone, User.name)
         .join(User, Order.user_id == User.id)
         .options(joinedload(Order.booking))
         .where(Order.organization_id == org_id, User.organization_id == org_id)
     )
     if status:
-        query = query.where(Order.status == status)
+        base_query = base_query.where(Order.status == status)
     if sum_min is not None:
-        query = query.where(Order.total_price >= sum_min)
+        base_query = base_query.where(Order.total_price >= sum_min)
     if sum_max is not None:
-        query = query.where(Order.total_price <= sum_max)
+        base_query = base_query.where(Order.total_price <= sum_max)
     if sum_min is not None and sum_max is not None and sum_min > sum_max:
         raise HTTPException(status_code=400, detail="sum_min не может быть больше sum_max")
 
@@ -611,9 +615,26 @@ async def list_orders(
                 clauses.append(Order.id == oid)
         except ValueError:
             pass
-        query = query.where(or_(*clauses))
+        base_query = base_query.where(or_(*clauses))
 
-    query = query.order_by(Order.created_at.desc()).limit(limit).offset(offset)
+    # Resolve page/size (preferred) or limit/offset (legacy)
+    eff_size = int(size) if size is not None else int(limit)
+    eff_size = max(1, min(500, eff_size))
+    if page is not None:
+        eff_page = int(page)
+        eff_offset = (eff_page - 1) * eff_size
+    else:
+        eff_offset = int(offset)
+        eff_page = (eff_offset // eff_size) + 1 if eff_size else 1
+
+    # total count (same filters)
+    total = int(
+        await db.scalar(select(func.count()).select_from(base_query.subquery())) or 0
+    )
+    pages = int((total + eff_size - 1) // eff_size) if eff_size else 1
+    has_more = (eff_offset + eff_size) < total
+
+    query = base_query.order_by(Order.created_at.desc()).limit(eff_size).offset(eff_offset)
 
     result = await db.execute(query)
     rows = result.all()
@@ -657,8 +678,17 @@ async def list_orders(
         )
 
     return {
+        # Standard response
+        "items": out,
+        "total": total,
+        "page": eff_page,
+        "pages": pages,
+        "has_more": has_more,
+        # Backward-compat (to be removed after frontend migration)
         "count": len(out),
         "orders": out,
+        "limit": eff_size,
+        "offset": eff_offset,
     }
 
 
@@ -2016,47 +2046,104 @@ async def patch_booking(
 @router.get("/chats")
 async def list_chats_sidebar(
     request: Request,
-    limit: int = Query(120, ge=1, le=500),
+    limit: int = Query(50, ge=1, le=200),
+    cursor_at: str | None = Query(None, description="Cursor: lastAt ISO (for infinite scroll)"),
+    cursor_id: int | None = Query(None, ge=1, description="Cursor: last message id (tie-breaker)"),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """
     Список диалогов для боковой панели админки: телефон, превью последнего сообщения, время.
-    Берём пользователей по убыванию времени последнего сообщения в chat_logs.
+    Infinite scroll: курсор по (lastAt, last_id). Без full-scan chat_logs.
     """
     org_id = admin_org_from_session(request)
-    result = await db.execute(
-        select(ChatLog, User.phone, User.name)
+
+    cur_dt: datetime | None = None
+    if cursor_at:
+        try:
+            cur_dt = datetime.fromisoformat(cursor_at.replace("Z", "+00:00"))
+            if cur_dt.tzinfo is None:
+                cur_dt = cur_dt.replace(tzinfo=timezone.utc)
+            else:
+                cur_dt = cur_dt.astimezone(timezone.utc)
+        except Exception:
+            cur_dt = None
+
+    # last message per user via window function (portable for Postgres/SQLite).
+    base_sq = (
+        select(
+            ChatLog.id.label("log_id"),
+            ChatLog.user_id.label("user_id"),
+            ChatLog.created_at.label("last_at"),
+            ChatLog.content.label("content"),
+            User.phone.label("phone"),
+            User.name.label("user_name"),
+            func.row_number()
+            .over(
+                partition_by=ChatLog.user_id,
+                order_by=(ChatLog.created_at.desc(), ChatLog.id.desc()),
+            )
+            .label("rn"),
+        )
         .join(User, User.id == ChatLog.user_id)
         .where(User.organization_id == org_id)
-        .order_by(ChatLog.created_at.desc()),
+        .subquery()
     )
+
+    stmt = (
+        select(base_sq)
+        .where(base_sq.c.rn == 1)
+    )
+    if cur_dt is not None and cursor_id is not None:
+        stmt = stmt.where(
+            or_(
+                base_sq.c.last_at < cur_dt,
+                and_(base_sq.c.last_at == cur_dt, base_sq.c.log_id < int(cursor_id)),
+            )
+        )
+    elif cur_dt is not None:
+        stmt = stmt.where(base_sq.c.last_at < cur_dt)
+    elif cursor_id is not None:
+        stmt = stmt.where(base_sq.c.log_id < int(cursor_id))
+
+    stmt = stmt.order_by(base_sq.c.last_at.desc(), base_sq.c.log_id.desc()).limit(limit + 1)
+
+    result = await db.execute(stmt)
     rows = result.all()
+
+    has_more = len(rows) > limit
+    rows = rows[:limit]
     chats: list[dict] = []
-    seen: set[str] = set()
-    for log, phone, name in rows:
-        if not phone or phone in seen:
+    next_cursor: dict[str, object] | None = None
+    for r in rows:
+        phone = r.phone
+        if not phone:
             continue
-        seen.add(phone)
         chats.append(
             {
                 "phone": phone,
-                "lastMessage": (log.content or "")[:80],
-                "lastAt": log.created_at.isoformat() if log.created_at else None,
+                "lastMessage": (r.content or "")[:80],
+                "lastAt": r.last_at.isoformat() if r.last_at else None,
                 "state": "chatting",
                 "unread": False,
-                "userName": name,
-            },
+                "userName": r.user_name,
+            }
         )
-        if len(chats) >= limit:
-            break
-    return {"chats": chats}
+    if chats:
+        last = rows[-1]
+        if last.last_at is not None:
+            next_cursor = {"cursor_at": last.last_at.isoformat(), "cursor_id": int(last.log_id)}
+        else:
+            next_cursor = {"cursor_at": None, "cursor_id": int(last.log_id)}
+
+    return {"chats": chats, "has_more": has_more, "next_cursor": next_cursor}
 
 
 @router.get("/chats/{phone}")
 async def get_chat_log(
     request: Request,
     phone: str,
-    limit: int = Query(50, ge=1, le=500),
+    limit: int = Query(50, ge=1, le=200),
+    before_id: int | None = Query(None, ge=1, description="Cursor: load older messages with id < before_id"),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Просмотр истории диалога с клиентом по номеру телефона."""
@@ -2069,18 +2156,23 @@ async def get_chat_log(
     if user is None:
         raise HTTPException(status_code=404, detail=f"Пользователь с номером {phone} не найден")
 
-    logs_result = await db.execute(
-        select(ChatLog)
-        .where(ChatLog.user_id == user.id)
-        .order_by(ChatLog.created_at.desc())
-        .limit(limit)
-    )
+    stmt = select(ChatLog).where(ChatLog.user_id == user.id)
+    if before_id is not None:
+        stmt = stmt.where(ChatLog.id < int(before_id))
+    # Cursor-based: stable by primary key.
+    stmt = stmt.order_by(ChatLog.id.desc()).limit(limit + 1)
+    logs_result = await db.execute(stmt)
     logs = logs_result.scalars().all()
+    has_more = len(logs) > limit
+    logs = logs[:limit]
+    next_before_id = int(logs[-1].id) if (has_more and logs) else None
 
     return {
         "phone": phone,
         "user_name": user.name,
         "count": len(logs),
+        "has_more": has_more,
+        "next_before_id": next_before_id,
         "messages": [
             {
                 "id": log.id,
@@ -2319,7 +2411,9 @@ async def list_menu(
 
     return {
         "count": len(items),
+        # Backward-compat: старый админский UI мог ожидать ключ `menu_items`.
         "items": [_menu_item_dict(item) for item in items],
+        "menu_items": [_menu_item_dict(item) for item in items],
     }
 
 
