@@ -51,6 +51,8 @@ copy .env.example .env
 **Админка:** `ADMIN_USERNAME`, `ADMIN_PASSWORD`; для cookie и подписи WebSocket-токена задайте **`SESSION_SECRET`** (случайная строка, в проде — не пустая).  
 Остальное — по необходимости (WhatsApp, iiko, Redis, `SENTRY_DSN`, `RATE_LIMIT_PER_MINUTE` — см. [.env.example](.env.example)).
 
+**Telegram — SOS персоналу (опционально):** при запросе оператора (`intent: escalate`) или временном сбое AI в Telegram уходит карточка с номером гостя и кнопкой «Открыть диалог в админке». В `.env` / Render: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ADMIN_CHAT_ID` (id группы или пользователя). Для отдельного чата на филиал — поле **Telegram: чат персонала** в админке (**Настройки → Мой ресторан**), иначе используется глобальный `TELEGRAM_ADMIN_CHAT_ID`. Чтобы ссылка в кнопке была кликабельной, задайте **`PUBLIC_BASE_URL`** (полный `https://…` без `/admin`).
+
 ### 3. База данных и демо
 
 **Важно:** команды выполняйте **из корня проекта** (где лежит `seed.py`).

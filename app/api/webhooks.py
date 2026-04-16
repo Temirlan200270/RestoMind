@@ -1005,7 +1005,9 @@ async def process_message(
                 sales_strategy_context=strategy_ctx,
                 customer_context=customer_ctx,
                 current_time_context=current_time_ctx,
-                raise_on_transient=True,
+                # Временный сбой провайдера → тот же путь, что и «позвать человека»:
+                # escalate + HUMAN_MODE + Telegram + human_needed (без 3× retry на исключении).
+                raise_on_transient=False,
             )
 
         log_pipeline_stage(

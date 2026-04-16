@@ -28,6 +28,50 @@ def _escape_html(s: str) -> str:
     )
 
 
+def format_phone_for_alert(phone: str) -> str:
+    """
+    Человекочитаемый E.164 для карточки в Telegram: +7 705 131 08 37.
+    Вставляется внутрь <code>…</code> — удобно копировать одним тапом.
+    """
+    raw = (phone or "").strip()
+    digits = "".join(c for c in raw if c.isdigit())
+    if len(digits) == 11 and digits.startswith("7"):
+        rest = digits[1:]
+        return f"+7 {rest[0:3]} {rest[3:6]} {rest[6:8]} {rest[8:10]}"
+    if len(digits) == 12 and digits.startswith("77"):  # редкий префикс
+        rest = digits[2:]
+        if len(rest) == 10:
+            return f"+77 {rest[0:3]} {rest[3:6]} {rest[6:8]} {rest[8:10]}"
+    if digits:
+        return raw if raw.startswith("+") else f"+{digits}"
+    return raw
+
+
+def _timezone_place_label() -> str:
+    """Короткая подпись к времени (последний сегмент IANA), без «системщины»."""
+    tz_name = (settings.display_timezone or "").strip()
+    if not tz_name:
+        return "UTC"
+    tail = tz_name.split("/")[-1].replace("_", " ")
+    return tail
+
+
+def _primary_time_line_html() -> str:
+    """Одна строка «Время» для карточки: локаль заведения или UTC."""
+    now = datetime.now(timezone.utc)
+    tz_name = (settings.display_timezone or "").strip()
+    place = _escape_html(_timezone_place_label())
+    if tz_name:
+        try:
+            local = now.astimezone(ZoneInfo(tz_name))
+            hm = local.strftime("%H:%M")
+            return f"<b>Время:</b> <code>{_escape_html(hm)}</code> <i>({place})</i>"
+        except Exception:
+            logger.warning("DISPLAY_TIMEZONE недействителен (%r) — в карточке UTC", tz_name)
+    hm = now.strftime("%H:%M")
+    return f"<b>Время:</b> <code>{_escape_html(hm)}</code> <i>(UTC)</i>"
+
+
 _FSM_LABELS_RU: dict[str, str] = {
     "chatting": "Обычный диалог",
     "awaiting_order_payment": "Выбор оплаты по заказу",
@@ -35,14 +79,6 @@ _FSM_LABELS_RU: dict[str, str] = {
     "confirming_booking": "Подтверждение брони",
     "human_mode": "У оператора",
 }
-
-_INTENT_LABELS_RU: dict[str, str] = {
-    "order": "Заказ",
-    "book": "Бронирование",
-    "faq": "Вопрос (FAQ)",
-    "escalate": "Запрос оператора / эскалация",
-}
-
 
 @dataclass
 class EscalationAlertExtras:
@@ -61,34 +97,10 @@ class EscalationAlertExtras:
     pending_booking_id: int | None = None
 
 
-def _intent_ru(intent: str) -> str:
-    return _INTENT_LABELS_RU.get((intent or "").strip().lower(), intent or "—")
-
-
-def _fsm_ru(fsm: str) -> str:
+def _fsm_plain_ru(fsm: str) -> str:
+    """Только по-русски, без machine-id (для карточек персоналу)."""
     key = (fsm or "").strip().lower()
-    ru = _FSM_LABELS_RU.get(key)
-    if ru:
-        return f"{ru} (<code>{_escape_html(key)}</code>)"
-    return f"<code>{_escape_html(key or '—')}</code>"
-
-
-def _alert_time_lines() -> list[str]:
-    """Строки «Время …» для алерта: при заданном DISPLAY_TIMEZONE — локальное + UTC, иначе только UTC."""
-    now = datetime.now(timezone.utc)
-    utc_hm = now.strftime("%Y-%m-%d %H:%M")
-    tz_name = (settings.display_timezone or "").strip()
-    if tz_name:
-        try:
-            local = now.astimezone(ZoneInfo(tz_name))
-            local_hm = local.strftime("%Y-%m-%d %H:%M")
-            return [
-                f"<b>Время (заведение, {_escape_html(tz_name)}):</b> <code>{local_hm}</code>",
-                f"<b>Время (UTC, сервер):</b> <code>{utc_hm}</code>",
-            ]
-        except Exception:
-            logger.warning("DISPLAY_TIMEZONE недействителен (%r) — в алерте только UTC", tz_name)
-    return [f"<b>Время (UTC):</b> <code>{utc_hm}</code>"]
+    return _FSM_LABELS_RU.get(key, "Диалог с гостем")
 
 
 async def _staff_chat_id_for_org(organization_id: int | None) -> str:
@@ -105,7 +117,12 @@ async def _staff_chat_id_for_org(organization_id: int | None) -> str:
     return (settings.telegram_admin_chat_id or "").strip()
 
 
-async def send_ops_notification_html(text: str, *, organization_id: int | None = None) -> None:
+async def send_ops_notification_html(
+    text: str,
+    *,
+    organization_id: int | None = None,
+    reply_markup: dict[str, object] | None = None,
+) -> None:
     """Короткое уведомление персоналу (HTML). Без токена/chat_id — no-op."""
     token = (settings.telegram_bot_token or "").strip()
     chat_id = await _staff_chat_id_for_org(organization_id)
@@ -118,10 +135,21 @@ async def send_ops_notification_html(text: str, *, organization_id: int | None =
         "parse_mode": "HTML",
         "disable_web_page_preview": True,
     }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
     api_url = f"https://api.telegram.org/bot{token}/sendMessage"
     async with httpx.AsyncClient(timeout=20.0) as client:
         resp = await client.post(api_url, json=payload)
         resp.raise_for_status()
+
+
+def _absolute_admin_base_url() -> str | None:
+    raw = (settings.public_base_url or "").strip().rstrip("/")
+    if not raw:
+        return None
+    if not raw.startswith(("http://", "https://")):
+        raw = f"https://{raw.lstrip('/')}"
+    return raw
 
 
 def _absolute_admin_dialog_url(phone: str) -> str | None:
@@ -129,14 +157,20 @@ def _absolute_admin_dialog_url(phone: str) -> str | None:
     Полный URL открытия админки на диалоге с клиентом.
     Нужен для inline-кнопки и для кликабельных ссылок в Telegram (относительные пути не работают).
     """
-    raw = (settings.public_base_url or "").strip().rstrip("/")
-    if not raw:
+    base = _absolute_admin_base_url()
+    if not base:
         return None
-    if not raw.startswith(("http://", "https://")):
-        raw = f"https://{raw.lstrip('/')}"
     q = (phone or "").strip()
     frag = f"chats?phone={quote(q, safe='')}" if q else "chats"
-    return f"{raw}/admin#{frag}"
+    return f"{base}/admin#{frag}"
+
+
+def _absolute_admin_orders_url() -> str | None:
+    """Вкладка заказов в админке (глубокая ссылка #orders)."""
+    base = _absolute_admin_base_url()
+    if not base:
+        return None
+    return f"{base}/admin#orders"
 
 
 async def send_tg_fallback_alert(
@@ -148,8 +182,8 @@ async def send_tg_fallback_alert(
     organization_id: int | None = None,
 ) -> None:
     """
-    Уведомление администратору: клиент переведён в режим оператора (escalate).
-    Если TELEGRAM_BOT_TOKEN / TELEGRAM_ADMIN_CHAT_ID не заданы — тихий no-op.
+    Карточка SOS в Telegram: эскалация на оператора или запасной ответ при сбое AI.
+    TELEGRAM_BOT_TOKEN + chat_id (организация или env) — иначе no-op.
     """
     token = (settings.telegram_bot_token or "").strip()
     chat_id = await _staff_chat_id_for_org(organization_id)
@@ -159,96 +193,81 @@ async def send_tg_fallback_alert(
 
     q = (phone or "").strip()
     admin_link_abs = _absolute_admin_dialog_url(q)
+    phone_code = _escape_html(format_phone_for_alert(q))
 
-    u_short = (user_message or "")[:1400]
-    r_short = (bot_reply or "")[:900]
+    u_short = (user_message or "").strip()[:900]
+    r_short = (bot_reply or "").strip()[:700]
 
-    app_line = _escape_html((settings.app_name or "RestoMind").strip())
-    ver = (settings.app_version or "").strip()
-    if ver:
-        app_line = f"{app_line} <i>v{_escape_html(ver)}</i>"
+    technical = bool(extras and extras.technical_fallback)
+    if technical:
+        what = "🤖 <i>Бот не смог обработать запрос (сбой AI-провайдера).</i>"
+    else:
+        what = "👤 <i>Гость запросил помощь менеджера.</i>"
+
+    if extras and extras.had_voice:
+        last_client = "🎤 <i>Голосовое сообщение</i>"
+    elif u_short:
+        last_client = f"<i>{_escape_html(u_short)}</i>"
+    else:
+        last_client = "<i>—</i>"
 
     lines: list[str] = [
-        "<b>Нужна помощь оператора</b>",
+        "🚨 <b>НУЖНА ПОМОЩЬ МЕНЕДЖЕРА</b>",
         "",
-        *_alert_time_lines(),
-        f"<b>Сервис:</b> {app_line}",
-        f"<b>Телефон:</b> <code>{_escape_html(q)}</code>",
+        f"<b>Гость:</b> <code>{phone_code}</code>",
+        _primary_time_line_html(),
+        "",
+        "<b>Что случилось</b>",
+        what,
+        "",
+        "<b>Последнее от клиента</b>",
+        last_client,
+        "",
+        "<b>Ответ гостю в WhatsApp</b>",
+        _escape_html(r_short) if r_short else "<i>—</i>",
+        "",
+        "📥 <b>Клиент ждёт ответа в WhatsApp.</b>",
     ]
 
     if extras:
         if extras.customer_name:
-            lines.append(f"<b>Имя в БД:</b> {_escape_html(extras.customer_name)}")
-        lines.append(f"<b>Состояние диалога:</b> {_fsm_ru(extras.fsm_state)}")
-        lines.append(
-            "<b>Интент модели:</b> "
-            f"{_escape_html(_intent_ru(extras.intent))} "
-            f"(<code>{_escape_html(extras.intent or '—')}</code>)",
-        )
-        voice_line = "голос (WhatsApp)" if extras.had_voice else "текст"
-        lines.append(f"<b>Ввод клиента:</b> {voice_line}")
-        if extras.detected_language:
-            lines.append(
-                "<b>Язык ответа (модель):</b> "
-                f"<code>{_escape_html(extras.detected_language)}</code>",
-            )
-        if extras.technical_fallback:
-            lines.append(
-                "<b>Признак:</b> запасной ответ при сбое OpenAI "
-                "(квота, лимиты, сеть — проверьте биллинг и логи).",
-            )
-        oid = extras.outbound_chat_log_id
-        if oid is not None:
-            lines.append(f"<b>Запись чата (id):</b> <code>{oid}</code>")
+            lines.extend(["", f"<b>Имя в базе:</b> {_escape_html(extras.customer_name.strip())}"])
+        fsm_key = (extras.fsm_state or "").strip().lower()
+        if fsm_key and fsm_key != "chatting":
+            lines.extend(["", f"<b>Этап:</b> {_escape_html(_fsm_plain_ru(extras.fsm_state))}"])
         if extras.draft_order_id is not None:
             extra_tot = ""
             if extras.draft_order_total:
-                extra_tot = f", сумма {_escape_html(extras.draft_order_total)}"
+                extra_tot = f" · {_escape_html(extras.draft_order_total)}"
             lines.append(
-                "<b>Черновик заказа:</b> "
-                f"\u2116<code>{extras.draft_order_id}</code>{extra_tot}",
+                f"<b>Корзина:</b> черновик №<code>{extras.draft_order_id}</code>{extra_tot}",
             )
         if extras.pending_order_id is not None:
             lines.append(
-                "<b>Ожидает подтверждения заказ:</b> "
-                f"\u2116<code>{extras.pending_order_id}</code>",
+                f"<b>Ожидает «Да» по заказу:</b> №<code>{extras.pending_order_id}</code>",
             )
         if extras.pending_booking_id is not None:
             lines.append(
-                "<b>Ожидает подтверждения бронь:</b> "
-                f"\u2116<code>{extras.pending_booking_id}</code>",
+                f"<b>Ожидает «Да» по брони:</b> №<code>{extras.pending_booking_id}</code>",
             )
 
-    lines.extend(
-        [
-            "",
-            "<b>Сообщение клиента:</b>",
-            _escape_html(u_short),
-            "",
-            "<b>Ответ бота клиенту:</b>",
-            _escape_html(r_short),
-        ],
-    )
+    brand = _escape_html((settings.app_name or "RestoMind").strip())
+    lines.extend(["", f"<i>{brand}</i>"])
 
     if admin_link_abs:
         lines.extend(
             [
                 "",
-                f'<a href="{_escape_html(admin_link_abs)}">Открыть диалог в админке</a>',
-                "",
-                "<i>Или нажмите кнопку ниже.</i>",
+                f'<a href="{_escape_html(admin_link_abs)}">Открыть в браузере</a>',
             ],
         )
     else:
         lines.extend(
             [
                 "",
-                "<b>Ссылка в админку недоступна:</b> задайте "
-                "<code>PUBLIC_BASE_URL</code> (полный URL без <code>/admin</code>, например "
-                "<code>https://your-app.onrender.com</code>). "
-                "На Render без этой переменной подставляется <code>RENDER_EXTERNAL_URL</code>, "
-                "если она есть в окружении.",
-                f"Фрагмент для ручного открытия: <code>/admin#chats?phone={_escape_html(q)}</code>",
+                "<b>Ссылка в админку:</b> задайте <code>PUBLIC_BASE_URL</code> (полный <code>https://…</code> без <code>/admin</code>). "
+                "На Render часто подставляется <code>RENDER_EXTERNAL_URL</code>.",
+                f"Фрагмент: <code>/admin#chats?phone={_escape_html(q)}</code>",
             ],
         )
 
@@ -262,11 +281,10 @@ async def send_tg_fallback_alert(
         "parse_mode": "HTML",
         "disable_web_page_preview": True,
     }
-    # Кнопка-ссылка: Telegram принимает только абсолютные http(s) URL.
     if admin_link_abs:
         payload["reply_markup"] = {
             "inline_keyboard": [
-                [{"text": "Открыть диалог в админке", "url": admin_link_abs}],
+                [{"text": "ОТКРЫТЬ ЧАТ ↗️", "url": admin_link_abs}],
             ],
         }
 

@@ -282,6 +282,7 @@ async def call_openai_with_audio(
         sales_strategy_context,
         customer_context=customer_context,
         current_time_context=current_time_context,
+        raise_on_transient=False,
     )
     if result.recognized_speech is None or not str(result.recognized_speech).strip():
         return result.model_copy(update={"recognized_speech": transcript})

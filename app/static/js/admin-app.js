@@ -262,7 +262,15 @@ function adminMixinState() {
         dashStatsLoading: false,
         dashStatsLoadedOnce: false,
         /** Контекст текущего заведения (multi-tenant брендинг в шапке). */
-        orgProfile: { id: null, organization_id: null, name: '', timezone: '', currency: '', whatsapp_phone_number_id: '' },
+        orgProfile: {
+            id: null,
+            organization_id: null,
+            name: '',
+            timezone: '',
+            currency: '',
+            whatsapp_phone_number_id: '',
+            telegram_ops_chat_id: '',
+        },
         orgProfileLoading: false,
         orgProfileSaving: false,
         orders: [],
@@ -1834,7 +1842,15 @@ function adminMixinAuthKnowledge() {
             this.settingsTab = 'restaurant';
             this.dashStatsLoading = false;
             this.dashStatsLoadedOnce = false;
-            this.orgProfile = { id: null, organization_id: null, name: '', timezone: '', currency: '', whatsapp_phone_number_id: '' };
+            this.orgProfile = {
+                id: null,
+                organization_id: null,
+                name: '',
+                timezone: '',
+                currency: '',
+                whatsapp_phone_number_id: '',
+                telegram_ops_chat_id: '',
+            };
             this.orgProfileLoading = false;
             this.integrationStatus = defaultIntegrationStatus();
             this.integrationEvents = [];
@@ -1925,6 +1941,7 @@ function adminMixinAuthKnowledge() {
                     timezone: (data?.timezone || '').trim(),
                     currency: (data?.currency || '').trim(),
                     whatsapp_phone_number_id: (data?.whatsapp_phone_number_id || '').trim(),
+                    telegram_ops_chat_id: (data?.telegram_ops_chat_id || '').trim(),
                 };
             } finally {
                 this.orgProfileLoading = false;
@@ -1945,6 +1962,7 @@ function adminMixinAuthKnowledge() {
                     timezone: String(this.orgProfile?.timezone || '').trim(),
                     currency: String(this.orgProfile?.currency || '').trim(),
                     whatsapp_phone_number_id: String(this.orgProfile?.whatsapp_phone_number_id || '').trim(),
+                    telegram_ops_chat_id: String(this.orgProfile?.telegram_ops_chat_id || '').trim(),
                 };
                 const { ok, status, data } = await this.apiJsonResponse('/api/admin/organization/profile', {
                     method: 'PATCH',
@@ -1963,6 +1981,7 @@ function adminMixinAuthKnowledge() {
                     timezone: (data?.timezone || '').trim(),
                     currency: (data?.currency || '').trim(),
                     whatsapp_phone_number_id: (data?.whatsapp_phone_number_id || '').trim(),
+                    telegram_ops_chat_id: (data?.telegram_ops_chat_id || '').trim(),
                 };
             } finally {
                 this.orgProfileSaving = false;
@@ -1983,7 +2002,15 @@ function adminMixinAuthKnowledge() {
             this._clearWsReadyTimer();
             this.hasDemoData = false;
             this.auth401AlertShown = false;
-            this.orgProfile = { id: null, organization_id: null, name: '', timezone: '', currency: '', whatsapp_phone_number_id: '' };
+            this.orgProfile = {
+                id: null,
+                organization_id: null,
+                name: '',
+                timezone: '',
+                currency: '',
+                whatsapp_phone_number_id: '',
+                telegram_ops_chat_id: '',
+            };
         },
 
         async refreshDemoStatus() {
@@ -3112,6 +3139,8 @@ function adminMixinLiveChat() {
             if (tab === 'chats') {
                 this.currentTab = 'chats';
                 if (phone) this._pendingHashChatPhone = phone;
+            } else if (tab === 'orders') {
+                this.currentTab = 'orders';
             }
         },
 
@@ -3141,6 +3170,11 @@ function adminMixinLiveChat() {
         async _onAdminHashChange() {
             if (!this.authenticated) return;
             const { tab, phone } = adminParseLocationHash();
+            if (tab === 'orders') {
+                this.currentTab = 'orders';
+                await this.loadTabData();
+                return;
+            }
             if (tab !== 'chats') return;
             this.currentTab = 'chats';
             await this.loadTabData();

@@ -1539,6 +1539,11 @@ class OrganizationProfilePatchBody(BaseModel):
     timezone: str | None = Field(default=None, max_length=64)
     currency: str | None = Field(default=None, max_length=8)
     whatsapp_phone_number_id: str | None = Field(default=None, max_length=100)
+    telegram_ops_chat_id: str | None = Field(
+        default=None,
+        max_length=32,
+        description="Telegram chat_id группы персонала для SOS-алертов (если пусто — TELEGRAM_ADMIN_CHAT_ID из Render)",
+    )
 
 
 @router.get("/organization/prefs")
@@ -1586,6 +1591,7 @@ async def get_organization_profile(request: Request, db: AsyncSession = Depends(
         "timezone": org.timezone,
         "currency": org.currency,
         "whatsapp_phone_number_id": (org.whatsapp_phone_number_id or "").strip(),
+        "telegram_ops_chat_id": (getattr(org, "telegram_ops_chat_id", None) or "").strip(),
     }
 
 
@@ -1611,6 +1617,8 @@ async def patch_organization_profile(
         org.currency = (body.currency or "").strip().upper() or org.currency
     if body.whatsapp_phone_number_id is not None:
         org.whatsapp_phone_number_id = (body.whatsapp_phone_number_id or "").strip()
+    if body.telegram_ops_chat_id is not None:
+        org.telegram_ops_chat_id = (body.telegram_ops_chat_id or "").strip()
     await db.commit()
     await db.refresh(org)
     return {
@@ -1620,6 +1628,7 @@ async def patch_organization_profile(
         "timezone": org.timezone,
         "currency": org.currency,
         "whatsapp_phone_number_id": (org.whatsapp_phone_number_id or "").strip(),
+        "telegram_ops_chat_id": (getattr(org, "telegram_ops_chat_id", None) or "").strip(),
     }
 
 
@@ -3087,7 +3096,7 @@ class RetentionRunBody(BaseModel):
 
 
 @router.get("/settings/environment")
-async def settings_environment(db: AsyncSession = Depends(get_db)) -> dict:
+async def settings_environment(request: Request, db: AsyncSession = Depends(get_db)) -> dict:
     """
     Безопасный снимок окружения для админки (без секретов и полных токенов).
     """
@@ -3097,6 +3106,14 @@ async def settings_environment(db: AsyncSession = Depends(get_db)) -> dict:
         iiko_configured=_iiko_env_configured(),
         whatsapp_configured=_whatsapp_env_configured(),
     )
+    org_id = admin_org_from_session(request)
+    org_row = await db.get(Organization, org_id)
+    tg_token_ok = bool(str(settings.telegram_bot_token or "").strip())
+    tg_global_chat_ok = bool(str(settings.telegram_admin_chat_id or "").strip())
+    tg_org_chat_ok = bool(
+        str(getattr(org_row, "telegram_ops_chat_id", "") or "").strip(),
+    ) if org_row is not None else False
+    telegram_staff_reachable = tg_token_ok and (tg_global_chat_ok or tg_org_chat_ok)
     return {
         "app_name": settings.app_name,
         "app_version": settings.app_version,
@@ -3115,10 +3132,10 @@ async def settings_environment(db: AsyncSession = Depends(get_db)) -> dict:
                 "phone_number_id_set": bool(str(settings.whatsapp_phone_number_id or "").strip()),
             },
             "telegram": {
-                "configured": bool(
-                    str(settings.telegram_bot_token or "").strip()
-                    and str(settings.telegram_admin_chat_id or "").strip(),
-                ),
+                "configured": telegram_staff_reachable,
+                "bot_token_set": tg_token_ok,
+                "default_chat_set": tg_global_chat_ok,
+                "org_chat_set": tg_org_chat_ok,
             },
             "openai": {"configured": bool(str(settings.openai_api_key or "").strip())},
             "public_base_url_set": bool(str(settings.public_base_url or "").strip()),
