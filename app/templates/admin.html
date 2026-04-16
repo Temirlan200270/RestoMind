@@ -1,4 +1,6 @@
 {% from "_order_iiko_error.html" import iiko_error %}
+{% from "components/_order_card.html" import order_card_row, order_card_mobile, order_card_kanban, order_status_badge %}
+{% from "components/_settings_tabs.html" import settings_tabs %}
 <!DOCTYPE html>
 <html lang="ru" x-data="adminApp()" x-init="init()" @keydown.window="handleGlobalKeydown($event)">
 <head>
@@ -98,7 +100,7 @@
                                 <span x-show="item.id === 'operator_queue' && (dashStats.failed_tasks_open || 0) > 0"
                                     class="absolute right-3 top-2 min-w-[1.25rem] h-5 px-1 bg-red-500 rounded-full text-[10px] font-bold flex items-center justify-center"
                                     x-text="dashStats.failed_tasks_open"></span>
-                                <span x-show="item.id === 'integrations' && integrationErrorBadge() > 0"
+                                <span x-show="item.id === 'settings' && integrationErrorBadge() > 0"
                                     class="absolute right-3 top-2 min-w-[1.25rem] h-5 px-1 bg-amber-500 rounded-full text-[10px] font-bold flex items-center justify-center"
                                     x-text="integrationErrorBadge()"></span>
                             </button>
@@ -125,22 +127,70 @@
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
                     </button>
                     <div class="min-w-0 flex-1">
+                        <!-- Multi-tenant брендинг: всегда видно, какой ресторан сейчас открыт -->
+                        <div class="flex items-center gap-2 mb-1 min-w-0" x-show="authenticated" x-cloak>
+                            <div class="h-7 w-7 rounded-xl bg-brand-600 text-white flex items-center justify-center text-xs font-bold shrink-0 ring-1 ring-black/5">
+                                <span x-text="(orgProfile?.name || 'R').trim().slice(0, 1).toUpperCase()"></span>
+                            </div>
+                            <div class="min-w-0">
+                                <div class="text-xs font-semibold text-gray-700 truncate" x-text="orgProfile?.name || '—'"></div>
+                            </div>
+                            <div class="text-[10px] text-gray-400 tabular-nums shrink-0" x-show="orgProfile?.organization_id" x-text="'ID ' + orgProfile.organization_id"></div>
+                        </div>
                         <div class="flex items-center gap-2 min-w-0">
-                            <h1 class="text-lg sm:text-xl md:text-2xl font-bold text-gray-900 truncate flex-1 min-w-0" x-text="navItems.find(i => i.id === currentTab)?.label"></h1>
+                            <h1 class="text-lg sm:text-xl md:text-2xl font-bold text-gray-900 truncate flex-1 min-w-0"
+                                x-text="currentTab === 'settings'
+                                  ? (settingsTab === 'restaurant' ? 'Мой ресторан'
+                                    : settingsTab === 'connections' ? 'Подключения'
+                                    : settingsTab === 'smart_sales' ? 'Умные продажи'
+                                    : settingsTab === 'team' ? 'Команда'
+                                    : 'Технический доступ')
+                                  : (navItems.find(i => i.id === currentTab)?.label)"></h1>
                             <button type="button" @click="openGlobalSearch()"
                                 class="md:hidden shrink-0 min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 hover:bg-gray-50"
                                 title="Быстрый поиск (Ctrl+K)" aria-label="Поиск по заказам и чатам">
                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
                             </button>
                         </div>
-                        <p class="hidden sm:block text-sm text-gray-500 mt-0.5 line-clamp-2" x-text="navItems.find(i => i.id === currentTab)?.desc"></p>
+                        <p class="hidden sm:block text-sm text-gray-500 mt-0.5 line-clamp-2"
+                            x-text="currentTab === 'settings'
+                              ? (settingsTab === 'restaurant' ? 'Профиль, часовой пояс, упаковка и информация для бота'
+                                : settingsTab === 'connections' ? 'iiko, WhatsApp и синхронизация'
+                                : settingsTab === 'smart_sales' ? 'Допродажи и сценарии продаж'
+                                : settingsTab === 'team' ? 'Доступ сотрудников к панели управления'
+                                : 'Экспорт, сбросы и диагностика')
+                              : (navItems.find(i => i.id === currentTab)?.desc)"></p>
                         <div x-show="authenticated && (setupStatus.score ?? 100) < 100" x-cloak class="w-full max-w-md mt-2">
-                            <div class="flex justify-between text-[10px] text-gray-500 mb-0.5">
-                                <span>Готовность филиала</span>
-                                <span x-text="(setupStatus.score ?? 0) + '%'"></span>
-                            </div>
-                            <div class="h-1.5 rounded-full bg-gray-200 overflow-hidden">
-                                <div class="h-full bg-emerald-500 transition-all duration-500" :style="'width:' + (setupStatus.score || 0) + '%'"></div>
+                            <div class="rounded-2xl p-3 border transition"
+                                :class="(setupStatus.score ?? 0) <= 30
+                                  ? 'border-amber-200 bg-amber-50/70 shadow-sm'
+                                  : 'border-gray-200 bg-white/60'">
+                                <div class="flex items-center justify-between gap-3 text-[10px] mb-1"
+                                    :class="(setupStatus.score ?? 0) <= 30 ? 'text-amber-900' : 'text-gray-500'">
+                                    <span class="font-semibold tracking-wide">Готовность филиала</span>
+                                    <span class="tabular-nums font-bold" x-text="(setupStatus.score ?? 0) + '%'"></span>
+                                </div>
+                                <div class="h-2 rounded-full overflow-hidden"
+                                    :class="(setupStatus.score ?? 0) <= 30 ? 'bg-amber-200/70' : 'bg-gray-200'">
+                                    <div class="h-full transition-all duration-700"
+                                        :class="(setupStatus.score ?? 0) <= 30 ? 'bg-amber-500' : 'bg-emerald-500'"
+                                        :style="'width:' + (setupStatus.score || 0) + '%'"></div>
+                                </div>
+                                <div class="mt-2 flex items-center justify-between gap-3">
+                                    <div class="text-[10px]"
+                                        :class="(setupStatus.score ?? 0) <= 30 ? 'text-amber-800' : 'text-gray-400'">
+                                        <span x-show="(setupStatus.score ?? 0) === 0" x-cloak>Начните настройку — добьём до 100%.</span>
+                                        <span x-show="(setupStatus.score ?? 0) > 0" x-cloak>Осталось немного — можно закончить за пару минут.</span>
+                                    </div>
+                                    <button type="button"
+                                        class="shrink-0 px-3 py-1.5 rounded-xl text-[10px] font-bold transition border min-h-[32px]"
+                                        :class="(setupStatus.score ?? 0) <= 30
+                                          ? 'bg-amber-600 text-white border-amber-600 hover:bg-amber-700'
+                                          : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'"
+                                        @click="currentTab='settings'; settingsTab='restaurant'; loadTabData()">
+                                        Завершить
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -168,7 +218,7 @@
                     </button>
                     <button type="button" @click="syncStopListOnly()"
                         :disabled="stopListSyncLoading || integrationSyncLoading || !integrationStatus.iiko_configured"
-                        :title="integrationStatus.iiko_configured ? 'Синхронизировать стоп-лист из iiko (учётные данные из .env)' : 'Задайте IIKO_API_LOGIN и IIKO_ORGANIZATION_ID в .env'"
+                        :title="integrationStatus.iiko_configured ? 'Синхронизировать стоп-лист из iiko' : 'Сначала подключите iiko в Настройках → Подключения'"
                         class="min-h-[44px] shrink-0 flex items-center gap-2 px-3 sm:px-4 py-2 rounded-xl border text-xs sm:text-sm font-semibold transition shadow-sm disabled:opacity-45 disabled:cursor-not-allowed bg-orange-50 text-orange-900 border-orange-200 hover:bg-orange-100">
                         <span :class="stopListSyncLoading ? 'animate-spin' : ''">&#x21bb;</span>
                         <span class="hidden sm:inline">Стоп-лист iiko</span>
@@ -206,149 +256,162 @@
         >
             <!-- ========== ДАШБОРД ========== -->
             <div x-show="currentTab === 'dashboard'" x-cloak class="fade-in">
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
-                    <!-- Выручка сегодня -->
-                    <div class="bg-white rounded-2xl p-6 border border-gray-100 shadow-[0_2px_10px_-3px_rgba(37,99,235,0.12)] transition-all duration-200 hover:shadow-md hover:-translate-y-0.5">
-                        <div class="flex justify-between items-start">
-                            <div>
-                                <p class="text-sm font-medium text-gray-500 mb-1">Выручка за сегодня</p>
-                                <h3 class="text-3xl font-bold text-gray-900" x-text="fmt.money(dashStats.today_revenue || 0)"></h3>
-                        </div>
-                            <div class="p-2 bg-brand-50 rounded-lg text-brand-600">
-                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 12a2.25 2.25 0 00-2.25-2.25H15a3 3 0 11-6 0H5.25A2.25 2.25 0 003 12m18 0v6a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 18v-6m18 0V9M3 12V9m18 0a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 9m18 0V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v3"/></svg>
-                    </div>
-                        </div>
-                        <div class="mt-4 flex items-center text-sm flex-wrap gap-2">
-                            <template x-if="dashStats.revenue_change_pct != null">
-                                <span class="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium"
-                                    :class="dashStats.revenue_change_pct >= 0 ? 'text-emerald-700 bg-emerald-50' : 'text-red-700 bg-red-50'">
-                                    <svg class="w-3.5 h-3.5 mr-1 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                            :d="dashStats.revenue_change_pct >= 0 ? 'M13 7h8m0 0v8m0-8l-8 8-4-4-6 6' : 'M13 17h8m0 0V9m0 8l-8-8-4 4-6-6'"/>
-                                    </svg>
-                                    <span x-text="formatTrendPct(dashStats.revenue_change_pct)"></span>
-                                </span>
-                            </template>
-                            <span x-show="Array.isArray(dashStats.daily_series) && dashStats.revenue_change_pct == null" class="text-xs text-gray-400 bg-gray-50 px-2 py-1 rounded-md">Нет данных за вчера</span>
-                            <span class="text-gray-400">к вчерашнему дню</span>
-                        </div>
-                    </div>
-                    <!-- Заказы -->
-                    <div class="bg-white rounded-2xl p-6 border border-gray-100 shadow-[0_2px_10px_-3px_rgba(37,99,235,0.12)] transition-all duration-200 hover:shadow-md hover:-translate-y-0.5">
-                        <div class="flex justify-between items-start">
-                            <div>
-                                <p class="text-sm font-medium text-gray-500 mb-1">Заказы сегодня</p>
-                                <h3 class="text-3xl font-bold text-gray-900">
-                            <span x-text="dashStats.today_orders || 0"></span>
-                                    <span class="text-lg font-semibold text-gray-400" x-text="' / ' + (dashStats.total_orders || 0)"></span>
-                                </h3>
-                        </div>
-                            <div class="p-2 bg-blue-50 rounded-lg text-blue-600">
-                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z"/></svg>
-                    </div>
-                        </div>
-                        <div class="mt-4 flex items-center text-sm flex-wrap gap-2">
-                            <template x-if="dashStats.orders_change_pct != null">
-                                <span class="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium"
-                                    :class="dashStats.orders_change_pct >= 0 ? 'text-emerald-700 bg-emerald-50' : 'text-red-700 bg-red-50'">
-                                    <svg class="w-3.5 h-3.5 mr-1 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                            :d="dashStats.orders_change_pct >= 0 ? 'M13 7h8m0 0v8m0-8l-8 8-4-4-6 6' : 'M13 17h8m0 0V9m0 8l-8-8-4 4-6-6'"/>
-                                    </svg>
-                                    <span x-text="formatTrendPct(dashStats.orders_change_pct)"></span>
-                                </span>
-                            </template>
-                            <span x-show="Array.isArray(dashStats.daily_series) && dashStats.orders_change_pct == null" class="text-xs text-gray-400 bg-gray-50 px-2 py-1 rounded-md">Нет данных за вчера</span>
-                            <span class="text-gray-400">к вчерашнему дню</span>
-                    </div>
-                        </div>
-                    <!-- Брони -->
-                    <div class="bg-white rounded-2xl p-6 border border-gray-100 shadow-[0_2px_10px_-3px_rgba(245,158,11,0.12)] transition-all duration-200 hover:shadow-md hover:-translate-y-0.5">
-                        <div class="flex justify-between items-start">
-                            <div>
-                                <p class="text-sm font-medium text-gray-500 mb-1">Бронирования</p>
-                                <h3 class="text-3xl font-bold text-gray-900" x-text="dashStats.bookings || 0"></h3>
+                <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 mb-8">
+                    <!-- AI ROI (главный блок) -->
+                    <div class="lg:col-span-7 rounded-2xl p-6 shadow-sm ring-1 ring-slate-900/5 bg-gradient-to-br from-brand-600 via-brand-600 to-violet-700 text-white">
+                        <div class="flex items-start justify-between gap-4">
+                            <div class="min-w-0">
+                                <div class="text-xs font-bold uppercase tracking-wider text-white/80">AI ROI · Сегодня</div>
+                                <div class="mt-2 flex flex-wrap items-end gap-x-4 gap-y-1">
+                                    <div x-show="dashStatsLoading && !dashStatsLoadedOnce" class="w-44 h-10 rounded-xl bg-white/20 animate-pulse"></div>
+                                    <div x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak class="text-3xl sm:text-4xl font-extrabold tabular-nums" x-text="fmt.money(dashStats.ai_revenue_today ?? dashStats.upsell_revenue_today ?? 0)"></div>
+                                    <div class="text-sm text-white/80" x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak>добавочная выручка от «умных продаж»</div>
+                                </div>
+                                <div class="mt-4 flex flex-wrap items-center gap-2 text-sm">
+                                    <template x-if="dashStatsLoading && !dashStatsLoadedOnce">
+                                        <div class="flex flex-wrap items-center gap-2">
+                                            <div class="h-8 w-28 rounded-lg bg-white/15 animate-pulse"></div>
+                                            <div class="h-8 w-28 rounded-lg bg-white/10 animate-pulse"></div>
+                                            <div class="h-8 w-40 rounded-lg bg-white/10 animate-pulse"></div>
+                                        </div>
+                                    </template>
+                                    <template x-if="!(dashStatsLoading && !dashStatsLoadedOnce)">
+                                        <div class="flex flex-wrap items-center gap-2">
+                                            <span class="inline-flex items-center px-2.5 py-1 rounded-lg bg-white/15 text-white font-semibold">
+                                                Конверсия <span class="ml-1 tabular-nums" x-text="(dashStats.upsell_conversion_pct ?? '—') + (dashStats.upsell_conversion_pct != null ? '%' : '')"></span>
+                                            </span>
+                                            <span class="inline-flex items-center px-2.5 py-1 rounded-lg bg-white/10 text-white/90">
+                                                Доля выручки <span class="ml-1 tabular-nums" x-text="(dashStats.ai_revenue_share_pct ?? '—') + (dashStats.ai_revenue_share_pct != null ? '%' : '')"></span>
+                                            </span>
+                                            <span class="inline-flex items-center px-2.5 py-1 rounded-lg bg-white/10 text-white/90">
+                                                Принято/предложено <span class="ml-1 tabular-nums" x-text="(dashStats.upsell_accepted_today ?? 0) + '/' + (dashStats.upsell_offered_today ?? 0)"></span>
+                                            </span>
+                                        </div>
+                                    </template>
+                                </div>
                             </div>
-                            <div class="p-2 bg-amber-50 rounded-lg text-amber-600">
-                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/></svg>
+                            <div class="shrink-0 rounded-2xl bg-white/15 p-3 ring-1 ring-white/20">
+                                <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.25 18L9 11.25l4.306 4.307a11.95 11.95 0 015.814-5.519l2.74-1.22m0 0l-5.94-2.28m5.94 2.28l-2.28 5.941"/></svg>
                             </div>
                         </div>
-                        <p class="mt-4 text-sm text-gray-400">Активные записи в системе</p>
-                    </div>
-                    <!-- Меню -->
-                    <div class="bg-white rounded-2xl p-6 border border-gray-100 shadow-[0_2px_10px_-3px_rgba(139,92,246,0.12)] transition-all duration-200 hover:shadow-md hover:-translate-y-0.5">
-                        <div class="flex justify-between items-start">
-                            <div>
-                                <p class="text-sm font-medium text-gray-500 mb-1">Позиций в меню</p>
-                                <h3 class="text-3xl font-bold text-gray-900" x-text="dashStats.menu_items || 0"></h3>
+                        <div class="mt-6 grid grid-cols-2 sm:grid-cols-3 gap-3">
+                            <div class="rounded-2xl bg-white/10 p-4 ring-1 ring-white/15">
+                                <div class="text-[11px] font-bold uppercase tracking-wider text-white/70">Выручка сегодня</div>
+                                <div x-show="dashStatsLoading && !dashStatsLoadedOnce" class="mt-2 h-7 w-24 rounded-lg bg-white/15 animate-pulse"></div>
+                                <div x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak class="mt-2 text-xl font-bold tabular-nums" x-text="fmt.money(dashStats.today_revenue || 0)"></div>
                             </div>
-                            <div class="p-2 bg-violet-50 rounded-lg text-violet-600">
-                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8.25v-1.5m0 1.5c-1.355 0-2.697.056-4.024.166C6.845 8.51 6 9.473 6 10.608v2.513m6-4.871c1.355 0 2.697.055 4.024.165C17.155 8.51 18 9.473 18 10.608v2.513m-3 4.73v-1.59c0-.532-.21-1.042-.586-1.418L12 13.5m-3 4.73c.55.47 1.27.73 2 .73h6c.73 0 1.45-.26 2-.73m-8-4.73V10.6c0-1.12.856-2.08 2.09-2.19.64-.09 1.29-.14 1.91-.14m5 6.37v1.59c0 1.632-.875 3.11-2.25 3.89"/></svg>
+                            <div class="rounded-2xl bg-white/10 p-4 ring-1 ring-white/15">
+                                <div class="text-[11px] font-bold uppercase tracking-wider text-white/70">Заказов сегодня</div>
+                                <div x-show="dashStatsLoading && !dashStatsLoadedOnce" class="mt-2 h-7 w-16 rounded-lg bg-white/15 animate-pulse"></div>
+                                <div x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak class="mt-2 text-xl font-bold tabular-nums" x-text="dashStats.today_orders || 0"></div>
+                            </div>
+                            <div class="hidden sm:block rounded-2xl bg-white/10 p-4 ring-1 ring-white/15">
+                                <div class="text-[11px] font-bold uppercase tracking-wider text-white/70">Динамика к вчера</div>
+                                <div x-show="dashStatsLoading && !dashStatsLoadedOnce" class="mt-2 h-7 w-20 rounded-lg bg-white/15 animate-pulse"></div>
+                                <div x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak class="mt-2 text-xl font-bold tabular-nums" x-text="dashStats.revenue_change_pct != null ? formatTrendPct(dashStats.revenue_change_pct) : '—'"></div>
                             </div>
                         </div>
-                        <p class="mt-4 text-sm text-gray-400">Каталог для ИИ и гостей</p>
+                    </div>
+
+                    <!-- Сэкономленное время -->
+                    <div class="lg:col-span-5 bg-white rounded-2xl p-6 shadow-sm ring-1 ring-slate-900/5">
+                        <div class="flex items-start justify-between gap-4">
+                            <div>
+                                <div class="text-xs font-bold uppercase tracking-wider text-slate-500">Экономия ресурсов</div>
+                                <div x-show="dashStatsLoading && !dashStatsLoadedOnce" class="mt-2 h-10 w-28 rounded-xl bg-slate-100 animate-pulse"></div>
+                                <div x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak class="mt-2 text-3xl font-extrabold text-slate-900 tabular-nums" x-text="(dashStats.ai_time_saved_hours ?? 0) + ' ч'"></div>
+                                <div class="mt-1 text-sm text-slate-500" x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak>
+                                    Сэкономлено примерно <span class="font-semibold tabular-nums" x-text="dashStats.ai_time_saved_minutes ?? 0"></span> мин
+                                    · <span class="font-semibold tabular-nums" x-text="dashStats.ai_messages_today ?? 0"></span> сообщений ИИ
+                                </div>
+                            </div>
+                            <div class="shrink-0 rounded-2xl bg-emerald-50 p-3 text-emerald-700 ring-1 ring-emerald-100">
+                                <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6v6l4 2"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                            </div>
+                        </div>
+                        <div class="mt-6 grid grid-cols-2 gap-3">
+                            <button type="button" class="min-h-[44px] rounded-xl px-4 py-2 text-sm font-semibold bg-slate-50 text-slate-900 ring-1 ring-slate-900/5 hover:bg-slate-100 transition"
+                                @click="currentTab = 'operator_queue'; loadTabData()">
+                                Помощь клиентам
+                                <span class="ml-1 tabular-nums" x-text="'(' + (dashStats.failed_tasks_open ?? 0) + ')'"></span>
+                            </button>
+                            <button type="button" class="min-h-[44px] rounded-xl px-4 py-2 text-sm font-semibold bg-slate-50 text-slate-900 ring-1 ring-slate-900/5 hover:bg-slate-100 transition"
+                                @click="currentTab = 'orders'; loadTabData()">
+                                Заказы
+                            </button>
+                        </div>
                     </div>
                 </div>
 
-                <!-- Наблюдаемость: очередь, upsell, iiko (сегодня, UTC) -->
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8">
-                    <div class="bg-white rounded-2xl p-6 border border-gray-100 shadow-[0_2px_10px_-3px_rgba(220,38,38,0.12)]">
-                        <p class="text-sm font-medium text-gray-500 mb-1">Очередь ошибок бота</p>
-                        <h3 class="text-3xl font-bold" :class="(dashStats.failed_tasks_open || 0) > 0 ? 'text-red-600' : 'text-gray-900'"
-                            x-text="dashStats.failed_tasks_open ?? 0"></h3>
-                        <p class="mt-3 text-xs text-gray-400">Неразрешённые failed_tasks (retry исчерпан)</p>
-                    </div>
-                    <div class="bg-white rounded-2xl p-6 border border-gray-100 shadow-[0_2px_10px_-3px_rgba(37,99,235,0.12)]">
-                        <p class="text-sm font-medium text-gray-500 mb-1">Допродажи / <span class="text-brand-600 font-semibold">AI Revenue</span> (сегодня, UTC)</p>
-                        <h3 class="text-3xl font-bold text-gray-900">
-                            <span x-text="dashStats.upsell_accepted_today ?? 0"></span>
-                            <span class="text-lg font-semibold text-gray-400">/</span>
-                            <span x-text="dashStats.upsell_offered_today ?? 0"></span>
-                        </h3>
-                        <p class="mt-2 text-xs text-emerald-700 font-medium" x-show="(dashStats.upsell_revenue_today ?? 0) > 0">
-                            Оценка выручки по принятым советам: <span class="tabular-nums" x-text="fmt.money(dashStats.upsell_revenue_today)"></span>
-                        </p>
-                        <p class="mt-3 text-xs text-gray-500">
-                            Принято / предложено (события в заказах)
-                            <template x-if="dashStats.upsell_conversion_pct != null">
-                                <span> · конверсия <span class="font-semibold text-brand-600" x-text="dashStats.upsell_conversion_pct + '%'"></span></span>
-                            </template>
-                        </p>
-                    </div>
-                    <div class="bg-white rounded-2xl p-6 border border-gray-100 shadow-[0_2px_10px_-3px_rgba(225,29,72,0.12)]">
-                        <p class="text-sm font-medium text-gray-500 mb-1">Ошибки iiko сегодня</p>
-                        <h3 class="text-3xl font-bold" :class="(dashStats.iiko_errors_today || 0) > 0 ? 'text-rose-600' : 'text-gray-900'"
-                            x-text="dashStats.iiko_errors_today ?? 0"></h3>
-                        <p class="mt-3 text-xs text-gray-400">Заказы с непустым iiko_last_error за сегодня (UTC)</p>
-                    </div>
-                </div>
-
-                <div class="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-8">
-                    <div class="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm lg:col-span-2">
-                        <h3 class="text-sm font-semibold text-gray-900 mb-3">Живая лента</h3>
-                        <p class="text-xs text-gray-400 mb-3">События из WebSocket (новые сообщения, заказы, доставка).</p>
-                        <ul class="max-h-56 overflow-y-auto space-y-2 text-sm" x-show="dashLiveFeed.length">
-                            <template x-for="(ev, i) in dashLiveFeed" :key="i + ev.ts">
-                                <li class="flex gap-2 border-b border-gray-50 pb-2">
-                                    <span class="text-[10px] text-gray-400 tabular-nums shrink-0 w-14" x-text="fmt.time(ev.ts)"></span>
-                                    <span class="text-gray-700" x-text="ev.text"></span>
+                <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 mb-8">
+                    <!-- Activity Feed -->
+                    <div class="lg:col-span-7 bg-white rounded-2xl p-6 shadow-sm ring-1 ring-slate-900/5">
+                        <div class="flex items-center justify-between gap-3 mb-4">
+                            <div>
+                                <h3 class="text-sm font-bold text-slate-900">Лента событий</h3>
+                                <p class="text-xs text-slate-500 mt-0.5">Сводка по важным действиям: заказы, помощь, доставка.</p>
+                            </div>
+                            <button type="button" class="min-h-[40px] px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-50 text-slate-700 ring-1 ring-slate-900/5 hover:bg-slate-100 transition"
+                                @click="loadDashActivity()">
+                                Обновить
+                            </button>
+                        </div>
+                        <div x-show="dashActivityLoading" class="text-sm text-slate-400 py-6">Загрузка…</div>
+                        <ul class="space-y-2" x-show="!dashActivityLoading && Array.isArray(dashActivity) && dashActivity.length" x-cloak>
+                            <template x-for="(it, i) in dashActivity" :key="it.ts + ':' + i">
+                                <li class="flex items-start gap-3 rounded-2xl px-3 py-2 hover:bg-slate-50 transition">
+                                    <div class="shrink-0 mt-0.5 h-9 w-9 rounded-2xl ring-1 ring-slate-900/5 bg-slate-50 flex items-center justify-center text-slate-700">
+                                        <span x-show="it.kind === 'order'" x-cloak>🧾</span>
+                                        <span x-show="it.kind === 'help'" x-cloak>🛟</span>
+                                        <span x-show="it.kind === 'delivery_failed'" x-cloak>⚠️</span>
+                                        <span x-show="it.kind === 'booking'" x-cloak>📅</span>
+                                        <span x-show="!it.kind" x-cloak>•</span>
+                                    </div>
+                                    <div class="min-w-0 flex-1">
+                                        <div class="flex items-center justify-between gap-3">
+                                            <div class="font-semibold text-slate-900 truncate" x-text="it.title || ''"></div>
+                                            <div class="text-[11px] text-slate-400 tabular-nums shrink-0" x-text="fmt.time(it.ts)"></div>
+                                        </div>
+                                        <div class="text-sm text-slate-500 truncate" x-text="it.subtitle || ''"></div>
+                                    </div>
                                 </li>
                             </template>
                         </ul>
-                        <p x-show="!dashLiveFeed.length" class="text-sm text-gray-400 py-6">Пока нет событий — откройте вкладку и дождитесь активности.</p>
+                        <div x-show="!dashActivityLoading && (!dashActivity || !dashActivity.length)" x-cloak class="text-sm text-slate-400 py-8 text-center">
+                            Пока тихо — лента заполнится по мере работы бота и команды.
+                        </div>
                     </div>
-                    <div class="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
-                        <h3 class="text-sm font-semibold text-gray-900 mb-1">AI Value</h3>
-                        <p class="text-lg font-bold text-brand-700 tabular-nums" x-text="fmt.money(dashStats.upsell_revenue_today || 0)"></p>
-                        <p class="text-xs text-gray-500 mt-0.5">AI Revenue (допродажи, сегодня UTC)</p>
-                        <div class="mt-4 space-y-2 text-xs text-gray-600">
-                            <p x-show="dashStats.ai_avg_check_upsell_accepted != null">
-                                Средний чек с принятой допродажой: <span class="font-semibold tabular-nums" x-text="fmt.money(dashStats.ai_avg_check_upsell_accepted)"></span>
-                            </p>
-                            <p x-show="dashStats.ai_avg_check_no_upsell_offer != null">
-                                Средний чек без предложения допродажи: <span class="font-semibold tabular-nums" x-text="fmt.money(dashStats.ai_avg_check_no_upsell_offer)"></span>
-                            </p>
-                            <p x-show="dashStats.ai_avg_check_upsell_accepted == null && dashStats.ai_avg_check_no_upsell_offer == null" class="text-gray-400">Недостаточно заказов за сегодня для сравнения.</p>
+
+                    <!-- Mini chart + health -->
+                    <div class="lg:col-span-5 space-y-5">
+                        <div class="bg-white rounded-2xl p-6 shadow-sm ring-1 ring-slate-900/5">
+                            <div class="flex flex-wrap justify-between items-center gap-3 mb-4">
+                                <div>
+                                    <h3 class="text-sm font-bold text-slate-900">Динамика</h3>
+                                    <p class="text-xs text-slate-500 mt-0.5">Последние 7 дней (UTC)</p>
+                                </div>
+                                <select x-model="dashMiniMetric" @change="scheduleDashboardChartRender()"
+                                    class="bg-slate-50 ring-1 ring-slate-900/5 text-slate-700 text-sm rounded-xl focus:ring-brand-500 focus:border-brand-500 block px-3 py-2">
+                                    <option value="revenue">Выручка</option>
+                                    <option value="orders">Заказы</option>
+                                </select>
+                            </div>
+                            <div class="h-56 w-full relative">
+                                <canvas id="dashboardMiniChart"></canvas>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-5">
+                            <div class="bg-white rounded-2xl p-5 shadow-sm ring-1 ring-slate-900/5">
+                                <div class="text-xs font-bold uppercase tracking-wider text-slate-500">Помощь</div>
+                                <div class="mt-2 text-2xl font-extrabold tabular-nums" :class="(dashStats.failed_tasks_open || 0) > 0 ? 'text-rose-600' : 'text-slate-900'" x-text="dashStats.failed_tasks_open ?? 0"></div>
+                                <div class="mt-2 text-xs text-slate-500">Требуют вмешательства</div>
+                            </div>
+                            <div class="bg-white rounded-2xl p-5 shadow-sm ring-1 ring-slate-900/5">
+                                <div class="text-xs font-bold uppercase tracking-wider text-slate-500">iiko</div>
+                                <div class="mt-2 text-2xl font-extrabold tabular-nums" :class="(dashStats.iiko_errors_today || 0) > 0 ? 'text-rose-600' : 'text-slate-900'" x-text="dashStats.iiko_errors_today ?? 0"></div>
+                                <div class="mt-2 text-xs text-slate-500">Ошибки сегодня (UTC)</div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -357,7 +420,7 @@
                     <h3 class="text-sm font-semibold text-amber-900 mb-2">Требуют внимания</h3>
                     <ul class="text-sm text-amber-900/90 space-y-1.5 list-disc list-inside">
                         <li x-show="(dashStats.failed_tasks_open || 0) > 0">
-                            Очередь ошибок бота: <button type="button" class="underline font-medium" @click="currentTab = 'operator_queue'; loadTabData()">открыть</button>
+                            Помощь клиентам: <button type="button" class="underline font-medium" @click="currentTab = 'operator_queue'; loadTabData()">открыть</button>
                             (<span x-text="dashStats.failed_tasks_open"></span>)
                         </li>
                         <li x-show="(dashStats.iiko_errors_today || 0) > 0">
@@ -365,24 +428,6 @@
                             (<span x-text="dashStats.iiko_errors_today"></span>)
                         </li>
                     </ul>
-                </div>
-
-                <!-- Динамика (мини-график, отдельный canvas от Аналитики) -->
-                <div class="mb-8 bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
-                    <div class="flex flex-wrap justify-between items-center gap-3 mb-4">
-                        <div>
-                            <h3 class="text-lg font-semibold text-gray-900">Динамика заказов</h3>
-                            <p class="text-xs text-gray-400 mt-0.5">Последние 7 дней (UTC)</p>
-                        </div>
-                        <select x-model="dashMiniMetric" @change="scheduleDashboardChartRender()"
-                            class="bg-gray-50 border border-gray-200 text-gray-700 text-sm rounded-lg focus:ring-brand-500 focus:border-brand-500 block p-2 min-w-[140px]">
-                            <option value="revenue">Выручка</option>
-                            <option value="orders">Кол-во заказов</option>
-                        </select>
-                    </div>
-                    <div class="h-64 w-full relative">
-                        <canvas id="dashboardMiniChart"></canvas>
-                    </div>
                 </div>
 
                 <!-- Последние заказы на дашборде -->
@@ -400,12 +445,7 @@
                             </thead>
                             <tbody>
                                 <template x-for="order in orders.slice(0, 5)" :key="order.id">
-                                    <tr class="border-b border-gray-50 hover:bg-blue-50/30 cursor-pointer transition" @click="openOrderDetails(order)">
-                                        <td class="py-3 font-medium text-brand-600" x-text="'#' + order.id"></td>
-                                        <td class="py-3"><span :class="statusConfig[order.status]?.class || 'bg-gray-100 text-gray-600'" x-text="statusConfig[order.status]?.label || order.status" class="px-2.5 py-1 rounded-full text-xs font-medium"></span></td>
-                                        <td class="py-3 font-semibold" x-text="fmt.money(order.total_price)"></td>
-                                        <td class="py-3 text-gray-500" x-text="fmt.date(order.created_at)"></td>
-                                    </tr>
+                                    {{ order_card_row("order") }}
                                 </template>
                             </tbody>
                         </table>
@@ -416,7 +456,7 @@
                         </div>
                         <h3 class="text-lg font-semibold text-gray-900 mb-1">Пока здесь тихо</h3>
                         <p class="text-gray-500 text-sm text-center max-w-sm mb-6">ИИ-агент готов к работе. Как только клиенты начнут писать в WhatsApp, заказы появятся здесь в реальном времени.</p>
-                        <button type="button" @click="currentTab = 'test'; loadTabData()"
+                        <button type="button" @click="currentTab = 'settings'; settingsTab = 'technical'; loadTabData()"
                             class="inline-flex items-center px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium rounded-lg transition-colors shadow-sm shadow-brand-600/20">
                             <svg class="w-4 h-4 mr-2 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
                             Создать тестовый заказ
@@ -427,117 +467,153 @@
 
             <!-- ========== АНАЛИТИКА ========== -->
             <div x-show="currentTab === 'analytics'" x-cloak class="fade-in">
-                <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 sm:p-6 mb-6">
-                    <!-- Компактный фильтр: один визуальный блок, без крупных полноширинных кнопок -->
-                    <div class="rounded-xl border border-gray-100 bg-gray-50/60 p-3 sm:p-4 space-y-3">
-                        <div class="flex flex-col gap-2 min-w-0 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-3 sm:gap-y-2">
-                            <span class="text-sm font-medium text-gray-600 shrink-0">Период</span>
-                            <div class="flex flex-wrap gap-1.5 sm:gap-2">
-                                <template x-for="p in [{id:'day', label:'Сегодня'}, {id:'week', label:'Неделя'}, {id:'month', label:'Месяц'}]" :key="p.id">
-                                    <button
-                                        type="button"
+                <div class="rounded-3xl bg-slate-50 ring-1 ring-slate-900/5 p-4 sm:p-6 mb-6">
+                    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+                        <div class="flex items-center gap-2">
+                            <h2 class="text-lg sm:text-xl font-extrabold tracking-tight text-slate-900">Аналитика</h2>
+                            <button type="button" @click="analyticsHelpOpen = true"
+                                class="inline-flex items-center justify-center h-9 w-9 rounded-xl bg-white ring-1 ring-slate-200/70 text-slate-600 hover:text-slate-900 hover:ring-slate-300 transition"
+                                title="Как считаются метрики">
+                                <span class="text-base font-black">?</span>
+                            </button>
+                        </div>
+                        <div class="flex flex-wrap items-center gap-2 min-w-0">
+                            <!-- Segmented control -->
+                            <div class="inline-flex flex-wrap gap-1 rounded-2xl bg-white ring-1 ring-slate-200/70 p-1">
+                                <template x-for="p in [{id:'day', label:'Сегодня'}, {id:'week', label:'Неделя'}, {id:'month', label:'Месяц'}, {id:'year', label:'Год'}]" :key="p.id">
+                                    <button type="button"
                                         @click="analyticsPeriod = p.id; analyticsCustom = false; reloadAnalyticsForUi()"
-                                        :class="analyticsPeriod === p.id && !analyticsCustom
-                                            ? 'bg-brand-600 text-white shadow-sm'
-                                            : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'"
-                                        class="px-3 py-1.5 rounded-lg text-sm font-medium transition touch-manipulation"
-                                        x-text="p.label"
-                                    ></button>
+                                        :class="analyticsPeriod === p.id && !analyticsCustom ? 'bg-slate-900 text-white shadow-sm' : 'bg-white text-slate-700 hover:bg-slate-50'"
+                                        class="px-3 py-2 rounded-xl text-sm font-semibold transition min-h-[40px] touch-manipulation"
+                                        x-text="p.label"></button>
                                 </template>
                             </div>
-                        </div>
-                        <div class="flex flex-col gap-2 min-w-0 lg:flex-row lg:items-end lg:gap-3">
-                            <div class="grid grid-cols-1 min-[420px]:grid-cols-2 gap-2 flex-1 min-w-0 max-w-2xl">
-                                <div class="min-w-0">
-                                    <label class="sr-only" for="analytics-from">Дата начала</label>
-                                    <input id="analytics-from" type="date" x-model="analyticsFrom" class="min-w-0 w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
-                                </div>
-                                <div class="min-w-0">
-                                    <label class="sr-only" for="analytics-to">Дата окончания</label>
-                                    <input id="analytics-to" type="date" x-model="analyticsTo" class="min-w-0 w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
-                                </div>
+                            <div class="flex items-center gap-2 min-w-0">
+                                <div class="hidden sm:block text-xs font-semibold text-slate-500 shrink-0">Диапазон</div>
+                                <input id="analytics-from" type="date" x-model="analyticsFrom"
+                                    class="w-[10.5rem] border border-slate-200 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                                <input id="analytics-to" type="date" x-model="analyticsTo"
+                                    class="w-[10.5rem] border border-slate-200 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                                <button type="button"
+                                    @click="analyticsPeriod = 'custom'; analyticsCustom = true; reloadAnalyticsForUi()"
+                                    class="px-4 py-2 rounded-xl bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 transition min-h-[40px] touch-manipulation">
+                                    Применить
+                                </button>
                             </div>
-                            <button
-                                type="button"
-                                @click="analyticsPeriod = 'custom'; analyticsCustom = true; reloadAnalyticsForUi()"
-                                class="w-full min-[420px]:w-auto shrink-0 px-4 py-1.5 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700 transition touch-manipulation"
-                            >Применить диапазон</button>
-                        </div>
-                        <p class="text-[11px] text-gray-400 leading-snug">После смены дат нажмите «Применить». Интервал в отчёте — UTC.</p>
-                    </div>
-                    <details class="hint-details mt-4 rounded-xl border border-gray-200/80 bg-gray-50/40 px-3 py-2 hover:bg-gray-50/80 transition-colors">
-                        <summary class="cursor-pointer flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-brand-700 select-none py-1">
-                            <svg class="w-4 h-4 text-gray-400 shrink-0 transition-transform duration-200 hint-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-                            Про часовой пояс (UTC)
-                        </summary>
-                        <div class="pb-2 pt-1 pl-6 border-l-2 border-brand-200 ml-1 text-xs text-gray-600 leading-relaxed">
-                            Сутки «Сегодня» и длительность «Неделя» / «Месяц» считаются в <strong>UTC</strong> (как на сервере), чтобы цифры совпадали с дашбордом.
-                        </div>
-                    </details>
-
-                    <div x-show="analyticsData.date_from && analyticsData.date_to" x-cloak
-                        class="mt-4 flex flex-col sm:flex-row sm:items-stretch gap-3 rounded-2xl border border-brand-200/60 bg-gradient-to-br from-brand-50/90 via-white to-violet-50/50 p-4 sm:p-5 shadow-sm shadow-brand-900/5">
-                        <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white border border-brand-100 text-brand-600 shadow-sm">
-                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/>
-                            </svg>
-                        </div>
-                        <div class="min-w-0 flex-1">
-                            <p class="text-[11px] font-semibold uppercase tracking-wide text-brand-700/90">Заказы в отчёте</p>
-                            <p class="text-lg sm:text-xl font-bold text-gray-900 leading-snug mt-1" x-text="analyticsIntervalTitle()"></p>
-                            <p class="text-xs text-gray-600 mt-2 leading-relaxed" x-text="analyticsIntervalSubtitle()"></p>
                         </div>
                     </div>
-
-                    <details class="hint-details mt-4 rounded-xl border border-gray-200/80 bg-gray-50/40 px-3 py-2 hover:bg-gray-50/80 transition-colors">
-                        <summary class="cursor-pointer flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-brand-700 select-none py-1">
-                            <svg class="w-4 h-4 text-gray-400 shrink-0 transition-transform duration-200 hint-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-                            Почему суммы за день, неделю и месяц иногда совпадают?
-                        </summary>
-                        <div class="pb-2 pt-1 pl-6 border-l-2 border-brand-200 ml-1 text-xs text-gray-600 leading-relaxed">
-                            Если все заказы (кроме отменённых) попали только в <strong>текущие календарные сутки UTC</strong>, то за более длинный период не добавляется ни одного дня с выручкой — итоговая сумма и число заказов совпадут. Чтобы увидеть разницу, пересоздайте демо-данные или добавьте заказы с датами в прошлых сутках по UTC.
-                        </div>
-                    </details>
+                    <div x-show="analyticsData.date_from && analyticsData.date_to" x-cloak class="text-xs text-slate-500">
+                        <span class="font-semibold text-slate-700" x-text="analyticsIntervalTitle()"></span>
+                        <span class="ml-2" x-text="analyticsIntervalSubtitle()"></span>
+                    </div>
                 </div>
 
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-5 mb-6">
-                    <div class="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
-                        <div class="flex items-center justify-between mb-1">
-                            <span class="text-sm text-gray-500">Выручка</span>
-                            <span x-show="analyticsData.changes?.revenue !== null"
-                                :class="analyticsData.changes?.revenue >= 0 ? 'change-up' : 'change-down'"
-                                class="text-xs font-semibold"
-                                x-text="(analyticsData.changes?.revenue >= 0 ? '+' : '') + analyticsData.changes?.revenue + '%'"></span>
+                <!-- KPI Power Row -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+                    <!-- Revenue -->
+                    <div class="bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 p-5">
+                        <div class="flex items-start justify-between gap-3">
+                            <div class="min-w-0">
+                                <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Заработано</div>
+                                <div class="mt-1 text-3xl font-extrabold tracking-tighter text-slate-900"
+                                    x-show="!analyticsLoading" x-text="fmt.money(analyticsData.current?.revenue || 0)"></div>
+                                <div class="mt-2 h-9 w-40 rounded-lg bg-slate-100 animate-pulse" x-show="analyticsLoading"></div>
+                                <div class="text-xs text-slate-500 mt-1" x-text="'Пред. период: ' + fmt.money(analyticsData.previous?.revenue || 0)"></div>
+                            </div>
+                            <div class="shrink-0">
+                                <span x-show="formatTrendPct(analyticsData.changes?.revenue) && (analyticsData.changes?.revenue ?? 0) !== 0"
+                                    :class="(analyticsData.changes?.revenue ?? 0) > 0 ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/70' : 'bg-rose-50 text-rose-700 ring-1 ring-rose-200/70'"
+                                    class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold tabular-nums"
+                                    x-text="formatTrendPct(analyticsData.changes?.revenue)"></span>
+                                <span x-show="(analyticsData.changes?.revenue ?? null) === 0"
+                                    class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold tabular-nums bg-slate-50 text-slate-600 ring-1 ring-slate-200/70">0%</span>
+                                <span x-show="!formatTrendPct(analyticsData.changes?.revenue)"
+                                    class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold tabular-nums bg-slate-50 text-slate-400 ring-1 ring-slate-200/50">—</span>
+                            </div>
                         </div>
-                        <div class="text-3xl font-extrabold text-gray-900" x-text="fmt.money(analyticsData.current?.revenue || 0)"></div>
-                        <div class="text-xs text-gray-400 mt-1" x-text="'Пред. период: ' + fmt.money(analyticsData.previous?.revenue || 0)"></div>
+                        <div class="mt-4 h-10">
+                            <canvas id="sparkRevenue" class="w-full h-full"></canvas>
+                        </div>
                     </div>
-                    <div class="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
-                        <div class="flex items-center justify-between mb-1">
-                            <span class="text-sm text-gray-500">Заказов</span>
-                            <span x-show="analyticsData.changes?.orders !== null"
-                                :class="analyticsData.changes?.orders >= 0 ? 'change-up' : 'change-down'"
-                                class="text-xs font-semibold"
-                                x-text="(analyticsData.changes?.orders >= 0 ? '+' : '') + analyticsData.changes?.orders + '%'"></span>
+                    <!-- Orders -->
+                    <div class="bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 p-5">
+                        <div class="flex items-start justify-between gap-3">
+                            <div class="min-w-0">
+                                <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Заказы</div>
+                                <div class="mt-1 text-3xl font-extrabold tracking-tighter text-slate-900"
+                                    x-show="!analyticsLoading" x-text="analyticsData.current?.orders || 0"></div>
+                                <div class="mt-2 h-9 w-28 rounded-lg bg-slate-100 animate-pulse" x-show="analyticsLoading"></div>
+                                <div class="text-xs text-slate-500 mt-1" x-text="'Пред. период: ' + (analyticsData.previous?.orders || 0)"></div>
+                            </div>
+                            <div class="shrink-0">
+                                <span x-show="formatTrendPct(analyticsData.changes?.orders) && (analyticsData.changes?.orders ?? 0) !== 0"
+                                    :class="(analyticsData.changes?.orders ?? 0) > 0 ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/70' : 'bg-rose-50 text-rose-700 ring-1 ring-rose-200/70'"
+                                    class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold tabular-nums"
+                                    x-text="formatTrendPct(analyticsData.changes?.orders)"></span>
+                                <span x-show="(analyticsData.changes?.orders ?? null) === 0"
+                                    class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold tabular-nums bg-slate-50 text-slate-600 ring-1 ring-slate-200/70">0%</span>
+                                <span x-show="!formatTrendPct(analyticsData.changes?.orders)"
+                                    class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold tabular-nums bg-slate-50 text-slate-400 ring-1 ring-slate-200/50">—</span>
+                            </div>
                         </div>
-                        <div class="text-3xl font-extrabold text-gray-900" x-text="analyticsData.current?.orders || 0"></div>
-                        <div class="text-xs text-gray-400 mt-1" x-text="'Пред. период: ' + (analyticsData.previous?.orders || 0)"></div>
+                        <div class="mt-4 h-10">
+                            <canvas id="sparkOrders" class="w-full h-full"></canvas>
+                        </div>
                     </div>
-                    <div class="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
-                        <div class="flex items-center justify-between mb-1">
-                            <span class="text-sm text-gray-500">Средний чек</span>
-                            <span x-show="analyticsData.changes?.avg_check !== null"
-                                :class="analyticsData.changes?.avg_check >= 0 ? 'change-up' : 'change-down'"
-                                class="text-xs font-semibold"
-                                x-text="(analyticsData.changes?.avg_check >= 0 ? '+' : '') + analyticsData.changes?.avg_check + '%'"></span>
+                    <!-- Avg check -->
+                    <div class="bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 p-5">
+                        <div class="flex items-start justify-between gap-3">
+                            <div class="min-w-0">
+                                <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Средний чек</div>
+                                <div class="mt-1 text-3xl font-extrabold tracking-tighter text-slate-900"
+                                    x-show="!analyticsLoading" x-text="fmt.money(analyticsData.current?.avg_check || 0)"></div>
+                                <div class="mt-2 h-9 w-40 rounded-lg bg-slate-100 animate-pulse" x-show="analyticsLoading"></div>
+                                <div class="text-xs text-slate-500 mt-1" x-text="'Пред. период: ' + fmt.money(analyticsData.previous?.avg_check || 0)"></div>
+                            </div>
+                            <div class="shrink-0">
+                                <span x-show="formatTrendPct(analyticsData.changes?.avg_check) && (analyticsData.changes?.avg_check ?? 0) !== 0"
+                                    :class="(analyticsData.changes?.avg_check ?? 0) > 0 ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/70' : 'bg-rose-50 text-rose-700 ring-1 ring-rose-200/70'"
+                                    class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold tabular-nums"
+                                    x-text="formatTrendPct(analyticsData.changes?.avg_check)"></span>
+                                <span x-show="(analyticsData.changes?.avg_check ?? null) === 0"
+                                    class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold tabular-nums bg-slate-50 text-slate-600 ring-1 ring-slate-200/70">0%</span>
+                                <span x-show="!formatTrendPct(analyticsData.changes?.avg_check)"
+                                    class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold tabular-nums bg-slate-50 text-slate-400 ring-1 ring-slate-200/50">—</span>
+                            </div>
                         </div>
-                        <div class="text-3xl font-extrabold text-gray-900" x-text="fmt.money(analyticsData.current?.avg_check || 0)"></div>
-                        <div class="text-xs text-gray-400 mt-1" x-text="'Пред. период: ' + fmt.money(analyticsData.previous?.avg_check || 0)"></div>
+                        <div class="mt-4 h-10">
+                            <canvas id="sparkAvg" class="w-full h-full"></canvas>
+                        </div>
+                    </div>
+                    <!-- AI Profit -->
+                    <div class="bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 p-5">
+                        <div class="flex items-start justify-between gap-3">
+                            <div class="min-w-0">
+                                <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">AI Profit</div>
+                                <div class="mt-1 text-3xl font-extrabold tracking-tighter text-slate-900"
+                                    x-show="!analyticsLoading" x-text="fmt.money(analyticsData.ai?.profit || 0)"></div>
+                                <div class="mt-2 h-9 w-40 rounded-lg bg-slate-100 animate-pulse" x-show="analyticsLoading"></div>
+                                <div class="text-xs text-slate-500 mt-1" x-text="'Пред. период: ' + fmt.money(analyticsData.ai?.previous_profit || 0)"></div>
+                            </div>
+                            <div class="shrink-0">
+                                <span x-show="formatTrendPct(analyticsData.ai?.change_pct) && (analyticsData.ai?.change_pct ?? 0) !== 0"
+                                    :class="(analyticsData.ai?.change_pct ?? 0) > 0 ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/70' : 'bg-rose-50 text-rose-700 ring-1 ring-rose-200/70'"
+                                    class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold tabular-nums"
+                                    x-text="formatTrendPct(analyticsData.ai?.change_pct)"></span>
+                                <span x-show="(analyticsData.ai?.change_pct ?? null) === 0"
+                                    class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold tabular-nums bg-slate-50 text-slate-600 ring-1 ring-slate-200/70">0%</span>
+                                <span x-show="!formatTrendPct(analyticsData.ai?.change_pct)"
+                                    class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold tabular-nums bg-slate-50 text-slate-400 ring-1 ring-slate-200/50">—</span>
+                            </div>
+                        </div>
+                        <div class="mt-4 h-10">
+                            <canvas id="sparkAi" class="w-full h-full"></canvas>
+                        </div>
                     </div>
                 </div>
 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-5 mb-6">
-                    <div class="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+                    <div class="bg-white rounded-2xl p-5 shadow-sm ring-1 ring-slate-900/5">
                         <h3 class="font-semibold text-gray-900 mb-1">Уровень автоматизации</h3>
                         <p class="text-xs text-gray-500 mb-3">Доля заказов <strong>без сообщений оператора</strong> в чате до момента последнего обновления заказа (оценка ROI бота).</p>
                         <div class="space-y-3">
@@ -559,7 +635,7 @@
                             </div>
                         </div>
                     </div>
-                    <div class="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+                    <div class="bg-white rounded-2xl p-5 shadow-sm ring-1 ring-slate-900/5">
                         <h3 class="font-semibold text-gray-900 mb-3">Воронка (за период)</h3>
                         <div class="space-y-2 text-sm">
                             <div class="flex justify-between gap-2"><span class="text-gray-500">Клиенты с активностью в чате</span><span class="font-bold tabular-nums" x-text="analyticsData.funnel?.dialogs ?? 0"></span></div>
@@ -577,7 +653,7 @@
                 </div>
 
                 <div class="grid grid-cols-1 xl:grid-cols-2 gap-5 mb-6">
-                    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 overflow-x-auto">
+                    <div class="bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 p-5 overflow-x-auto">
                         <h3 class="font-semibold text-gray-900 mb-1">Menu Engineering (ИИ)</h3>
                         <p class="text-xs text-gray-500 mb-4">Что бот предлагал чаще всего (<code class="text-[10px]">recommendation_trace</code>) и конверсия в добавление в заказ.</p>
                         <table class="w-full text-sm min-w-[420px]">
@@ -607,7 +683,7 @@
                         </table>
                         <p x-show="!(analyticsData.menu_engineering && analyticsData.menu_engineering.length)" class="text-center py-6 text-gray-400 text-sm">Нет событий допродаж ИИ за период</p>
                     </div>
-                    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 overflow-x-auto">
+                    <div class="bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 p-5 overflow-x-auto">
                         <h3 class="font-semibold text-gray-900 mb-1">География доставки</h3>
                         <p class="text-xs text-gray-500 mb-4">Районы по адресам доставки (нормализация текста). «Зак./клиент» — повторные заказы в зоне.</p>
                         <table class="w-full text-sm min-w-[380px]">
@@ -638,9 +714,20 @@
                     </div>
                 </div>
 
-                <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 mb-6 overflow-x-auto">
-                    <h3 class="font-semibold text-gray-900 mb-2">Тепловая карта заказов (UTC)</h3>
-                    <p class="text-xs text-gray-500 mb-3">Строка — день недели, столбец — час. Темнее — больше заказов.</p>
+                <div class="bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 p-5 mb-6 overflow-x-auto">
+                    <h3 class="font-semibold text-slate-900 mb-2">Пики заказов по времени</h3>
+                    <p class="text-xs text-slate-500 mb-3">Строка — день недели, столбец — час. Темнее — больше заказов.</p>
+                    <div x-show="!(analyticsData.heatmap?.matrix && analyticsData.heatmap.matrix.length)" class="py-8">
+                        <div class="mx-auto max-w-md rounded-2xl bg-slate-50 ring-1 ring-slate-900/5 p-5 text-center">
+                            <div class="mx-auto h-10 w-10 rounded-2xl bg-white ring-1 ring-slate-200/70 flex items-center justify-center text-slate-600 mb-3">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 3v18h18M7.5 14.25V18m4.5-6V18m4.5-9V18"/>
+                                </svg>
+                            </div>
+                            <div class="text-sm font-semibold text-slate-900">Пока нет данных</div>
+                            <div class="text-sm text-slate-600 mt-1">Здесь появятся ваши лидеры продаж и пики заказов по времени.</div>
+                        </div>
+                    </div>
                     <div class="inline-block min-w-[720px]">
                         <div class="flex text-[10px] text-gray-400 mb-1">
                             <div class="w-8 shrink-0"></div>
@@ -661,36 +748,45 @@
                     </div>
                 </div>
 
-                <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
+                <div class="bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 p-6 mb-6">
                     <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
-                        <h3 class="font-semibold text-lg">Выручка по дням</h3>
-                        <div class="flex items-center gap-2">
-                            <span class="text-xs text-gray-500 hidden sm:inline">График:</span>
-                            <select x-model="analyticsChartMetric" @change="renderChart()"
-                                class="text-sm border border-gray-200 rounded-xl px-3 py-2 bg-gray-50 focus:ring-2 focus:ring-brand-500 min-w-[200px]">
-                                <option value="both">Выручка и заказы</option>
-                                <option value="revenue">Только выручка</option>
-                                <option value="orders">Только число заказов</option>
-                            </select>
+                        <h3 class="font-semibold text-lg text-slate-900">Бизнес в движении</h3>
+                        <div class="text-xs text-slate-500">
+                            Наведите курсор на точку — подсказка покажет «из них ботом»
                         </div>
                     </div>
-                    <details class="hint-details mb-3 rounded-xl border border-gray-200/80 bg-gray-50/40 px-3 py-2">
-                        <summary class="cursor-pointer flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-brand-700 select-none py-0.5">
-                            <svg class="w-4 h-4 text-gray-400 shrink-0 transition-transform duration-200 hint-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-                            Про «Сегодня» на графике и демо-данные
-                        </summary>
-                        <div class="pb-2 pt-1 pl-6 border-l-2 border-brand-200 ml-1 text-xs text-gray-600 leading-relaxed">
-                            Период «Сегодня» и столбцы — <strong>календарные сутки UTC</strong> (как на дашборде). Демо-заказы привязаны к дате генерации: после смены суток на сервере обновите демо («Удалить демо» → «Демо-данные»).
-                        </div>
-                    </details>
                     <div class="relative w-full min-h-[320px]" style="height: 320px;">
+                        <div x-show="analyticsLoading" x-cloak class="absolute inset-0 rounded-2xl bg-white/70 backdrop-blur-[1px] flex items-center justify-center">
+                            <div class="w-full px-8">
+                                <div class="h-4 w-40 rounded bg-slate-100 animate-pulse mb-4"></div>
+                                <div class="h-56 rounded-2xl bg-slate-100 animate-pulse"></div>
+                            </div>
+                        </div>
                         <canvas id="revenueChart" class="w-full h-full"></canvas>
                     </div>
                 </div>
 
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-                        <h3 class="font-semibold text-lg mb-4">Топ-10 блюд</h3>
+                    <div class="bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 p-6">
+                        <div class="flex items-center justify-between gap-3 mb-4">
+                            <h3 class="font-semibold text-lg text-slate-900">Топ-10 блюд</h3>
+                            <div class="text-[11px] text-slate-500 flex items-center gap-2">
+                                <span class="inline-flex items-center gap-1"><span class="h-2 w-2 rounded-full bg-brand-500/80"></span>база</span>
+                                <span class="inline-flex items-center gap-1"><span class="h-2 w-2 rounded-full bg-violet-500/80"></span>upsell ИИ</span>
+                            </div>
+                        </div>
+                        <div x-show="!(analyticsData.top_items && analyticsData.top_items.length)" class="py-10">
+                            <div class="mx-auto max-w-md rounded-2xl bg-slate-50 ring-1 ring-slate-900/5 p-6 text-center">
+                                <div class="mx-auto h-10 w-10 rounded-2xl bg-white ring-1 ring-slate-200/70 flex items-center justify-center text-slate-600 mb-3">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4.5 18.75A2.25 2.25 0 006.75 21h10.5A2.25 2.25 0 0019.5 18.75V7.5A2.25 2.25 0 0017.25 5.25H6.75A2.25 2.25 0 004.5 7.5v11.25z"/>
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8.25 9h7.5M8.25 12h7.5M8.25 15h4.5"/>
+                                    </svg>
+                                </div>
+                                <div class="text-sm font-semibold text-slate-900">Здесь появятся ваши лидеры продаж</div>
+                                <div class="text-sm text-slate-600 mt-1">Когда появятся заказы в выбранном периоде, мы покажем ТОП‑блюда и вклад upsell ИИ.</div>
+                            </div>
+                        </div>
                         <div class="space-y-3">
                             <template x-for="(item, idx) in (analyticsData.top_items || [])" :key="idx">
                                 <div class="flex items-center gap-3">
@@ -700,8 +796,11 @@
                                     <div class="flex-1 min-w-0">
                                         <div class="text-sm font-medium truncate" x-text="item.name"></div>
                                         <div class="flex items-center gap-2">
-                                            <div class="flex-1 bg-gray-100 rounded-full h-1.5">
-                                                <div class="bg-brand-500 rounded-full h-1.5 transition-all" :style="'width:' + (analyticsData.top_items?.length ? (item.revenue / analyticsData.top_items[0].revenue * 100) : 0) + '%'"></div>
+                                            <div class="flex-1 bg-slate-100 rounded-full h-2 overflow-hidden">
+                                                <div class="h-2 bg-brand-500/80 transition-all"
+                                                    :style="'width:' + (analyticsData.top_items?.length ? (((item.revenue - (item.ai_profit || 0)) / analyticsData.top_items[0].revenue) * 100) : 0) + '%'"></div>
+                                                <div class="h-2 bg-violet-500/80 -mt-2 transition-all"
+                                                    :style="'width:' + (analyticsData.top_items?.length ? (((item.ai_profit || 0) / analyticsData.top_items[0].revenue) * 100) : 0) + '%'"></div>
                                             </div>
                                         </div>
                                     </div>
@@ -711,12 +810,9 @@
                                     </div>
                                 </div>
                             </template>
-                            <div x-show="!analyticsData.top_items?.length" class="text-center py-8 text-gray-400 text-sm">
-                                Нет данных за период
-                            </div>
                         </div>
                     </div>
-                    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                    <div class="bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 p-6">
                         <h3 class="font-semibold text-lg mb-4">Разбивка по дням</h3>
                         <p class="text-xs text-gray-400 mb-3">Сортировка таблицы не меняет график выше.</p>
                         <div class="overflow-y-auto max-h-[380px]">
@@ -753,6 +849,53 @@
                                     </template>
                                 </tbody>
                             </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Help slide-over (replaces heavy details blocks) -->
+                <div x-show="analyticsHelpOpen" x-cloak class="fixed inset-0 z-50">
+                    <div class="absolute inset-0 bg-slate-900/30" @click="analyticsHelpOpen = false"></div>
+                    <div class="absolute right-0 top-0 h-full w-full sm:max-w-md bg-white shadow-2xl ring-1 ring-slate-900/10">
+                        <div class="h-full flex flex-col">
+                            <div class="flex items-start justify-between gap-3 px-5 py-4 border-b border-slate-100">
+                                <div class="min-w-0">
+                                    <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Справка</div>
+                                    <div class="text-lg font-extrabold tracking-tight text-slate-900">Как читается отчёт</div>
+                                </div>
+                                <button type="button" @click="analyticsHelpOpen = false"
+                                    class="h-9 w-9 rounded-xl bg-white ring-1 ring-slate-200/70 text-slate-600 hover:text-slate-900 hover:ring-slate-300 transition"
+                                    title="Закрыть">
+                                    ✕
+                                </button>
+                            </div>
+                            <div class="p-5 overflow-y-auto text-sm text-slate-700 space-y-4">
+                                <div class="rounded-2xl bg-slate-50 ring-1 ring-slate-900/5 p-4">
+                                    <div class="font-semibold text-slate-900 mb-1">Часовой пояс</div>
+                                    <p class="text-slate-600 text-sm leading-relaxed">
+                                        «Сегодня», «Неделя», «Месяц» и дневные столбцы считаются в <strong>UTC</strong>, чтобы цифры совпадали с дашбордом сервера.
+                                    </p>
+                                </div>
+                                <div class="rounded-2xl bg-slate-50 ring-1 ring-slate-900/5 p-4">
+                                    <div class="font-semibold text-slate-900 mb-1">Почему суммы иногда совпадают?</div>
+                                    <p class="text-slate-600 text-sm leading-relaxed">
+                                        Если все заказы попали только в текущие календарные сутки UTC, то за более длинный период не добавляется ни одного дня с выручкой — итоговая сумма может совпасть.
+                                    </p>
+                                </div>
+                                <div class="rounded-2xl bg-indigo-50/60 ring-1 ring-indigo-200/50 p-4">
+                                    <div class="font-semibold text-slate-900 mb-1">AI Profit</div>
+                                    <p class="text-slate-600 text-sm leading-relaxed">
+                                        Это сумма допродаж, которые принёс бот (по <code class="text-[11px]">accepted_revenue_kzt</code> из <code class="text-[11px]">recommendation_trace</code>).
+                                        На графике подсказка показывает вклад ИИ в выручку дня.
+                                    </p>
+                                </div>
+                                <div class="rounded-2xl bg-emerald-50/60 ring-1 ring-emerald-200/50 p-4">
+                                    <div class="font-semibold text-slate-900 mb-1">Экономия времени</div>
+                                    <p class="text-slate-600 text-sm leading-relaxed">
+                                        Для дашборда: <strong>сообщения бота × 1.5 минуты</strong>. Это оценка времени, которое персонал не потратил на ручной набор.
+                                    </p>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -841,31 +984,8 @@
                             @dragover.prevent="$event.dataTransfer.dropEffect='move'"
                             @drop.prevent="kanbanDrop($event, 'draft')">
                             <template x-for="order in kanbanDraft" :key="order.id">
-                                <div class="kanban-card rounded-xl p-4 cursor-grab active:cursor-grabbing transition"
-                                    draggable="true"
-                                    @dragstart.stop="kanbanDragStart($event, order)"
-                                    @dragend="kanbanDragEnd()"
-                                    :class="kanbanOrderSurfaceClass(order, 'bg-white shadow-sm border border-gray-100')"
-                                    @click="openOrderDetails(order)">
-                                    <div class="flex items-center justify-between mb-2">
-                                        <span class="font-bold text-brand-600 text-sm" x-text="'#' + order.id"></span>
-                                        <span class="text-[10px] text-gray-400" x-text="fmt.time(order.created_at)"></span>
-                                    </div>
-                                    <div class="flex flex-wrap gap-1 mb-1 items-center">
-                                        <span x-show="order.order_type" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-800 border border-indigo-100" x-text="orderTypeBadge(order)"></span>
-                                        <span :class="paymentKanbanBadgeClass(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded border tracking-wide" x-text="paymentMethodShort(order)"></span>
-                                        <span x-show="orderAwaitingOrderPrepay(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-400">ПРЕДОПЛАТА</span>
-                                        <span x-show="orderPlov1kgHint(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-50 text-violet-800 border border-violet-200 truncate max-w-[10rem]" x-text="orderPlov1kgHint(order)"></span>
-                                        <span x-show="orderHasUpsell(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200" title="Бот сделал допродажу">UPSELL</span>
-                                    </div>
-                                    <div class="text-xs font-mono text-gray-600 mb-1 truncate" x-show="order.user_phone" x-text="order.user_phone"></div>
-                                    <div class="text-xs text-gray-500 mb-2" x-text="(order.items?.items?.length || 0) + ' позиций'"></div>
-                                    <div class="text-sm font-bold text-gray-900" x-text="fmt.money(order.total_price)"></div>
-                                    <p class="text-[10px] mt-2 font-semibold leading-tight"
-                                        :class="orderTimerWarn(order, 'draft') ? 'text-red-600' : 'text-gray-500'"
-                                        x-text="orderTimerText(order, 'draft')"></p>
-                                    {{ iiko_error('order', 'mt-3') }}
-                                </div>
+                                {{ order_card_kanban('draft', 'bg-white shadow-sm border border-gray-100') }}
+                                {{ iiko_error('order', 'mt-3') }}
                             </template>
                             <div x-show="kanbanDraft.length === 0" class="text-center py-8 text-gray-400 text-xs">Пусто</div>
                         </div>
@@ -883,31 +1003,8 @@
                             @dragover.prevent="$event.dataTransfer.dropEffect='move'"
                             @drop.prevent="kanbanDrop($event, 'confirmed')">
                             <template x-for="order in kanbanConfirmed" :key="order.id">
-                                <div class="kanban-card rounded-xl p-4 cursor-grab active:cursor-grabbing transition"
-                                    draggable="true"
-                                    @dragstart.stop="kanbanDragStart($event, order)"
-                                    @dragend="kanbanDragEnd()"
-                                    :class="kanbanOrderSurfaceClass(order, 'bg-white shadow-sm border border-blue-100')"
-                                    @click="openOrderDetails(order)">
-                                    <div class="flex items-center justify-between mb-2">
-                                        <span class="font-bold text-brand-600 text-sm" x-text="'#' + order.id"></span>
-                                        <span class="text-[10px] text-gray-400" x-text="fmt.time(order.created_at)"></span>
-                                    </div>
-                                    <div class="flex flex-wrap gap-1 mb-1 items-center">
-                                        <span x-show="order.order_type" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-800 border border-indigo-100" x-text="orderTypeBadge(order)"></span>
-                                        <span :class="paymentKanbanBadgeClass(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded border tracking-wide" x-text="paymentMethodShort(order)"></span>
-                                        <span x-show="orderAwaitingOrderPrepay(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-400">ПРЕДОПЛАТА</span>
-                                        <span x-show="orderPlov1kgHint(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-50 text-violet-800 border border-violet-200 truncate max-w-[10rem]" x-text="orderPlov1kgHint(order)"></span>
-                                        <span x-show="orderHasUpsell(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200" title="Бот сделал допродажу">UPSELL</span>
-                                    </div>
-                                    <div class="text-xs font-mono text-gray-600 mb-1 truncate" x-show="order.user_phone" x-text="order.user_phone"></div>
-                                    <div class="text-xs text-gray-500 mb-2" x-text="(order.items?.items?.length || 0) + ' позиций'"></div>
-                                    <div class="text-sm font-bold text-gray-900" x-text="fmt.money(order.total_price)"></div>
-                                    <p class="text-[10px] mt-2 font-semibold leading-tight"
-                                        :class="orderTimerWarn(order, 'confirmed') ? 'text-red-600' : 'text-gray-500'"
-                                        x-text="orderTimerText(order, 'confirmed')"></p>
-                                    {{ iiko_error('order', 'mt-3') }}
-                                </div>
+                                {{ order_card_kanban('confirmed', 'bg-white shadow-sm border border-blue-100') }}
+                                {{ iiko_error('order', 'mt-3') }}
                             </template>
                             <div x-show="kanbanConfirmed.length === 0" class="text-center py-8 text-gray-400 text-xs">Пусто</div>
                         </div>
@@ -925,31 +1022,8 @@
                             @dragover.prevent="$event.dataTransfer.dropEffect='move'"
                             @drop.prevent="kanbanDrop($event, 'sent_to_iiko')">
                             <template x-for="order in kanbanSent" :key="order.id">
-                                <div class="kanban-card rounded-xl p-4 cursor-grab active:cursor-grabbing transition"
-                                    draggable="true"
-                                    @dragstart.stop="kanbanDragStart($event, order)"
-                                    @dragend="kanbanDragEnd()"
-                                    :class="kanbanOrderSurfaceClass(order, 'bg-white shadow-sm border border-emerald-100')"
-                                    @click="openOrderDetails(order)">
-                                    <div class="flex items-center justify-between mb-2">
-                                        <span class="font-bold text-brand-600 text-sm" x-text="'#' + order.id"></span>
-                                        <span class="text-[10px] text-gray-400" x-text="fmt.time(order.created_at)"></span>
-                                    </div>
-                                    <div class="flex flex-wrap gap-1 mb-1 items-center">
-                                        <span x-show="order.order_type" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-800 border border-indigo-100" x-text="orderTypeBadge(order)"></span>
-                                        <span :class="paymentKanbanBadgeClass(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded border tracking-wide" x-text="paymentMethodShort(order)"></span>
-                                        <span x-show="orderAwaitingOrderPrepay(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-400">ПРЕДОПЛАТА</span>
-                                        <span x-show="orderPlov1kgHint(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-50 text-violet-800 border border-violet-200 truncate max-w-[10rem]" x-text="orderPlov1kgHint(order)"></span>
-                                        <span x-show="orderHasUpsell(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200" title="Бот сделал допродажу">UPSELL</span>
-                                    </div>
-                                    <div class="text-xs font-mono text-gray-600 mb-1 truncate" x-show="order.user_phone" x-text="order.user_phone"></div>
-                                    <div class="text-xs text-gray-500 mb-2" x-text="(order.items?.items?.length || 0) + ' позиций'"></div>
-                                    <div class="text-sm font-bold text-gray-900" x-text="fmt.money(order.total_price)"></div>
-                                    <p class="text-[10px] mt-2 font-semibold leading-tight"
-                                        :class="orderTimerWarn(order, 'sent') ? 'text-red-600' : 'text-gray-500'"
-                                        x-text="orderTimerText(order, 'sent')"></p>
-                                    {{ iiko_error('order', 'mt-3') }}
-                                </div>
+                                {{ order_card_kanban('sent', 'bg-white shadow-sm border border-emerald-100') }}
+                                {{ iiko_error('order', 'mt-3') }}
                             </template>
                             <div x-show="kanbanSent.length === 0" class="text-center py-8 text-gray-400 text-xs">Пусто</div>
                         </div>
@@ -1008,7 +1082,7 @@
                                         </td>
                                         <td class="px-5 py-4 font-semibold" x-text="fmt.money(order.total_price)"></td>
                                         <td class="px-5 py-4">
-                                            <span :class="statusConfig[order.status]?.class || 'bg-gray-100 text-gray-600'" x-text="statusConfig[order.status]?.label || order.status" class="px-2.5 py-1 rounded-full text-xs font-medium"></span>
+                                            {{ order_status_badge("order") }}
                                             {{ iiko_error('order', 'mt-2') }}
                                         </td>
                                         <td class="px-5 py-4 text-gray-500" x-text="fmt.date(order.created_at)"></td>
@@ -1025,32 +1099,17 @@
                     </div>
                     <div class="md:hidden divide-y divide-gray-100">
                         <template x-for="order in ordersTableSorted" :key="'mob-' + order.id">
-                            <button type="button" class="w-full text-left px-4 py-3 flex flex-col gap-1 hover:bg-gray-50"
-                                :class="order.iiko_last_error ? 'bg-rose-50/80' : ''"
-                                @click="openOrderDetails(order)">
-                                <div class="flex justify-between items-center gap-2">
-                                    <span class="font-bold text-brand-600" x-text="'#' + order.id"></span>
-                                    <span class="text-sm font-semibold" x-text="fmt.money(order.total_price)"></span>
-                                </div>
-                                <div class="font-mono text-xs text-gray-700" x-text="order.user_phone || '—'"></div>
-                                <div class="flex flex-wrap items-center gap-2">
-                                    <span :class="statusConfig[order.status]?.class || 'bg-gray-100 text-gray-600'" x-text="statusConfig[order.status]?.label || order.status" class="px-2 py-0.5 rounded-full text-[10px] font-medium"></span>
-                                    <span x-show="order.order_type" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-800" x-text="orderTypeBadge(order)"></span>
-                                    <span x-show="orderHasUpsell(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200" title="Upsell">UPSELL</span>
-                                    <span class="text-[10px] text-gray-400" x-text="fmt.date(order.created_at)"></span>
-                                </div>
-                            </button>
+                            {{ order_card_mobile("order") }}
                         </template>
                     </div>
                 </div>
             </div>
 
-            <!-- ========== ОЧЕРЕДЬ ОШИБОК (failed_tasks) ========== -->
+            <!-- ========== ПОМОЩЬ КЛИЕНТАМ (Inbox Zero) ========== -->
             <div x-show="currentTab === 'operator_queue'" x-cloak class="fade-in">
                 <p class="text-sm text-gray-600 mb-4 max-w-3xl leading-relaxed">
-                    Сюда записываются входящие сообщения WhatsApp, которые не удалось обработать после нескольких попыток (сеть, БД, OpenAI и т.д.).
-                    Если список пустой, значит ошибки не «пробивались» наружу — так и задумано после исправления пайплайна.
-                    Отметьте <span class="font-semibold text-emerald-800">Resolved</span>, если ситуацию закрыли вручную.
+                    Здесь — обращения, где системе нужен человек: что-то пошло не так или нужен ручной ответ.
+                    Цель этого экрана — <span class="font-semibold text-emerald-800">пусто</span>.
                 </p>
                 <div class="flex flex-wrap items-end gap-4 mb-6">
                     <div>
@@ -1074,33 +1133,42 @@
                 <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
                     <div x-show="failedTasksLoading" class="p-8 text-center text-gray-400 text-sm">Загрузка…</div>
                     <div x-show="!failedTasksLoading && failedTasks.length === 0" class="p-12 text-center text-gray-400">
-                        Нет записей
+                        <div class="text-5xl mb-3">✅</div>
+                        <div class="text-lg font-semibold text-gray-700">Inbox Zero</div>
+                        <div class="text-sm mt-1">Обращений, требующих человека, сейчас нет.</div>
                     </div>
                     <table x-show="!failedTasksLoading && failedTasks.length > 0" class="w-full text-sm">
                         <thead class="bg-gray-50 text-left text-gray-500 border-b border-gray-100">
                             <tr>
                                 <th class="px-4 py-3 font-medium">Время</th>
-                                <th class="px-4 py-3 font-medium">Телефон</th>
-                                <th class="px-4 py-3 font-medium">Ошибка</th>
-                                <th class="px-4 py-3 font-medium w-32">Действие</th>
+                                <th class="px-4 py-3 font-medium">Клиент</th>
+                                <th class="px-4 py-3 font-medium">Ситуация</th>
+                                <th class="px-4 py-3 font-medium w-44">Действия</th>
                             </tr>
                         </thead>
                         <tbody>
                             <template x-for="t in failedTasks" :key="'ft-' + t.id">
                                 <tr class="border-b border-gray-50 hover:bg-gray-50/80 align-top">
                                     <td class="px-4 py-3 text-gray-500 whitespace-nowrap" x-text="fmt.date(t.created_at)"></td>
-                                    <td class="px-4 py-3 font-mono text-xs" x-text="t.phone"></td>
                                     <td class="px-4 py-3">
-                                        <p class="text-gray-800 line-clamp-3" x-text="t.error"></p>
+                                        <div class="font-mono text-xs text-gray-800" x-text="t.phone"></div>
+                                    </td>
+                                    <td class="px-4 py-3">
+                                        <p class="text-gray-800 line-clamp-2" x-text="t.error"></p>
                                         <p class="text-xs text-gray-400 mt-1 line-clamp-2" x-text="t.message_text"></p>
                                     </td>
                                     <td class="px-4 py-3">
-                                        <button type="button" x-show="!t.resolved"
-                                            @click="setFailedTaskResolved(t, true)"
-                                            class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100">Resolved</button>
-                                        <button type="button" x-show="t.resolved"
-                                            @click="setFailedTaskResolved(t, false)"
-                                            class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 border border-gray-200">Открыть</button>
+                                        <div class="flex flex-col gap-2">
+                                            <button type="button"
+                                                @click="openHelpChat(t.phone)"
+                                                class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-brand-50 text-brand-700 border border-brand-200 hover:bg-brand-100">Открыть диалог</button>
+                                            <button type="button" x-show="!t.resolved"
+                                                @click="setFailedTaskResolved(t, true)"
+                                                class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100">Закрыто</button>
+                                            <button type="button" x-show="t.resolved"
+                                                @click="setFailedTaskResolved(t, false)"
+                                                class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 border border-gray-200">Вернуть</button>
+                                        </div>
                                     </td>
                                 </tr>
                             </template>
@@ -1315,10 +1383,13 @@
                                                         Переотправить
                                                     </button>
                                                     <span class="text-[10px] opacity-80 tabular-nums" x-text="fmt.time(msg.created_at)"></span>
-                                                    <span class="text-[11px] opacity-90 cursor-default shrink-0"
-                                                        x-show="msg.role !== 'user' && msg.delivery_status"
-                                                        :title="chatDeliveryTitle(msg)"
-                                                        x-text="chatDeliveryMark(msg)"></span>
+                                                    <span x-show="chatDeliveryBadge(msg)" x-cloak
+                                                        class="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border cursor-default shrink-0"
+                                                        :class="chatDeliveryBadge(msg)?.cls || 'bg-white/15 text-white border-white/20'"
+                                                        :title="chatDeliveryBadge(msg)?.label || ''">
+                                                        <span class="tabular-nums" x-text="chatDeliveryBadge(msg)?.icon || ''"></span>
+                                                        <span x-text="chatDeliveryBadge(msg)?.label || ''"></span>
+                                                    </span>
                                                 </div>
                                             </div>
                                         </div>
@@ -1692,7 +1763,7 @@
                         </summary>
                         <div class="pb-2 pt-1 pl-6 border-l-2 border-orange-200 ml-1 text-xs text-gray-600 leading-relaxed">
                             Список позиций с флагом «нет в наличии». Кнопка подтягивает актуальный стоп из iiko Cloud (учётные данные берутся из настроек текущего филиала; для legacy — fallback на переменные окружения).
-                            <span x-show="!integrationStatus.iiko_configured" class="text-amber-700 font-medium"> Подключите iiko в этом разделе или задайте IIKO_* в окружении.</span>
+                            <span x-show="!integrationStatus.iiko_configured" class="text-amber-700 font-medium"> Подключите iiko в этом разделе, чтобы включить синхронизацию.</span>
                         </div>
                     </details>
                 </div>
@@ -1745,7 +1816,8 @@
             </div>
 
             <!-- ========== ПОДКЛЮЧЕНИЯ ========== -->
-            <div x-show="currentTab === 'integrations'" x-cloak class="fade-in max-w-3xl">
+            <div x-show="currentTab === 'settings' && settingsTab === 'connections'" x-cloak class="fade-in max-w-3xl">
+                {{ settings_tabs() }}
                 <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
                     <h3 class="font-semibold text-lg text-gray-900 mb-1">Подключения</h3>
                     <p class="text-sm text-gray-500 mb-6">Подключите кассу и WhatsApp. Синхронизация меню и наличия выполняется автоматически.</p>
@@ -1812,7 +1884,7 @@
                             </div>
                             <div class="mt-3 flex flex-wrap items-center gap-2 pl-6">
                                 <span class="h-2 w-2 rounded-full shrink-0" :class="integrationStatus.iiko_configured ? 'bg-emerald-500' : 'bg-gray-300'"></span>
-                                <span class="text-xs text-gray-500" x-text="integrationStatus.iiko_configured ? 'Учётные данные заданы (филиал или IIKO_* в .env)' : 'Не настроено: мастер выше или IIKO_API_LOGIN и IIKO_ORGANIZATION_ID в .env'"></span>
+                                <span class="text-xs text-gray-500" x-text="integrationStatus.iiko_configured ? 'Настроено для этого заведения' : 'Не настроено: подключите через мастер выше'"></span>
                             </div>
                             <div class="mt-2 pl-6 text-xs text-gray-500" x-show="integrationStatus.last_menu_sync?.at">
                                 Последняя синхронизация <strong>меню</strong>:
@@ -1862,7 +1934,7 @@
                         <h4 class="text-sm font-semibold text-gray-900 mb-1">URL вебхука WhatsApp (Meta)</h4>
                         <p class="text-xs text-gray-500 mb-2">Укажите в кабинете Meta Callback URL и тот же verify token, что в <code class="bg-gray-100 px-1 rounded">WHATSAPP_VERIFY_TOKEN</code>.</p>
                         <div class="flex flex-wrap items-center gap-2">
-                            <code class="flex-1 min-w-0 text-xs bg-white border border-gray-200 rounded-lg px-3 py-2 break-all" x-text="integrationStatus.webhook_url || 'Задайте PUBLIC_BASE_URL в .env'"></code>
+                            <code class="flex-1 min-w-0 text-xs bg-white border border-gray-200 rounded-lg px-3 py-2 break-all" x-text="integrationStatus.webhook_url || 'URL появится после настройки публичного адреса сервера'"></code>
                             <button type="button" @click="copyWebhookUrl()" class="shrink-0 px-3 py-2 rounded-xl bg-brand-600 text-white text-xs font-semibold hover:bg-brand-700">Копировать</button>
                         </div>
                         <p class="text-[10px] text-gray-400 mt-2" x-show="integrationStatus.whatsapp_verify_token_hint">Подсказка verify: <span class="font-mono" x-text="integrationStatus.whatsapp_verify_token_hint"></span></p>
@@ -1885,7 +1957,43 @@
             </div>
 
             <!-- ========== БАЗА ЗНАНИЙ ========== -->
-            <div x-show="currentTab === 'knowledge'" x-cloak class="fade-in max-w-4xl space-y-6 pb-16">
+            <div x-show="currentTab === 'settings' && settingsTab === 'restaurant'" x-cloak class="fade-in max-w-4xl space-y-6 pb-16">
+                {{ settings_tabs() }}
+                <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+                    <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
+                        <div>
+                            <h3 class="text-lg font-bold text-gray-900">Профиль ресторана</h3>
+                            <p class="text-sm text-gray-500 mt-1">Эти данные видны в шапке и задают контекст текущего заведения.</p>
+                        </div>
+                        <button type="button" @click="saveOrgProfile()" :disabled="orgProfileSaving"
+                            class="shrink-0 px-4 py-2.5 rounded-xl bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 disabled:opacity-40">
+                            <span x-show="!orgProfileSaving">Сохранить</span>
+                            <span x-show="orgProfileSaving" x-cloak>Сохраняем…</span>
+                        </button>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Название</label>
+                            <input type="text" x-model="orgProfile.name" placeholder="Название заведения"
+                                class="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm bg-white">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Часовой пояс</label>
+                            <input type="text" x-model="orgProfile.timezone" placeholder="Например: Asia/Almaty"
+                                class="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm bg-white">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Валюта</label>
+                            <input type="text" x-model="orgProfile.currency" placeholder="KZT"
+                                class="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm bg-white">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">WhatsApp Phone ID</label>
+                            <input type="text" x-model="orgProfile.whatsapp_phone_number_id" placeholder="112358..."
+                                class="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm bg-white font-mono">
+                        </div>
+                    </div>
+                </div>
                 <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
                     <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
                         <div>
@@ -1975,7 +2083,8 @@
             </div>
 
             <!-- ========== ДОПРОДАЖИ (Strategy Engine) ========== -->
-            <div x-show="currentTab === 'upsell'" x-cloak class="fade-in max-w-4xl space-y-6 pb-16">
+            <div x-show="currentTab === 'settings' && settingsTab === 'smart_sales'" x-cloak class="fade-in max-w-4xl space-y-6 pb-16">
+                {{ settings_tabs() }}
                 <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
                     <h3 class="text-lg font-bold text-gray-900">Правила допродаж</h3>
                     <p class="text-sm text-gray-500 mt-1">Режим «нет категории в корзине» → предложить позицию из другой категории. Работает после ответа AI.</p>
@@ -2038,7 +2147,7 @@
             </div>
 
             <!-- ========== УПАКОВКА (карточки) ========== -->
-            <div x-show="currentTab === 'packaging'" x-cloak class="fade-in max-w-5xl space-y-6 pb-16">
+            <div x-show="currentTab === 'settings' && settingsTab === 'restaurant'" x-cloak class="fade-in max-w-5xl space-y-6 pb-16">
                 <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-2">
                     <div>
                         <h3 class="text-xl font-bold text-gray-900">Правила упаковки и логистики</h3>
@@ -2150,7 +2259,8 @@
             </div>
 
             <!-- ========== НАСТРОЙКИ ========== -->
-            <div x-show="currentTab === 'settings'" x-cloak class="fade-in max-w-3xl space-y-6 pb-16">
+            <div x-show="currentTab === 'settings' && settingsTab === 'technical'" x-cloak class="fade-in max-w-3xl space-y-6 pb-16">
+                {{ settings_tabs() }}
                 <div class="rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-950">
                     <strong class="font-semibold">Опасная зона.</strong> Действия необратимы. Клиенты в таблице <code class="text-xs bg-white/80 px-1 rounded">users</code> не удаляются при сбросе операционных данных и при удалении отдельных заказов.
                 </div>
@@ -2335,7 +2445,8 @@
             </div>
 
             <!-- ========== ТЕСТ БОТА ========== -->
-            <div x-show="currentTab === 'test'" x-cloak class="fade-in">
+            <div x-show="currentTab === 'settings' && settingsTab === 'technical'" x-cloak class="fade-in">
+                {{ settings_tabs() }}
                 <div class="max-w-2xl mx-auto">
                     <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                         <div class="bg-emerald-600 px-5 py-3 flex items-center gap-3">
@@ -2403,7 +2514,8 @@
             </div>
 
             <!-- ========== КОМАНДА ========== -->
-            <div x-show="currentTab === 'team'" x-cloak class="fade-in max-w-3xl">
+            <div x-show="currentTab === 'settings' && settingsTab === 'team'" x-cloak class="fade-in max-w-3xl">
+                {{ settings_tabs() }}
                 <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
                     <h3 class="font-semibold text-lg text-gray-900 mb-1">Команда</h3>
                     <p class="text-sm text-gray-500 mb-6">Добавляйте сотрудников и выдавайте доступ к панели управления.</p>

@@ -37,6 +37,7 @@ from app.services.ai_brain import (
 )
 from app.services.chat_delivery import apply_whatsapp_status_webhook
 from app.services.customer_context import build_customer_context
+from app.services.time_context import format_org_current_time_block
 from app.services.customer_reply import (
     reset_twilio_call_context,
     send_customer_text,
@@ -677,7 +678,7 @@ async def process_with_retry(
             await process_message(
                 phone,
                 message_text,
-                whatsapp_message_id="",
+                whatsapp_message_id=wmid,
                 voice_audio=voice_audio,
                 organization_id=org_id,
             )
@@ -731,6 +732,7 @@ async def process_message(
     Полный цикл обработки входящего сообщения с учётом State Machine.
     """
     try:
+        wmid = (whatsapp_message_id or "").strip()
         if not await check_rate_limit(phone):
             logger.warning("Rate limit: %s заблокирован", phone)
             await send_customer_text(phone, "Слишком много сообщений. Подождите минуту и попробуйте снова.")
@@ -940,6 +942,7 @@ async def process_message(
         draft_ctx = ""
         strategy_ctx = ""
         customer_ctx = ""
+        current_time_ctx = ""
         u_row: User | None = None
         async with async_session_factory() as db:
             menu_items = await load_available_menu(db, organization_id=organization_id)
@@ -951,6 +954,10 @@ async def process_message(
                 ),
             )
             customer_ctx = await build_customer_context(db, u_row)
+            org_ent = await db.get(Organization, organization_id)
+            current_time_ctx = format_org_current_time_block(
+                getattr(org_ent, "timezone", None) if org_ent is not None else "UTC",
+            )
             kb_context = await load_knowledge_context_block(db, organization_id)
             draft_row = await get_open_draft_order(db, phone, organization_id)
             draft_ctx = format_draft_order_context_for_prompt(
@@ -981,6 +988,7 @@ async def process_message(
                 draft_order_context=draft_ctx,
                 sales_strategy_context=strategy_ctx,
                 customer_context=customer_ctx,
+                current_time_context=current_time_ctx,
             )
             user_log_text = (ai_response.recognized_speech or "").strip() or "🎤 голосовое сообщение"
             await append_to_history(
@@ -996,6 +1004,7 @@ async def process_message(
                 draft_order_context=draft_ctx,
                 sales_strategy_context=strategy_ctx,
                 customer_context=customer_ctx,
+                current_time_context=current_time_ctx,
                 raise_on_transient=True,
             )
 

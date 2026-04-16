@@ -48,6 +48,7 @@ from app.integrations.whatsapp import send_message
 from app.services.admin_tokens import AdminWsClaims, create_admin_ws_token, parse_admin_ws_token
 from app.services.ai_brain import call_openai
 from app.services.customer_context import build_customer_context
+from app.services.time_context import format_org_current_time_block
 from app.services.demo_data import clear_demo_data, demo_data_exists, seed_demo_data
 from app.services.integration_health import (
     build_status_payload,
@@ -3454,6 +3455,28 @@ async def dashboard_stats(
         round(sum(ai_checks_no_offer) / len(ai_checks_no_offer), 2) if ai_checks_no_offer else None
     )
 
+    # AI ROI + "экономия времени" (оценка по количеству сообщений ассистента)
+    ai_revenue_today = round(upsell_revenue_today, 2)
+    ai_revenue_share_pct: float | None = None
+    if today_revenue > 0 and ai_revenue_today > 0:
+        ai_revenue_share_pct = round(ai_revenue_today / today_revenue * 100, 1)
+
+    ai_messages_today = int(
+        await db.scalar(
+            select(func.count(ChatLog.id)).where(
+                ChatLog.organization_id == org_id,
+                ChatLog.role == "assistant",
+                ChatLog.created_at >= ts_lo,
+                ChatLog.created_at <= ts_hi,
+            ),
+        )
+        or 0,
+    )
+    # Продуктовая метрика: одно сообщение ассистента экономит ~1.5 минуты ручного набора текста.
+    minutes_per_message = 1.5
+    ai_time_saved_minutes = round(ai_messages_today * minutes_per_message, 1)
+    ai_time_saved_hours = round(ai_time_saved_minutes / 60.0, 2)
+
     return {
         "total_orders": total_orders,
         "today_orders": today_orders,
@@ -3471,10 +3494,129 @@ async def dashboard_stats(
         "upsell_accepted_today": upsell_accepted_today,
         "upsell_revenue_today": round(upsell_revenue_today, 2),
         "upsell_conversion_pct": upsell_conversion_pct,
+        "ai_revenue_today": ai_revenue_today,
+        "ai_revenue_share_pct": ai_revenue_share_pct,
+        "ai_messages_today": ai_messages_today,
+        "ai_time_saved_minutes": ai_time_saved_minutes,
+        "ai_time_saved_hours": ai_time_saved_hours,
         "iiko_errors_today": iiko_errors_today,
         "ai_avg_check_upsell_accepted": ai_avg_check_upsell_accepted,
         "ai_avg_check_no_upsell_offer": ai_avg_check_no_upsell_offer,
     }
+
+
+@router.get("/activity")
+async def dashboard_activity(
+    request: Request,
+    limit: int = Query(25, ge=5, le=100),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    Activity feed для CEO/Staff: последние события, читаемые “за 1 секунду”.
+    Возвращает единый список, отсортированный по времени (desc).
+    """
+    org_id = admin_org_from_session(request)
+    now_utc = datetime.now(tz=timezone.utc)
+    since = _sql_dt_for_filter(now_utc - timedelta(days=7))
+
+    items: list[dict[str, Any]] = []
+
+    # Последние заказы
+    o_rows = await db.execute(
+        select(Order.id, Order.status, Order.total_price, Order.created_at).where(
+            Order.organization_id == org_id,
+            Order.created_at.isnot(None),
+            Order.created_at >= since,
+        )
+        .order_by(Order.created_at.desc())
+        .limit(limit),
+    )
+    for oid, st, total, ts in o_rows.all():
+        if ts is None:
+            continue
+        items.append(
+            {
+                "ts": _dt_as_utc(ts).isoformat(),
+                "kind": "order",
+                "title": f"Новый заказ #{oid}",
+                "subtitle": f"{OrderStatus(st).value if hasattr(st, 'value') else st} · {float(total or 0):.0f} ₸",
+                "ref": {"tab": "orders", "order_id": int(oid)},
+            }
+        )
+
+    # Эскалации (бот попросил помощи)
+    e_rows = await db.execute(
+        select(EscalationEvent.phone, EscalationEvent.created_at, EscalationEvent.reason).where(
+            EscalationEvent.organization_id == org_id,
+            EscalationEvent.created_at.isnot(None),
+            EscalationEvent.created_at >= since,
+        )
+        .order_by(EscalationEvent.created_at.desc())
+        .limit(limit),
+    )
+    for phone, ts, reason in e_rows.all():
+        if ts is None:
+            continue
+        items.append(
+            {
+                "ts": _dt_as_utc(ts).isoformat(),
+                "kind": "help",
+                "title": "Нужна помощь клиенту",
+                "subtitle": f"{(phone or '').strip()} · {(reason or '')[:80]}".strip(" ·"),
+                "ref": {"tab": "operator_queue", "phone": (phone or "").strip()},
+            }
+        )
+
+    # Не доставленные сообщения (failed)
+    f_rows = await db.execute(
+        select(ChatLog.user_id, ChatLog.id, ChatLog.created_at).where(
+            ChatLog.organization_id == org_id,
+            ChatLog.delivery_status == "failed",
+            ChatLog.created_at.isnot(None),
+            ChatLog.created_at >= since,
+        )
+        .order_by(ChatLog.created_at.desc())
+        .limit(limit),
+    )
+    for _uid, cid, ts in f_rows.all():
+        if ts is None:
+            continue
+        items.append(
+            {
+                "ts": _dt_as_utc(ts).isoformat(),
+                "kind": "delivery_failed",
+                "title": "Сообщение не доставлено",
+                "subtitle": f"ID сообщения #{int(cid)}",
+                "ref": {"tab": "chats"},
+            }
+        )
+
+    # Бронирования
+    b_rows = await db.execute(
+        select(Booking.id, Booking.created_at).where(
+            Booking.organization_id == org_id,
+            Booking.created_at.isnot(None),
+            Booking.created_at >= since,
+        )
+        .order_by(Booking.created_at.desc())
+        .limit(limit),
+    )
+    for bid, ts in b_rows.all():
+        if ts is None:
+            continue
+        items.append(
+            {
+                "ts": _dt_as_utc(ts).isoformat(),
+                "kind": "booking",
+                "title": f"Новое бронирование #{int(bid)}",
+                "subtitle": "",
+                "ref": {"tab": "bookings"},
+            }
+        )
+
+    items.sort(key=lambda x: x.get("ts") or "", reverse=True)
+    items = items[: int(limit)]
+    return {"items": items}
 
 
 # ─── Аналитика ──────────────────────────────────────────
@@ -3484,7 +3626,7 @@ async def dashboard_stats(
 async def analytics(
     request: Request,
     response: Response,
-    period: str = Query("week", description="day, week, month, custom"),
+    period: str = Query("week", description="day, week, month, year, custom"),
     date_from: str | None = Query(None, description="Начало периода (YYYY-MM-DD)"),
     date_to: str | None = Query(None, description="Конец периода (YYYY-MM-DD)"),
     db: AsyncSession = Depends(get_db),
@@ -3504,7 +3646,7 @@ async def analytics(
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
     period = (period or "week").strip().lower()
-    if period not in ("day", "week", "month", "custom"):
+    if period not in ("day", "week", "month", "year", "custom"):
         period = "week"
 
     if period == "custom" and date_from and date_to:
@@ -3521,6 +3663,9 @@ async def analytics(
         end = now
     elif period == "month":
         start = today_start - timedelta(days=30)
+        end = now
+    elif period == "year":
+        start = today_start - timedelta(days=365)
         end = now
     else:
         start = today_start - timedelta(days=7)
@@ -3614,11 +3759,19 @@ async def analytics(
     daily: dict[str, dict] = defaultdict(
         lambda: {"revenue": 0.0, "orders": 0}
     )
+    daily_ai_profit: dict[str, float] = defaultdict(float)
+    ai_profit_total = 0.0
     for o in current_orders:
         dk = _order_day_key_utc(o.created_at)
         if dk:
             daily[dk]["revenue"] += float(o.total_price or 0)
             daily[dk]["orders"] += 1
+        ij = o.items_json if isinstance(o.items_json, dict) else None
+        _off, _acc, rev = upsell_stats_from_items_json(ij)
+        if rev:
+            ai_profit_total += float(rev)
+            if dk:
+                daily_ai_profit[dk] += float(rev)
 
     # Все календарные дни от start до end включительно (UTC), без off-by-one по .days
     start_d = _dt_as_utc(start).date()
@@ -3632,12 +3785,13 @@ async def analytics(
             "date": key,
             "revenue": entry["revenue"],
             "orders": entry["orders"],
+            "ai_profit": round(float(daily_ai_profit.get(key, 0.0)), 2),
         })
         walk += timedelta(days=1)
 
     # Топ позиций
     item_stats: dict[str, dict] = defaultdict(
-        lambda: {"quantity": 0, "revenue": 0.0}
+        lambda: {"quantity": 0, "revenue": 0.0, "ai_profit": 0.0}
     )
     for o in current_orders:
         items_data = o.items_json or {}
@@ -3647,6 +3801,41 @@ async def analytics(
             total = item.get("item_total", 0)
             item_stats[name]["quantity"] += qty
             item_stats[name]["revenue"] += float(total)
+
+        # Пытаемся атрибутировать accepted_revenue_kzt к конкретным позициям заказа (если есть iiko_id).
+        ij = items_data if isinstance(items_data, dict) else None
+        if not isinstance(ij, dict):
+            continue
+        meta = order_meta_from_items_json(ij)
+        trace = meta.get("recommendation_trace")
+        if not isinstance(trace, list) or not trace:
+            continue
+        items_list = ij.get("items")
+        if not isinstance(items_list, list) or not items_list:
+            continue
+        id_to_name: dict[str, str] = {}
+        for it in items_list:
+            if not isinstance(it, dict):
+                continue
+            iid = str(it.get("iiko_item_id") or "").strip()
+            nm = str(it.get("name") or "?")
+            if iid and nm:
+                id_to_name[iid] = nm
+        for ev in trace:
+            if not isinstance(ev, dict):
+                continue
+            if ev.get("accepted") is not True:
+                continue
+            rev = float(ev.get("accepted_revenue_kzt") or 0)
+            if rev <= 0:
+                continue
+            iid = str(ev.get("offered_iiko_id") or ev.get("accepted_iiko_id") or "").strip()
+            if not iid:
+                continue
+            nm = id_to_name.get(iid)
+            if not nm:
+                continue
+            item_stats[nm]["ai_profit"] += float(rev)
 
     top_items = sorted(
         [{"name": k, **v} for k, v in item_stats.items()],
@@ -3770,6 +3959,23 @@ async def analytics(
             return None
         return round((curr - prev) / prev * 100, 1)
 
+    # AI Profit (upsell revenue) — previous period only needs totals.
+    prev_ai_profit_total = 0.0
+    prev_orders_result = await db.execute(
+        select(Order.items_json)
+        .where(
+            not_cancelled,
+            org_orders,
+            Order.created_at >= prev_start_sql,
+            Order.created_at < prev_end_sql,
+        )
+    )
+    for (ij,) in prev_orders_result.all():
+        items_json = ij if isinstance(ij, dict) else None
+        _o, _a, rev = upsell_stats_from_items_json(items_json)
+        if rev:
+            prev_ai_profit_total += float(rev)
+
     return {
         "period": period,
         "date_from": start.strftime("%Y-%m-%d"),
@@ -3790,6 +3996,15 @@ async def analytics(
             "avg_check": pct_change(avg_check, prev_avg),
         },
         "daily": daily_data,
+        "ai": {
+            "profit": round(ai_profit_total, 2),
+            "previous_profit": round(prev_ai_profit_total, 2),
+            "change_pct": pct_change(ai_profit_total, prev_ai_profit_total),
+            "daily_profit": [
+                {"date": row["date"], "profit": round(float(row.get("ai_profit") or 0.0), 2)}
+                for row in daily_data
+            ],
+        },
         "top_items": top_items,
         "funnel": {
             "dialogs": funnel_dialogs,
@@ -4016,6 +4231,10 @@ async def test_bot(request: Request, body: TextRequest) -> dict:
     await append_to_history(redis_client, phone, "user", message_text, organization_id=org_id)
 
     async with async_session_factory() as db:
+        org_ent = await db.get(Organization, org_id)
+        current_time_ctx = format_org_current_time_block(
+            getattr(org_ent, "timezone", None) if org_ent is not None else "UTC",
+        )
         menu_items = await load_available_menu(db, organization_id=org_id)
         menu_context = build_menu_context(menu_items)
         u_row = await db.scalar(
@@ -4047,6 +4266,7 @@ async def test_bot(request: Request, body: TextRequest) -> dict:
             draft_order_context=draft_ctx,
             sales_strategy_context=strategy_ctx,
             customer_context=customer_ctx,
+            current_time_context=current_time_ctx,
             raise_on_transient=False,
         )
         inbound_mid = f"admin-test-bot:{secrets.token_hex(8)}"

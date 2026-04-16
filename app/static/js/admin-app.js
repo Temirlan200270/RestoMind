@@ -10,6 +10,7 @@
 const charts = {
     dashboard: null,
     analytics: null,
+    analyticsSparks: {},
 };
 
 /** Форматирование вне Alpine — без лишних замыканий в шаблоне; единый символ ₸. */
@@ -215,6 +216,8 @@ function adminMixinState() {
             { id: 'operations', title: 'Операции' },
             { id: 'settings', title: 'Управление' },
         ],
+        /** Вкладка внутри Settings (Stripe-like). */
+        settingsTab: 'restaurant', // restaurant | connections | smart_sales | team | technical
         navItems: [
             { id: 'dashboard', section: 'overview', label: 'Дашборд', desc: 'Общая статистика и последние заказы',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25A2.25 2.25 0 018.25 10.5H6A2.25 2.25 0 013.75 8.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z"/></svg>' },
@@ -222,30 +225,18 @@ function adminMixinState() {
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/></svg>' },
             { id: 'orders', section: 'operations', label: 'Заказы', desc: 'По этапам (черновик → подтверждён → кухня) или общий список',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z"/></svg>' },
-            { id: 'operator_queue', section: 'operations', label: 'Помощь бота', desc: 'Запросы, где нужна помощь человека',
+            { id: 'operator_queue', section: 'operations', label: 'Помощь клиентам', desc: 'Обращения, где нужен человек (цель — «пусто»)',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>' },
             { id: 'bookings', section: 'operations', label: 'Бронирования', desc: 'Столики и резервации',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/></svg>' },
-            { id: 'chats', section: 'operations', label: 'Диалоги', desc: 'Live-чаты с клиентами',
+            { id: 'chats', section: 'operations', label: 'Диалоги', desc: 'Сообщения и ответы клиентам',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 01-.825-.242m9.345-8.334a21.05 21.05 0 00-1.889-2.403 19.7 19.7 0 00-1.6-1.562c-.642-.522-1.397-.957-2.23-1.25C16.247 1.872 14.747 1.5 12 1.5c-2.747 0-4.247.372-5.63.99-.833.293-1.588.728-2.23 1.25-.563.459-1.082 1-1.6 1.562A21.05 21.05 0 003.75 8.511"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5.25 8.511c-.884.284-1.5 1.128-1.5 2.097v4.286c0 1.136.847 2.1 1.98 2.193.34.027.68.052 1.02.072v3.091l3-3a11.63 11.63 0 014.02-.163 2.115 2.115 0 001.825-.242M9.378 5.378A21.05 21.05 0 0018.72 3.728"/></svg>' },
             { id: 'menu', section: 'operations', label: 'Меню', desc: 'Позиции меню ресторана',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8.25v-1.5m0 1.5c-1.355 0-2.697.056-4.024.166C6.845 8.51 6 9.473 6 10.608v2.513m6-4.871c1.355 0 2.697.055 4.024.165C17.155 8.51 18 9.473 18 10.608v2.513m-3 4.73v-1.59c0-.532-.21-1.042-.586-1.418L12 13.5m-3 4.73c.55.47 1.27.73 2 .73h6c.73 0 1.45-.26 2-.73m-8-4.73V10.6c0-1.12.856-2.08 2.09-2.19.64-.09 1.29-.14 1.91-.14m5 6.37v1.59c0 1.632-.875 3.11-2.25 3.89"/></svg>' },
             { id: 'stoplist', section: 'operations', label: 'Стоп-лист', desc: 'Нет в наличии и синхронизация с iiko',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>' },
-            { id: 'integrations', section: 'settings', label: 'Подключения', desc: 'Касса, WhatsApp и синхронизация',
-              icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m4.95-4.95l1.757-1.757a4.5 4.5 0 016.364 6.364l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757"/></svg>' },
-            { id: 'packaging', section: 'settings', label: 'Доставка и упаковка', desc: 'Правила упаковки и доп. услуги',
-              icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5m8.25 3v6.75m0 0l-3-3m3 3l3-3M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z"/></svg>' },
-            { id: 'upsell', section: 'settings', label: 'Стратегия продаж', desc: 'Допродажи и предложения к заказу',
-              icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.25 18L9 11.25l4.306 4.307a11.95 11.95 0 015.814-5.519l2.74-1.22m0 0l-5.94-2.28m5.94 2.28l-2.28 5.941"/></svg>' },
-            { id: 'knowledge', section: 'settings', label: 'Информация о ресторане', desc: 'Адрес, часы работы и ответы клиентам',
-              icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v15.128A9 9 0 009 18c0 1.518.39 2.948 1.082 4.192m3-16.15V18c0 1.518-.39 2.948-1.082 4.192M15 6.042a8.967 8.967 0 014.5 2.292v15.128A9 9 0 0015 18c0-1.518-.39-2.948-1.082-4.192"/></svg>' },
-            { id: 'settings', section: 'settings', label: 'Данные и безопасность', desc: 'Администрирование и расширенные действия',
+            { id: 'settings', section: 'settings', label: 'Настройки', desc: 'Ресторан, подключения, продажи, команда',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>' },
-            { id: 'test', section: 'settings', label: 'Тест бота', desc: 'Протестируйте AI-оператора вживую',
-              icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25zm.75-12h9v9h-9v-9z"/></svg>' },
-            { id: 'team', section: 'settings', label: 'Команда', desc: 'Доступ сотрудников к панели управления',
-              icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M18 18.72a9.094 9.094 0 00-6-2.28c-2.334 0-4.477.88-6 2.28M15 10.5a3 3 0 11-6 0 3 3 0 016 0z"/></svg>' },
         ],
 
         // WebSocket (статус в сайдбаре: readyState + ws_ready с сервера)
@@ -262,9 +253,18 @@ function adminMixinState() {
 
         /** Последние события из WebSocket (дашборд). */
         dashLiveFeed: [],
+        /** Activity Feed (с сервера) — красиво, не “лог”. */
+        dashActivity: [],
+        dashActivityLoading: false,
 
         // Дашборд
         dashStats: {},
+        dashStatsLoading: false,
+        dashStatsLoadedOnce: false,
+        /** Контекст текущего заведения (multi-tenant брендинг в шапке). */
+        orgProfile: { id: null, organization_id: null, name: '', timezone: '', currency: '', whatsapp_phone_number_id: '' },
+        orgProfileLoading: false,
+        orgProfileSaving: false,
         orders: [],
         _ordersLoadSeq: 0,
         ordersLoadError: '',
@@ -314,6 +314,8 @@ function adminMixinState() {
         analyticsCustom: false,
         analyticsFrom: '',
         analyticsTo: '',
+        analyticsLoading: false,
+        analyticsHelpOpen: false,
         /** График на вкладке Аналитика: обе метрики / только выручка / только заказы */
         analyticsChartMetric: 'both',
         analyticsData: {},
@@ -660,6 +662,8 @@ function adminMixinMenuOrdersUi() {
                 const m = window.matchMedia('(min-width: 768px)').matches;
                 this.menuCategoryChipsOpen = m;
                 this.menuToolbarExpanded = m;
+                // Mobile-first: заказы без горизонтального скролла (канбан — для больших экранов).
+                this.ordersView = m ? (this.ordersView || 'kanban') : 'table';
             } catch (_e) {
                 this.menuCategoryChipsOpen = true;
                 this.menuToolbarExpanded = true;
@@ -1815,6 +1819,11 @@ function adminMixinAuthKnowledge() {
                 menu_items: 0,
                 bookings: 0,
             };
+            this.settingsTab = 'restaurant';
+            this.dashStatsLoading = false;
+            this.dashStatsLoadedOnce = false;
+            this.orgProfile = { id: null, organization_id: null, name: '', timezone: '', currency: '', whatsapp_phone_number_id: '' };
+            this.orgProfileLoading = false;
             this.integrationStatus = defaultIntegrationStatus();
             this.integrationEvents = [];
             this.hasDemoData = false;
@@ -1832,6 +1841,7 @@ function adminMixinAuthKnowledge() {
                     this._ensureAdminHashListener();
                     this._applyAdminHashBeforeFirstPaint();
                     await this.refreshDemoStatus();
+                    await this.loadOrgProfile();
                     this.connectWebSocket();
                     await this.loadTabData();
                     await this.loadIntegrationStatus();
@@ -1875,6 +1885,7 @@ function adminMixinAuthKnowledge() {
                 this._ensureAdminHashListener();
                 this._applyAdminHashBeforeFirstPaint();
                 await this.refreshDemoStatus();
+                await this.loadOrgProfile();
                 this.connectWebSocket();
                 await this.loadTabData();
                 await this.loadIntegrationStatus();
@@ -1884,6 +1895,65 @@ function adminMixinAuthKnowledge() {
                 this.loginError = 'Не удалось связаться с сервером';
             } finally {
                 this.loginLoading = false;
+            }
+        },
+
+        async loadOrgProfile() {
+            this.orgProfileLoading = true;
+            try {
+                const { ok, status, data } = await this.apiJsonResponse('/api/admin/organization/profile');
+                if (!ok) {
+                    console.warn('GET /api/admin/organization/profile', status, data);
+                    return;
+                }
+                this.orgProfile = {
+                    id: data?.id ?? null,
+                    organization_id: data?.organization_id ?? null,
+                    name: (data?.name || '').trim(),
+                    timezone: (data?.timezone || '').trim(),
+                    currency: (data?.currency || '').trim(),
+                    whatsapp_phone_number_id: (data?.whatsapp_phone_number_id || '').trim(),
+                };
+            } finally {
+                this.orgProfileLoading = false;
+            }
+        },
+
+        async saveOrgProfile() {
+            if (this.orgProfileSaving) return;
+            const nm = String(this.orgProfile?.name || '').trim();
+            if (nm.length < 2) {
+                void this.showUiAlert('Название ресторана должно быть не короче 2 символов.', 'Подсказка');
+                return;
+            }
+            this.orgProfileSaving = true;
+            try {
+                const body = {
+                    name: nm,
+                    timezone: String(this.orgProfile?.timezone || '').trim(),
+                    currency: String(this.orgProfile?.currency || '').trim(),
+                    whatsapp_phone_number_id: String(this.orgProfile?.whatsapp_phone_number_id || '').trim(),
+                };
+                const { ok, status, data } = await this.apiJsonResponse('/api/admin/organization/profile', {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                if (!ok) {
+                    const msg = this.formatApiError(data?.detail) || `Не удалось сохранить (${status})`;
+                    void this.showUiAlert(msg, 'Ошибка');
+                    return;
+                }
+                this.orgProfile = {
+                    id: data?.id ?? this.orgProfile?.id ?? null,
+                    organization_id: data?.organization_id ?? this.orgProfile?.organization_id ?? null,
+                    name: (data?.name || nm).trim(),
+                    timezone: (data?.timezone || '').trim(),
+                    currency: (data?.currency || '').trim(),
+                    whatsapp_phone_number_id: (data?.whatsapp_phone_number_id || '').trim(),
+                };
+            } finally {
+                this.orgProfileSaving = false;
             }
         },
 
@@ -1901,6 +1971,7 @@ function adminMixinAuthKnowledge() {
             this._clearWsReadyTimer();
             this.hasDemoData = false;
             this.auth401AlertShown = false;
+            this.orgProfile = { id: null, organization_id: null, name: '', timezone: '', currency: '', whatsapp_phone_number_id: '' };
         },
 
         async refreshDemoStatus() {
@@ -2602,16 +2673,16 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
 
         wsIndicatorText() {
             void this.wsEpoch;
-            if (!this.authenticated) return 'Войдите — для push-уведомлений';
+            if (!this.authenticated) return 'Войдите, чтобы видеть обновления';
             const w = this.ws;
             const rs = w?.readyState;
-            if (w == null || typeof rs !== 'number') return 'Нет соединения, переподключение…';
-            if (rs === WebSocket.CONNECTING) return 'Подключение…';
+            if (w == null || typeof rs !== 'number') return 'Связь: нет (переподключаемся…)';
+            if (rs === WebSocket.CONNECTING) return 'Связь: подключаемся…';
             if (rs === WebSocket.OPEN) {
-                if (this.wsChannelReady) return 'Уведомления в реальном времени';
-                return 'Синхронизация канала…';
+                if (this.wsChannelReady) return 'Связь: работает';
+                return 'Связь: синхронизация…';
             }
-            return 'Переподключение…';
+            return 'Связь: переподключение…';
         },
     };
 }
@@ -2727,12 +2798,19 @@ function adminMixinWebSocketEvents() {
                     type,
                     `${st === 'failed' ? 'Сбой доставки' : 'Статус'} · ${data.phone || ''} · #${data.chat_log_id || ''}`,
                 );
+                if (this.currentTab === 'dashboard') {
+                    void this.loadDashActivity();
+                }
             } else if (type === 'new_message') {
                 this.onNewMessage(data);
                 this._pushDashLiveFeed(
                     type,
                     `${data.role === 'user' ? 'Клиент' : (data.role === 'operator' ? 'Оператор' : 'Бот')} · ${data.phone || ''}`,
                 );
+                if (this.currentTab === 'dashboard') {
+                    // Редко, но полезно: лента событий должна быть “живой”.
+                    void this.loadDashActivity();
+                }
             } else if (type === 'order_updated') {
                 this.onOrderUpdated(data);
                 this.scheduleDashStatsRefreshDebounced();
@@ -2740,6 +2818,9 @@ function adminMixinWebSocketEvents() {
                     type,
                     `Заказ #${data.order_id} → ${data.status} · ${data.phone || ''}`,
                 );
+                if (this.currentTab === 'dashboard') {
+                    void this.loadDashActivity();
+                }
             } else if (type === 'order_deleted') {
                 const i = this.orders.findIndex((o) => o.id === data.order_id);
                 if (i >= 0) {
@@ -2757,9 +2838,15 @@ function adminMixinWebSocketEvents() {
                     this.selectedOrder = null;
                 }
                 this.scheduleDashStatsRefreshDebounced();
+                if (this.currentTab === 'dashboard') {
+                    void this.loadDashActivity();
+                }
             } else if (type === 'human_needed') {
                 this.onHumanNeeded(data);
                 this._pushDashLiveFeed(type, `Нужен оператор · ${data.phone || ''}`);
+                if (this.currentTab === 'dashboard') {
+                    void this.loadDashActivity();
+                }
             } else if (type === 'state_changed') {
                 this.onStateChanged(data);
             }
@@ -2819,6 +2906,19 @@ function adminMixinWebSocketEvents() {
                 failed: 'Не доставлено',
             };
             return labels[s] || '';
+        },
+
+        chatDeliveryBadge(msg) {
+            const s = String(msg.delivery_status || '').toLowerCase();
+            if (!s || msg.role === 'user') return null;
+            const label = this.chatDeliveryTitle(msg);
+            const icon = this.chatDeliveryMark(msg);
+            let cls = 'bg-white/15 text-white border-white/20';
+            if (s === 'sending') cls = 'bg-white/15 text-white border-white/20';
+            else if (s === 'sent') cls = 'bg-white/15 text-white border-white/20';
+            else if (s === 'delivered' || s === 'read') cls = 'bg-emerald-500/20 text-white border-emerald-200/30';
+            else if (s === 'failed') cls = 'bg-rose-500/20 text-white border-rose-200/30';
+            return { s, label, icon, cls };
         },
 
         onNewMessage(data) {
@@ -2967,6 +3067,15 @@ function adminMixinWebSocketEvents() {
             if (!phone) return;
             this.currentTab = 'chats';
             this.dismissAlert();
+            await this.selectChat(phone);
+            setTimeout(() => this.scrollChatToBottom(), 350);
+            await this.takeoverChat();
+        },
+
+        /** Открыть диалог из «Помощь клиентам» (без влияния на alertQueue). */
+        async openHelpChat(phone) {
+            if (!phone) return;
+            this.currentTab = 'chats';
             await this.selectChat(phone);
             setTimeout(() => this.scrollChatToBottom(), 350);
             await this.takeoverChat();
@@ -3303,6 +3412,20 @@ function adminMixinDataChartsSettings() {
     return {
         // ─── Data Loading ────────────────────────────
         async loadTabData() {
+            // Legacy ids → Settings tabs (backward compatibility for old sidebar/hash links)
+            const legacySettingsMap = {
+                integrations: 'connections',
+                packaging: 'restaurant',
+                knowledge: 'restaurant',
+                upsell: 'smart_sales',
+                team: 'team',
+                test: 'technical',
+            };
+            const legacyTab = legacySettingsMap[this.currentTab];
+            if (legacyTab) {
+                this.currentTab = 'settings';
+                this.settingsTab = legacyTab;
+            }
             if (this.currentTab !== 'chats') {
                 this.chatMobileInfoOpen = false;
                 this.activeChatPhone = '';
@@ -3314,7 +3437,7 @@ function adminMixinDataChartsSettings() {
             this.tabDataLoading = true;
             try {
                 if (this.currentTab === 'dashboard') {
-                    await Promise.all([this.loadDashStats(), this.loadOrders()]);
+                    await Promise.all([this.loadDashStats(), this.loadDashActivity(), this.loadOrders()]);
                 } else if (this.currentTab === 'analytics') {
                     await this.loadAnalytics();
                 } else if (this.currentTab === 'orders') {
@@ -3327,18 +3450,19 @@ function adminMixinDataChartsSettings() {
                     await this.loadMenu();
                 } else if (this.currentTab === 'stoplist') {
                     await Promise.all([this.loadStopList(), this.loadIntegrationStatus()]);
-                } else if (this.currentTab === 'integrations') {
-                    await this.loadIntegrationStatus();
-                } else if (this.currentTab === 'knowledge') {
-                    await this.loadKnowledgeBase();
-                } else if (this.currentTab === 'packaging') {
-                    await this.loadPackagingRules();
-                } else if (this.currentTab === 'upsell') {
-                    await this.loadUpsellRules();
                 } else if (this.currentTab === 'settings') {
-                    await Promise.all([this.loadSettingsOrders(), this.loadSettingsEnvironment()]);
-                } else if (this.currentTab === 'team') {
-                    await this.loadTeam();
+                    if (this.settingsTab === 'connections') {
+                        await this.loadIntegrationStatus();
+                    } else if (this.settingsTab === 'smart_sales') {
+                        await this.loadUpsellRules();
+                    } else if (this.settingsTab === 'team') {
+                        await this.loadTeam();
+                    } else if (this.settingsTab === 'technical') {
+                        await Promise.all([this.loadSettingsOrders(), this.loadSettingsEnvironment()]);
+                    } else {
+                        // restaurant
+                        await Promise.all([this.loadOrgProfile(), this.loadKnowledgeBase(), this.loadPackagingRules()]);
+                    }
                 } else if (this.currentTab === 'chats') {
                     await this.loadChatList();
                 }
@@ -3357,6 +3481,9 @@ function adminMixinDataChartsSettings() {
                     charts.analytics.destroy();
                 } catch (_e) { /* ignore */ }
                 charts.analytics = null;
+            }
+            if (this.currentTab !== 'analytics') {
+                this._destroyAnalyticsSparklines();
             }
             this.tabDataLoading = false;
             // После layout (fade-in / flex) — отрисовка графиков не из реактивного цикла; пауза стабилизирует размер canvas.
@@ -3378,29 +3505,60 @@ function adminMixinDataChartsSettings() {
             });
         },
 
+        setSettingsTab(tab) {
+            const allowed = new Set(['restaurant', 'connections', 'smart_sales', 'team', 'technical']);
+            if (!allowed.has(String(tab || ''))) return;
+            this.currentTab = 'settings';
+            this.settingsTab = String(tab);
+            this.loadTabData();
+        },
+
         async loadDashStats() {
-            const { ok, status, data } = await this.apiJsonResponse('/api/admin/stats');
-            if (!ok) {
-                console.warn('GET /api/admin/stats', status, data);
-                // Не затираем уже загруженные KPI/серию: второй параллельный или повторный запрос
-                // с 401/502 иначе уничтожает график (renderDashboardMiniChart: destroy → пустая серия).
-                const prev = this.dashStats;
-                const keep =
-                    prev && Array.isArray(prev.daily_series) && prev.daily_series.length > 0;
-                if (!keep) {
-                    this.dashStats = {
-                        daily_series: [],
-                        today_revenue: 0,
-                        today_orders: 0,
-                        menu_items: 0,
-                        bookings: 0,
-                    };
-                }
-                return;
+            const initial = !this.dashStatsLoadedOnce;
+            if (initial) {
+                this.dashStatsLoading = true;
             }
-            this.dashStats = data;
-            await this.$nextTick();
-            // Мини-график: scheduleDashboardChartRender вызывается из loadTabData (задержка после layout) и при смене метрики.
+            try {
+                const { ok, status, data } = await this.apiJsonResponse('/api/admin/stats');
+                if (!ok) {
+                    console.warn('GET /api/admin/stats', status, data);
+                    // Не затираем уже загруженные KPI/серию: второй параллельный или повторный запрос
+                    // с 401/502 иначе уничтожает график (renderDashboardMiniChart: destroy → пустая серия).
+                    const prev = this.dashStats;
+                    const keep =
+                        prev && Array.isArray(prev.daily_series) && prev.daily_series.length > 0;
+                    if (!keep) {
+                        this.dashStats = {
+                            daily_series: [],
+                            today_revenue: 0,
+                            today_orders: 0,
+                            menu_items: 0,
+                            bookings: 0,
+                        };
+                    }
+                    return;
+                }
+                this.dashStats = data;
+                this.dashStatsLoadedOnce = true;
+                await this.$nextTick();
+                // Мини-график: scheduleDashboardChartRender вызывается из loadTabData (задержка после layout) и при смене метрики.
+            } finally {
+                this.dashStatsLoading = false;
+            }
+        },
+
+        async loadDashActivity() {
+            this.dashActivityLoading = true;
+            try {
+                const { ok, status, data } = await this.apiJsonResponse('/api/admin/activity?limit=25');
+                if (!ok) {
+                    console.warn('GET /api/admin/activity', status, data);
+                    return;
+                }
+                this.dashActivity = Array.isArray(data.items) ? data.items : [];
+            } finally {
+                this.dashActivityLoading = false;
+            }
         },
 
         /**
@@ -4254,25 +4412,31 @@ function adminMixinDataChartsSettings() {
         },
 
         async loadAnalytics() {
+            this.analyticsLoading = true;
             let url = `/api/admin/analytics?period=${this.analyticsPeriod}`;
             if (this.analyticsPeriod === 'custom' && this.analyticsFrom && this.analyticsTo) {
                 url += `&date_from=${this.analyticsFrom}&date_to=${this.analyticsTo}`;
             }
-            const { ok, status, data: raw } = await this.apiJsonResponse(url);
-            if (!ok) {
-                this.analyticsData = {
-                    daily: [],
-                    current: {},
-                    previous: {},
-                    top_items: [],
-                    changes: {},
-                };
-                console.warn('GET /api/admin/analytics', status, raw);
+            try {
+                const { ok, status, data: raw } = await this.apiJsonResponse(url);
+                if (!ok) {
+                    this.analyticsData = {
+                        daily: [],
+                        current: {},
+                        previous: {},
+                        ai: {},
+                        top_items: [],
+                        changes: {},
+                    };
+                    console.warn('GET /api/admin/analytics', status, raw);
+                    this.analyticsDailyDataRev = (this.analyticsDailyDataRev || 0) + 1;
+                    return;
+                }
+                this.analyticsData = raw;
                 this.analyticsDailyDataRev = (this.analyticsDailyDataRev || 0) + 1;
-                return;
+            } finally {
+                this.analyticsLoading = false;
             }
-            this.analyticsData = raw;
-            this.analyticsDailyDataRev = (this.analyticsDailyDataRev || 0) + 1;
         },
 
         /** Перерисовка графика аналитики после стабилизации layout (вызов из loadTabData или reloadAnalyticsForUi). */
@@ -4310,6 +4474,7 @@ function adminMixinDataChartsSettings() {
                     } catch (_e) { /* ignore */ }
                     charts.analytics = null;
                 }
+                this._destroyAnalyticsSparklines();
                 return;
             }
 
@@ -4327,89 +4492,189 @@ function adminMixinDataChartsSettings() {
                 return dd.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' });
             });
 
-            const m = this.analyticsChartMetric || 'both';
-            const hideRev = m === 'orders';
-            const hideOrd = m === 'revenue';
+            const revenueSeries = daily.map((d) => Number(d.revenue) || 0);
+            const aiSeries = daily.map((d) => Number(d.ai_profit) || 0);
+            const self = this;
+            const externalTooltipPlugin = {
+                id: 'rmExternalTooltip',
+                afterDraw(chart) {
+                    const tooltip = chart.tooltip;
+                    const parent = chart.canvas?.parentElement;
+                    if (!parent) return;
+                    parent.style.position = 'relative';
+
+                    let el = parent.querySelector('.rm-tooltip');
+                    if (!el) {
+                        el = document.createElement('div');
+                        el.className = 'rm-tooltip pointer-events-none absolute z-10 opacity-0 transition-opacity duration-75';
+                        el.innerHTML = '<div class="rounded-xl bg-slate-900 text-white shadow-lg ring-1 ring-white/10 px-3 py-2 text-xs"></div>';
+                        parent.appendChild(el);
+                    }
+
+                    const body = el.querySelector('div');
+                    if (!body) return;
+
+                    if (!tooltip || tooltip.opacity === 0 || !tooltip.dataPoints || tooltip.dataPoints.length === 0) {
+                        el.style.opacity = '0';
+                        return;
+                    }
+
+                    const dp = tooltip.dataPoints[0];
+                    const idx = Number(dp.dataIndex);
+                    const dateLabel = labels[idx] || '—';
+                    const rev = revenueSeries[idx] || 0;
+                    const aip = aiSeries[idx] || 0;
+                    body.innerHTML = `
+                      <div class="font-semibold mb-1">${dateLabel}</div>
+                      <div class="flex items-center justify-between gap-3"><span class="text-slate-200">Выручка</span><span class="font-bold tabular-nums">${adminFormat.moneyAmount(rev)} ₸</span></div>
+                      <div class="flex items-center justify-between gap-3"><span class="text-slate-200">Из них ботом</span><span class="font-bold tabular-nums text-indigo-200">${adminFormat.moneyAmount(aip)} ₸</span></div>
+                    `;
+
+                    const { chartArea } = chart;
+                    const x = tooltip.caretX;
+                    const y = tooltip.caretY;
+                    el.style.opacity = '1';
+                    el.style.left = Math.min(chartArea.right - 220, Math.max(chartArea.left + 8, x + 12)) + 'px';
+                    el.style.top = Math.min(chartArea.bottom - 60, Math.max(chartArea.top + 8, y - 18)) + 'px';
+
+                    const ctx2 = chart.ctx;
+                    ctx2.save();
+                    ctx2.beginPath();
+                    ctx2.moveTo(x, chartArea.top);
+                    ctx2.lineTo(x, chartArea.bottom);
+                    ctx2.strokeStyle = 'rgba(99, 102, 241, 0.25)';
+                    ctx2.lineWidth = 1;
+                    ctx2.stroke();
+                    ctx2.restore();
+                },
+            };
 
             try {
-            charts.analytics = new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels,
-                    datasets: [
-                        {
-                            label: 'Выручка (₸)',
-                            data: daily.map((d) => d.revenue),
-                            backgroundColor: 'rgba(37, 99, 235, 0.7)',
-                            borderRadius: 8,
-                            borderSkipped: false,
-                            yAxisID: 'y',
-                            order: 2,
-                            hidden: hideRev,
-                        },
-                        {
-                            label: 'Заказов',
-                            data: daily.map((d) => d.orders),
-                            type: 'line',
-                            borderColor: '#10b981',
-                            backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                            borderWidth: 2,
-                            pointRadius: 4,
-                            pointBackgroundColor: '#10b981',
-                            fill: true,
-                            tension: 0.3,
-                            yAxisID: 'y1',
-                            order: 1,
-                            hidden: hideOrd,
-                        },
-                    ],
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    interaction: { intersect: false, mode: 'index' },
-                    plugins: {
-                        legend: { position: 'top', labels: { usePointStyle: true, padding: 20 } },
-                        tooltip: {
-                            backgroundColor: '#1e293b',
-                            titleFont: { size: 13 },
-                            bodyFont: { size: 12 },
-                            padding: 12,
-                            cornerRadius: 10,
-                            callbacks: {
-                                label(ctx) {
-                                    if (ctx.dataset.yAxisID === 'y') {
-                                        return 'Выручка: ' + adminFormat.moneyAmount(ctx.raw) + ' ₸';
-                                    }
-                                    return 'Заказов: ' + ctx.raw;
+                charts.analytics = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels,
+                        datasets: [
+                            {
+                                label: 'Выручка',
+                                data: revenueSeries,
+                                borderColor: '#6366F1',
+                                borderWidth: 2,
+                                fill: true,
+                                backgroundColor: (context) => {
+                                    const chart = context.chart;
+                                    const { ctx: cctx, chartArea } = chart;
+                                    if (!chartArea) return 'rgba(99, 102, 241, 0.10)';
+                                    const g = cctx.createLinearGradient(0, chartArea.bottom, 0, chartArea.top);
+                                    g.addColorStop(0, 'rgba(99, 102, 241, 0.22)');
+                                    g.addColorStop(1, 'rgba(99, 102, 241, 0)');
+                                    return g;
                                 },
+                                tension: 0.4,
+                                pointRadius: 0,
+                                pointHoverRadius: 4,
+                                pointBackgroundColor: '#6366F1',
+                            },
+                            {
+                                label: 'AI Profit',
+                                data: aiSeries,
+                                borderColor: 'rgba(124, 58, 237, 0.9)',
+                                borderWidth: 2,
+                                fill: false,
+                                tension: 0.4,
+                                pointRadius: 0,
+                                pointHoverRadius: 4,
+                                pointBackgroundColor: 'rgba(124, 58, 237, 0.9)',
+                            },
+                        ],
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: { intersect: false, mode: 'index' },
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: { enabled: false },
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                ticks: {
+                                    callback: (v) => adminFormat.moneyAmount(v) + ' ₸',
+                                    font: { size: 11 },
+                                    color: '#64748b',
+                                },
+                                grid: { color: 'rgba(15, 23, 42, 0.06)', borderDash: [4, 4] },
+                            },
+                            x: {
+                                ticks: { font: { size: 11 }, color: '#64748b' },
+                                grid: { display: false },
                             },
                         },
                     },
-                    scales: {
-                        y: {
-                            display: !hideRev,
-                            beginAtZero: true,
-                            position: 'left',
-                            ticks: {
-                                callback: (v) => adminFormat.moneyAmount(v) + ' ₸',
-                                font: { size: 11 },
-                            },
-                            grid: { color: 'rgba(0,0,0,0.05)' },
-                        },
-                        y1: {
-                            display: !hideOrd,
-                            beginAtZero: true,
-                            position: 'right',
-                            ticks: { font: { size: 11 } },
-                            grid: { display: false },
-                        },
-                        x: { ticks: { font: { size: 11 } }, grid: { display: false } },
-                    },
-                },
-            });
+                    plugins: [externalTooltipPlugin],
+                });
             } catch (e) {
                 console.error('Chart.js (аналитика):', e);
+            }
+
+            // KPI sparklines render (tiny, no axes).
+            self._renderAnalyticsSparklines(daily);
+        },
+
+        _destroyAnalyticsSparklines() {
+            const obj = charts.analyticsSparks || {};
+            for (const k of Object.keys(obj)) {
+                const ch = obj[k];
+                if (!ch) continue;
+                try { ch.destroy(); } catch (_e) { /* ignore */ }
+            }
+            charts.analyticsSparks = {};
+        },
+
+        _renderAnalyticsSparklines(daily) {
+            this._destroyAnalyticsSparklines();
+            const defs = [
+                { id: 'sparkRevenue', key: 'revenue', color: '#6366F1' },
+                { id: 'sparkOrders', key: 'orders', color: '#0ea5e9' },
+                { id: 'sparkAvg', key: 'avg_check', color: '#10b981' },
+                { id: 'sparkAi', key: 'ai_profit', color: '#7c3aed' },
+            ];
+            for (const d of defs) {
+                const canvas = document.getElementById(d.id);
+                if (!canvas) continue;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) continue;
+                let series = [];
+                if (d.key === 'avg_check') {
+                    series = daily.map((row) => {
+                        const rev = Number(row.revenue) || 0;
+                        const ord = Number(row.orders) || 0;
+                        return ord ? rev / ord : 0;
+                    });
+                } else {
+                    series = daily.map((row) => Number(row[d.key]) || 0);
+                }
+                try {
+                    charts.analyticsSparks[d.id] = new Chart(ctx, {
+                        type: 'line',
+                        data: { labels: daily.map((row) => row.date), datasets: [{
+                            data: series,
+                            borderColor: d.color,
+                            borderWidth: 2,
+                            tension: 0.45,
+                            pointRadius: 0,
+                            fill: false,
+                        }]},
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: { legend: { display: false }, tooltip: { enabled: false } },
+                            scales: { x: { display: false }, y: { display: false } },
+                            elements: { line: { capBezierPoints: true } },
+                        },
+                    });
+                } catch (_e) { /* ignore */ }
             }
         },
 
@@ -4550,9 +4815,11 @@ function adminMixinDataChartsSettings() {
 
         // ─── Helpers ─────────────────────────────────
         formatTrendPct(pct) {
-            if (pct == null) return '';
-            const sign = pct > 0 ? '+' : '';
-            return sign + pct + '%';
+            const n = Number(pct);
+            if (!Number.isFinite(n)) return '';
+            if (n === 0) return '0%';
+            const sign = n > 0 ? '+' : '';
+            return sign + n + '%';
         },
     };
 }

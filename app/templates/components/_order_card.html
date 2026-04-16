@@ -1,0 +1,71 @@
+{# Reusable order UI blocks (Alpine-friendly). #}
+
+{% macro order_status_badge(order_var="order") -%}
+<span
+  :class="statusConfig[{{ order_var }}.status]?.class || 'bg-gray-100 text-gray-600'"
+  x-text="statusConfig[{{ order_var }}.status]?.label || {{ order_var }}.status"
+  class="px-2.5 py-1 rounded-full text-xs font-medium"
+></span>
+{%- endmacro %}
+
+{% macro order_card_row(order_var="order") -%}
+<tr class="border-b border-gray-50 hover:bg-blue-50/30 cursor-pointer transition" @click="openOrderDetails({{ order_var }})">
+  <td class="py-3 font-medium text-brand-600" x-text="'#' + {{ order_var }}.id"></td>
+  <td class="py-3">
+    {{ order_status_badge(order_var) }}
+  </td>
+  <td class="py-3 font-semibold" x-text="fmt.money({{ order_var }}.total_price)"></td>
+  <td class="py-3 text-gray-500" x-text="fmt.date({{ order_var }}.created_at)"></td>
+</tr>
+{%- endmacro %}
+
+{% macro order_card_mobile(order_var="order") -%}
+<button type="button"
+  class="w-full text-left px-4 py-3 flex flex-col gap-1 hover:bg-gray-50"
+  :class="{{ order_var }}.iiko_last_error ? 'bg-rose-50/80' : ''"
+  @click="openOrderDetails({{ order_var }})">
+  <div class="flex justify-between items-center gap-2">
+    <span class="font-bold text-brand-600" x-text="'#' + {{ order_var }}.id"></span>
+    <span class="text-sm font-semibold" x-text="fmt.money({{ order_var }}.total_price)"></span>
+  </div>
+  <div class="font-mono text-xs text-gray-700" x-text="{{ order_var }}.user_phone || '—'"></div>
+  <div class="flex flex-wrap items-center gap-2">
+    <span :class="statusConfig[{{ order_var }}.status]?.class || 'bg-gray-100 text-gray-600'"
+      x-text="statusConfig[{{ order_var }}.status]?.label || {{ order_var }}.status"
+      class="px-2 py-0.5 rounded-full text-[10px] font-medium"></span>
+    <span x-show="{{ order_var }}.order_type" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-800"
+      x-text="orderTypeBadge({{ order_var }})"></span>
+    <span x-show="orderHasUpsell({{ order_var }})" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200"
+      title="Upsell">UPSELL</span>
+    <span class="text-[10px] text-gray-400" x-text="fmt.date({{ order_var }}.created_at)"></span>
+  </div>
+</button>
+{%- endmacro %}
+
+{% macro order_card_kanban(stage_key="draft", base_surface_class="bg-white shadow-sm border border-gray-100") -%}
+<div class="kanban-card rounded-xl p-4 cursor-grab active:cursor-grabbing transition"
+  draggable="true"
+  @dragstart.stop="kanbanDragStart($event, order)"
+  @dragend="kanbanDragEnd()"
+  :class="kanbanOrderSurfaceClass(order, '{{ base_surface_class }}')"
+  @click="openOrderDetails(order)">
+  <div class="flex items-center justify-between mb-2">
+    <span class="font-bold text-brand-600 text-sm" x-text="'#' + order.id"></span>
+    <span class="text-[10px] text-gray-400" x-text="fmt.time(order.created_at)"></span>
+  </div>
+  <div class="flex flex-wrap gap-1 mb-1 items-center">
+    <span x-show="order.order_type" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-800 border border-indigo-100" x-text="orderTypeBadge(order)"></span>
+    <span :class="paymentKanbanBadgeClass(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded border tracking-wide" x-text="paymentMethodShort(order)"></span>
+    <span x-show="orderAwaitingOrderPrepay(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-400">ПРЕДОПЛАТА</span>
+    <span x-show="orderPlov1kgHint(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-50 text-violet-800 border border-violet-200 truncate max-w-[10rem]" x-text="orderPlov1kgHint(order)"></span>
+    <span x-show="orderHasUpsell(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200" title="Бот сделал допродажу">UPSELL</span>
+  </div>
+  <div class="text-xs font-mono text-gray-600 mb-1 truncate" x-show="order.user_phone" x-text="order.user_phone"></div>
+  <div class="text-xs text-gray-500 mb-2" x-text="(order.items?.items?.length || 0) + ' позиций'"></div>
+  <div class="text-sm font-bold text-gray-900" x-text="fmt.money(order.total_price)"></div>
+  <p class="text-[10px] mt-2 font-semibold leading-tight"
+    :class="orderTimerWarn(order, '{{ stage_key }}') ? 'text-red-600' : 'text-gray-500'"
+    x-text="orderTimerText(order, '{{ stage_key }}')"></p>
+</div>
+{%- endmacro %}
+

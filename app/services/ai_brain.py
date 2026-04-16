@@ -97,12 +97,18 @@ def _system_prompt_with_context(
     draft_order_context: str = "",
     sales_strategy_context: str = "",
     customer_context: str = "",
+    current_time_context: str = "",
 ) -> str:
     system_prompt = RESTAURANT_SYSTEM_PROMPT
     if (customer_context or "").strip():
         system_prompt += (
             "\n\n# Досье гостя (только факты с сервера; для тона и узнавания)\n"
             f"{customer_context.strip()}"
+        )
+    if (current_time_context or "").strip():
+        system_prompt += (
+            "\n\n# Текущее время заведения\n"
+            f"{current_time_context.strip()}"
         )
     if kb_context:
         system_prompt += f"\n\n# Справочник заведения (база знаний)\n{kb_context}"
@@ -145,6 +151,7 @@ async def call_openai(
     draft_order_context: str = "",
     sales_strategy_context: str = "",
     customer_context: str = "",
+    current_time_context: str = "",
     *,
     raise_on_transient: bool = True,
 ) -> AIBrainResponse:
@@ -158,6 +165,7 @@ async def call_openai(
         draft_order_context,
         sales_strategy_context,
         customer_context=customer_context,
+        current_time_context=current_time_context,
     )
     messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
     messages.extend(_history_to_openai_messages(history))
@@ -299,6 +307,7 @@ async def call_openai_with_audio(
     draft_order_context: str = "",
     sales_strategy_context: str = "",
     customer_context: str = "",
+    current_time_context: str = "",
 ) -> AIBrainResponse:
     """
     Голосовой ввод: Whisper → structured chat с тем же контрактом AIBrainResponse.
@@ -335,6 +344,7 @@ async def call_openai_with_audio(
         draft_order_context,
         sales_strategy_context,
         customer_context=customer_context,
+        current_time_context=current_time_context,
     )
     if result.recognized_speech is None or not str(result.recognized_speech).strip():
         return result.model_copy(update={"recognized_speech": transcript})

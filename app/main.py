@@ -12,7 +12,7 @@ from collections.abc import AsyncGenerator
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -591,6 +591,24 @@ async def health_check() -> dict:
     Только признак, что процесс жив — без запросов к БД.
     """
     return {"status": "ok"}
+
+
+@app.get("/admin/health", tags=["System"])
+async def admin_health_check() -> dict:
+    """
+    Отдельный health endpoint для внешних проверок, которые почему-то стучатся в /admin/health.
+    FastAPI автоматически обслуживает HEAD для GET.
+    """
+    return {"status": "ok"}
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon() -> Response:
+    """
+    В проде браузеры/healthcheck часто запрашивают /favicon.ico.
+    Делаем редирект на SVG в /static, чтобы не спамить 404 в логах.
+    """
+    return RedirectResponse(url="/static/favicon.svg", status_code=307)
 
 
 @app.get("/health/deep", tags=["System"])
