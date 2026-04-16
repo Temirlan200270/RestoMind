@@ -79,7 +79,11 @@ from app.services.order_logic import (
     merge_total_into_items_json,
 )
 from app.services.sales_strategy import build_sales_strategy, format_strategy_for_prompt
-from app.services.whatsapp_idempotency import try_claim_whatsapp_inbound_in_db
+from app.services.whatsapp_idempotency import (
+    mark_whatsapp_inbound_done,
+    mark_whatsapp_inbound_failed,
+    try_start_whatsapp_inbound_in_db,
+)
 from app.services.tts_edge import synthesize_speech_mp3
 
 logger = logging.getLogger(__name__)
@@ -652,16 +656,35 @@ async def process_with_retry(
                 org_id = await organization_id_for_whatsapp_value(db, webhook_value)
         except Exception as exc:
             logger.warning("organization_id resolve: %s", exc)
+    wmid = (whatsapp_message_id or "").strip()
+    if wmid:
+        try:
+            async with async_session_factory() as db:
+                can = await try_start_whatsapp_inbound_in_db(db, message_id=wmid, phone=phone)
+                await db.commit()
+            if not can:
+                return
+        except Exception as exc:
+            # Если дедуп-таблица недоступна, лучше не терять сообщение: продолжаем без БД-идемпотентности.
+            logger.warning("WhatsApp dedupe start failed (mid=%s): %s", wmid[:24], exc)
+
     last_exc: BaseException | None = None
     for attempt in range(MAX_RETRIES):
         try:
             await process_message(
                 phone,
                 message_text,
-                whatsapp_message_id=whatsapp_message_id,
+                whatsapp_message_id="",
                 voice_audio=voice_audio,
                 organization_id=org_id,
             )
+            if wmid:
+                try:
+                    async with async_session_factory() as db:
+                        await mark_whatsapp_inbound_done(db, wmid)
+                        await db.commit()
+                except Exception as exc:
+                    logger.warning("WhatsApp dedupe mark done failed (mid=%s): %s", wmid[:24], exc)
             return
         except Exception as exc:
             last_exc = exc
@@ -680,6 +703,13 @@ async def process_with_retry(
     await _save_failed_task(
         phone, message_text, str(last_exc), MAX_RETRIES, organization_id=org_id,
     )
+    if wmid:
+        try:
+            async with async_session_factory() as db:
+                await mark_whatsapp_inbound_failed(db, wmid, str(last_exc or "unknown_error"))
+                await db.commit()
+        except Exception as exc:
+            logger.warning("WhatsApp dedupe mark failed error (mid=%s): %s", wmid[:24], exc)
     try:
         await send_customer_text(phone, "Извините, произошла техническая ошибка. Мы уже работаем над ней — попробуйте написать чуть позже.")
     except Exception:
@@ -702,16 +732,6 @@ async def process_message(
             logger.warning("Rate limit: %s заблокирован", phone)
             await send_customer_text(phone, "Слишком много сообщений. Подождите минуту и попробуйте снова.")
             return
-
-        wmid = (whatsapp_message_id or "").strip()
-        if wmid:
-            async with async_session_factory() as dedupe_db:
-                if not await try_claim_whatsapp_inbound_in_db(
-                    dedupe_db, message_id=wmid, phone=phone,
-                ):
-                    logger.info("Повтор message_id=%s (БД) — обработка не запускается", wmid)
-                    return
-                await dedupe_db.commit()
 
         voice_bytes: bytes | None = None
         voice_mime = ""
@@ -909,6 +929,15 @@ async def process_message(
 
         outbound_id_chat: int | None = None
         tg_alert_ctx: EscalationAlertExtras | None = None
+        # 1) DB: собрать контекст без удержания соединения во время OpenAI
+        menu_items: list[MenuItem] = []
+        menu_context = ""
+        kb_context = ""
+        draft_row: Order | None = None
+        draft_ctx = ""
+        strategy_ctx = ""
+        customer_ctx = ""
+        u_row: User | None = None
         async with async_session_factory() as db:
             menu_items = await load_available_menu(db)
             menu_context = build_menu_context(menu_items)
@@ -924,7 +953,6 @@ async def process_message(
             draft_ctx = format_draft_order_context_for_prompt(
                 draft_row.items_json if draft_row else None,
             )
-            strategy_ctx = ""
             if draft_row and isinstance(draft_row.items_json, dict):
                 cart = [
                     x for x in (draft_row.items_json.get("items") or [])
@@ -936,40 +964,45 @@ async def process_message(
                 strategy_ctx = format_strategy_for_prompt(
                     build_sales_strategy(cart, total, meta_d, menu_items),
                 )
-            if had_voice:
-                if voice_bytes is None:
-                    return
-                ai_response = await call_openai_with_audio(
-                    history,
-                    voice_bytes,
-                    voice_mime,
-                    menu_context,
-                    kb_context,
-                    draft_order_context=draft_ctx,
-                    sales_strategy_context=strategy_ctx,
-                    customer_context=customer_ctx,
-                )
-                user_log_text = (ai_response.recognized_speech or "").strip() or "🎤 голосовое сообщение"
-                await append_to_history(
-                    redis_client, phone, "user", user_log_text, organization_id=organization_id,
-                )
-            else:
-                user_log_text = message_text
-                ai_response = await call_openai(
-                    history,
-                    message_text,
-                    menu_context,
-                    kb_context,
-                    draft_order_context=draft_ctx,
-                    sales_strategy_context=strategy_ctx,
-                    customer_context=customer_ctx,
-                )
 
-            log_pipeline_stage(
-                "llm_ok",
-                phone=phone,
-                extra={"intent": ai_response.intent, "voice": had_voice},
+        # 2) OpenAI: без DB-сессии
+        if had_voice:
+            if voice_bytes is None:
+                return
+            ai_response = await call_openai_with_audio(
+                history,
+                voice_bytes,
+                voice_mime,
+                menu_context,
+                kb_context,
+                draft_order_context=draft_ctx,
+                sales_strategy_context=strategy_ctx,
+                customer_context=customer_ctx,
             )
+            user_log_text = (ai_response.recognized_speech or "").strip() or "🎤 голосовое сообщение"
+            await append_to_history(
+                redis_client, phone, "user", user_log_text, organization_id=organization_id,
+            )
+        else:
+            user_log_text = message_text
+            ai_response = await call_openai(
+                history,
+                message_text,
+                menu_context,
+                kb_context,
+                draft_order_context=draft_ctx,
+                sales_strategy_context=strategy_ctx,
+                customer_context=customer_ctx,
+            )
+
+        log_pipeline_stage(
+            "llm_ok",
+            phone=phone,
+            extra={"intent": ai_response.intent, "voice": had_voice},
+        )
+
+        # 3) DB: короткая мутация/запись результатов
+        async with async_session_factory() as db:
             result = await route_intent(
                 db,
                 phone,

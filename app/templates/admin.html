@@ -807,6 +807,18 @@
                     </div>
                 </div>
 
+                <div x-show="ordersLoadError" x-cloak
+                    class="mb-4 rounded-xl border border-red-200 bg-red-50 text-red-800 px-4 py-3 text-sm">
+                    <div class="flex items-start gap-3">
+                        <div class="font-semibold">Ошибка загрузки заказов</div>
+                        <div class="flex-1" x-text="ordersLoadError"></div>
+                        <button type="button" class="text-red-900/70 hover:text-red-900 underline"
+                            @click="ordersLoadError = ''">
+                            скрыть
+                        </button>
+                    </div>
+                </div>
+
                 <!-- Доска по этапам: на узких экранах — горизонтальный snap-скролл колонок -->
                 <div x-show="ordersView === 'kanban'" class="flex lg:grid lg:grid-cols-3 gap-4 lg:gap-5 overflow-x-auto snap-x snap-mandatory lg:overflow-visible lg:snap-none pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 touch-pan-x">
                     <!-- DRAFT -->
@@ -1695,8 +1707,8 @@
                             Что показывает эта вкладка и кнопка синхронизации
                         </summary>
                         <div class="pb-2 pt-1 pl-6 border-l-2 border-orange-200 ml-1 text-xs text-gray-600 leading-relaxed">
-                            Список позиций с флагом «нет в наличии». Кнопка подтягивает актуальный стоп из iiko Cloud (те же учётные данные, что в .env).
-                            <span x-show="!integrationStatus.iiko_configured" class="text-amber-700 font-medium"> Настройте IIKO_* в .env.</span>
+                            Список позиций с флагом «нет в наличии». Кнопка подтягивает актуальный стоп из iiko Cloud (учётные данные берутся из настроек текущего филиала; для legacy — fallback на переменные окружения).
+                            <span x-show="!integrationStatus.iiko_configured" class="text-amber-700 font-medium"> Подключите iiko в этом разделе или задайте IIKO_* в окружении.</span>
                         </div>
                     </details>
                 </div>

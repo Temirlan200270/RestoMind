@@ -3,8 +3,9 @@
 """
 
 import logging
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +14,8 @@ from app.core.config import settings
 from app.db.models import WhatsappInboundDedupe
 
 logger = logging.getLogger(__name__)
+
+PROCESSING_STALE_AFTER = timedelta(minutes=15)
 
 
 async def try_claim_whatsapp_inbound_in_db(db: AsyncSession, *, message_id: str, phone: str) -> bool:
@@ -45,6 +48,81 @@ async def try_claim_whatsapp_inbound_in_db(db: AsyncSession, *, message_id: str,
     if not claimed:
         logger.info("Повтор message_id=%s (БД) от %s — пропуск обработки", mid, phone)
     return claimed
+
+
+async def try_start_whatsapp_inbound_in_db(db: AsyncSession, *, message_id: str, phone: str) -> bool:
+    """
+    Атомарно начинает обработку входящего сообщения.
+
+    True — сообщение можно обрабатывать.
+    False — дубль уже обработан или прямо сейчас обрабатывается другим воркером.
+    """
+    mid = (message_id or "").strip()
+    if not mid:
+        return True
+
+    now = datetime.now(timezone.utc)
+    stale_before = now - PROCESSING_STALE_AFTER
+
+    values = {
+        "message_id": mid,
+        "phone": phone,
+        "status": "processing",
+        "attempts": 1,
+        "error": "",
+        "claimed_at": now,
+    }
+    insert_stmt = sqlite_insert(WhatsappInboundDedupe) if settings.db_mode == "sqlite" else pg_insert(WhatsappInboundDedupe)
+    inserted = await db.execute(insert_stmt.values(**values).on_conflict_do_nothing(index_elements=["message_id"]))
+    if (inserted.rowcount or 0) > 0:
+        return True
+
+    reclaimed = await db.execute(
+        update(WhatsappInboundDedupe)
+        .where(
+            WhatsappInboundDedupe.message_id == mid,
+            or_(
+                WhatsappInboundDedupe.status == "failed",
+                WhatsappInboundDedupe.claimed_at < stale_before,
+            ),
+        )
+        .values(
+            phone=phone,
+            status="processing",
+            attempts=WhatsappInboundDedupe.attempts + 1,
+            error="",
+            claimed_at=now,
+            processed_at=None,
+        )
+    )
+    if (reclaimed.rowcount or 0) > 0:
+        logger.info("Повторная обработка message_id=%s после failed/stale состояния", mid)
+        return True
+
+    logger.info("Повтор message_id=%s уже обработан или выполняется — пропуск", mid)
+    return False
+
+
+async def mark_whatsapp_inbound_done(db: AsyncSession, message_id: str) -> None:
+    mid = (message_id or "").strip()
+    if not mid:
+        return
+    await db.execute(
+        update(WhatsappInboundDedupe)
+        .where(WhatsappInboundDedupe.message_id == mid)
+        .values(status="done", error="", processed_at=datetime.now(timezone.utc))
+    )
+
+
+async def mark_whatsapp_inbound_failed(db: AsyncSession, message_id: str, error: str) -> None:
+    mid = (message_id or "").strip()
+    if not mid:
+        return
+    await db.execute(
+        update(WhatsappInboundDedupe)
+        .where(WhatsappInboundDedupe.message_id == mid)
+        .values(status="failed", error=(error or "")[:2000])
+    )
 
 
 async def inbound_already_processed_in_db(db: AsyncSession, message_id: str) -> bool:

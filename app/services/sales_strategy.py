@@ -10,6 +10,7 @@ import re
 from dataclasses import dataclass, field
 
 from app.db.models import MenuItem
+from app.services.upsell_utils import cart_iiko_ids, rejected_upsell_iiko_ids
 
 
 def _norm_name(s: str) -> str:
@@ -51,14 +52,8 @@ _DRINK_CAT_HINTS = ("напит", "кофе", "чай", "бар", "сок")
 
 
 def _cart_iiko_ids(cart_items: list[dict]) -> set[str]:
-    out: set[str] = set()
-    for it in cart_items:
-        if not isinstance(it, dict):
-            continue
-        iid = (it.get("iiko_id") or "").strip()
-        if iid:
-            out.add(iid.lower())
-    return out
+    # backward-compatible name: used below in build_sales_strategy
+    return cart_iiko_ids([x for x in cart_items if isinstance(x, dict)])
 
 
 def _line_text(it: dict) -> str:
@@ -112,11 +107,8 @@ def _offered_iiko_ids(meta: dict) -> set[str]:
 
 
 def _rejected_iiko_ids(meta: dict) -> set[str]:
-    """UUID отказов по допродажам (order_meta.upsell_rejected_iiko_ids)."""
-    raw = meta.get("upsell_rejected_iiko_ids")
-    if not isinstance(raw, list):
-        return set()
-    return {str(x).strip().lower() for x in raw if str(x).strip()}
+    # backward-compatible name: used below in build_sales_strategy
+    return rejected_upsell_iiko_ids(meta)
 
 
 def _rejected_names(meta: dict) -> set[str]:

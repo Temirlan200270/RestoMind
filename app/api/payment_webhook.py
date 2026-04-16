@@ -74,12 +74,16 @@ async def _run_payment_webhook(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
 
-    if (
+    should_notify = (
         out.get("ok")
         and not out.get("duplicate")
         and body.status == "paid"
         and (out.get("prepayment_status") or "").strip().lower() == "paid"
-    ):
+    )
+
+    await db.commit()
+
+    if should_notify:
         from app.services.task_queue import enqueue_job
 
         ok = await enqueue_job("payment_notify_customer", order_id=int(body.order_id))

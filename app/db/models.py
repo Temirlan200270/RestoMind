@@ -126,6 +126,7 @@ class OrderStatus(StrEnum):
 
     DRAFT = "draft"
     CONFIRMED = "confirmed"
+    SENDING_TO_IIKO = "sending_to_iiko"
     SENT_TO_IIKO = "sent_to_iiko"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
@@ -365,6 +366,19 @@ class WhatsappInboundDedupe(Base):
 
     message_id: Mapped[str] = mapped_column(String(128), primary_key=True, comment="id сообщения из вебхука Meta")
     phone: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="processing",
+        server_default="processing",
+        comment="processing | done | failed",
+    )
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    error: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    claimed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False,
+    )
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -647,6 +661,9 @@ class PaymentEvent(Base):
     """
 
     __tablename__ = "payment_events"
+    __table_args__ = (
+        UniqueConstraint("order_id", "event_type", "note", name="uq_payment_event_idempotency"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     order_id: Mapped[int] = mapped_column(

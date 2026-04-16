@@ -574,6 +574,10 @@ class OrderPatchBody(BaseModel):
     """Смена статуса заказа из админки (канбан, ручное подтверждение)."""
 
     status: str = Field(..., description="draft | confirmed | sent_to_iiko | …")
+    expected_version: int | None = Field(
+        default=None,
+        description="Ожидаемая row_version; при рассинхроне — 409.",
+    )
 
 
 class AdminFoodLineIn(BaseModel):
@@ -715,6 +719,8 @@ async def patch_order_status(
 
     org_id = admin_org_from_session(request)
     order = await _order_in_org(db, order_id, org_id)
+    if body.expected_version is not None and int(order.row_version or 0) != int(body.expected_version):
+        raise HTTPException(status_code=409, detail="Заказ изменился. Обновите список.")
     phone = await db.scalar(select(User.phone).where(User.id == order.user_id))
     phone_s = (phone or "").strip()
 
@@ -764,35 +770,110 @@ async def patch_order_status(
 
     # Подтверждён, но iiko не принял — повторная отправка на кухню
     if cur == OrderStatus.CONFIRMED.value and want == OrderStatus.SENT_TO_IIKO.value:
+        expected = (
+            int(body.expected_version)
+            if body.expected_version is not None
+            else int(order.row_version or 0)
+        )
+        claimed = (
+            await db.execute(
+                update(Order)
+                .where(
+                    Order.id == order.id,
+                    Order.organization_id == org_id,
+                    Order.status == OrderStatus.CONFIRMED.value,
+                    Order.row_version == expected,
+                )
+                .values(
+                    status=OrderStatus.SENDING_TO_IIKO.value,
+                    row_version=Order.row_version + 1,
+                    iiko_last_error=None,
+                )
+            )
+        ).rowcount
+        if claimed != 1:
+            raise HTTPException(status_code=409, detail="Заказ уже изменён или отправляется в iiko")
+        await db.commit()
+
         sent_to_iiko, iiko_err, iiko_raw = await _send_order_to_iiko(
             order_id=order.id,
             phone=phone_s,
             items_json=order.items_json,
             restaurant_organization_id=int(order.organization_id or org_id),
         )
-        if sent_to_iiko:
-            order.status = OrderStatus.SENT_TO_IIKO.value
-            order.iiko_last_error = None
-            if iiko_raw and isinstance(order.items_json, dict):
-                ij = dict(order.items_json)
-                raw_om = ij.get("order_meta")
-                om: dict = dict(raw_om) if isinstance(raw_om, dict) else {}
-                oi = iiko_raw.get("orderInfo") if isinstance(iiko_raw.get("orderInfo"), dict) else {}
-                om["iiko_last_send"] = {
-                    "correlation_id": iiko_raw.get("correlationId"),
-                    "iiko_order_id": oi.get("id"),
-                    "external_number": str(order.id),
-                    "sent_at": datetime.now(timezone.utc).isoformat(),
-                }
-                ij["order_meta"] = om
-                order.items_json = ij
-            await db.commit()
-            return await _emit(order)
-        if iiko_err:
-            order.iiko_last_error = iiko_err
-            await db.commit()
-            return await _emit(order)
-        raise HTTPException(status_code=502, detail="Не удалось отправить в iiko")
+
+        async with async_session_factory() as db2:
+            locked = await _order_in_org(db2, order.id, org_id)
+            if sent_to_iiko:
+                locked.status = OrderStatus.SENT_TO_IIKO.value
+                locked.iiko_last_error = None
+                if iiko_raw and isinstance(locked.items_json, dict):
+                    ij = dict(locked.items_json)
+                    raw_om = ij.get("order_meta")
+                    om: dict = dict(raw_om) if isinstance(raw_om, dict) else {}
+                    oi = iiko_raw.get("orderInfo") if isinstance(iiko_raw.get("orderInfo"), dict) else {}
+                    om["iiko_last_send"] = {
+                        "correlation_id": iiko_raw.get("correlationId"),
+                        "iiko_order_id": oi.get("id"),
+                        "external_number": str(locked.id),
+                        "sent_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                    ij["order_meta"] = om
+                    locked.items_json = ij
+            else:
+                locked.status = OrderStatus.CONFIRMED.value
+                locked.iiko_last_error = iiko_err or "iiko: неизвестная ошибка"
+            locked.row_version = int(locked.row_version or 0) + 1
+            await db2.commit()
+            items_json = locked.items_json if isinstance(locked.items_json, dict) else None
+            meta = order_meta_from_items_json(items_json)
+            order_public = {
+                "id": locked.id,
+                "user_id": locked.user_id,
+                "user_phone": phone_s,
+                "user_name": None,
+                "status": locked.status,
+                "items": locked.items_json,
+                "items_count": _order_items_count(items_json),
+                "total_price": float(locked.total_price),
+                "created_at": locked.created_at.isoformat() if locked.created_at else None,
+                "updated_at": locked.updated_at.isoformat() if locked.updated_at else None,
+                "iiko_last_error": locked.iiko_last_error,
+                "order_type": meta.get("order_type"),
+                "payment_method": meta.get("payment_method"),
+                "delivery_address": meta.get("delivery_address") or "",
+                "booking_id": locked.booking_id,
+                "booking": _booking_public(locked.booking),
+                "prepayment_status": getattr(locked, "prepayment_status", None) or "not_required",
+                "payment_link_url": getattr(locked, "payment_link_url", None),
+                "payment_provider": getattr(locked, "payment_provider", None),
+                "external_payment_id": getattr(locked, "external_payment_id", None),
+                "payment_amount_captured": (
+                    float(locked.payment_amount_captured)
+                    if getattr(locked, "payment_amount_captured", None) is not None
+                    else None
+                ),
+                "row_version": int(getattr(locked, "row_version", 1) or 1),
+                "payment_split_warning": _check_mixed_payment_split(items_json, float(locked.total_price)),
+            }
+            await publish_event(
+                "order_updated",
+                {
+                    "order_id": locked.id,
+                    "status": locked.status,
+                    "phone": phone_s,
+                    "total_price": float(locked.total_price),
+                    "iiko_last_error": locked.iiko_last_error,
+                    "organization_id": org_id,
+                    "order": order_public,
+                },
+            )
+            return {
+                "ok": True,
+                "id": locked.id,
+                "status": locked.status,
+                "iiko_last_error": locked.iiko_last_error,
+            }
 
     raise HTTPException(
         status_code=400,

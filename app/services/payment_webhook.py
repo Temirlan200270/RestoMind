@@ -8,9 +8,12 @@ import re
 from typing import Literal
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Order, PaymentEvent
+from app.core.config import settings
 
 PaymentWebhookStatus = Literal["paid", "failed"]
 
@@ -53,53 +56,42 @@ async def apply_payment_webhook(
     note_key = _idempotency_note(prov, payment_id)
 
     if status == "paid":
-        existing = await db.scalar(
-            select(PaymentEvent.id).where(
-                PaymentEvent.order_id == order.id,
-                PaymentEvent.event_type == "webhook_paid",
-                PaymentEvent.note == note_key,
-            ).limit(1),
+        insert_stmt = sqlite_insert(PaymentEvent) if settings.db_mode == "sqlite" else pg_insert(PaymentEvent)
+        stmt = (
+            insert_stmt.values(
+                order_id=order.id,
+                event_type="webhook_paid",
+                actor="webhook",
+                amount=float(amount) if amount is not None else float(order.total_price or 0),
+                note=note_key,
+            ).on_conflict_do_nothing(
+                index_elements=["order_id", "event_type", "note"],
+            )
         )
-        if existing is not None:
-            return {
-                "ok": True,
-                "duplicate": True,
-                "prepayment_status": order.prepayment_status,
-            }
+        res = await db.execute(stmt)
+        if (res.rowcount or 0) == 0:
+            return {"ok": True, "duplicate": True, "prepayment_status": order.prepayment_status}
         order.prepayment_status = "paid"
         amt = float(amount) if amount is not None else float(order.total_price or 0)
         ext_id = (payment_id or "").strip()[:200]
         order.payment_provider = prov
         order.external_payment_id = ext_id
         order.payment_amount_captured = amt
-        db.add(
-            PaymentEvent(
-                order_id=order.id,
-                event_type="webhook_paid",
-                actor="webhook",
-                amount=amt,
-                note=note_key,
-            ),
-        )
         return {"ok": True, "duplicate": False, "prepayment_status": order.prepayment_status}
 
-    existing_fail = await db.scalar(
-        select(PaymentEvent.id).where(
-            PaymentEvent.order_id == order.id,
-            PaymentEvent.event_type == "webhook_failed",
-            PaymentEvent.note == note_key,
-        ).limit(1),
-    )
-    if existing_fail is not None:
-        return {"ok": True, "duplicate": True, "prepayment_status": order.prepayment_status}
-
-    db.add(
-        PaymentEvent(
+    insert_stmt_f = sqlite_insert(PaymentEvent) if settings.db_mode == "sqlite" else pg_insert(PaymentEvent)
+    stmt_f = (
+        insert_stmt_f.values(
             order_id=order.id,
             event_type="webhook_failed",
             actor="webhook",
             amount=float(amount) if amount is not None else None,
             note=note_key,
-        ),
+        ).on_conflict_do_nothing(
+            index_elements=["order_id", "event_type", "note"],
+        )
     )
+    res_f = await db.execute(stmt_f)
+    if (res_f.rowcount or 0) == 0:
+        return {"ok": True, "duplicate": True, "prepayment_status": order.prepayment_status}
     return {"ok": True, "duplicate": False, "prepayment_status": order.prepayment_status}

@@ -254,6 +254,8 @@ function adminMixinState() {
         // Дашборд
         dashStats: {},
         orders: [],
+        _ordersLoadSeq: 0,
+        ordersLoadError: '',
         bookings: [],
         menuItems: [],
 
@@ -1260,8 +1262,6 @@ function adminMixinMenuOrdersUi() {
             if (!this.selectedOrder) return;
             const st = String(this.selectedOrder.status || '').toLowerCase();
             if (st !== 'draft' && st !== 'confirmed') return;
-            this.orderRebuildLoading = true;
-            this.orderRebuildError = '';
             const food_lines = [];
             for (const line of this.orderEditLines) {
                 const name = (line.name || '').trim();
@@ -1276,41 +1276,9 @@ function adminMixinMenuOrdersUi() {
             }
             if (food_lines.length === 0) {
                 this.orderRebuildError = 'Добавьте хотя бы одну позицию с названием';
-                this.orderRebuildLoading = false;
                 return;
             }
-            try {
-                const { ok, data } = await this.apiJsonResponse(
-                    `/api/admin/orders/${this.selectedOrder.id}/rebuild-draft`,
-                    {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            food_lines,
-                            expected_version: this.selectedOrder.row_version,
-                        }),
-                    },
-                );
-                if (!ok) {
-                    const d = data.detail;
-                    this.orderRebuildError = typeof d === 'string' ? d : JSON.stringify(d || data);
-                    return;
-                }
-                await this.loadOrders();
-                const updated = this.orders.find((o) => o.id === this.selectedOrder.id);
-                if (updated) {
-                    this.selectedOrder = updated;
-                    this.initOrderRebuildFromSelected();
-                    this.initOrderCompositionLinesFromSelected();
-                    this.orderCompositionOpen = false;
-                    this.syncOrderPaymentFormFromSelected();
-                }
-                await this.loadDashStats();
-            } catch {
-                this.orderRebuildError = 'Ошибка сети';
-            } finally {
-                this.orderRebuildLoading = false;
-            }
+            await this.submitOrderRebuild({ food_lines, closeComposition: true });
         },
 
         async kanbanDrop(ev, targetCol) {
@@ -1330,10 +1298,14 @@ function adminMixinMenuOrdersUi() {
 
         async patchOrderStatus(orderId, status) {
             try {
+                const local = (this.orders || []).find((o) => Number(o.id) === Number(orderId));
                 const { ok, data } = await this.apiJsonResponse(`/api/admin/orders/${orderId}`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ status }),
+                    body: JSON.stringify({
+                        status,
+                        expected_version: local?.row_version ?? null,
+                    }),
                 });
                 if (!ok) {
                     void this.showUiAlert(this.formatApiError(data.detail) || 'Не удалось обновить статус', 'Ошибка');
@@ -2639,6 +2611,10 @@ function adminMixinWebSocketEvents() {
             if (!this.authenticated || !this.wsToken) return;
             this._clearWsReadyTimer();
             this.wsChannelReady = false;
+            if (this._wsReconnectTimer) {
+                clearTimeout(this._wsReconnectTimer);
+                this._wsReconnectTimer = null;
+            }
             // Не держим два сокета одновременно — иначе события (order_updated/new_message) будут дублироваться.
             try {
                 const rs0 = this.ws?.readyState;
@@ -2692,7 +2668,11 @@ function adminMixinWebSocketEvents() {
         },
 
         scheduleReconnect() {
-            setTimeout(() => {
+            if (this._wsReconnectTimer) {
+                clearTimeout(this._wsReconnectTimer);
+            }
+            this._wsReconnectTimer = setTimeout(() => {
+                this._wsReconnectTimer = null;
                 if (!this.authenticated) return;
                 this.wsEpoch++;
                 this.wsReconnectDelay = Math.min(this.wsReconnectDelay * 1.5, 15000);
@@ -2883,8 +2863,13 @@ function adminMixinWebSocketEvents() {
             const idx = this.orders.findIndex((o) => Number(o.id) === oid);
 
             if (data.order) {
-                if (idx >= 0) this.orders.splice(idx, 1, data.order);
-                else this.orders.unshift(data.order);
+                const incoming = data.order;
+                const prev = idx >= 0 ? this.orders[idx] : null;
+                if (prev && Number(prev.row_version || 0) > Number(incoming.row_version || 0)) {
+                    return;
+                }
+                if (idx >= 0) this.orders.splice(idx, 1, incoming);
+                else this.orders.unshift(incoming);
             } else {
                 // Если событие не несёт полный заказ — синхронизируемся по REST.
                 void this.loadOrders();
@@ -3488,6 +3473,8 @@ function adminMixinDataChartsSettings() {
         },
 
         async loadOrders() {
+            const reqId = ++this._ordersLoadSeq;
+            this.ordersLoadError = '';
             const p = new URLSearchParams();
             p.set('limit', '200');
             if (this.orderFilter) p.set('status', this.orderFilter);
@@ -3502,11 +3489,21 @@ function adminMixinDataChartsSettings() {
                 p.set('sum_max', String(Number(smax)));
             }
             const { ok, status, data } = await this.apiJsonResponse(`/api/admin/orders?${p.toString()}`);
+            if (reqId !== this._ordersLoadSeq) return;
             if (!ok) {
-                console.warn('[admin] loadOrders', status, data);
+                this.ordersLoadError = this.formatApiError(data?.detail) || `Не удалось загрузить заказы (${status})`;
+                void this.showUiAlert(this.ordersLoadError, 'Ошибка');
                 return;
             }
-            this.orders = data.orders || [];
+            const incoming = Array.isArray(data.orders) ? data.orders : [];
+            const byId = new Map((this.orders || []).map((o) => [Number(o.id), o]));
+            this.orders = incoming.map((next) => {
+                const prev = byId.get(Number(next?.id));
+                if (prev && Number(prev.row_version || 0) > Number(next?.row_version || 0)) {
+                    return prev;
+                }
+                return next;
+            });
         },
 
         async loadFailedTasks() {
@@ -3564,30 +3561,40 @@ function adminMixinDataChartsSettings() {
 
         async submitOrderRebuildDraft() {
             if (!this.selectedOrder || this.selectedOrder.status !== 'draft') return;
-            this.orderRebuildLoading = true;
             this.orderRebuildError = '';
             let food_lines;
             try {
                 food_lines = JSON.parse(this.orderRebuildDraftJson || '[]');
             } catch {
                 this.orderRebuildError = 'Некорректный JSON: проверьте кавычки, запятые и скобки. Можно проверить текст во внешнем валидаторе JSON. Поле не очищено — исправьте и отправьте снова.';
-                this.orderRebuildLoading = false;
                 return;
             }
             if (!Array.isArray(food_lines) || food_lines.length === 0) {
                 this.orderRebuildError = 'Нужен непустой массив позиций';
-                this.orderRebuildLoading = false;
                 return;
             }
+            await this.submitOrderRebuild({ food_lines });
+        },
+
+        async submitOrderRebuild({ food_lines, closeComposition = false } = {}) {
+            if (!this.selectedOrder) return;
+            const st = String(this.selectedOrder.status || '').toLowerCase();
+            if (st !== 'draft' && st !== 'confirmed') return;
+
+            this.orderRebuildLoading = true;
+            this.orderRebuildError = '';
             try {
-                const { ok, data } = await this.apiJsonResponse(`/api/admin/orders/${this.selectedOrder.id}/rebuild-draft`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        food_lines,
-                        expected_version: this.selectedOrder.row_version,
-                    }),
-                });
+                const { ok, data } = await this.apiJsonResponse(
+                    `/api/admin/orders/${this.selectedOrder.id}/rebuild-draft`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            food_lines,
+                            expected_version: this.selectedOrder.row_version,
+                        }),
+                    },
+                );
                 if (!ok) {
                     const d = data.detail;
                     this.orderRebuildError = typeof d === 'string' ? d : JSON.stringify(d || data);
@@ -3601,6 +3608,9 @@ function adminMixinDataChartsSettings() {
                 if (updated) {
                     this.selectedOrder = updated;
                     this.initOrderRebuildFromSelected();
+                    this.initOrderCompositionLinesFromSelected();
+                    this.syncOrderPaymentFormFromSelected();
+                    if (closeComposition) this.orderCompositionOpen = false;
                 }
                 await this.loadDashStats();
             } catch {

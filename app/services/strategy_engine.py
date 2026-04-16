@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import MenuItem, UpsellRule
 from app.schemas.ai_schemas import AIBrainResponse
+from app.services.upsell_utils import cart_iiko_ids, rejected_upsell_iiko_ids
 
 logger = logging.getLogger(__name__)
 
@@ -25,22 +26,9 @@ def _cart_categories(items: list[dict[str, Any]]) -> set[str]:
     return out
 
 
-def _cart_iiko_ids(items: list[dict[str, Any]]) -> set[str]:
-    s: set[str] = set()
-    for it in items:
-        if not isinstance(it, dict):
-            continue
-        iid = str(it.get("iiko_id") or "").strip().lower()
-        if iid:
-            s.add(iid)
-    return s
-
-
 def _rejected_iiko(meta: dict[str, Any]) -> set[str]:
-    raw = meta.get("upsell_rejected_iiko_ids")
-    if not isinstance(raw, list):
-        return set()
-    return {str(x).strip().lower() for x in raw if str(x).strip()}
+    # backward-compatible name: used only inside this module
+    return rejected_upsell_iiko_ids(meta)
 
 
 def _offered_recently(meta: dict[str, Any], iiko_id: str) -> bool:
@@ -120,7 +108,7 @@ async def apply_db_upsell_rules(
         return reply_text, items_json
 
     cats = _cart_categories(items)
-    in_cart = _cart_iiko_ids(items)
+    in_cart = cart_iiko_ids(items)
     rejected = _rejected_iiko(meta)
 
     for rule in rules:
