@@ -14,6 +14,7 @@ from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import settings
+from app.db.ssl_context import postgres_connect_args
 
 logger = logging.getLogger(__name__)
 
@@ -26,11 +27,7 @@ if settings.db_mode == "postgres":
     engine_kwargs.update(pool_size=20, max_overflow=10, pool_pre_ping=True)
     # Не полагаемся на `?sslmode=` в DATABASE_URL (SQLAlchemy/asyncpg иногда превращают это в kwargs).
     # TLS включаем явно через connect_args.
-    ssl_ctx = ssl.create_default_context()
-    if settings.redis_ssl_skip_verify:
-        ssl_ctx.check_hostname = False
-        ssl_ctx.verify_mode = ssl.CERT_NONE
-    engine_kwargs["connect_args"] = {"ssl": ssl_ctx}
+    engine_kwargs["connect_args"] = postgres_connect_args(settings.database_url)
 
 async_engine = create_async_engine(settings.database_url, **engine_kwargs)
 

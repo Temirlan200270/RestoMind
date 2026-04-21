@@ -5,7 +5,6 @@
 
 import asyncio
 import os
-import ssl
 from logging.config import fileConfig
 
 from alembic import context
@@ -14,6 +13,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.core.config import settings
 from app.db.models import Base
+from app.db.ssl_context import postgres_connect_args
 
 config = context.config
 
@@ -49,22 +49,10 @@ def do_run_migrations(connection) -> None:
 async def run_async_migrations() -> None:
     """Запуск миграций через асинхронный движок."""
     url = settings.database_url
-    connect_args = {}
-    # Supabase / managed Postgres обычно требуют TLS. asyncpg принимает `ssl` как bool/SSLContext.
-    # В норме используем системный trust store (verify-full). Если у окружения нет CA цепочки,
-    # лучше чинить trust store, а не отключать верификацию.
-    if url.startswith("postgresql"):
-        ctx = ssl.create_default_context()
-        try:
-            import certifi
-
-            ctx.load_verify_locations(certifi.where())
-        except Exception:
-            pass
-        if (os.environ.get("ALEMBIC_SSL_NO_VERIFY") or "").strip().lower() in {"1", "true", "yes"}:
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-        connect_args = {"ssl": ctx}
+    # Совместимость: раньше использовали только ALEMBIC_SSL_NO_VERIFY
+    if (os.environ.get("ALEMBIC_SSL_NO_VERIFY") or "").strip().lower() in {"1", "true", "yes"}:
+        os.environ.setdefault("DATABASE_SSL_SKIP_VERIFY", "true")
+    connect_args = postgres_connect_args(url)
     connectable = async_engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",

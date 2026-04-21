@@ -475,8 +475,9 @@ class Settings(BaseSettings):
                     q = dict(parse_qsl(parsed.query, keep_blank_values=True))
                     if "sslmode" in q:
                         q.pop("sslmode", None)
-                        # asyncpg принимает `ssl` как bool/SSLContext; `ssl=true` достаточно для require
-                        q.setdefault("ssl", "true")
+                        # TLS для asyncpg задаём явно через `connect_args` (см. `app/db/ssl_context.py`),
+                        # поэтому не оставляем `ssl=` в query string — иначе возможны коллизии/разный режим verify.
+                        q.pop("ssl", None)
                         raw = urlunparse(
                             (parsed.scheme, parsed.netloc, parsed.path, parsed.params, urlencode(q), parsed.fragment)
                         )
