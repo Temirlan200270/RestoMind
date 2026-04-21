@@ -464,6 +464,24 @@ class Settings(BaseSettings):
         """DSN для подключения к БД — SQLite или PostgreSQL в зависимости от режима."""
         raw = self.database_url_dsn.strip()
         if raw:
+            # Supabase часто даёт `?sslmode=require` (psql/psycopg). Для asyncpg это невалидный kwargs,
+            # поэтому конвертируем в `ssl=true` и выкидываем sslmode.
+            try:
+                from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+
+                parsed = urlparse(raw)
+                # Поддерживаем схемы вида `postgresql+asyncpg://...` тоже
+                if parsed.scheme.startswith("postgres") and parsed.query:
+                    q = dict(parse_qsl(parsed.query, keep_blank_values=True))
+                    if "sslmode" in q:
+                        q.pop("sslmode", None)
+                        # asyncpg принимает `ssl` как bool/SSLContext; `ssl=true` достаточно для require
+                        q.setdefault("ssl", "true")
+                        raw = urlunparse(
+                            (parsed.scheme, parsed.netloc, parsed.path, parsed.params, urlencode(q), parsed.fragment)
+                        )
+            except Exception:
+                pass
             # Render и др.: postgresql:// или postgres://
             if raw.startswith("postgres://"):
                 rest = raw[len("postgres://") :]

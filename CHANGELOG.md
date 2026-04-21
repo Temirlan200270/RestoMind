@@ -8,6 +8,7 @@
 
 ### Изменено
 
+- **Деплой / БД:** добавлен [docs/SUPABASE_MIGRATION.md](docs/SUPABASE_MIGRATION.md) (Render Postgres → Supabase, Alembic, env); [render.yaml](render.yaml) — внешний секрет `DATABASE_URL` вместо managed PostgreSQL в Blueprint.
 - **AI:** чат и STT на **OpenAI** — structured output (`call_openai`, `beta.chat.completions.parse`), голос — **Whisper** (`openai_transcribe_voice`, `call_openai_with_audio`). Переменные окружения: `OPENAI_API_KEY`, опционально `OPENAI_MODEL`, `OPENAI_TRANSCRIPTION_MODEL`. Удалена зависимость `google-genai`.
 
 ### Добавлено
@@ -32,7 +33,7 @@
 - **Админка — интеграции:** вкладка «Интеграции» — индикатор последней синхронизации **стоп-листа** iiko (зелёный / красный / жёлтый до первого цикла), флаг настройки **WhatsApp**, кнопка **«Синхронизировать меню и стоп-листы сейчас»** (`POST /api/admin/integrations/sync`, учётные данные из `.env`). API: `GET /api/admin/integrations/status`.
 - **Ошибки iiko по заказам:** поле `orders.iiko_last_error` — при неудачной отправке подтверждённого заказа в iiko текст сохраняется; в списке/канбане/карточке заказа показывается алерт **«Ошибка iiko: …»**; событие WebSocket `order_updated` передаёт `iiko_last_error`.
 - **Таблица `integration_health`:** одна строка с метками времени и результатом последних синхронизаций меню и стоп-листа; фоновый цикл в `main.py` обновляет статус стоп-листа при успехе и ошибке.
-- **Деплой на Render:** `render.yaml` (Blueprint: Web Service + PostgreSQL `free`), `DEPLOY_RENDER.md`, `docs/VERCEL.md`; в конфиге поддержка `DATABASE_URL` (managed Postgres) и `CMD` Docker с `PORT`; миграции через `preDeployCommand: alembic upgrade head`.
+- **Деплой на Render:** `render.yaml` (Blueprint: Web Service; БД — внешний `DATABASE_URL`), `DEPLOY_RENDER.md`, `docs/VERCEL.md`; в конфиге поддержка `DATABASE_URL` и `CMD` Docker с `PORT`; миграции через `preDeployCommand: alembic upgrade head`.
 - **Форма входа в админку** — полноэкранный экран до авторизации; сессия в cookie (`SessionMiddleware`), API `POST /api/admin/auth/login`, `GET /api/admin/auth/me`, `POST /api/admin/auth/logout`.
 - **WebSocket-токен** — подпись `itsdangerous` (`/api/admin/auth/login` и `/auth/me` отдают `ws_token`), query `?token=` на `/api/admin/ws`.
 - **Демо-данные** — кнопки «Демо-данные» / «Удалить демо» в шапке; `GET/POST/DELETE /api/admin/demo*`, префикс телефонов `demo7700…`.

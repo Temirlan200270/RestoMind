@@ -105,7 +105,7 @@ curl -b cookies.txt -X POST http://localhost:8000/api/admin/test-bot \
 
 | Платформа | Документ |
 |-----------|----------|
-| **Render** (рекомендуется: Web Service + PostgreSQL без своего VPS) | **[DEPLOY_RENDER.md](DEPLOY_RENDER.md)** — Blueprint `render.yaml`, секреты в Dashboard |
+| **Render** (Web Service; PostgreSQL — Supabase или другой хост, см. `DATABASE_URL`) | **[DEPLOY_RENDER.md](DEPLOY_RENDER.md)**, миграция БД — **[docs/SUPABASE_MIGRATION.md](docs/SUPABASE_MIGRATION.md)** |
 | **Свой сервер** (Docker + Traefik + HTTPS) | **[DEPLOY_GUIDE.md](DEPLOY_GUIDE.md)** |
 | **Vercel** | Этот бэкенд на Vercel не рассчитан; см. [docs/VERCEL.md](docs/VERCEL.md) |
 
@@ -150,9 +150,10 @@ RestoMind/
 ├── docker-compose.yml
 ├── docker-compose.prod.yml
 ├── Dockerfile
-├── render.yaml               # Blueprint Render (Web + Postgres)
+├── render.yaml               # Blueprint Render (веб-сервис; БД через DATABASE_URL)
 ├── DEPLOY_RENDER.md
 ├── docs/
+│   ├── SUPABASE_MIGRATION.md # Render Postgres → Supabase, DATABASE_URL
 │   └── VERCEL.md             # почему API не на Vercel
 ├── seed.py
 ├── requirements.txt

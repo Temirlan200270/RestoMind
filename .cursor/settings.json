@@ -11,6 +11,9 @@
     },
     "render": {
       "enabled": true
+    },
+    "supabase": {
+      "enabled": true
     }
   }
 }

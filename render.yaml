@@ -1,13 +1,9 @@
 # Blueprint для деплоя RestoMind на https://dashboard.render.com
 # 1. Создайте New -> Blueprint
 # 2. Подключите ваш репозиторий
-# 3. После деплоя зайдите в Dashboard -> Environment и заполните пустые секреты (OpenAI, WhatsApp и т.д.)
-
-databases:
-  - name: restomind-db
-    plan: free
-    databaseName: restomind_db
-    user: restomind
+# 3. В Environment задайте DATABASE_URL (Supabase или другой managed PostgreSQL) и секреты из sync: false
+#
+# База данных не создаётся этим файлом — используйте Supabase или вставьте URL существующего Postgres (см. docs/SUPABASE_MIGRATION.md).
 
 services:
   - type: web
@@ -35,11 +31,9 @@ services:
       - key: REDIS_MEMORY_ONLY
         value: "true"
       
-      # Подключение к базе данных Render
+      # PostgreSQL: Supabase (рекомендуется) или URL из Render/Railway — см. docs/SUPABASE_MIGRATION.md
       - key: DATABASE_URL
-        fromDatabase:
-          name: restomind-db
-          property: connectionString
+        sync: false
 
       # Автоматическое определение URL сервиса (нужно для Webhook WhatsApp)
       - key: PUBLIC_BASE_URL

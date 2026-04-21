@@ -24,6 +24,13 @@ engine_kwargs: dict[str, Any] = {
 
 if settings.db_mode == "postgres":
     engine_kwargs.update(pool_size=20, max_overflow=10, pool_pre_ping=True)
+    # Не полагаемся на `?sslmode=` в DATABASE_URL (SQLAlchemy/asyncpg иногда превращают это в kwargs).
+    # TLS включаем явно через connect_args.
+    ssl_ctx = ssl.create_default_context()
+    if settings.redis_ssl_skip_verify:
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = ssl.CERT_NONE
+    engine_kwargs["connect_args"] = {"ssl": ssl_ctx}
 
 async_engine = create_async_engine(settings.database_url, **engine_kwargs)
 

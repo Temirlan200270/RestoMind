@@ -1,6 +1,6 @@
 # Деплой RestoMind на Render
 
-Полноценный бэкенд (FastAPI + Jinja-админка + WebSocket) размещается **на Render** как **Web Service** + **PostgreSQL**.  
+Полноценный бэкенд (FastAPI + Jinja-админка + WebSocket) размещается **на Render** как **Web Service**; база данных — **внешний PostgreSQL** (рекомендуется [Supabase](https://supabase.com), см. [docs/SUPABASE_MIGRATION.md](docs/SUPABASE_MIGRATION.md)) или любой другой хост с `DATABASE_URL`.  
 **Vercel** этот репозиторий напрямую не подходит: нет долгоживущего процесса и нормальных WebSocket для текущей архитектуры (см. [docs/VERCEL.md](docs/VERCEL.md)).
 
 Я не могу зайти в ваш аккаунт Render/Vercel — деплой выполняете вы по шагам ниже.
@@ -17,18 +17,20 @@
 
 ## Вариант A: Blueprint (рекомендуется)
 
-1. Залейте код в удалённый репозиторий (ветка `main` или `master`).
-2. В Render: **New** → **Blueprint**.
-3. Укажите репозиторий и корень с `render.yaml`.
-4. Подтвердите создание ресурсов: **Web Service** `restomind` + **PostgreSQL** `restomind-db`.
-5. В интерфейсе Render задайте переменные с **sync: false** (если мастер их запросит):
-   - `SESSION_SECRET` — обязательный секрет для cookie-сессии и подписи `ws_token` (случайная длинная строка).
+1. Создайте проект в **Supabase** (или другой PostgreSQL) и скопируйте **Database URL** с `sslmode=require` (подробно — [docs/SUPABASE_MIGRATION.md](docs/SUPABASE_MIGRATION.md)).
+2. Залейте код в удалённый репозиторий (ветка `main` или `master`).
+3. В Render: **New** → **Blueprint**.
+4. Укажите репозиторий и корень с `render.yaml`.
+5. Подтвердите создание **Web Service** `restomind`.
+6. В интерфейсе Render задайте секреты, которые запросит мастер (в т.ч. **`DATABASE_URL`** — строка подключения к Postgres):
+   - `DATABASE_URL` — URI Supabase или другого PostgreSQL (обязательно перед первым успешным деплоем).
+   - `SESSION_SECRET` — если не используете `generateValue` из Blueprint, задайте вручную длинную случайную строку для cookie-сессии и подписи `ws_token`.
    - `OPENAI_API_KEY`
    - `ADMIN_PASSWORD` (и при желании смените `ADMIN_USERNAME` в Environment)
    - токены WhatsApp (`WHATSAPP_*`), когда подключите бота.
-6. Дождитесь сборки и деплоя. Логи: сервис → **Logs**.
+7. Дождитесь сборки и деплоя. Логи: сервис → **Logs**.
 
-`DATABASE_URL` подставится из БД автоматически. Миграции выполняются командой **`preDeployCommand: alembic upgrade head`** перед выкладкой.
+Миграции выполняются командой **`preDeployCommand: alembic upgrade head`** перед выкладкой.
 
 ---
 
@@ -102,6 +104,6 @@ curl -sS https://<ваш-хост>/health
 
 | Файл | Назначение |
 |------|------------|
-| `render.yaml` | Blueprint: веб + Postgres + env |
+| `render.yaml` | Blueprint: веб-сервис + env (БД — внешняя, `DATABASE_URL`) |
 | `Dockerfile` | Сборка образа; слушает `$PORT` |
 | `DEPLOY_GUIDE.md` | Альтернатива: свой VPS + Docker + Traefik |
