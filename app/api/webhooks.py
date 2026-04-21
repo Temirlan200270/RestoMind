@@ -30,10 +30,11 @@ from app.integrations.twilio_client import verify_twilio_signature
 from app.integrations.twilio_media import mulaw_8k_to_wav
 from app.integrations.whatsapp import download_media_bytes, send_template, send_voice_message
 from app.services.ai_brain import (
+    call_ai_with_audio,
     call_openai,
-    call_openai_with_audio,
     is_openai_fallback_escalation_reply,
-    openai_transcribe_voice,
+    transcribe_voice,
+    voice_supported,
 )
 from app.services.chat_delivery import apply_whatsapp_status_webhook
 from app.services.customer_context import build_customer_context
@@ -762,13 +763,13 @@ async def process_message(
             or state == UserState.HUMAN_MODE
             or ai_paused_db
         ):
-            if not (settings.openai_api_key or "").strip():
+            if not voice_supported():
                 await send_customer_text(
                     phone,
-                    "Голосовые недоступны: задайте OPENAI_API_KEY в настройках сервера.",
+                    "Голосовые недоступны: задайте OPENAI_API_KEY или GEMINI_API_KEY в настройках сервера.",
                 )
                 return
-            message_text = await openai_transcribe_voice(voice_bytes, voice_mime)
+            message_text = await transcribe_voice(voice_bytes, voice_mime)
             message_text = (message_text or "").strip()
             if not message_text:
                 await send_customer_text(
@@ -921,10 +922,10 @@ async def process_message(
         history = await get_chat_history(redis_client, phone, organization_id=organization_id)
 
         if had_voice:
-            if not (settings.openai_api_key or "").strip():
+            if not voice_supported():
                 await send_customer_text(
                     phone,
-                    "Голосовые недоступны: задайте OPENAI_API_KEY в настройках сервера.",
+                    "Голосовые недоступны: задайте OPENAI_API_KEY или GEMINI_API_KEY в настройках сервера.",
                 )
                 return
         else:
@@ -982,7 +983,7 @@ async def process_message(
         if had_voice:
             if voice_bytes is None:
                 return
-            ai_response = await call_openai_with_audio(
+            ai_response = await call_ai_with_audio(
                 history,
                 voice_bytes,
                 voice_mime,
@@ -1189,14 +1190,15 @@ async def process_voice_message(
     webhook_value: dict[str, Any] | None = None,
 ) -> None:
     """
-    Голосовое WhatsApp: скачать → Whisper (STT) + чат OpenAI в CHATTING или только STT в подтверждениях.
+    Голосовое WhatsApp: скачать → STT (Whisper или Gemini, по AI_PROVIDER) + чат текущего AI в CHATTING
+    или только STT в подтверждениях.
     """
     try:
-        if not (settings.openai_api_key or "").strip():
-            logger.info("Голосовое от %s: OPENAI_API_KEY не задан", phone)
+        if not voice_supported():
+            logger.info("Голосовое от %s: ни OPENAI_API_KEY, ни GEMINI_API_KEY не заданы", phone)
             await send_customer_text(
                 phone,
-                "Голосовые сообщения пока не настроены. Настройте OPENAI_API_KEY на сервере или напишите текстом.",
+                "Голосовые сообщения пока не настроены. Задайте OPENAI_API_KEY или GEMINI_API_KEY на сервере (и AI_PROVIDER), или напишите текстом.",
             )
             return
 
@@ -1235,11 +1237,11 @@ async def _flush_twilio_voice_chunk(phone: str, call_sid: str, mulaw: bytes) -> 
     """
     if not mulaw or not phone or not call_sid:
         return
-    if not (settings.openai_api_key or "").strip():
-        logger.warning("Twilio voice: нет OPENAI_API_KEY")
+    if not voice_supported():
+        logger.warning("Twilio voice: AI-провайдер не настроен для голоса (нет ключа OPENAI/GEMINI)")
         return
     wav = mulaw_8k_to_wav(mulaw)
-    text = await openai_transcribe_voice(wav, "audio/wav")
+    text = await transcribe_voice(wav, "audio/wav")
     text = (text or "").strip()
     if not text:
         return

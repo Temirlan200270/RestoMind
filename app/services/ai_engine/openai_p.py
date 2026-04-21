@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import logging
 import time
 from typing import Any
@@ -15,6 +16,35 @@ from app.services.ai_engine.errors import TransientAiError
 from app.services.ai_engine.prompting import build_system_prompt
 
 logger = logging.getLogger(__name__)
+
+
+_STT_MAX_RETRIES = 2
+
+_AUDIO_EXT_BY_MIME: dict[str, str] = {
+    "audio/ogg": ".ogg",
+    "audio/opus": ".ogg",
+    "audio/webm": ".webm",
+    "audio/wav": ".wav",
+    "audio/x-wav": ".wav",
+    "audio/wave": ".wav",
+    "audio/mpeg": ".mp3",
+    "audio/mp3": ".mp3",
+    "audio/mp4": ".m4a",
+    "audio/m4a": ".m4a",
+    "audio/x-m4a": ".m4a",
+}
+
+
+def _normalize_audio_mime(mime: str) -> str:
+    base = (mime or "").split(";")[0].strip().lower()
+    if not base or base == "application/octet-stream":
+        return "audio/ogg"
+    return base
+
+
+def _whisper_filename(mime: str) -> str:
+    base = _normalize_audio_mime(mime)
+    return f"audio{_AUDIO_EXT_BY_MIME.get(base, '.ogg')}"
 
 
 def _history_to_openai_messages(history: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -193,4 +223,52 @@ class OpenAIProvider(BaseAIProvider):
             intent="escalate",
             reply_text="Прошу прощения, у меня возникли технические сложности. Переключаю на оператора.",
         )
+
+    # --- Голос (Whisper STT) ---
+
+    def supports_voice(self) -> bool:
+        # Сознательно идём через _ensure_client(): тесты патчат `_ensure_openai_client`,
+        # и это обеспечивает один источник истины о доступности OpenAI (ключ или прокси).
+        return self._ensure_client() is not None
+
+    async def transcribe_voice(
+        self,
+        *,
+        audio_bytes: bytes,
+        audio_mime: str,
+    ) -> str:
+        if not audio_bytes:
+            return ""
+        client = self._ensure_client()
+        if client is None:
+            logger.error("[AI] provider=openai stt status=NO_KEY")
+            return ""
+
+        fname = _whisper_filename(audio_mime)
+        stt_model = (settings.openai_transcription_model or "").strip() or "whisper-1"
+
+        for attempt in range(1, _STT_MAX_RETRIES + 1):
+            buf = io.BytesIO(audio_bytes)
+            try:
+                tr = await client.audio.transcriptions.create(
+                    model=stt_model,
+                    file=(fname, buf),
+                )
+                text = (getattr(tr, "text", None) or "").strip()
+                if text:
+                    return text
+                logger.warning(
+                    "[AI] provider=openai stt model=%s attempt=%d status=EMPTY",
+                    stt_model,
+                    attempt,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[AI] provider=openai stt model=%s attempt=%d/%d status=ERROR err=%s",
+                    stt_model,
+                    attempt,
+                    _STT_MAX_RETRIES,
+                    type(exc).__name__,
+                )
+        return ""
 

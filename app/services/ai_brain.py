@@ -3,12 +3,11 @@ AI Brain — точка входа AI-Engine v2.0.
 
 - `call_ai(...)` — AI-агностичный диспетчер провайдеров (OpenAI/Gemini).
 - `call_openai(...)` — обратная совместимость (alias на `call_ai`).
-- Голос (Whisper STT) пока реализован через OpenAI (опциональный компонент).
+- Голос: STT и full-stack ответ — провайдер-агностичны (`AI_PROVIDER` решает: Whisper или Gemini multimodal).
 """
 
 from __future__ import annotations
 
-import io
 import logging
 import time
 from typing import Any
@@ -17,6 +16,7 @@ from openai import AsyncOpenAI
 
 from app.core.config import settings
 from app.schemas.ai_schemas import AIBrainResponse
+from app.services.ai_engine.base import BaseAIProvider
 from app.services.ai_engine.errors import TransientAiError
 from app.services.ai_engine.gemini_p import GeminiProvider
 from app.services.ai_engine.openai_p import OpenAIProvider
@@ -61,39 +61,22 @@ def is_openai_fallback_escalation_reply(reply_text: str) -> bool:
     return (reply_text or "").strip() == _FALLBACK_RESPONSE.reply_text.strip()
 
 
-VOICE_FROM_WHISPER_INSTRUCTION = (
-    "Клиент прислал голосовое в WhatsApp; ниже — распознанный текст (Whisper). "
+VOICE_FROM_STT_INSTRUCTION = (
+    "Клиент прислал голосовое в WhatsApp; ниже — расшифрованный текст. "
     "Определи намерение и заполни AIBrainResponse. "
     "В recognized_speech укажи дословную или слегка нормализованную формулировку речи на языке клиента. "
     "Поле detected_language должно соответствовать основному языку reply_text."
 )
+# Backward-compat (внешний код может импортировать старое имя).
+VOICE_FROM_WHISPER_INSTRUCTION = VOICE_FROM_STT_INSTRUCTION
 
 
 def normalize_audio_mime(mime: str) -> str:
-    """Нормализует MIME для Whisper (убирает codecs=..., дефолт для неизвестного)."""
+    """Нормализует MIME (убирает codecs=..., дефолт для неизвестного)."""
     base = (mime or "").split(";")[0].strip().lower()
     if not base or base == "application/octet-stream":
         return "audio/ogg"
     return base
-
-
-def _whisper_filename(mime: str) -> str:
-    """Имя файла для multipart Whisper (по расширению сервер угадывает формат)."""
-    base = normalize_audio_mime(mime)
-    ext_map: dict[str, str] = {
-        "audio/ogg": ".ogg",
-        "audio/opus": ".ogg",
-        "audio/webm": ".webm",
-        "audio/wav": ".wav",
-        "audio/x-wav": ".wav",
-        "audio/wave": ".wav",
-        "audio/mpeg": ".mp3",
-        "audio/mp3": ".mp3",
-        "audio/mp4": ".m4a",
-        "audio/m4a": ".m4a",
-        "audio/x-m4a": ".m4a",
-    }
-    return f"audio{ext_map.get(base, '.ogg')}"
 
 
 def _system_prompt_with_context(
@@ -122,7 +105,7 @@ def _transcription_model() -> str:
     return m if m else "whisper-1"
 
 
-def get_ai_client() -> object:
+def get_ai_client() -> BaseAIProvider:
     """
     Фабрика провайдеров AI-Engine v2.0.
     Выбор — только по settings.AI_PROVIDER (gemini|openai).
@@ -208,34 +191,43 @@ async def call_openai(
     )
 
 
-async def openai_transcribe_voice(audio_bytes: bytes, audio_mime: str) -> str:
-    """Расшифровка голоса (Whisper): для Да/Нет, HUMAN_MODE и логов."""
-    client = _ensure_openai_client()
-    if client is None or not audio_bytes:
+def voice_supported() -> bool:
+    """
+    True, если активный AI-провайдер настроен и умеет распознавать аудио.
+    Используется вебхуками, чтобы корректно отвечать клиенту, если ключи не заданы.
+    """
+    try:
+        return bool(get_ai_client().supports_voice())
+    except Exception:
+        return False
+
+
+async def transcribe_voice(audio_bytes: bytes, audio_mime: str) -> str:
+    """
+    Провайдер-агностичное STT: при AI_PROVIDER=openai — Whisper,
+    при AI_PROVIDER=gemini — Gemini multimodal. Возвращает "" при неудаче.
+    """
+    if not audio_bytes:
         return ""
-    fname = _whisper_filename(audio_mime)
-    stt_model = _transcription_model()
-
-    for attempt in range(1, MAX_RETRIES + 1):
-        buf = io.BytesIO(audio_bytes)
-        try:
-            tr = await client.audio.transcriptions.create(
-                model=stt_model,
-                file=(fname, buf),
-            )
-            text = getattr(tr, "text", None) or ""
-            return text.strip()
-        except Exception as exc:
-            logger.warning(
-                "openai_transcribe_voice попытка %d/%d: %s",
-                attempt,
-                MAX_RETRIES,
-                exc,
-            )
-    return ""
+    provider = get_ai_client()
+    try:
+        return await provider.transcribe_voice(audio_bytes=audio_bytes, audio_mime=audio_mime)
+    except Exception as exc:
+        # Защита от падений транспорта/SDK: пайплайн должен решить, что показать клиенту.
+        logger.warning(
+            "transcribe_voice провайдер=%s упал: %s",
+            type(provider).__name__,
+            exc,
+        )
+        return ""
 
 
-async def call_openai_with_audio(
+# Backward-compat: имя сохраняем — но реализация уже провайдер-агностичная.
+async def openai_transcribe_voice(audio_bytes: bytes, audio_mime: str) -> str:
+    return await transcribe_voice(audio_bytes, audio_mime)
+
+
+async def call_ai_with_audio(
     history: list[dict[str, str]],
     audio_bytes: bytes,
     audio_mime: str,
@@ -247,33 +239,37 @@ async def call_openai_with_audio(
     current_time_context: str = "",
 ) -> AIBrainResponse:
     """
-    Голосовой ввод: Whisper → structured chat с тем же контрактом AIBrainResponse.
-    Поле recognized_speech заполняется транскриптом (источник STT).
+    Голосовой ввод: STT (через активного провайдера) → structured chat (через того же провайдера),
+    общий контракт AIBrainResponse. `recognized_speech` заполняется транскриптом, если модель
+    сама его не вернула.
     """
     mime = normalize_audio_mime(audio_mime)
+    provider = get_ai_client()
     logger.debug(
-        "Запрос к OpenAI (голос): %d сообщений в истории, mime=%s, размер=%d байт",
+        "AI (голос) provider=%s: %d сообщений в истории, mime=%s, размер=%d байт",
+        type(provider).__name__,
         len(history),
         mime,
         len(audio_bytes),
     )
 
-    client = _ensure_openai_client()
-    if client is None:
-        logger.error("OPENAI_API_KEY не задан — голос недоступен, fallback")
+    if not provider.supports_voice():
+        logger.error(
+            "AI-провайдер %s не настроен для голоса — fallback escalate",
+            type(provider).__name__,
+        )
         return _FALLBACK_RESPONSE
 
-    transcript = await openai_transcribe_voice(audio_bytes, audio_mime)
-    transcript = (transcript or "").strip()
+    transcript = (await transcribe_voice(audio_bytes, audio_mime) or "").strip()
     if not transcript:
-        logger.warning("Whisper вернул пустой транскрипт — fallback")
+        logger.warning("STT (%s) вернул пустой транскрипт — fallback", type(provider).__name__)
         return _FALLBACK_RESPONSE
 
     augmented = (
-        f"{VOICE_FROM_WHISPER_INSTRUCTION}\n\nТекст: {transcript}\n"
+        f"{VOICE_FROM_STT_INSTRUCTION}\n\nТекст: {transcript}\n"
         "Ответь клиенту; при необходимости уточни recognized_speech относительно этого текста."
     )
-    result = await call_openai(
+    result = await call_ai(
         history,
         augmented,
         menu_context,
@@ -287,3 +283,28 @@ async def call_openai_with_audio(
     if result.recognized_speech is None or not str(result.recognized_speech).strip():
         return result.model_copy(update={"recognized_speech": transcript})
     return result
+
+
+# Backward-compat alias — старое имя продолжает работать.
+async def call_openai_with_audio(
+    history: list[dict[str, str]],
+    audio_bytes: bytes,
+    audio_mime: str,
+    menu_context: str = "",
+    kb_context: str = "",
+    draft_order_context: str = "",
+    sales_strategy_context: str = "",
+    customer_context: str = "",
+    current_time_context: str = "",
+) -> AIBrainResponse:
+    return await call_ai_with_audio(
+        history,
+        audio_bytes,
+        audio_mime,
+        menu_context,
+        kb_context,
+        draft_order_context,
+        sales_strategy_context,
+        customer_context=customer_context,
+        current_time_context=current_time_context,
+    )
