@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 import re
 import time
+import warnings
+from typing import Any
 
 from pydantic import ValidationError
 
@@ -131,6 +133,43 @@ _PROVIDER_LEVEL_ERROR_NAMES: frozenset[str] = frozenset({
 })
 
 
+def _lazy_import_genai() -> Any:
+    """
+    Ленивый импорт `google.generativeai` с подавлением известного FutureWarning.
+
+    Пакет переведён в maintenance и при импорте пишет FutureWarning в stderr —
+    он попадает в прод-логи Render и «шумит» в SRE-дашборде. Миграция на
+    `google-genai` — отдельная задача, а сейчас глушим именно ЭТОТ warning,
+    максимально узко (по категории и тексту), чтобы другие FutureWarning
+    продолжали быть видимыми.
+    """
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"(?s).*google\.generativeai.*",
+            category=FutureWarning,
+        )
+        import google.generativeai as genai  # type: ignore
+    return genai
+
+
+def _format_validation_error(exc: ValidationError) -> str:
+    """
+    Компактное человекочитаемое представление ошибок Pydantic для одной строки лога.
+
+    Стандартный `str(exc)` разворачивается на много строк и плохо ищется
+    grep'ом в Render/Datadog. Сворачиваем до `field=<loc> type=<error_type>`,
+    перечисляя все ошибки через `;`.
+    """
+    parts: list[str] = []
+    for err in exc.errors()[:5]:  # защита от «простыни» при массовой невалидности
+        loc = ".".join(str(x) for x in err.get("loc", ())) or "<root>"
+        parts.append(f"{loc}[{err.get('type', '?')}]")
+    if len(exc.errors()) > 5:
+        parts.append(f"(+{len(exc.errors()) - 5} more)")
+    return ",".join(parts) or "unknown"
+
+
 def _is_provider_level_error(exc: BaseException) -> bool:
     """
     True, если ошибка указывает на проблему с провайдером в целом (биллинг/ключ/квоты),
@@ -152,9 +191,7 @@ class GeminiProvider(BaseAIProvider):
         if not key:
             return False
         if self._configured_key != key:
-            # Lazy import to keep local/test environments working when Gemini isn't used.
-            import google.generativeai as genai  # type: ignore
-
+            genai = _lazy_import_genai()
             genai.configure(api_key=key)
             self._configured_key = key
         return True
@@ -198,11 +235,14 @@ class GeminiProvider(BaseAIProvider):
         ).strip()
 
         last_error: Exception | None = None
+        # Храним сырой ответ модели между try-блоками, чтобы при ValidationError
+        # логировать первые N символов — это главный инсайт для отладки схемы.
+        raw_text_for_log: str = ""
         for idx, model_name in enumerate(preset.models, start=1):
             t0 = time.perf_counter()
+            raw_text_for_log = ""
             try:
-                import google.generativeai as genai  # type: ignore
-
+                genai = _lazy_import_genai()
                 model = genai.GenerativeModel(model_name)
                 # Async API is available in google-generativeai; use it to avoid blocking.
                 # response_mime_type="application/json" — нативный JSON-режим Gemini:
@@ -220,6 +260,7 @@ class GeminiProvider(BaseAIProvider):
                     ),
                 )
                 text = (getattr(resp, "text", None) or "").strip()
+                raw_text_for_log = text
                 if not text:
                     raise ValueError("Empty response")
                 # Защита №2: thinking-модели иногда всё равно оборачивают JSON в
@@ -240,13 +281,20 @@ class GeminiProvider(BaseAIProvider):
 
             except ValidationError as exc:
                 last_error = exc
+                # Первые 240 символов достаточно, чтобы увидеть структуру ответа
+                # (intent/reply_text/…), но не раздувают лог и не утекут PII-данных
+                # клиента целиком. При необходимости можно поднять лимит точечно.
+                raw_preview = raw_text_for_log[:240].replace("\n", " ")
                 logger.warning(
-                    "[AI] provider=gemini model=%s attempt=%d/%d status=VALIDATION_ERROR latency_ms=%d err=%s",
+                    "[AI] provider=gemini model=%s attempt=%d/%d status=VALIDATION_ERROR "
+                    "latency_ms=%d err=%s fields=%s raw=%r",
                     model_name,
                     idx,
                     len(preset.models),
                     int((time.perf_counter() - t0) * 1000),
                     type(exc).__name__,
+                    _format_validation_error(exc),
+                    raw_preview,
                 )
                 if idx < len(preset.models):
                     logger.warning(
@@ -324,8 +372,7 @@ class GeminiProvider(BaseAIProvider):
             for attempt in range(1, _STT_MAX_RETRIES + 1):
                 t0 = time.perf_counter()
                 try:
-                    import google.generativeai as genai  # type: ignore
-
+                    genai = _lazy_import_genai()
                     model = genai.GenerativeModel(model_name)
                     resp = await model.generate_content_async(
                         [
