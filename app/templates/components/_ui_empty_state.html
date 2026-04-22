@@ -1,0 +1,10 @@
+{# Пустое состояние: emoji + заголовок + описание #}
+{% macro ui_empty_state(emoji='📭', title='Пока пусто', description='') -%}
+<div class="py-12 px-6 text-center rounded-2xl border-2 border-dashed border-gray-200 bg-gray-50/50">
+  <div class="text-5xl mb-3" aria-hidden="true">{{ emoji }}</div>
+  <div class="text-lg font-semibold text-gray-800">{{ title }}</div>
+  {% if description %}
+  <p class="text-sm text-gray-500 mt-2 max-w-md mx-auto">{{ description }}</p>
+  {% endif %}
+</div>
+{%- endmacro %}

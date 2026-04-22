@@ -1,0 +1,9 @@
+{# Свертка «Для разработчика» — technical copy #}
+{% macro ui_advanced_details(summary='Для разработчика') -%}
+<details class="mt-2 text-xs text-gray-600 border border-gray-100 rounded-xl px-3 py-2 bg-slate-50/80">
+  <summary class="cursor-pointer font-semibold text-gray-700 select-none">{{ summary }}</summary>
+  <div class="mt-2 space-y-1">
+    {{ caller() }}
+  </div>
+</details>
+{%- endmacro %}

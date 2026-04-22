@@ -67,12 +67,13 @@ const adminFormat = {
 };
 
 /**
- * Фрагмент админки в location.hash: #chats или #chats?phone=7705… (как в ссылках из Telegram).
- * @returns {{ tab: string | null, phone: string | null }}
+ * Фрагмент админки в location.hash.
+ * Примеры: #dashboard, #chats?phone=7705…, #settings/connections (как в ссылках из Telegram).
+ * @returns {{ tab: string | null, settingsTab: string | null, phone: string | null }}
  */
 function adminParseLocationHash() {
     const raw = String(window.location.hash || '').replace(/^#/, '').trim();
-    if (!raw) return { tab: null, phone: null };
+    if (!raw) return { tab: null, settingsTab: null, phone: null };
     const q = raw.indexOf('?');
     const path = (q >= 0 ? raw.slice(0, q) : raw).trim();
     const qs = q >= 0 ? raw.slice(q + 1) : '';
@@ -84,14 +85,38 @@ function adminParseLocationHash() {
     } catch (_e) {
         phone = null;
     }
-    return { tab: path || null, phone };
+    if (path.startsWith('settings/')) {
+        const st = path.slice('settings/'.length).trim();
+        return { tab: 'settings', settingsTab: st || 'restaurant', phone: null };
+    }
+    if (path === 'settings') {
+        return { tab: 'settings', settingsTab: null, phone: null };
+    }
+    const legacyToSettings = {
+        integrations: 'connections',
+        packaging: 'restaurant',
+        knowledge: 'restaurant',
+        upsell: 'smart_sales',
+        team: 'team',
+        test: 'technical',
+    };
+    if (legacyToSettings[path]) {
+        return { tab: 'settings', settingsTab: legacyToSettings[path], phone: null };
+    }
+    return { tab: path || null, settingsTab: null, phone };
 }
+
+/** Допустимые верхнеуровневые вкладки (id из navItems). */
+const ADMIN_TOP_TAB_IDS = new Set([
+    'dashboard', 'analytics', 'orders', 'operator_queue', 'bookings', 'chats', 'menu', 'stoplist', 'settings',
+]);
 
 /** Начальное состояние GET /integrations/status — чтобы Alpine не падал на undefined до первой загрузки. */
 function defaultIntegrationStatus() {
     return {
         iiko_configured: false,
         whatsapp_configured: false,
+        telegram_configured: false,
         openai_configured: false,
         whatsapp_voice_replies_enabled: false,
         webhook_url: '',
@@ -115,6 +140,11 @@ function adminMixinState() {
         /** Показали ли уже модалку «сессия истекла» для серии 401 (не хранить на window). */
         auth401AlertShown: false,
         wsToken: '',
+        /** Роль staff из API: admin | operator (для стартовой вкладки). */
+        staffRole: '',
+        _adminHashWatchInstalled: false,
+        _applyingHashFromBrowser: false,
+        _hashPushTimer: null,
         hasDemoData: false,
         demoActionLoading: false,
         showDemoDeleteModal: false,
@@ -261,6 +291,9 @@ function adminMixinState() {
         dashStats: {},
         dashStatsLoading: false,
         dashStatsLoadedOnce: false,
+        /** GET /api/admin/roi/today — нарратив + достижения. */
+        dashRoiSummary: null,
+        dashRoiLoading: false,
         /** Контекст текущего заведения (multi-tenant брендинг в шапке). */
         orgProfile: {
             id: null,
@@ -1452,6 +1485,20 @@ function adminMixinMenuOrdersUi() {
             if (ok) this.showOrderModal = false;
         },
 
+        /** Передача в iiko из канбана/списка без открытия модалки. */
+        async confirmSendToIikoForOrder(order) {
+            if (!order || order.id == null) return;
+            if (this.orderAwaitingOrderPrepay(order)) {
+                void this.showUiAlert('Сначала подтвердите предоплату по этому заказу.', 'Предоплата');
+                return;
+            }
+            const ok = await this.patchOrderStatus(order.id, 'sent_to_iiko');
+            if (ok) {
+                this.demoToastMessage = `Заказ #${order.id} передан в iiko`;
+                setTimeout(() => { this.demoToastMessage = ''; }, 3500);
+            }
+        },
+
         async confirmAndDeleteOrdersFromModal() {
             const o = this.selectedOrder;
             if (!o || o.id == null) return;
@@ -1912,6 +1959,8 @@ function adminMixinAuthKnowledge() {
             this.settingsTab = 'restaurant';
             this.dashStatsLoading = false;
             this.dashStatsLoadedOnce = false;
+            this.dashRoiSummary = null;
+            this.dashRoiLoading = false;
             this.orgProfile = {
                 id: null,
                 organization_id: null,
@@ -1936,8 +1985,16 @@ function adminMixinAuthKnowledge() {
                     this.authenticated = true;
                     this.auth401AlertShown = false;
                     this.wsToken = data.ws_token || '';
+                    this.staffRole = String(data.staff_role || 'admin').toLowerCase();
                     this._ensureAdminHashListener();
-                    this._applyAdminHashBeforeFirstPaint();
+                    const parsed = adminParseLocationHash();
+                    if (!parsed.tab) {
+                        this.currentTab = this.staffRole === 'operator' ? 'chats' : 'dashboard';
+                        this._pushAdminHash();
+                    } else {
+                        this._applyParsedHash(parsed);
+                    }
+                    this._installAdminHashWatch();
                     await this.refreshDemoStatus();
                     await this.loadOrgProfile();
                     this.connectWebSocket();
@@ -1980,8 +2037,16 @@ function adminMixinAuthKnowledge() {
                 this.authenticated = true;
                 this.wsToken = data.ws_token || '';
                 this.loginPassword = '';
+                this.staffRole = String(data.staff_role || 'admin').toLowerCase();
                 this._ensureAdminHashListener();
-                this._applyAdminHashBeforeFirstPaint();
+                const parsedLogin = adminParseLocationHash();
+                if (!parsedLogin.tab) {
+                    this.currentTab = this.staffRole === 'operator' ? 'chats' : 'dashboard';
+                    this._pushAdminHash();
+                } else {
+                    this._applyParsedHash(parsedLogin);
+                }
+                this._installAdminHashWatch();
                 await this.refreshDemoStatus();
                 await this.loadOrgProfile();
                 this.connectWebSocket();
@@ -2068,6 +2133,7 @@ function adminMixinAuthKnowledge() {
             } catch { /* ignore */ }
             this.authenticated = false;
             this.wsToken = '';
+            this._adminHashWatchInstalled = false;
             this.wsChannelReady = false;
             this._clearWsReadyTimer();
             this.hasDemoData = false;
@@ -3272,24 +3338,22 @@ function adminMixinLiveChat() {
             });
         },
 
-        /** Перед loadTabData: открыть нужную вкладку по hash (глубокая ссылка на диалог). */
-        _applyAdminHashBeforeFirstPaint() {
-            this._pendingHashChatPhone = null;
-            const { tab, phone } = adminParseLocationHash();
-            if (tab === 'chats') {
-                this.currentTab = 'chats';
-                if (phone) this._pendingHashChatPhone = phone;
-            } else if (tab === 'orders') {
-                this.currentTab = 'orders';
-            }
-        },
+        /** Допустимые под-вкладки «Настройки». */
+        _adminSettingsTabIds: new Set(['restaurant', 'connections', 'smart_sales', 'team', 'technical']),
 
-        syncAdminChatsHash(phone) {
-            if (!this.authenticated) return;
+        _pushAdminHash() {
+            if (!this.authenticated || this._applyingHashFromBrowser) return;
             const path = window.location.pathname || '/admin';
-            const frag = phone && String(phone).trim()
-                ? `chats?phone=${encodeURIComponent(String(phone).trim())}`
-                : 'chats';
+            let frag = 'dashboard';
+            if (this.currentTab === 'settings') {
+                const st = (this.settingsTab || 'restaurant').trim();
+                frag = `settings/${encodeURIComponent(st)}`;
+            } else if (this.currentTab === 'chats') {
+                const ph = (this.activeChatPhone || '').trim();
+                frag = ph ? `chats?phone=${encodeURIComponent(ph)}` : 'chats';
+            } else if (ADMIN_TOP_TAB_IDS.has(this.currentTab)) {
+                frag = this.currentTab;
+            }
             const url = `${path}#${frag}`;
             try {
                 window.history.replaceState(null, '', url);
@@ -3298,6 +3362,77 @@ function adminMixinLiveChat() {
                     window.location.hash = frag;
                 } catch (_e2) { /* ignore */ }
             }
+        },
+
+        _schedulePushAdminHash() {
+            if (!this.authenticated || this._applyingHashFromBrowser) return;
+            if (this._hashPushTimer) clearTimeout(this._hashPushTimer);
+            this._hashPushTimer = setTimeout(() => {
+                this._hashPushTimer = null;
+                this._pushAdminHash();
+            }, 0);
+        },
+
+        _installAdminHashWatch() {
+            if (this._adminHashWatchInstalled) return;
+            this._adminHashWatchInstalled = true;
+            try {
+                this.$watch('currentTab', () => this._schedulePushAdminHash());
+                this.$watch('settingsTab', () => {
+                    if (this.currentTab === 'settings') this._schedulePushAdminHash();
+                });
+                this.$watch('activeChatPhone', () => {
+                    if (this.currentTab === 'chats') this._schedulePushAdminHash();
+                });
+            } catch (_e) { /* ignore */ }
+        },
+
+        /**
+         * Навигация по верхнему меню (и из кода): синхронизирует hash и грузит данные.
+         * @param {string} tabId
+         * @param {{ settingsTab?: string }} [opts]
+         */
+        navigateToTab(tabId, opts) {
+            const o = opts && typeof opts === 'object' ? opts : {};
+            this.currentTab = tabId;
+            if (tabId === 'settings' && typeof o.settingsTab === 'string' && o.settingsTab.trim()) {
+                const st = o.settingsTab.trim();
+                if (this._adminSettingsTabIds.has(st)) this.settingsTab = st;
+            }
+            this.sidebarOpen = false;
+            void this.loadTabData();
+            this._schedulePushAdminHash();
+        },
+
+        _applyParsedHash(parsed) {
+            this._pendingHashChatPhone = null;
+            const tab = parsed?.tab;
+            const phone = parsed?.phone || null;
+            const settingsTab = parsed?.settingsTab || null;
+            if (!tab) return;
+            if (tab === 'settings') {
+                this.currentTab = 'settings';
+                if (settingsTab && this._adminSettingsTabIds.has(settingsTab)) {
+                    this.settingsTab = settingsTab;
+                }
+                return;
+            }
+            if (!ADMIN_TOP_TAB_IDS.has(tab)) {
+                this.currentTab = 'dashboard';
+                return;
+            }
+            this.currentTab = tab;
+            if (tab === 'chats' && phone) this._pendingHashChatPhone = phone;
+        },
+
+        /** Перед loadTabData: открыть вкладку по hash (глубокие ссылки). */
+        _applyAdminHashBeforeFirstPaint() {
+            this._applyParsedHash(adminParseLocationHash());
+        },
+
+        /** Совместимость: URL чата — общий _pushAdminHash. */
+        syncAdminChatsHash(_phoneIgnored) {
+            this._pushAdminHash();
         },
 
         async _consumePendingHashChatPhone() {
@@ -3309,20 +3444,21 @@ function adminMixinLiveChat() {
 
         async _onAdminHashChange() {
             if (!this.authenticated) return;
-            const { tab, phone } = adminParseLocationHash();
-            if (tab === 'orders') {
-                this.currentTab = 'orders';
+            this._applyingHashFromBrowser = true;
+            try {
+                const parsed = adminParseLocationHash();
+                this._applyParsedHash(parsed);
                 await this.loadTabData();
-                return;
-            }
-            if (tab !== 'chats') return;
-            this.currentTab = 'chats';
-            await this.loadTabData();
-            await this.loadChatList();
-            if (phone) await this.selectChat(phone);
-            else {
-                this.activeChatPhone = '';
-                this.chatMobileInfoOpen = false;
+                if (this.currentTab === 'chats') {
+                    await this.loadChatList();
+                    if (parsed.phone) await this.selectChat(parsed.phone);
+                    else {
+                        this.activeChatPhone = '';
+                        this.chatMobileInfoOpen = false;
+                    }
+                }
+            } finally {
+                this._applyingHashFromBrowser = false;
             }
         },
 
@@ -3714,7 +3850,12 @@ function adminMixinDataChartsSettings() {
             this.tabDataLoading = true;
             try {
                 if (this.currentTab === 'dashboard') {
-                    await Promise.all([this.loadDashStats(), this.loadDashActivity(), this.loadOrders()]);
+                    await Promise.all([
+                        this.loadDashStats(),
+                        this.loadDashRoiSummary(),
+                        this.loadDashActivity(),
+                        this.loadOrders(),
+                    ]);
                 } else if (this.currentTab === 'analytics') {
                     await this.loadAnalytics();
                 } else if (this.currentTab === 'orders') {
@@ -3788,6 +3929,7 @@ function adminMixinDataChartsSettings() {
             this.currentTab = 'settings';
             this.settingsTab = String(tab);
             this.loadTabData();
+            this._schedulePushAdminHash();
         },
 
         async loadDashStats() {
@@ -3835,6 +3977,21 @@ function adminMixinDataChartsSettings() {
                 this.dashActivity = Array.isArray(data.items) ? data.items : [];
             } finally {
                 this.dashActivityLoading = false;
+            }
+        },
+
+        async loadDashRoiSummary() {
+            this.dashRoiLoading = true;
+            try {
+                const { ok, status, data } = await this.apiJsonResponse('/api/admin/roi/today');
+                if (!ok) {
+                    console.warn('GET /api/admin/roi/today', status, data);
+                    this.dashRoiSummary = null;
+                    return;
+                }
+                this.dashRoiSummary = data;
+            } finally {
+                this.dashRoiLoading = false;
             }
         },
 

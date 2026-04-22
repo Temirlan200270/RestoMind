@@ -9,7 +9,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.services.owner_weekly_digest import owner_digest_scheduled_tick
 from app.services.payment_notify import run_payment_received_customer_notify
+
+try:
+    from arq.cron import cron
+except Exception:  # pragma: no cover
+    cron = None  # type: ignore[misc, assignment]
 
 
 async def whatsapp_process_text(
@@ -75,4 +81,8 @@ class WorkerSettings:
         whatsapp_process_statuses,
         payment_notify_customer,
     ]
+    # Понедельник ~10:00 в TZ каждой организации: проверка внутри тика (4× в час).
+    cron_jobs = (
+        [cron(owner_digest_scheduled_tick, minute={0, 15, 30, 45})] if cron is not None else []
+    )
 

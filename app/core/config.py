@@ -371,6 +371,13 @@ class Settings(BaseSettings):
     # --- Rate Limiting ---
     rate_limit_per_minute: int = 20
 
+    # Тариф подписки (₸/мес) для грубой оценки окупаемости на дашборде; 0 — не считать.
+    owner_subscription_monthly_kzt: int = Field(
+        default=0,
+        ge=0,
+        validation_alias=AliasChoices("OWNER_SUBSCRIPTION_MONTHLY_KZT", "owner_subscription_monthly_kzt"),
+    )
+
     # --- Очередь задач (ARQ + Redis) ---
     arq_enabled: bool = Field(
         default=False,

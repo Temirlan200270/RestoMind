@@ -1,0 +1,10 @@
+{# Подписанное поле: label, optional hint, caller = input/control #}
+{% macro ui_field(label, hint='', label_class='block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2') -%}
+<div class="min-w-0">
+  <label class="{{ label_class }}">{{ label }}</label>
+  {% if hint %}
+  <p class="text-[11px] text-gray-400 mb-2">{{ hint }}</p>
+  {% endif %}
+  {{ caller() }}
+</div>
+{%- endmacro %}

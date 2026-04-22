@@ -102,6 +102,7 @@ from app.services.intelligence_analytics import (
     order_meta_from_items_json,
     upsell_stats_from_items_json,
 )
+from app.services.owner_roi import aggregate_org_window, build_achievements_week, build_today_narrative_ru
 from app.api.webhooks import _normalize_phone_e164
 
 logger = logging.getLogger(__name__)
@@ -280,6 +281,7 @@ async def admin_login(request: Request, body: LoginBody, db: AsyncSession = Depe
                 "ok": True,
                 "username": staff.email,
                 "organization_id": int(staff.organization_id),
+                "staff_role": (staff.role or StaffRole.ADMIN.value).strip().lower(),
                 "ws_token": ws_token,
             }
 
@@ -301,6 +303,7 @@ async def admin_login(request: Request, body: LoginBody, db: AsyncSession = Depe
             "ok": True,
             "username": body.username.strip(),
             "organization_id": oid,
+            "staff_role": StaffRole.ADMIN.value,
             "ws_token": ws_token,
         }
 
@@ -393,10 +396,16 @@ async def admin_me(request: Request, db: AsyncSession = Depends(get_db)) -> dict
             oid = int(oid_db)
             request.session["organization_id"] = oid
     sid = request.session.get("staff_id")
+    staff_role = StaffRole.ADMIN.value
+    if sid is not None:
+        staff_me = await db.get(StaffUser, int(sid))
+        if staff_me is not None:
+            staff_role = (staff_me.role or StaffRole.ADMIN.value).strip().lower()
     return {
         "authenticated": True,
         "username": user,
         "organization_id": oid,
+        "staff_role": staff_role,
         "ws_token": create_admin_ws_token(
             organization_id=oid,
             email=str(user),
@@ -1520,6 +1529,12 @@ async def integrations_status(
     base["iiko_secrets_encrypt_ready"] = bool((settings.app_secrets_fernet_key or "").strip())
     org_row = await db.get(Organization, org_id)
     base["prepayment_enforced"] = bool(getattr(org_row, "prepayment_enforced", True)) if org_row else True
+    tg_token_ok = bool(str(settings.telegram_bot_token or "").strip())
+    tg_global_chat_ok = bool(str(settings.telegram_admin_chat_id or "").strip())
+    tg_org_chat_ok = bool(
+        str(getattr(org_row, "telegram_ops_chat_id", "") or "").strip(),
+    ) if org_row is not None else False
+    base["telegram_configured"] = tg_token_ok and (tg_global_chat_ok or tg_org_chat_ok)
     return base
 
 
@@ -3623,6 +3638,27 @@ async def dashboard_stats(
         "iiko_errors_today": iiko_errors_today,
         "ai_avg_check_upsell_accepted": ai_avg_check_upsell_accepted,
         "ai_avg_check_no_upsell_offer": ai_avg_check_no_upsell_offer,
+    }
+
+
+@router.get("/roi/today")
+async def roi_today_summary(request: Request, db: AsyncSession = Depends(get_db)) -> dict[str, object]:
+    """
+    ROI-нарратив за сегодня (UTC, как /stats) + «достижения» за последние 7 дней в TZ организации.
+    """
+    org_id = admin_org_from_session(request)
+    org = await db.get(Organization, org_id)
+    now_utc = datetime.now(tz=timezone.utc)
+    today_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+    metrics = await aggregate_org_window(db, org_id, today_start, now_utc)
+    cur = (getattr(org, "currency", None) or "KZT") if org is not None else "KZT"
+    narrative = build_today_narrative_ru(metrics, str(cur))
+    tz = (getattr(org, "timezone", None) or "UTC") if org is not None else "UTC"
+    achievements = await build_achievements_week(db, org_id, str(tz))
+    return {
+        "narrative": narrative,
+        "metrics": metrics,
+        "achievements": achievements,
     }
 
 

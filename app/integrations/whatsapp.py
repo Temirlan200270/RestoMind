@@ -30,6 +30,54 @@ class WhatsAppSendResult:
 
 logger = logging.getLogger(__name__)
 
+
+def _strip_markdown_for_whatsapp(text: str) -> str:
+    """
+    Привести текст к тому, что WhatsApp покажет читабельно.
+
+    Модели часто копируют Markdown (**жирный**, ## заголовок). В WhatsApp
+    жирный — только *одинарные* звёздочки; двойные остаются буквально.
+    Убираем/нормализуем распространённый мусор без HTML-парсера.
+    """
+    s = (text or "").replace("\r\n", "\n")
+    if not s.strip():
+        return s
+
+    # **bold** или **bold * mix ** → *bold* (итеративно, вложенные пары)
+    for _ in range(20):
+        prev = s
+        s = re.sub(r"\*\*([^*]+)\*\*", r"*\1*", s)
+        if s == prev:
+            break
+
+    # Оставшиеся «висячие» **
+    s = s.replace("**", "")
+
+    # __underline__ → _underline_ (WA поддерживает курсив одинарным _)
+    s = re.sub(r"__([^_]+)__", r"_\1_", s)
+
+    # Заголовки markdown: # ... до конца строки
+    s = re.sub(r"(?m)^#{1,6}\s*", "", s)
+
+    # Блоки ```...``` — раньше инлайн-кода `...`, иначе `` внутри фенса ломают разбор.
+    s = re.sub(r"```(?:\w+)?(?:\r?\n|\s)?([\s\S]*?)```", r"\1", s)
+
+    # Инлайн-код `...`
+    s = re.sub(r"`([^`]+)`", r"\1", s)
+
+    # Ссылки [label](url) → label (url) или только label
+    def _link_repl(m: re.Match[str]) -> str:
+        label = (m.group(1) or "").strip()
+        url = (m.group(2) or "").strip()
+        if url and label:
+            return f"{label} ({url})"
+        return label or url
+
+    s = re.sub(r"\[([^\]]*)\]\(([^)]*)\)", _link_repl, s)
+
+    return s
+
+
 def _graph_api_version() -> str:
     return (getattr(settings, "whatsapp_api_version", "") or "v21.0").strip() or "v21.0"
 
@@ -240,6 +288,7 @@ async def send_message(phone: str, text: str) -> WhatsAppSendResult:
     Отправить текстовое сообщение клиенту в WhatsApp.
     Если токен не настроен — логирует (режим разработки) и возвращает ok без wamid.
     """
+    text = _strip_markdown_for_whatsapp(text)
     if not settings.whatsapp_api_token:
         logger.info("WhatsApp (dev, no token) -> %s: %s", phone, text[:200])
         return WhatsAppSendResult(ok=True, message_id=None)
