@@ -171,6 +171,10 @@ function adminMixinState() {
         /** Многострочное поле в uiConfirm (JSON и длинный текст). */
         uiConfirmInputMultiline: false,
         uiConfirmInputRows: 6,
+        /** Чекбокс «Я понимаю…» для деструктивных действий: primary кнопка disabled пока false. */
+        uiConfirmRequireAck: false,
+        uiConfirmAckLabel: '',
+        uiConfirmAckChecked: false,
         /** Кнопка «Форматировать JSON» в модалке (многострочный ввод). */
         uiConfirmShowFormatJson: false,
 
@@ -866,6 +870,9 @@ function adminMixinMenuOrdersUi() {
                 this.uiConfirmInputMultiline = !!(inp && inp.multiline);
                 this.uiConfirmInputRows = inp && Number(inp.rows) > 0 ? Number(inp.rows) : 6;
                 this.uiConfirmShowFormatJson = !!(inp && inp.multiline);
+                this.uiConfirmRequireAck = !!o.requireAck;
+                this.uiConfirmAckLabel = o.ackLabel != null ? String(o.ackLabel) : 'Я понимаю, что это действие нельзя отменить';
+                this.uiConfirmAckChecked = false;
                 this.uiConfirmError = '';
                 this.uiConfirmSubmitting = false;
                 this.uiConfirmOpen = true;
@@ -912,6 +919,10 @@ function adminMixinMenuOrdersUi() {
         },
         uiConfirmSubmit() {
             if (this.uiConfirmSubmitting) return;
+            if (this.uiConfirmRequireAck && !this.uiConfirmAckChecked) {
+                this.uiConfirmError = 'Отметьте согласие, чтобы продолжить';
+                return;
+            }
             if (this.uiConfirmShowInput && this.uiConfirmInputRequired) {
                 const v = (this.uiConfirmInputValue || '').trim();
                 if (!v) {
@@ -1505,25 +1516,42 @@ function adminMixinMenuOrdersUi() {
             await this.confirmAndDeleteOrders([Number(o.id)], 'modal');
         },
 
-        /** Двойное подтверждение и удаление заказа(ов) через uiConfirm (без отдельной разметки модалки). */
+        /** Подтверждение + удаление заказа(ов). Одна модалка с чекбоксом — меньше «confirmation fatigue», но всё ещё требует осознанного клика. */
         async confirmAndDeleteOrders(ids, source) {
             const clean = [...new Set((ids || []).map((x) => Number(x)).filter((n) => Number.isFinite(n) && n > 0))].sort((a, b) => a - b);
             if (!clean.length) return;
             const src = source || '';
-            const msg1 = clean.length === 1
-                ? `Заказ #${clean[0]} будет удалён из базы без возможности восстановления. Запись пропадёт из списков и аналитики.`
-                : `Будут безвозвратно удалены заказы (${clean.length} шт.): ${clean.map((i) => '#' + i).join(', ')}.`;
-            let r = await this.openUiConfirm({
-                title: clean.length === 1 ? 'Удалить заказ?' : 'Удалить заказы?',
-                message: msg1,
+            let message;
+            let confirmText;
+            let title;
+            if (clean.length === 1) {
+                title = 'Удалить заказ?';
+                const id = clean[0];
+                const o = this.selectedOrder && Number(this.selectedOrder.id) === id ? this.selectedOrder : null;
+                const lines = [`Заказ #${id} будет удалён из базы безвозвратно — пропадёт из списков, карточек гостя и аналитики.`];
+                if (o) {
+                    const bits = [];
+                    if (o.total_price) bits.push(this.fmt.money(o.total_price));
+                    if (o.user_phone) bits.push(o.user_phone);
+                    if (bits.length) lines.push(bits.join(' · '));
+                }
+                message = lines.join('\n\n');
+                confirmText = 'Удалить заказ';
+            } else {
+                title = 'Удалить заказы?';
+                message = `Безвозвратно удалятся ${clean.length} заказов: ${clean.map((i) => '#' + i).join(', ')}. Данные уйдут из списков и аналитики.`;
+                confirmText = `Удалить заказы (${clean.length})`;
+            }
+            const r = await this.openUiConfirm({
+                title,
+                message,
                 danger: true,
-                confirmText: 'Продолжить',
-            });
-            if (!r.ok) return;
-            r = await this.openUiConfirm({
-                message: 'Последнее подтверждение: отменить это действие будет нельзя.',
-                danger: true,
-                confirmText: 'Удалить навсегда',
+                confirmText,
+                cancelText: 'Отмена',
+                requireAck: true,
+                ackLabel: clean.length === 1
+                    ? 'Я понимаю, что заказ нельзя будет восстановить'
+                    : 'Я понимаю, что эти заказы нельзя будет восстановить',
             });
             if (!r.ok) return;
             await this._executeOrderDeleteDirect(clean, src);

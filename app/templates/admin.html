@@ -3043,6 +3043,12 @@
                         class="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm font-mono leading-relaxed focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 min-h-[12rem]"></textarea>
                     <p x-show="uiConfirmError" class="mt-2 text-xs text-red-600" x-text="uiConfirmError"></p>
                 </div>
+                <label x-show="uiConfirmRequireAck" x-cloak
+                    class="mt-5 flex items-start gap-3 cursor-pointer group select-none">
+                    <input type="checkbox" x-model="uiConfirmAckChecked"
+                        class="mt-0.5 rounded border-gray-300 text-red-600 focus:ring-red-500">
+                    <span class="text-sm text-gray-700 group-hover:text-gray-900" x-text="uiConfirmAckLabel"></span>
+                </label>
                 <div class="mt-6 flex flex-wrap gap-3 justify-end items-center">
                     <button type="button" x-show="uiConfirmShowFormatJson" x-cloak
                         @click="uiConfirmTryFormatJson()"
@@ -3057,9 +3063,9 @@
                         x-text="uiConfirmCancelText"></button>
                     <button type="button"
                         @click="uiConfirmSubmit()"
-                        :disabled="uiConfirmSubmitting"
+                        :disabled="uiConfirmSubmitting || (uiConfirmRequireAck && !uiConfirmAckChecked)"
                         :class="uiConfirmDanger ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'"
-                        class="py-2.5 px-4 rounded-xl text-white font-semibold text-sm disabled:opacity-50"
+                        class="py-2.5 px-4 rounded-xl text-white font-semibold text-sm disabled:opacity-40 disabled:cursor-not-allowed"
                         x-text="uiConfirmConfirmText"></button>
                 </div>
             </div>
