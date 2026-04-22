@@ -584,20 +584,24 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 # --- Системные эндпоинты ---
 
 
-@app.get("/health", tags=["System"])
+@app.api_route("/health", methods=["GET", "HEAD"], tags=["System"])
 async def health_check() -> dict:
     """
     Максимально лёгкий эндпоинт для UptimeRobot / Render.
     Только признак, что процесс жив — без запросов к БД.
+
+    HEAD добавлен явно: FastAPI (в отличие от raw Starlette) не подставляет
+    HEAD автоматически для GET-роутов, а внешние мониторы (UptimeRobot и пр.)
+    часто шлют именно HEAD — без HEAD они получали 405.
     """
     return {"status": "ok"}
 
 
-@app.get("/admin/health", tags=["System"])
+@app.api_route("/admin/health", methods=["GET", "HEAD"], tags=["System"])
 async def admin_health_check() -> dict:
     """
     Отдельный health endpoint для внешних проверок, которые почему-то стучатся в /admin/health.
-    FastAPI автоматически обслуживает HEAD для GET.
+    HEAD поддержан явно — см. комментарий в /health.
     """
     return {"status": "ok"}
 

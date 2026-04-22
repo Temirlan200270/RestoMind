@@ -30,6 +30,10 @@ _cached_openai_base: str = ""
 _openai_provider: OpenAIProvider | None = None
 _gemini_provider: GeminiProvider | None = None
 
+# Последнее залогированное решение о выборе провайдера.
+# Кешируем, чтобы писать INFO/WARNING только при смене входных данных, а не на каждом вызове.
+_provider_choice_log_state: tuple[str, bool, bool] | None = None
+
 
 def _ensure_openai_client() -> AsyncOpenAI | None:
     """Клиент OpenAI или None, если ключ не задан. Пересоздаётся при смене ключа или base_url."""
@@ -105,20 +109,105 @@ def _transcription_model() -> str:
     return m if m else "whisper-1"
 
 
+def _has_openai_key() -> bool:
+    return bool((settings.openai_api_key or "").strip())
+
+
+def _has_gemini_key() -> bool:
+    return bool((getattr(settings, "gemini_api_key", "") or "").strip())
+
+
+def _resolve_provider_name() -> str:
+    """
+    Определить, какого провайдера фактически отдать в рантайме.
+
+    Логика (по убыванию приоритета):
+      1. Явный `AI_PROVIDER` с валидным ключом — используется он.
+      2. Явный `AI_PROVIDER` без ключа, но у альтернативы ключ есть —
+         переключаемся на альтернативу с WARNING (graceful degradation).
+      3. `AI_PROVIDER` пуст/неизвестен — авто-выбор по наличию ключей;
+         если оба ключа или ни одного — дефолт `openai` (обратная совместимость).
+      4. Если ключей нет вовсе — возвращаем запрошенного, чтобы downstream
+         честно залогировал `NO_KEY` (не маскируем ошибку конфигурации).
+
+    Логируем решение только при смене входных данных — иначе лог захлебнётся.
+    """
+    global _provider_choice_log_state
+
+    requested_raw = (getattr(settings, "ai_provider", "") or "").strip().lower()
+    requested = requested_raw if requested_raw in ("openai", "gemini") else ""
+    has_openai = _has_openai_key()
+    has_gemini = _has_gemini_key()
+
+    if requested == "openai":
+        if has_openai:
+            chosen = "openai"
+        elif has_gemini:
+            chosen = "gemini"
+        else:
+            chosen = "openai"
+    elif requested == "gemini":
+        if has_gemini:
+            chosen = "gemini"
+        elif has_openai:
+            chosen = "openai"
+        else:
+            chosen = "gemini"
+    else:
+        if has_gemini and not has_openai:
+            chosen = "gemini"
+        elif has_openai and not has_gemini:
+            chosen = "openai"
+        else:
+            chosen = "openai"
+
+    state = (requested_raw, has_openai, has_gemini)
+    if _provider_choice_log_state != state:
+        _provider_choice_log_state = state
+        if requested and requested != chosen:
+            logger.warning(
+                "[AI] AI_PROVIDER=%s задан, но ключ отсутствует; fallback → %s "
+                "(has_openai=%s, has_gemini=%s)",
+                requested, chosen, has_openai, has_gemini,
+            )
+        elif not requested:
+            logger.info(
+                "[AI] AI_PROVIDER не задан; авто-выбор → %s "
+                "(has_openai=%s, has_gemini=%s)",
+                chosen, has_openai, has_gemini,
+            )
+        else:
+            logger.info(
+                "[AI] AI_PROVIDER=%s (has_openai=%s, has_gemini=%s)",
+                chosen, has_openai, has_gemini,
+            )
+
+    return chosen
+
+
 def get_ai_client() -> BaseAIProvider:
     """
     Фабрика провайдеров AI-Engine v2.0.
-    Выбор — только по settings.AI_PROVIDER (gemini|openai).
+
+    Источник истины — `settings.AI_PROVIDER`, но с graceful fallback:
+    если указанный провайдер не имеет ключа, а у альтернативы ключ есть —
+    автоматически переключается на альтернативу (см. `_resolve_provider_name`).
     """
     global _openai_provider, _gemini_provider
-    prov = (getattr(settings, "ai_provider", "") or "").strip().lower()
-    if prov == "gemini":
+    chosen = _resolve_provider_name()
+    if chosen == "gemini":
         if _gemini_provider is None:
             _gemini_provider = GeminiProvider()
         return _gemini_provider
     if _openai_provider is None:
         _openai_provider = OpenAIProvider()
     return _openai_provider
+
+
+def _reset_provider_choice_log() -> None:
+    """Сбросить кеш логирования (нужно в тестах, когда меняются env-переменные)."""
+    global _provider_choice_log_state
+    _provider_choice_log_state = None
 
 
 async def call_ai(
