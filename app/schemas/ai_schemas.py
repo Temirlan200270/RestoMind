@@ -3,7 +3,7 @@ Pydantic-схемы для структурированных ответов AI 
 Используются как response_format для гарантированной схемы AIBrainResponse.
 """
 
-from typing import Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -259,6 +259,44 @@ class AIBrainResponse(BaseModel):
             "В обычном текстовом чате — null (не заполнять)."
         ),
     )
+
+    # Поля, для которых `null` от LLM семантически эквивалентен «не указано» и
+    # должен быть схлопнут в дефолт. Это защищает схему от распространённой
+    # привычки LLM заполнять все ключи `null` вместо пропуска ключа.
+    # Списком, а не «молча для всех», чтобы непредвиденные `None` в новых полях
+    # падали явно и мы могли осознанно решить — терпеть или нет.
+    _LLM_NULLABLE_TO_DEFAULT: ClassVar[frozenset[str]] = frozenset({
+        "order_type",
+        "payment_method",
+        "payment_mode",
+        "payment_split",
+        "is_preorder",
+        "delivery_address",
+        "pickup_time_note",
+        "detected_language",
+        "is_recommendation",
+        "items",
+        "order_actions",
+        "rejected_upsell_iiko_ids",
+    })
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_llm_nulls_to_defaults(cls, data: Any) -> Any:
+        """
+        LLM часто возвращают `null` для всех полей, включая не-nullable с дефолтом
+        (наблюдалось на Gemini: order_type=null, payment_split=null, is_preorder=null).
+        Удаляем такие ключи до валидации — Pydantic подставит `default` / `default_factory`.
+
+        Работаем только с dict-входом (model_validate_json / model_validate на dict);
+        при уже собранной модели `mode="before"` получит объект и просто пропустит его.
+        """
+        if not isinstance(data, dict):
+            return data
+        for field_name in cls._LLM_NULLABLE_TO_DEFAULT:
+            if data.get(field_name, "__SENTINEL__") is None:
+                data.pop(field_name, None)
+        return data
 
     @model_validator(mode="after")
     def _normalize_payment(self) -> "AIBrainResponse":

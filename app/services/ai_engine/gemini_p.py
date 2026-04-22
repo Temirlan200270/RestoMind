@@ -40,7 +40,12 @@ def _history_to_gemini_text(history: list[dict[str, str]]) -> str:
 _JSON_ONLY_INSTRUCTION = (
     "Ответь СТРОГО одним JSON-объектом, без Markdown и без пояснений.\n"
     "Формат JSON должен соответствовать Pydantic-схеме AIBrainResponse.\n"
-    "Никакого текста вне JSON."
+    "Никакого текста вне JSON.\n"
+    "ВАЖНО: для полей, которые к ответу не относятся, НЕ пиши null. "
+    "Либо опусти ключ, либо используй дефолт из схемы: "
+    "пустая строка \"\" для order_type/payment_method/delivery_address/pickup_time_note, "
+    "'single' для payment_mode, false для is_preorder/is_recommendation, "
+    "пустой список [] для items/order_actions."
 )
 
 
