@@ -3137,13 +3137,17 @@
                             <p class="text-sm text-red-900 font-semibold leading-snug break-words mt-1" x-text="selectedOrder?.iiko_last_error"></p>
                         </div>
                     </div>
-                    <details class="mb-4 rounded-xl border border-slate-200 bg-slate-50/90 px-4 py-3 text-sm group"
+                    <details class="mb-4 rounded-xl border border-slate-200 bg-slate-50/90 px-4 py-3 text-sm"
                         x-show="canEditOrderComposition(selectedOrder)"
-                        :open="orderPayMode === 'mixed' || !!selectedOrder?.payment_split_warning || !!orderPaymentError">
+                        x-data="{ payEditorOpen: false }"
+                        x-init="payEditorOpen = (orderPayMode === 'mixed' || !!selectedOrder?.payment_split_warning || !!orderPaymentError)"
+                        x-effect="if (orderPayMode === 'mixed' || selectedOrder?.payment_split_warning || orderPaymentError) payEditorOpen = true"
+                        :open="payEditorOpen"
+                        @toggle="payEditorOpen = $event.target.open">
                         <summary class="flex items-center justify-between gap-2 cursor-pointer select-none list-none">
                             <span class="text-xs font-bold text-slate-700 uppercase tracking-wide">Изменить способ оплаты</span>
-                            <span class="text-[11px] font-semibold text-slate-500 group-open:hidden">Раскрыть</span>
-                            <span class="text-[11px] font-semibold text-slate-500 hidden group-open:inline">Свернуть</span>
+                            <span class="text-[11px] font-semibold text-slate-500"
+                                x-text="payEditorOpen ? 'Свернуть' : 'Раскрыть'"></span>
                         </summary>
                         <div class="mt-3 space-y-3">
                         <div class="flex flex-wrap gap-3 text-sm">
