@@ -3272,12 +3272,57 @@
                             </p>
                             <div x-show="orderCompositionOpen" class="space-y-3 rounded-xl border border-brand-100 bg-brand-50/40 p-4 max-h-[50vh] overflow-y-auto">
                                 <template x-for="(line, li) in orderEditLines" :key="'oe-' + li">
-                                    <div class="rounded-xl bg-white border border-gray-100 p-3 space-y-2 shadow-sm">
-                                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                            <div>
-                                                <label class="block text-[10px] font-bold text-gray-400 uppercase mb-1">Название (как в меню)</label>
-                                                <input type="text" x-model="line.name"
-                                                    class="w-full rounded-lg border border-gray-200 px-2 py-1.5 text-sm focus:ring-2 focus:ring-brand-500">
+                                    <div class="rounded-xl bg-white border border-gray-100 p-3 space-y-2 shadow-sm"
+                                        x-data="{ pickOpen: false, pickQuery: '' }"
+                                        @click.outside="pickOpen = false">
+                                        <div class="grid grid-cols-1 sm:grid-cols-[1fr_90px] gap-2">
+                                            <div class="relative">
+                                                <label class="block text-[10px] font-bold text-gray-400 uppercase mb-1">Блюдо из меню</label>
+                                                <div class="relative">
+                                                    <input type="text" x-model="line.name"
+                                                        @focus="pickQuery = line.name || ''; pickOpen = true"
+                                                        @input="pickQuery = line.name || ''; pickOpen = true; line.iiko_item_id = ''"
+                                                        @keydown.escape="pickOpen = false"
+                                                        placeholder="Начните вводить название…"
+                                                        autocomplete="off" spellcheck="false"
+                                                        class="w-full rounded-lg border border-gray-200 pl-2 pr-7 py-1.5 text-sm focus:ring-2 focus:ring-brand-500">
+                                                    <button type="button" x-show="line.name" @click="line.name = ''; line.iiko_item_id = ''; pickQuery = ''; pickOpen = true"
+                                                        class="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-base leading-none" aria-label="Очистить">&times;</button>
+                                                </div>
+                                                <div class="mt-1 flex items-center gap-1.5 text-[10px]"
+                                                    x-show="line.iiko_item_id">
+                                                    <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 font-semibold">
+                                                        <span>✓</span><span>Из меню</span>
+                                                    </span>
+                                                    <span class="font-mono text-gray-400 truncate" :title="line.iiko_item_id" x-text="'id: ' + (line.iiko_item_id || '').slice(0, 8) + '…'"></span>
+                                                </div>
+                                                <p x-show="line.name && !line.iiko_item_id" x-cloak
+                                                    class="mt-1 text-[10px] text-amber-700">
+                                                    Название введено вручную — iiko попробует найти блюдо при отправке.
+                                                </p>
+                                                <div x-show="pickOpen" x-cloak
+                                                    class="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-xl max-h-64 overflow-y-auto">
+                                                    <template x-for="mi in (menuItems || []).filter(m => m && m.name && (!pickQuery.trim() || (m.name + ' ' + (m.category || '')).toLowerCase().includes(pickQuery.trim().toLowerCase()))).slice(0, 50)"
+                                                        :key="'pick-' + li + '-' + mi.id">
+                                                        <button type="button"
+                                                            @mousedown.prevent="line.name = mi.name; line.iiko_item_id = mi.iiko_id || ''; pickQuery = mi.name; pickOpen = false"
+                                                            class="w-full text-left px-3 py-2 text-sm hover:bg-brand-50 border-b border-gray-50 last:border-b-0 flex items-center justify-between gap-2">
+                                                            <span class="min-w-0 flex-1 flex flex-col">
+                                                                <span class="truncate text-gray-900 font-medium" x-text="mi.name"></span>
+                                                                <span class="flex items-center gap-1.5 text-[10px] text-gray-400 mt-0.5">
+                                                                    <span x-show="mi.category" x-text="mi.category"></span>
+                                                                    <span x-show="mi.is_available === false" class="text-rose-600 font-semibold">· в стопе</span>
+                                                                </span>
+                                                            </span>
+                                                            <span class="text-xs text-gray-600 shrink-0 tabular-nums"
+                                                                x-show="mi.price" x-text="fmt.money(mi.price)"></span>
+                                                        </button>
+                                                    </template>
+                                                    <div x-show="!(menuItems || []).filter(m => m && m.name && (!pickQuery.trim() || (m.name + ' ' + (m.category || '')).toLowerCase().includes(pickQuery.trim().toLowerCase()))).length"
+                                                        class="px-3 py-3 text-xs text-gray-500">
+                                                        Ничего не нашли. Можно ввести название вручную — при сохранении бот попытается распознать его по меню.
+                                                    </div>
+                                                </div>
                                             </div>
                                             <div>
                                                 <label class="block text-[10px] font-bold text-gray-400 uppercase mb-1">Кол-во</label>
@@ -3285,18 +3330,16 @@
                                                     class="w-full rounded-lg border border-gray-200 px-2 py-1.5 text-sm focus:ring-2 focus:ring-brand-500">
                                             </div>
                                         </div>
-                                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                            <div>
-                                                <label class="block text-[10px] font-bold text-gray-400 uppercase mb-1">ID блюда в iiko</label>
-                                                <input type="text" x-model="line.iiko_item_id" placeholder="из меню"
-                                                    class="w-full font-mono text-xs rounded-lg border border-gray-200 px-2 py-1.5 focus:ring-2 focus:ring-brand-500">
-                                            </div>
-                                            <div>
-                                                <label class="block text-[10px] font-bold text-gray-400 uppercase mb-1">Плов 1 кг</label>
-                                                <input type="text" x-model="line.packaging_plov_1kg" placeholder="пусто · tabak · foil_kazan"
-                                                    class="w-full font-mono text-xs rounded-lg border border-gray-200 px-2 py-1.5 focus:ring-2 focus:ring-brand-500">
-                                            </div>
+                                        <div>
+                                            <label class="block text-[10px] font-bold text-gray-400 uppercase mb-1">Плов 1 кг (упаковка)</label>
+                                            <input type="text" x-model="line.packaging_plov_1kg" placeholder="пусто · tabak · foil_kazan"
+                                                class="w-full font-mono text-xs rounded-lg border border-gray-200 px-2 py-1.5 focus:ring-2 focus:ring-brand-500">
                                         </div>
+                                        <details class="text-[11px] text-gray-400" x-show="line.iiko_item_id || line.name">
+                                            <summary class="cursor-pointer select-none hover:text-gray-600">Для разработчика: ID блюда в iiko</summary>
+                                            <input type="text" x-model="line.iiko_item_id" placeholder="uuid из меню"
+                                                class="mt-2 w-full font-mono text-[11px] rounded-lg border border-gray-200 px-2 py-1.5 focus:ring-2 focus:ring-brand-500">
+                                        </details>
                                         <button type="button" @click="removeOrderEditLine(li)" :disabled="orderEditLines.length <= 1"
                                             class="text-xs font-semibold text-red-600 hover:text-red-700 disabled:opacity-40 disabled:cursor-not-allowed">
                                             Удалить строку
