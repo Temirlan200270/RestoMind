@@ -23,7 +23,12 @@ class ProviderPreset:
 
 AI_PRESETS: dict[ProviderKey, ProviderPreset] = {
     "gemini": ProviderPreset(
-        models=("gemini-3.1-flash-lite", "gemini-3-flash"),
+        # Primary: Gemini 3 Flash (preview) — флагманский Flash с reasoning уровня Pro,
+        # поддерживает большое окно контекста (1M) и длинный output (≈66K токенов).
+        # Fallback: Gemini 2.5 Flash (GA, стабильная) — страхует, если preview временно
+        # недоступен / разлогинен / Google снёс preview-алиас. GA-модель гарантированно
+        # жива до ≥2026-10-16, поэтому это безопасная страховка.
+        models=("gemini-3-flash-preview", "gemini-2.5-flash"),
         strategy="cascade",
     ),
     "openai": ProviderPreset(
