@@ -4593,6 +4593,17 @@ class PackagingRulePatchBody(BaseModel):
     sort_order: int | None = None
 
 
+class PackagingPreviewBody(BaseModel):
+    menu_item_id: int = Field(..., ge=1)
+    quantity: int = Field(1, ge=1, le=999)
+    # Whitelist через Literal: единственный валидный набор типов заказа в домене.
+    # Pydantic вернёт 422 на любой другой ввод — не маскируем мусор в логику расчёта.
+    order_type: Literal["delivery", "pickup", "hall"] = Field(...)
+    # Синхронизация с доменной схемой PackagingPlov1Kg (app/schemas/ai_schemas.py):
+    # пустая строка = не выбран, tabak / foil_kazan = контейнеры для плова 1кг.
+    packaging_plov_1kg: Literal["", "tabak", "foil_kazan"] = ""
+
+
 @router.get("/packaging-rules")
 async def list_packaging_rules(request: Request, db: AsyncSession = Depends(get_db)) -> dict:
     """Правила упаковки арендатора (включая неактивные). При отсутствии — сиды для организации."""
@@ -4616,6 +4627,54 @@ async def list_packaging_rules(request: Request, db: AsyncSession = Depends(get_
         )
         rows = list(result2.scalars().all())
     return {"items": [_packaging_rule_dict(r) for r in rows]}
+
+
+@router.post("/packaging-rules/preview")
+async def preview_packaging_rules(
+    request: Request,
+    body: PackagingPreviewBody,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    «Живой калькулятор» для вкладки упаковки: считает fee_lines тем же кодом, что и прод,
+    чтобы админ видел понятную математику без дублирования логики в JS.
+    """
+    from app.services.order_logic import compute_fee_lines
+
+    org_id = admin_org_from_session(request)
+
+    menu_item = await db.get(MenuItem, int(body.menu_item_id))
+    if menu_item is None or int(menu_item.organization_id) != org_id:
+        raise HTTPException(status_code=404, detail="Позиция меню не найдена")
+
+    qty = int(body.quantity)
+    price = float(menu_item.price or 0.0)
+    foods_subtotal = round(price * qty, 2)
+    foods = [{
+        "name": menu_item.name,
+        "category": menu_item.category or "",
+        "quantity": qty,
+        "price_per_unit": price,
+        "item_total": foods_subtotal,
+        "packaging_plov_1kg": body.packaging_plov_1kg,
+    }]
+
+    rules = await load_packaging_rules(db, org_id)
+    fee_lines, extras = compute_fee_lines(foods, foods_subtotal, body.order_type, packaging_rules=rules)
+    grand_total = round(foods_subtotal + float(extras), 2)
+
+    return {
+        "ok": True,
+        "input": {
+            "order_type": body.order_type,
+            "quantity": qty,
+            "menu_item": _menu_item_dict(menu_item),
+        },
+        "foods_subtotal": foods_subtotal,
+        "fee_lines": fee_lines,
+        "extras_total": round(float(extras), 2),
+        "grand_total": grand_total,
+    }
 
 
 @router.post("/packaging-rules")

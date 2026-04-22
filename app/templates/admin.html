@@ -2189,6 +2189,111 @@
                     </button>
                 </div>
 
+                <!-- ========== LIVE PREVIEW (receipt) ========== -->
+                <div class="bg-white rounded-3xl border border-gray-100 shadow-sm p-6"
+                    x-init="initPackagingPreviewDefaults()">
+                    <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6">
+                        <div class="min-w-0 flex-1">
+                            <h4 class="text-base font-extrabold text-gray-900">Проверка правил (живой чек)</h4>
+                            <p class="text-sm text-gray-500 mt-1">Выберите блюдо и тип получения — увидите, какие сборы начислятся и почему.</p>
+
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-5">
+                                <div>
+                                    <label class="block text-[11px] font-bold text-gray-400 uppercase mb-2 ml-1">Блюдо</label>
+                                    <select x-model="packagingPreviewMenuItemId" class="w-full px-4 py-2 bg-gray-50 border border-gray-100 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-brand-500 transition-all">
+                                        <template x-for="it in (menuItems || [])" :key="it.id">
+                                            <option :value="it.id" x-text="(it.name || '—') + (it.price != null ? (' · ' + fmt.money(it.price)) : '')"></option>
+                                        </template>
+                                    </select>
+                                    <p class="text-[11px] text-gray-400 mt-2 ml-1">Если список пустой — откройте вкладку «Меню» и загрузите/создайте позиции.</p>
+                                </div>
+                                <div>
+                                    <label class="block text-[11px] font-bold text-gray-400 uppercase mb-2 ml-1">Кол-во</label>
+                                    <input type="number" x-model.number="packagingPreviewQty" min="1" step="1"
+                                        class="w-full px-4 py-2 bg-gray-50 border border-gray-100 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-brand-500 transition-all">
+                                </div>
+                                <div>
+                                    <label class="block text-[11px] font-bold text-gray-400 uppercase mb-2 ml-1">Тип получения</label>
+                                    <select x-model="packagingPreviewOrderType" class="w-full px-4 py-2 bg-gray-50 border border-gray-100 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-brand-500 transition-all">
+                                        <option value="delivery">Доставка</option>
+                                        <option value="pickup">Самовывоз</option>
+                                        <option value="hall">В зале</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="mt-4 flex flex-wrap items-center gap-3"
+                                x-effect="if (!packagingPreviewIsPlov1Kg && packagingPreviewPlovChoice) packagingPreviewPlovChoice = ''">
+                                <div x-show="packagingPreviewIsPlov1Kg" x-cloak
+                                    class="flex items-center gap-2 bg-slate-50 border border-slate-100 px-3 py-2 rounded-2xl"
+                                    title="Выбор контейнера актуален только для «плов 1кг»">
+                                    <span class="text-[11px] font-bold uppercase tracking-widest text-slate-400">Плов 1кг</span>
+                                    <select x-model="packagingPreviewPlovChoice" class="bg-transparent text-sm font-mono text-slate-700 focus:ring-0 border-none">
+                                        <option value="">не выбрано</option>
+                                        <option value="tabak">tabak</option>
+                                        <option value="foil_kazan">foil_kazan</option>
+                                    </select>
+                                </div>
+                                <button type="button" @click="packagingPreviewRun()" :disabled="packagingPreviewLoading"
+                                    class="inline-flex items-center px-4 py-2.5 bg-gray-900 hover:bg-black text-white text-sm font-semibold rounded-xl shadow-sm transition-all active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed">
+                                    <span x-show="!packagingPreviewLoading">Посчитать чек</span>
+                                    <span x-show="packagingPreviewLoading" x-cloak>Считаем…</span>
+                                </button>
+                                <button type="button" @click="packagingPreviewResult=null" :disabled="packagingPreviewLoading"
+                                    class="inline-flex items-center px-3 py-2 text-sm font-semibold rounded-xl border border-gray-200 text-gray-700 hover:bg-gray-50 transition-all disabled:opacity-60 disabled:cursor-not-allowed">
+                                    Сбросить
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="w-full lg:w-[22rem] shrink-0">
+                            <div class="rounded-2xl border border-gray-100 bg-gradient-to-b from-white to-slate-50 p-4">
+                                <div class="flex items-center justify-between mb-3">
+                                    <p class="text-[11px] font-extrabold uppercase tracking-widest text-slate-400">Мини-чек</p>
+                                    <p class="text-[11px] text-slate-400" x-show="packagingPreviewResult && packagingPreviewResult.input" x-cloak
+                                        x-text="(packagingPreviewResult.input.order_type || '').toUpperCase()"></p>
+                                </div>
+
+                                <div x-show="!packagingPreviewResult" class="text-sm text-gray-400 py-8 text-center">
+                                    Нажмите «Посчитать чек»
+                                </div>
+
+                                <div x-show="packagingPreviewResult" x-cloak class="space-y-2 text-sm">
+                                    <div class="flex items-start justify-between gap-3">
+                                        <div class="min-w-0">
+                                            <p class="font-semibold text-gray-900 truncate" x-text="packagingPreviewResult.input?.menu_item?.name || 'Блюдо'"></p>
+                                            <p class="text-[11px] text-gray-400" x-text="'× ' + String(packagingPreviewResult.input?.quantity ?? 1)"></p>
+                                        </div>
+                                        <div class="font-semibold text-gray-900 whitespace-nowrap" x-text="fmt.money(packagingPreviewResult.foods_subtotal || 0)"></div>
+                                    </div>
+
+                                    <div class="border-t border-slate-200/70 my-2"></div>
+
+                                    <template x-for="(line, lineIdx) in (packagingPreviewResult.fee_lines || [])" :key="lineIdx + '_' + (line.kind || '')">
+                                        <div class="flex items-start justify-between gap-3">
+                                            <div class="min-w-0">
+                                                <p class="text-slate-700 truncate" x-text="line.name || line.kind"></p>
+                                                <p class="text-[11px] text-slate-400" x-text="'× ' + String(line.quantity || 1)"></p>
+                                            </div>
+                                            <div class="font-semibold text-slate-700 whitespace-nowrap" x-text="fmt.money(line.item_total || 0)"></div>
+                                        </div>
+                                    </template>
+
+                                    <div class="border-t border-slate-200/70 my-2"></div>
+
+                                    <div class="flex items-center justify-between">
+                                        <p class="text-[12px] font-extrabold text-gray-900">Итого</p>
+                                        <p class="text-[12px] font-extrabold text-gray-900" x-text="fmt.money(packagingPreviewResult.grand_total || 0)"></p>
+                                    </div>
+                                </div>
+                            </div>
+                            <p class="text-[11px] text-gray-400 mt-3">
+                                Этот расчёт делается сервером тем же кодом, что и итог заказа (<code class="bg-gray-100 px-1 rounded">compute_fee_lines</code>).
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
                 <div x-show="packagingLoading" class="py-20 text-center">
                     <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-brand-500 border-t-transparent"></div>
                     <p class="text-gray-400 mt-4 font-medium">Загружаем правила…</p>

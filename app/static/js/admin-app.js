@@ -2294,6 +2294,75 @@ function adminMixinAuthKnowledge() {
 function adminMixinPackagingIntegrationsDemoWsUi() {
     return {
         // ─── Packaging Rules ────────────────────────
+        packagingPreviewLoading: false,
+        packagingPreviewMenuItemId: null,
+        packagingPreviewQty: 1,
+        packagingPreviewOrderType: 'delivery', // delivery | pickup | hall
+        packagingPreviewPlovChoice: '',
+        packagingPreviewResult: null,
+
+        initPackagingPreviewDefaults() {
+            if (!Array.isArray(this.menuItems) || !this.menuItems.length) return;
+            const stillValid = this.packagingPreviewMenuItemId != null
+                && this.menuItems.some((x) => x && x.id === this.packagingPreviewMenuItemId);
+            if (stillValid) return;
+            const first = this.menuItems.find((x) => x && x.id != null);
+            if (first) this.packagingPreviewMenuItemId = first.id;
+        },
+
+        /**
+         * Эвристика: выбранное блюдо — «плов 1кг» → имеет смысл показывать выбор
+         * контейнера (tabak / foil_kazan). Смотрим по name/category.
+         * Логика совпадает с серверной `classify_packaging_kind` для ветки plov_1kg,
+         * чтобы UI не предлагал пользователю переключатель, который всё равно
+         * не повлияет на расчёт.
+         */
+        get packagingPreviewIsPlov1Kg() {
+            const id = this.packagingPreviewMenuItemId;
+            if (id == null || !Array.isArray(this.menuItems)) return false;
+            const item = this.menuItems.find((x) => x && x.id === id);
+            if (!item) return false;
+            const name = String(item.name || '').toLowerCase();
+            const cat = String(item.category || '').toLowerCase();
+            const hasPlov = name.includes('плов') || cat.includes('плов');
+            if (!hasPlov) return false;
+            const sizeHint = name.includes('1кг') || name.includes('1 кг') || name.includes('1000')
+                || cat.includes('1кг') || cat.includes('1 кг') || cat.includes('1000');
+            return sizeHint;
+        },
+
+        async packagingPreviewRun() {
+            this.initPackagingPreviewDefaults();
+            if (this.packagingPreviewMenuItemId == null) {
+                void this.showUiAlert('Сначала загрузите меню и выберите блюдо.', 'Подсказка');
+                return;
+            }
+            this.packagingPreviewLoading = true;
+            this.packagingPreviewResult = null;
+            try {
+                const { ok, data } = await this.apiJsonResponse('/api/admin/packaging-rules/preview', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        menu_item_id: Number(this.packagingPreviewMenuItemId),
+                        quantity: Number(this.packagingPreviewQty || 1),
+                        order_type: String(this.packagingPreviewOrderType || 'delivery'),
+                        packaging_plov_1kg: String(this.packagingPreviewPlovChoice || ''),
+                    }),
+                });
+                if (!ok) {
+                    void this.showUiAlert(this.formatApiError(data), 'Ошибка');
+                    return;
+                }
+                this.packagingPreviewResult = data;
+            } catch (e) {
+                console.error('[admin] packagingPreviewRun', e);
+                void this.showUiAlert('Ошибка сети. Проверьте соединение.', 'Ошибка');
+            } finally {
+                this.packagingPreviewLoading = false;
+            }
+        },
+
         async loadPackagingRules() {
             this.packagingLoading = true;
             try {
@@ -2306,6 +2375,7 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                 this.packagingRules = [];
             } finally {
                 this.packagingLoading = false;
+                this.initPackagingPreviewDefaults();
             }
         },
         packagingSave(rule) {

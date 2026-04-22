@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 
 from pydantic import ValidationError
@@ -40,6 +41,46 @@ _JSON_ONLY_INSTRUCTION = (
     "Никакого текста вне JSON."
 )
 
+
+# Fenced code block (``` или ```json), non-greedy, через несколько строк.
+# DOTALL — чтобы '.' матчил '\n'.
+_MARKDOWN_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL | re.IGNORECASE)
+
+
+def _extract_json_from_text(raw: str) -> str:
+    """
+    Извлекает чистый JSON-объект из возможно «обёрнутого» ответа LLM.
+
+    Зачем: Gemini 3 Flash — thinking-модель, она склонна к добавлению преамбул,
+    пояснений и Markdown-обёрток (```json ... ```), несмотря на явный системный
+    запрет. Также бывают пустые хвостовые символы, которые ломают JSON-парсер.
+
+    Эвристики (по убыванию точности):
+      1) Первый Markdown code fence → содержимое фенса.
+      2) Подстрока от первой '{' до последней '}' — если оба нашлись.
+      3) Возврат исходной строки (пусть Pydantic упадёт с честной ошибкой).
+
+    ВАЖНО: функция не валидирует JSON, она лишь «чистит мусор». Валидация — в
+    AIBrainResponse.model_validate_json(). Так мы разделяем ответственности:
+    экстрактор знает про Markdown, валидатор — про схему данных.
+    """
+    stripped = (raw or "").strip()
+    if not stripped:
+        return stripped
+
+    fence_match = _MARKDOWN_FENCE_RE.search(stripped)
+    if fence_match:
+        candidate = fence_match.group(1).strip()
+        if candidate:
+            return candidate
+
+    first_brace = stripped.find("{")
+    last_brace = stripped.rfind("}")
+    if 0 <= first_brace < last_brace:
+        return stripped[first_brace : last_brace + 1]
+
+    return stripped
+
 # Gemini поддерживает inline-аудио: audio/wav, audio/mp3, audio/aiff, audio/aac, audio/ogg, audio/flac.
 # WhatsApp обычно отдаёт audio/ogg; codecs=opus — корректно нормализуется в audio/ogg.
 _GEMINI_AUDIO_MIME_BY_BASE: dict[str, str] = {
@@ -76,6 +117,30 @@ _STT_PROMPT = (
 )
 
 _STT_MAX_RETRIES = 2
+
+
+# Ошибки уровня провайдера (биллинг, аутентификация, общий лимит).
+# Для них нет смысла делать каскадный failover между моделями одного провайдера —
+# у них общий ключ и общий billing-аккаунт, ответ будет идентичным.
+# Сравниваем по имени класса, чтобы не тянуть жёсткий импорт google.api_core
+# (сохраняем lazy-философию модуля: провайдер работает даже если SDK не стоит).
+_PROVIDER_LEVEL_ERROR_NAMES: frozenset[str] = frozenset({
+    "ResourceExhausted",   # 429 — кончились кредиты / превышен tokens-per-minute / RPM
+    "PermissionDenied",    # 403 — ключ валиден, но нет доступа к модели/региону
+    "Unauthenticated",     # 401 — ключ невалиден/отозван
+})
+
+
+def _is_provider_level_error(exc: BaseException) -> bool:
+    """
+    True, если ошибка указывает на проблему с провайдером в целом (биллинг/ключ/квоты),
+    а не на проблему конкретной модели.
+
+    Пример: `ResourceExhausted: Your prepayment credits are depleted` — переключение
+    на другую модель того же провайдера бессмысленно, билинг общий. Уходим в
+    TransientAiError немедленно, экономим latency и не тратим квоту «вхолостую».
+    """
+    return type(exc).__name__ in _PROVIDER_LEVEL_ERROR_NAMES
 
 
 class GeminiProvider(BaseAIProvider):
@@ -140,16 +205,29 @@ class GeminiProvider(BaseAIProvider):
 
                 model = genai.GenerativeModel(model_name)
                 # Async API is available in google-generativeai; use it to avoid blocking.
+                # response_mime_type="application/json" — нативный JSON-режим Gemini:
+                # модель обязуется вернуть валидный JSON без Markdown-обёртки. Это
+                # защита №1 (работает на уровне API и снижает ValidationError-каскад).
+                # Схему (response_schema=AIBrainResponse) не передаём: AIBrainResponse
+                # слишком сложна (nullable Unions, nested Pydantic) — SDK-конвертер
+                # в JSON Schema может упасть на InvalidArgument для некоторых preview
+                # моделей. Валидируем через Pydantic на нашей стороне — это надёжнее.
                 resp = await model.generate_content_async(
                     prompt,
                     generation_config=genai.types.GenerationConfig(
                         temperature=0.3,
+                        response_mime_type="application/json",
                     ),
                 )
                 text = (getattr(resp, "text", None) or "").strip()
                 if not text:
                     raise ValueError("Empty response")
-                parsed = AIBrainResponse.model_validate_json(text)
+                # Защита №2: thinking-модели иногда всё равно оборачивают JSON в
+                # ```json ... ``` или добавляют преамбулу. Экстрактор — безопасный
+                # no-op, когда ответ уже чистый.
+                json_text = _extract_json_from_text(text)
+                # Защита №3: финальная проверка схемы.
+                parsed = AIBrainResponse.model_validate_json(json_text)
                 logger.info(
                     "[AI] provider=gemini model=%s attempt=%d/%d status=SUCCESS latency_ms=%d intent=%s",
                     model_name,
@@ -180,15 +258,22 @@ class GeminiProvider(BaseAIProvider):
 
             except Exception as exc:
                 last_error = exc
+                is_provider_level = _is_provider_level_error(exc)
                 logger.warning(
-                    "[AI] provider=gemini model=%s attempt=%d/%d status=ERROR latency_ms=%d err=%s",
+                    "[AI] provider=gemini model=%s attempt=%d/%d status=%s latency_ms=%d err=%s",
                     model_name,
                     idx,
                     len(preset.models),
+                    "QUOTA_EXHAUSTED" if is_provider_level else "ERROR",
                     int((time.perf_counter() - t0) * 1000),
                     type(exc).__name__,
-                    exc_info=True,
+                    # Полный traceback — только для неожиданных ошибок; для квоты/биллинга
+                    # он бесполезен (причина и так ясна из текста) и лишь засоряет логи.
+                    exc_info=not is_provider_level,
                 )
+                if is_provider_level:
+                    # Прерываем каскад: другая модель того же провайдера упадёт так же.
+                    break
                 if idx < len(preset.models):
                     logger.warning(
                         "[FAILOVER] Model %s failed (Reason: API_ERROR), trying %s",
@@ -231,6 +316,9 @@ class GeminiProvider(BaseAIProvider):
         preset = AI_PRESETS["gemini"]
 
         last_error: Exception | None = None
+        # Если словили provider-level ошибку (квота/биллинг/ключ) — обе петли прерываются:
+        # ретраить бессмысленно, переключаться на другую модель того же провайдера — тоже.
+        provider_level_failure = False
         # Каскад моделей тот же, что для чата: если первая упала по 4xx/недоступна — пробуем следующую.
         for idx, model_name in enumerate(preset.models, start=1):
             for attempt in range(1, _STT_MAX_RETRIES + 1):
@@ -264,13 +352,20 @@ class GeminiProvider(BaseAIProvider):
                     break
                 except Exception as exc:
                     last_error = exc
+                    is_provider_level = _is_provider_level_error(exc)
                     logger.warning(
-                        "[AI] provider=gemini stt model=%s attempt=%d/%d status=ERROR err=%s",
+                        "[AI] provider=gemini stt model=%s attempt=%d/%d status=%s err=%s",
                         model_name,
                         attempt,
                         _STT_MAX_RETRIES,
+                        "QUOTA_EXHAUSTED" if is_provider_level else "ERROR",
                         type(exc).__name__,
                     )
+                    if is_provider_level:
+                        provider_level_failure = True
+                        break
+            if provider_level_failure:
+                break
             if idx < len(preset.models):
                 logger.warning(
                     "[FAILOVER] STT model %s failed, trying %s",
@@ -279,6 +374,11 @@ class GeminiProvider(BaseAIProvider):
                 )
 
         if last_error is not None:
-            logger.error("[AI] provider=gemini stt status=FAILED err=%s", type(last_error).__name__)
+            final_status = "QUOTA_EXHAUSTED" if provider_level_failure else "FAILED"
+            logger.error(
+                "[AI] provider=gemini stt status=%s err=%s",
+                final_status,
+                type(last_error).__name__,
+            )
         return ""
 
