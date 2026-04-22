@@ -3065,32 +3065,34 @@
             </div>
         </div>
 
-        <div x-show="showOrderModal && selectedOrder" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/40" @click.self="showOrderModal = false; orderCompositionOpen = false">
+        <div x-show="showOrderModal && selectedOrder" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" @click.self="showOrderModal = false; orderCompositionOpen = false">
             <template x-if="selectedOrder">
-                <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 fade-in" @click.stop>
-                    <div class="flex items-start justify-between mb-5 gap-3">
+                <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[92vh] flex flex-col fade-in overflow-hidden" @click.stop role="dialog" aria-modal="true">
+                    <div class="flex items-start justify-between gap-3 px-6 pt-6 pb-4 border-b border-gray-100">
                         <div class="min-w-0 flex-1">
                             <h3 class="text-lg font-bold text-gray-900" x-text="'Заказ #' + selectedOrder.id"></h3>
-                            <p class="text-sm mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                                <span class="text-gray-500 font-semibold shrink-0">Оплата:</span>
-                                <span class="inline-flex items-center gap-1.5 font-bold"
+                            <div class="mt-2 flex flex-wrap items-center gap-1.5">
+                                <span x-show="selectedOrder.order_type"
+                                    class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-semibold bg-indigo-50 text-indigo-800 border border-indigo-200/70"
+                                    x-text="orderTypeBadge(selectedOrder)"></span>
+                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-white border border-gray-200"
                                     :class="paymentModalPayClass(selectedOrder)">
-                                    <span class="text-base leading-none" x-text="paymentIcon(selectedOrder)"></span>
+                                    <span aria-hidden="true" x-text="paymentIcon(selectedOrder)"></span>
                                     <span x-text="paymentMethodTitle(selectedOrder)"></span>
                                 </span>
-                            </p>
-                            <!-- Разбивка смешанной оплаты -->
-                            <template x-if="paymentMixedSplit(selectedOrder)">
-                                <div class="mt-2 ml-0.5 flex flex-wrap gap-2">
-                                    <template x-for="part in paymentMixedSplit(selectedOrder)" :key="part.label">
-                                        <span class="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-md bg-purple-50 text-purple-800 border border-purple-200">
-                                            <span x-text="part.icon"></span>
+                                <span x-show="selectedOrder?.prepayment_status && selectedOrder?.prepayment_status !== 'not_required'"
+                                    class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-semibold bg-amber-50 text-amber-900 border border-amber-200/70"
+                                    x-text="prepaymentLabel(selectedOrder?.prepayment_status)"></span>
+                                <template x-if="paymentMixedSplit(selectedOrder)">
+                                    <template x-for="part in paymentMixedSplit(selectedOrder)" :key="'hdr-' + part.label">
+                                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-purple-50 text-purple-800 border border-purple-200/70">
+                                            <span aria-hidden="true" x-text="part.icon"></span>
                                             <span x-text="part.label"></span>
-                                            <span x-text="fmt.money(part.amount)"></span>
+                                            <span class="tabular-nums" x-text="fmt.money(part.amount)"></span>
                                         </span>
                                     </template>
-                                </div>
-                            </template>
+                                </template>
+                            </div>
                             <template x-if="selectedOrder?.payment_split_warning">
                                 <div class="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
                                     ⚠️ <span x-text="selectedOrder.payment_split_warning"></span>
@@ -3099,14 +3101,7 @@
                         </div>
                         <button type="button" @click="showOrderModal = false; orderCompositionOpen = false" class="text-gray-400 hover:text-gray-600 text-xl shrink-0 leading-none" aria-label="Закрыть">&times;</button>
                     </div>
-                    <div class="flex flex-wrap items-center gap-2 mb-4"
-                        x-show="selectedOrder.order_type || (selectedOrder?.prepayment_status && selectedOrder?.prepayment_status !== 'not_required')">
-                        <span x-show="selectedOrder.order_type" class="px-2.5 py-1 rounded-lg text-[10px] font-black tracking-wide uppercase bg-indigo-100 text-indigo-900 border border-indigo-200/80"
-                            x-text="orderTypeBadge(selectedOrder)"></span>
-                        <span x-show="selectedOrder?.prepayment_status && selectedOrder?.prepayment_status !== 'not_required'"
-                            class="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase bg-amber-100 text-amber-900 border border-amber-200/80"
-                            x-text="prepaymentLabel(selectedOrder?.prepayment_status)"></span>
-                    </div>
+                    <div class="flex-1 overflow-y-auto px-6 py-5">
                     <div class="mb-4 rounded-xl border border-violet-200 bg-violet-50/60 px-4 py-3 text-sm" x-show="selectedOrder?.booking">
                         <div class="text-xs font-bold text-violet-800 uppercase tracking-wide mb-1">Бронь (предзаказ в зале)</div>
                         <p class="text-gray-900 font-semibold" x-text="fmt.bookingDate(selectedOrder?.booking?.date) + ' в ' + (selectedOrder?.booking?.time?.slice(0,5) || '—')"></p>
@@ -3142,11 +3137,15 @@
                             <p class="text-sm text-red-900 font-semibold leading-snug break-words mt-1" x-text="selectedOrder?.iiko_last_error"></p>
                         </div>
                     </div>
-                    <div class="mb-4 rounded-xl border border-slate-200 bg-slate-50/90 px-4 py-3 text-sm space-y-3"
-                        x-show="canEditOrderComposition(selectedOrder)">
-                        <div class="text-xs font-bold text-slate-700 uppercase tracking-wide">Управление оплатой</div>
-                        <p class="text-xs text-gray-600">Итог заказа: <span class="font-semibold tabular-nums text-gray-900" x-text="fmt.money(selectedOrder?.total_price)"></span>
-                            — подстройте способ и суммы, чтобы совпадало с пересчётом состава.</p>
+                    <details class="mb-4 rounded-xl border border-slate-200 bg-slate-50/90 px-4 py-3 text-sm group"
+                        x-show="canEditOrderComposition(selectedOrder)"
+                        :open="orderPayMode === 'mixed' || !!selectedOrder?.payment_split_warning || !!orderPaymentError">
+                        <summary class="flex items-center justify-between gap-2 cursor-pointer select-none list-none">
+                            <span class="text-xs font-bold text-slate-700 uppercase tracking-wide">Изменить способ оплаты</span>
+                            <span class="text-[11px] font-semibold text-slate-500 group-open:hidden">Раскрыть</span>
+                            <span class="text-[11px] font-semibold text-slate-500 hidden group-open:inline">Свернуть</span>
+                        </summary>
+                        <div class="mt-3 space-y-3">
                         <div class="flex flex-wrap gap-3 text-sm">
                             <label class="inline-flex items-center gap-2 cursor-pointer">
                                 <input type="radio" class="rounded-full border-gray-300 text-brand-600" value="single" x-model="orderPayMode" @change="onOrderPayModeChange()">
@@ -3188,7 +3187,8 @@
                             <span x-show="orderPaymentSaving" class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
                             <span x-text="orderPaymentSaving ? 'Сохраняем…' : 'Сохранить оплату'"></span>
                         </button>
-                    </div>
+                        </div>
+                    </details>
                     <template x-if="orderSalesInsightSteps(selectedOrder).length">
                         <div class="mb-4 rounded-2xl border border-violet-200/80 bg-gradient-to-br from-violet-50/90 via-white to-indigo-50/50 p-4 shadow-sm ring-1 ring-violet-900/5 relative overflow-hidden">
                             <div class="absolute -right-6 -top-6 w-24 h-24 bg-violet-200/40 rounded-full blur-2xl pointer-events-none"></div>
@@ -3345,8 +3345,8 @@
                                 <button type="button"
                                     x-show="selectedOrder?.status === 'confirmed' || selectedOrder?.iiko_last_error"
                                     @click="confirmSendToIiko()"
-                                    class="w-full mt-2 py-4 rounded-2xl text-white font-black text-sm tracking-wide shadow-lg shadow-emerald-500/25 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:to-teal-500 transition">
-                                    <span x-text="selectedOrder?.iiko_last_error ? 'Повторить отправку в iiko' : 'ПОДТВЕРДИТЬ И ПЕЧАТЬ В IIKO'"></span>
+                                    class="w-full mt-2 py-3.5 rounded-xl text-white font-bold text-sm tracking-wide bg-emerald-600 hover:bg-emerald-700 shadow-sm shadow-emerald-600/20 transition">
+                                    <span x-text="selectedOrder?.iiko_last_error ? 'Повторить отправку в iiko' : 'Подтвердить и печать в iiko'"></span>
                                 </button>
                                 <div x-show="selectedOrder?.items?.order_meta?.iiko_last_send && selectedOrder?.status === 'sent_to_iiko'"
                                     class="mt-2 rounded-xl border border-emerald-200 bg-emerald-50/90 px-3 py-2 text-xs text-emerald-900">
@@ -3361,13 +3361,18 @@
                             </div>
                         </div>
                     </template>
-                    <div class="mt-6 pt-4 border-t border-gray-200">
+                    </div><!-- /scrollable body -->
+                    <div class="border-t border-gray-100 bg-gray-50/80 px-6 py-3 flex items-center justify-between gap-3">
                         <button type="button"
                             @click="confirmAndDeleteOrdersFromModal()"
-                            class="w-full py-3 rounded-xl text-sm font-semibold border-2 border-red-200 text-red-800 bg-red-50 hover:bg-red-100 transition">
-                            Удалить заказ из базы…
+                            class="text-xs font-semibold text-red-600 hover:text-red-700 hover:underline transition"
+                            title="Удалить заказ из базы (потребует подтверждения)">
+                            Удалить заказ…
                         </button>
-                        <p class="text-[11px] text-gray-400 text-center mt-2">Откроется окно подтверждения</p>
+                        <button type="button" @click="showOrderModal = false; orderCompositionOpen = false"
+                            class="py-2 px-4 rounded-lg text-sm font-semibold text-gray-700 hover:bg-gray-100 transition">
+                            Закрыть
+                        </button>
                     </div>
                 </div>
             </template>
