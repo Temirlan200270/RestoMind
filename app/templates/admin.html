@@ -70,8 +70,8 @@
             <div class="flex items-center gap-3 min-w-0">
                 <div class="w-10 h-10 rounded-xl bg-brand-500 flex items-center justify-center text-xl font-bold shrink-0">R</div>
                 <div class="min-w-0">
-                    <div class="font-bold text-lg leading-tight">RestoMind</div>
-                    <div class="text-xs text-blue-300 opacity-80">Панель управления рестораном</div>
+                    <div class="font-bold text-lg leading-tight truncate" x-text="orgProfile?.name || 'RestoMind'"></div>
+                    <div class="text-xs text-blue-300 opacity-80">Панель управления</div>
                 </div>
             </div>
             <button type="button" class="md:hidden p-2 rounded-lg text-blue-200 hover:bg-white/10 shrink-0" @click="sidebarOpen = false" aria-label="Закрыть меню">&times;</button>
@@ -320,17 +320,18 @@
                             <span class="tabular-nums" x-text="dashStats.revenue_change_pct != null ? formatTrendPct(dashStats.revenue_change_pct) : '—'"></span> к вчера
                         </div>
                     </div>
-                    <div class="rounded-2xl p-5 sm:p-6 shadow-sm ring-1 ring-violet-200/80 bg-gradient-to-br from-violet-600 via-fuchsia-600 to-brand-600 text-white">
-                        <div class="text-[11px] font-bold uppercase tracking-wider text-white/80">Сколько заработал ИИ</div>
-                        <div x-show="dashStatsLoading && !dashStatsLoadedOnce" class="mt-3 h-10 w-40 rounded-xl bg-white/20 animate-pulse"></div>
+                    <div class="rounded-2xl p-5 sm:p-6 shadow-sm ring-1 ring-violet-200/80 bg-violet-50/95 text-slate-900">
+                        <div class="text-[11px] font-bold uppercase tracking-wider text-violet-900/80">Сколько заработал ИИ</div>
+                        <p class="mt-1 text-xs text-slate-600 leading-snug">Допродажи, которые гость принял в чеке. Подробнее по дням — вкладка «Аналитика».</p>
+                        <div x-show="dashStatsLoading && !dashStatsLoadedOnce" class="mt-3 h-10 w-40 rounded-xl bg-violet-100 animate-pulse"></div>
                         <div x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak class="mt-3 flex items-center gap-2">
                             <span class="text-2xl sm:text-3xl leading-none shrink-0" aria-hidden="true">📈</span>
-                            <span class="text-2xl sm:text-3xl font-extrabold tabular-nums" x-text="fmt.money(dashStats.ai_revenue_today ?? dashStats.upsell_revenue_today ?? 0)"></span>
+                            <span class="text-2xl sm:text-3xl font-extrabold tabular-nums text-violet-950" x-text="fmt.money(dashStats.ai_revenue_today ?? dashStats.upsell_revenue_today ?? 0)"></span>
                         </div>
-                        <div class="mt-2 flex flex-wrap gap-2 text-[11px] sm:text-xs text-white/90" x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak>
-                            <span class="inline-flex items-center rounded-lg bg-white/15 px-2 py-0.5 font-semibold">доля <span class="ml-1 tabular-nums" x-text="(dashStats.ai_revenue_share_pct ?? '—') + (dashStats.ai_revenue_share_pct != null ? '%' : '')"></span></span>
-                            <span class="inline-flex items-center rounded-lg bg-white/10 px-2 py-0.5">конв. <span class="ml-1 tabular-nums" x-text="(dashStats.upsell_conversion_pct ?? '—') + (dashStats.upsell_conversion_pct != null ? '%' : '')"></span></span>
-                            <span class="inline-flex items-center rounded-lg bg-white/10 px-2 py-0.5 tabular-nums" x-text="'принято ' + (dashStats.upsell_accepted_today ?? 0) + '/' + (dashStats.upsell_offered_today ?? 0)"></span>
+                        <div class="mt-2 flex flex-wrap gap-2 text-[11px] sm:text-xs text-slate-700" x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak>
+                            <span class="inline-flex items-center rounded-lg bg-violet-100 px-2 py-0.5 font-semibold text-violet-950 ring-1 ring-violet-200/80">доля <span class="ml-1 tabular-nums" x-text="(dashStats.ai_revenue_share_pct ?? '—') + (dashStats.ai_revenue_share_pct != null ? '%' : '')"></span></span>
+                            <span class="inline-flex items-center rounded-lg bg-white px-2 py-0.5 text-slate-800 ring-1 ring-slate-200/80">конв. <span class="ml-1 tabular-nums" x-text="(dashStats.upsell_conversion_pct ?? '—') + (dashStats.upsell_conversion_pct != null ? '%' : '')"></span></span>
+                            <span class="inline-flex items-center rounded-lg bg-white px-2 py-0.5 tabular-nums text-slate-800 ring-1 ring-slate-200/80" x-text="'принято ' + (dashStats.upsell_accepted_today ?? 0) + '/' + (dashStats.upsell_offered_today ?? 0)"></span>
                         </div>
                     </div>
                     <div class="rounded-2xl bg-white p-5 sm:p-6 shadow-sm ring-1 ring-slate-900/5">
@@ -682,6 +683,30 @@
                             </p>
                         </div>
                     </div>
+                </div>
+
+                <div class="bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 p-5 mb-6 overflow-x-auto">
+                    <h3 class="font-semibold text-gray-900 mb-1">Заказы по часу суток (UTC)</h3>
+                    <p class="text-xs text-gray-500 mb-3">Сводка по времени создания заказа в RestoMind. Сопоставляйте с пиками кухни и логистикой iiko; календарная теплокарта — ниже.</p>
+                    <table class="w-full text-sm min-w-[360px]">
+                        <thead>
+                            <tr class="text-left text-gray-500 border-b border-gray-100">
+                                <th class="pb-2 font-medium">Час UTC</th>
+                                <th class="pb-2 font-medium text-right tabular-nums">Заказов</th>
+                                <th class="pb-2 font-medium text-right tabular-nums">Выручка</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="(h, hi) in (analyticsData.sales_by_hour_utc || []).filter(x => x.orders > 0)" :key="'sh-' + hi">
+                                <tr class="border-b border-gray-50">
+                                    <td class="py-2 font-mono tabular-nums" x-text="String(h.hour).padStart(2, '0') + ':00–' + String(h.hour).padStart(2, '0') + ':59'"></td>
+                                    <td class="py-2 text-right tabular-nums font-medium" x-text="h.orders"></td>
+                                    <td class="py-2 text-right tabular-nums" x-text="fmt.money(h.revenue)"></td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                    <p x-show="!(analyticsData.sales_by_hour_utc || []).some(x => x.orders > 0)" class="text-center py-6 text-gray-400 text-sm">Нет заказов с ненулевой меткой часа в выбранном периоде</p>
                 </div>
 
                 <div class="grid grid-cols-1 xl:grid-cols-2 gap-5 mb-6">
@@ -1840,6 +1865,46 @@
                                 placeholder="Через запятую: хит, к нему: ачичук, чай грузинский"></textarea>
                             <p class="mt-1 text-[11px] text-gray-400 leading-snug">Бот использует теги в первую очередь для рекомендаций к этому блюду (названия как в меню).</p>
                         </div>
+                        <div class="rounded-xl border border-slate-200 bg-slate-50/80 p-3 space-y-3">
+                            <p class="text-xs font-semibold text-slate-700">Профиль для ИИ (порции и ограничения)</p>
+                            <div>
+                                <label class="text-[11px] font-semibold text-gray-500 uppercase">Тип порции</label>
+                                <select x-model="menuEditForm.portion_kind" class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm bg-white">
+                                    <option value="single">Порционное (на одного)</option>
+                                    <option value="shareable">На компанию / шеринг</option>
+                                </select>
+                            </div>
+                            <div class="grid grid-cols-2 gap-2">
+                                <div>
+                                    <label class="text-[11px] font-semibold text-gray-500 uppercase">Гостей от</label>
+                                    <input type="number" min="1" max="99" x-model.number="menuEditForm.serves_min" class="mt-1 w-full rounded-xl border border-gray-200 px-2 py-2 text-sm">
+                                </div>
+                                <div>
+                                    <label class="text-[11px] font-semibold text-gray-500 uppercase">Гостей до</label>
+                                    <input type="number" min="1" max="99" x-model.number="menuEditForm.serves_max" class="mt-1 w-full rounded-xl border border-gray-200 px-2 py-2 text-sm">
+                                </div>
+                            </div>
+                            <div>
+                                <label class="text-[11px] font-semibold text-gray-500 uppercase">Аллергены</label>
+                                <input type="text" x-model="menuEditForm.allergens" placeholder="орехи, молоко, глютен…"
+                                    class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
+                            </div>
+                            <div>
+                                <label class="text-[11px] font-semibold text-gray-500 uppercase">Краткий состав</label>
+                                <textarea x-model="menuEditForm.ingredients_summary" rows="2" placeholder="Для подсказок гостю и кухне"
+                                    class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm resize-y"></textarea>
+                            </div>
+                            <div>
+                                <label class="text-[11px] font-semibold text-gray-500 uppercase">Диетические теги</label>
+                                <input type="text" x-model="menuEditForm.dietary_tags" placeholder="веган, халяль, безлактозное…"
+                                    class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
+                            </div>
+                            <div>
+                                <label class="text-[11px] font-semibold text-gray-500 uppercase">Пары допродаж (текст)</label>
+                                <input type="text" x-model="menuEditForm.upsell_pairs" placeholder="UUID iiko или названия через запятую"
+                                    class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm font-mono text-xs">
+                            </div>
+                        </div>
                         <div>
                             <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Фото (URL, необязательно)</label>
                             <input type="url" x-model="menuEditForm.image_url"
@@ -2140,6 +2205,11 @@
                         </div>
                     </div>
                 </div>
+                <div class="rounded-2xl border border-sky-200 bg-sky-50/90 px-4 py-3 text-sm text-sky-950 mb-2">
+                    <strong class="font-semibold">Онбординг:</strong> сначала заполните профиль выше, затем базу знаний.
+                    Тип записи: <span class="font-mono text-xs">facility</span> — факты о заведении (парковка, часы);
+                    <span class="font-mono text-xs">persona</span> — тон и правила поведения бота. Обе попадают в контекст ИИ в разных блоках.
+                </div>
                 <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
                     <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
                         <div>
@@ -2161,6 +2231,8 @@
                                 <div class="flex-1 min-w-0">
                                     <div class="flex flex-wrap items-center gap-2 mb-1">
                                         <span class="text-xs font-bold uppercase tracking-wide text-brand-600" x-text="k.category || 'Общее'"></span>
+                                        <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200"
+                                            x-text="(k.knowledge_kind || 'facility') === 'persona' ? 'persona' : 'facility'"></span>
                                         <span x-show="!k.is_active" class="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-200 text-gray-700">Выкл</span>
                                         <span class="text-[10px] text-gray-400 font-mono" x-text="'#' + k.id"></span>
                                     </div>
@@ -2192,6 +2264,14 @@
                                 <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Категория</label>
                                 <input type="text" x-model="knowledgeEditForm.category" placeholder="Парковка, Банкеты…"
                                     class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Тип знания</label>
+                                <select x-model="knowledgeEditForm.knowledge_kind" class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm bg-white">
+                                    <option value="facility">О заведении (facility)</option>
+                                    <option value="persona">Характер бота (persona)</option>
+                                </select>
+                                <p class="text-[11px] text-gray-400 mt-1">Persona — тон и стиль; facility — часы, парковка, политики.</p>
                             </div>
                             <div>
                                 <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Вопрос / заголовок</label>
@@ -2550,6 +2630,10 @@
                                 <div><span class="text-gray-500">db_mode</span> <span class="text-gray-900" x-text="settingsEnv.db_mode"></span></div>
                                 <div><span class="text-gray-500">redis_backend</span> <span class="text-gray-900" x-text="settingsEnv.redis_backend"></span></div>
                                 <div><span class="text-gray-500">app_debug</span> <span class="text-gray-900" x-text="settingsEnv.app_debug"></span></div>
+                                <div class="pt-2 border-t border-slate-200 text-gray-700">ИИ и токены</div>
+                                <ul class="list-none space-y-1 pl-2 text-gray-700">
+                                    <li>OpenAI: после каждого ответа в лог сервиса пишется строка <span class="font-mono">usage prompt=… completion=…</span> — для контроля расхода без отдельной БД.</li>
+                                </ul>
                                 <div class="pt-2 border-t border-slate-200 text-gray-700">Подключения (флаги)</div>
                                 <template x-if="settingsEnv.integrations">
                                     <ul class="list-none space-y-1 pl-2">
@@ -2719,7 +2803,7 @@
             </div>
 
             <!-- ========== ТЕСТ БОТА ========== -->
-            <div x-show="currentTab === 'settings' && settingsTab === 'technical'" x-cloak class="fade-in">
+            <div x-show="currentTab === 'settings' && settingsTab === 'bot_test'" x-cloak class="fade-in">
                 {{ settings_tabs() }}
                 <div class="max-w-2xl mx-auto">
                     <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
@@ -3071,10 +3155,10 @@
             </div>
         </div>
 
-        <div x-show="showOrderModal && selectedOrder" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" @click.self="showOrderModal = false; orderCompositionOpen = false">
+        <div x-show="showOrderModal && selectedOrder" x-cloak class="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/40" @click.self="showOrderModal = false; orderCompositionOpen = false">
             <template x-if="selectedOrder">
-                <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[92vh] flex flex-col fade-in overflow-hidden" @click.stop role="dialog" aria-modal="true">
-                    <div class="flex items-start justify-between gap-3 px-6 pt-6 pb-4 border-b border-gray-100">
+                <div class="bg-white shadow-2xl w-full max-w-lg h-[100dvh] sm:h-auto max-h-[100dvh] sm:max-h-[92vh] flex flex-col fade-in overflow-hidden rounded-t-3xl sm:rounded-2xl min-h-0" @click.stop role="dialog" aria-modal="true">
+                    <div class="flex items-start justify-between gap-3 px-6 pt-6 pb-4 border-b border-gray-100 shrink-0">
                         <div class="min-w-0 flex-1">
                             <h3 class="text-lg font-bold text-gray-900" x-text="'Заказ #' + selectedOrder.id"></h3>
                             <div class="mt-2 flex flex-wrap items-center gap-1.5">
@@ -3107,7 +3191,7 @@
                         </div>
                         <button type="button" @click="showOrderModal = false; orderCompositionOpen = false" class="text-gray-400 hover:text-gray-600 text-xl shrink-0 leading-none" aria-label="Закрыть">&times;</button>
                     </div>
-                    <div class="flex-1 overflow-y-auto px-6 py-5">
+                    <div class="flex-1 min-h-0 overflow-y-auto overscroll-contain px-6 py-5">
                     <div class="mb-4 rounded-xl border border-violet-200 bg-violet-50/60 px-4 py-3 text-sm" x-show="selectedOrder?.booking">
                         <div class="text-xs font-bold text-violet-800 uppercase tracking-wide mb-1">Бронь (предзаказ в зале)</div>
                         <p class="text-gray-900 font-semibold" x-text="fmt.bookingDate(selectedOrder?.booking?.date) + ' в ' + (selectedOrder?.booking?.time?.slice(0,5) || '—')"></p>
@@ -3141,16 +3225,17 @@
                         <div class="min-w-0">
                             <p class="text-xs font-bold uppercase tracking-wider text-red-900">Ошибка отправки в iiko</p>
                             <p class="text-sm text-red-900 font-semibold leading-snug break-words mt-1" x-text="selectedOrder?.iiko_last_error"></p>
+                            <p class="text-[11px] text-red-800/90 mt-2 leading-snug">Проверьте в настройках филиала терминальную группу iiko и тип заказа (доставка / самовывоз / зал). Заказ остаётся подтверждённым — после исправления нажмите «Повторить отправку в iiko».</p>
                         </div>
                     </div>
                     <details class="mb-4 rounded-xl border border-slate-200 bg-slate-50/90 px-4 py-3 text-sm"
                         x-show="canEditOrderComposition(selectedOrder)"
                         x-data="{ payEditorOpen: false }"
-                        x-init="payEditorOpen = (orderPayMode === 'mixed' || !!selectedOrder?.payment_split_warning || !!orderPaymentError)"
+                        x-init="payEditorOpen = (orderPayMode === 'mixed' || !!selectedOrder?.payment_split_warning || !!orderPaymentError) || (window.matchMedia && window.matchMedia('(min-width:640px)').matches)"
                         x-effect="if (orderPayMode === 'mixed' || selectedOrder?.payment_split_warning || orderPaymentError) payEditorOpen = true"
                         :open="payEditorOpen"
                         @toggle="payEditorOpen = $event.target.open">
-                        <summary class="flex items-center justify-between gap-2 cursor-pointer select-none list-none">
+                        <summary class="flex items-center justify-between gap-2 cursor-pointer select-none list-none min-h-[44px] sm:min-h-0">
                             <span class="text-xs font-bold text-slate-700 uppercase tracking-wide">Изменить способ оплаты</span>
                             <span class="text-[11px] font-semibold text-slate-500"
                                 x-text="payEditorOpen ? 'Свернуть' : 'Раскрыть'"></span>
@@ -3222,7 +3307,7 @@
                                 </p>
                                 <div class="relative pl-1">
                                     <div class="absolute left-[11px] top-2 bottom-2 w-0.5 bg-violet-200 rounded-full" aria-hidden="true"></div>
-                                    <ul class="space-y-0">
+                                    <ul class="space-y-0 max-h-[min(38vh,300px)] sm:max-h-[min(52vh,420px)] overflow-y-auto overscroll-contain pr-1">
                                         <template x-for="(trace, tidx) in orderSalesInsightSteps(selectedOrder)" :key="'si-' + tidx">
                                             <li class="relative flex gap-3 pb-4 last:pb-0">
                                                 <div class="relative z-10 mt-0.5 flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full border-2 border-white bg-violet-500 text-[10px] font-bold text-white shadow-sm" x-text="tidx + 1"></div>
@@ -3415,7 +3500,7 @@
                         </div>
                     </template>
                     </div><!-- /scrollable body -->
-                    <div class="border-t border-gray-100 bg-gray-50/80 px-6 py-3 flex items-center justify-between gap-3">
+                    <div class="border-t border-gray-100 bg-gray-50/80 px-6 py-3 flex items-center justify-between gap-3 shrink-0">
                         <button type="button"
                             @click="confirmAndDeleteOrdersFromModal()"
                             class="text-xs font-semibold text-red-600 hover:text-red-700 hover:underline transition"

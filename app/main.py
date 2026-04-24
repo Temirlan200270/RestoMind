@@ -424,6 +424,46 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as exc:
         _ddl_warn(sql, exc)
 
+    # Меню: структурный профиль блюда (порции, аллергены, допродажи) — для ИИ и iiko-комментария.
+    for sql_sqlite, sql_pg in (
+        (
+            "ALTER TABLE menu_items ADD COLUMN portion_kind VARCHAR(20) DEFAULT 'single'",
+            "ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS portion_kind VARCHAR(20) DEFAULT 'single'",
+        ),
+        (
+            "ALTER TABLE menu_items ADD COLUMN serves_min INTEGER DEFAULT 1",
+            "ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS serves_min INTEGER DEFAULT 1",
+        ),
+        (
+            "ALTER TABLE menu_items ADD COLUMN serves_max INTEGER DEFAULT 1",
+            "ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS serves_max INTEGER DEFAULT 1",
+        ),
+        (
+            "ALTER TABLE menu_items ADD COLUMN allergens TEXT DEFAULT ''",
+            "ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS allergens TEXT DEFAULT ''",
+        ),
+        (
+            "ALTER TABLE menu_items ADD COLUMN ingredients_summary TEXT DEFAULT ''",
+            "ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS ingredients_summary TEXT DEFAULT ''",
+        ),
+        (
+            "ALTER TABLE menu_items ADD COLUMN dietary_tags TEXT DEFAULT ''",
+            "ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS dietary_tags TEXT DEFAULT ''",
+        ),
+        (
+            "ALTER TABLE menu_items ADD COLUMN upsell_pairs TEXT DEFAULT ''",
+            "ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS upsell_pairs TEXT DEFAULT ''",
+        ),
+    ):
+        try:
+            async with async_engine.begin() as conn:
+                if settings.db_mode == "sqlite":
+                    await conn.execute(text(sql_sqlite))
+                else:
+                    await conn.execute(text(sql_pg))
+        except Exception as exc:
+            _ddl_warn(sql_sqlite if settings.db_mode == "sqlite" else sql_pg, exc)
+
     # Franchise / iiko в БД: create_all создаёт новые таблицы; для существующих SQLite — колонки.
     for sql_sqlite, sql_pg in (
         (

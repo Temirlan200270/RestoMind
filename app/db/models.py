@@ -462,6 +462,33 @@ class MenuItem(Base):
         server_default="",
         comment="Теги сочетаемости для ИИ: через запятую (напр. хит, к нему: ачичук, чай)",
     )
+    portion_kind: Mapped[str] = mapped_column(
+        String(20),
+        default="single",
+        server_default="single",
+        comment="single — порционное; shareable — на компанию / кушать вместе",
+    )
+    serves_min: Mapped[int] = mapped_column(
+        Integer, default=1, server_default="1", comment="Мин. число гостей, на которых рассчитана позиция",
+    )
+    serves_max: Mapped[int] = mapped_column(
+        Integer, default=1, server_default="1", comment="Макс. число гостей для комфортной порции",
+    )
+    allergens: Mapped[str] = mapped_column(
+        Text, default="", server_default="", comment="Аллергены и риски (текст для ИИ и оператора)",
+    )
+    ingredients_summary: Mapped[str] = mapped_column(
+        Text, default="", server_default="", comment="Краткий состав для подсказок и ограничений",
+    )
+    dietary_tags: Mapped[str] = mapped_column(
+        Text, default="", server_default="", comment="Теги диеты: веган, халяль, безглютеновый — через запятую",
+    )
+    upsell_pairs: Mapped[str] = mapped_column(
+        Text,
+        default="",
+        server_default="",
+        comment="Пары допродаж: iiko UUID или названия через запятую, как в меню",
+    )
     price: Mapped[float] = mapped_column(Numeric(10, 2), default=0, comment="Цена в тенге")
     is_available: Mapped[bool] = mapped_column(Boolean, default=True, comment="Есть ли в наличии")
     image_url: Mapped[str | None] = mapped_column(String(500), nullable=True, comment="Ссылка на фото")

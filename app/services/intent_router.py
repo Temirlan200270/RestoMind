@@ -92,6 +92,18 @@ def _blend_ai_with_stored_order_meta(ai: AIBrainResponse, meta: dict | None) -> 
         bt = str(meta.get("booking_time"))
     ip = bool(meta.get("is_preorder", ai.is_preorder))
 
+    guest_updates: dict[str, object] = {}
+    if getattr(ai, "guest_count_for_meal", None) is None and meta.get("guest_count") is not None:
+        try:
+            gc = int(meta.get("guest_count"))
+            guest_updates["guest_count_for_meal"] = max(1, min(50, gc))
+        except (TypeError, ValueError):
+            pass
+    prev_notes = (getattr(ai, "dietary_allergy_notes", None) or "").strip()
+    meta_notes = str(meta.get("dietary_allergy_notes") or "").strip()
+    if meta_notes and not prev_notes:
+        guest_updates["dietary_allergy_notes"] = meta_notes[:2000]
+
     out = ai.model_copy(
         update={
             "order_type": ot,
@@ -102,6 +114,7 @@ def _blend_ai_with_stored_order_meta(ai: AIBrainResponse, meta: dict | None) -> 
             "pickup_time_note": pu,
             "booking_time": bt,
             "is_preorder": ip,
+            **guest_updates,
         }
     )
     mix_sum = float(ai.payment_split.cash) + float(ai.payment_split.card) + float(ai.payment_split.remote)
@@ -648,7 +661,7 @@ async def _handle_order(
         next_state = UserState.CONFIRMING_ORDER
         log_hint = "ждём подтверждение"
 
-    from app.services.strategy_engine import apply_db_upsell_rules
+    from app.services.strategy_engine import apply_db_upsell_rules, apply_guest_meal_guidance_reply
 
     reply, items_json = await apply_db_upsell_rules(
         db,
@@ -659,6 +672,7 @@ async def _handle_order(
         menu_items=menu_items,
         ai_eff=ai_eff,
     )
+    reply = apply_guest_meal_guidance_reply(reply, items_json, menu_items or [])
     order.items_json = items_json
     await db.flush()
 

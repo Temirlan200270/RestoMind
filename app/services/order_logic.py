@@ -734,7 +734,23 @@ def build_menu_context(db_items: list[MenuItem]) -> str:
         iiko_tag = f" [id: {item.iiko_id}]" if item.iiko_id else ""
         tags_s = (getattr(item, "tags", None) or "").strip()
         tags_part = f" — теги: {tags_s}" if tags_s else ""
-        lines.append(f"- {item.name}: {float(item.price):.0f} ₸{iiko_tag}{tags_part}")
+        pk = (getattr(item, "portion_kind", None) or "single").strip().lower()
+        portion_lbl = "на компанию" if pk == "shareable" else "порция"
+        smin = int(getattr(item, "serves_min", None) or 1)
+        smax = int(getattr(item, "serves_max", None) or smin)
+        serve_part = ""
+        if smax > 1 or smin > 1:
+            serve_part = f" — гостей: {smin}–{smax}" if smin != smax else f" — гостей: ~{smin}"
+        al = (getattr(item, "allergens", None) or "").strip()
+        al_part = f" — аллергены: {al}" if al else ""
+        ing = (getattr(item, "ingredients_summary", None) or "").strip()
+        ing_part = f" — состав: {ing[:120]}" if ing else ""
+        dt = (getattr(item, "dietary_tags", None) or "").strip()
+        dt_part = f" — диета: {dt}" if dt else ""
+        lines.append(
+            f"- {item.name}: {float(item.price):.0f} ₸{iiko_tag}{tags_part} "
+            f"({portion_lbl}{serve_part}{al_part}{ing_part}{dt_part})"
+        )
 
     return "\n".join(lines)
 
@@ -1063,6 +1079,15 @@ def build_order_items_json(
         "payment_details": pay_details,
         "requires_order_prepayment": requires_order_prepayment,
     }
+    gc = getattr(ai, "guest_count_for_meal", None)
+    if gc is not None:
+        try:
+            order_meta["guest_count"] = max(1, min(50, int(gc)))
+        except (TypeError, ValueError):
+            pass
+    diet_notes = (getattr(ai, "dietary_allergy_notes", None) or "").strip()
+    if diet_notes:
+        order_meta["dietary_allergy_notes"] = diet_notes[:4000]
     if ai.booking_details:
         order_meta["booking_snapshot"] = {
             "date": ai.booking_details.date,

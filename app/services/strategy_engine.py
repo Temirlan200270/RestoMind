@@ -161,3 +161,51 @@ async def apply_db_upsell_rules(
         return f"{reply_text}\n\n💡 {extra}", new_ij
 
     return reply_text, items_json
+
+
+def apply_guest_meal_guidance_reply(
+    reply_text: str,
+    items_json: dict[str, Any],
+    menu_rows: list[MenuItem],
+) -> str:
+    """
+    Детерминированный слой после ИИ: если в заказе много гостей, а в чеке только «порционные»
+    позиции без признака «на компанию» — добавляем короткую подсказку (не меняет корзину).
+    """
+    meta = items_json.get("order_meta") if isinstance(items_json.get("order_meta"), dict) else {}
+    raw_g = meta.get("guest_count")
+    try:
+        guests = int(raw_g) if raw_g is not None else 0
+    except (TypeError, ValueError):
+        guests = 0
+    if guests < 3:
+        return reply_text
+
+    raw_items = items_json.get("items")
+    lines = [x for x in (raw_items or []) if isinstance(x, dict)]
+    if len(lines) < 1:
+        return reply_text
+
+    by_iiko: dict[str, MenuItem] = {}
+    for m in menu_rows or []:
+        iid = (m.iiko_id or "").strip().lower()
+        if iid:
+            by_iiko[iid] = m
+
+    def _line_kind(line: dict[str, Any]) -> str:
+        iid = str(line.get("iiko_item_id") or line.get("iiko_id") or "").strip().lower()
+        if iid and iid in by_iiko:
+            pk = (getattr(by_iiko[iid], "portion_kind", None) or "single").strip().lower()
+            return "shareable" if pk == "shareable" else "single"
+        return "single"
+
+    kinds = [_line_kind(x) for x in lines]
+    if any(k == "shareable" for k in kinds):
+        return reply_text
+    if all(k == "single" for k in kinds):
+        return (
+            f"{reply_text}\n\n"
+            f"👥 Для компании из {guests} гостей порционных позиций может не хватить по объёму. "
+            "Если хотите — могу подсказать блюда «на компанию» из меню или уточнить у кухни порции."
+        )
+    return reply_text

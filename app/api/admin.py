@@ -2362,6 +2362,13 @@ def _menu_item_dict(item: MenuItem) -> dict:
         "category": item.category or "",
         "description": item.description or "",
         "tags": item.tags or "",
+        "portion_kind": getattr(item, "portion_kind", None) or "single",
+        "serves_min": int(getattr(item, "serves_min", None) or 1),
+        "serves_max": int(getattr(item, "serves_max", None) or 1),
+        "allergens": getattr(item, "allergens", None) or "",
+        "ingredients_summary": getattr(item, "ingredients_summary", None) or "",
+        "dietary_tags": getattr(item, "dietary_tags", None) or "",
+        "upsell_pairs": getattr(item, "upsell_pairs", None) or "",
         "price": float(item.price),
         "is_available": item.is_available,
         "image_url": item.image_url,
@@ -2375,6 +2382,13 @@ class MenuItemPatchBody(BaseModel):
     category: str | None = Field(None, max_length=100)
     description: str | None = None
     tags: str | None = None
+    portion_kind: str | None = Field(None, description="single | shareable")
+    serves_min: int | None = Field(None, ge=1, le=99)
+    serves_max: int | None = Field(None, ge=1, le=99)
+    allergens: str | None = None
+    ingredients_summary: str | None = None
+    dietary_tags: str | None = None
+    upsell_pairs: str | None = None
     price: float | None = Field(None, ge=0)
     is_available: bool | None = None
     image_url: str | None = Field(None, max_length=500)
@@ -2393,6 +2407,13 @@ class MenuItemCreateBody(BaseModel):
     category: str = Field(default="", max_length=100)
     description: str = ""
     tags: str = ""
+    portion_kind: str = Field(default="single", description="single | shareable")
+    serves_min: int = Field(default=1, ge=1, le=99)
+    serves_max: int = Field(default=1, ge=1, le=99)
+    allergens: str = ""
+    ingredients_summary: str = ""
+    dietary_tags: str = ""
+    upsell_pairs: str = ""
     price: float = Field(0, ge=0)
     is_available: bool = True
     image_url: str | None = Field(None, max_length=500)
@@ -2449,12 +2470,26 @@ async def create_menu_item(
 ) -> dict:
     """Добавить позицию меню вручную (iiko_id генерируется локально)."""
     org_id = admin_org_from_session(request)
+    pk = (body.portion_kind or "single").strip().lower()
+    if pk not in ("single", "shareable"):
+        pk = "single"
+    smin = max(1, min(99, int(body.serves_min)))
+    smax = max(1, min(99, int(body.serves_max)))
+    if smax < smin:
+        smax = smin
     item = MenuItem(
         organization_id=org_id,
         name=body.name.strip(),
         category=(body.category or "").strip(),
         description=(body.description or "").strip(),
         tags=(body.tags or "").strip(),
+        portion_kind=pk,
+        serves_min=smin,
+        serves_max=smax,
+        allergens=(body.allergens or "").strip(),
+        ingredients_summary=(body.ingredients_summary or "").strip(),
+        dietary_tags=(body.dietary_tags or "").strip(),
+        upsell_pairs=(body.upsell_pairs or "").strip(),
         price=body.price,
         is_available=body.is_available,
         image_url=(body.image_url or "").strip() or None,
@@ -2489,12 +2524,30 @@ async def patch_menu_item(
         data["description"] = data["description"].strip()
     if "tags" in data and data["tags"] is not None:
         data["tags"] = data["tags"].strip()
+    if "portion_kind" in data and data["portion_kind"] is not None:
+        pk = str(data["portion_kind"]).strip().lower()
+        data["portion_kind"] = pk if pk in ("single", "shareable") else "single"
+    if "serves_min" in data and data["serves_min"] is not None:
+        data["serves_min"] = max(1, min(99, int(data["serves_min"])))
+    if "serves_max" in data and data["serves_max"] is not None:
+        data["serves_max"] = max(1, min(99, int(data["serves_max"])))
+    if "allergens" in data and data["allergens"] is not None:
+        data["allergens"] = str(data["allergens"]).strip()
+    if "ingredients_summary" in data and data["ingredients_summary"] is not None:
+        data["ingredients_summary"] = str(data["ingredients_summary"]).strip()
+    if "dietary_tags" in data and data["dietary_tags"] is not None:
+        data["dietary_tags"] = str(data["dietary_tags"]).strip()
+    if "upsell_pairs" in data and data["upsell_pairs"] is not None:
+        data["upsell_pairs"] = str(data["upsell_pairs"]).strip()
     if "image_url" in data:
         url = (data["image_url"] or "").strip()
         data["image_url"] = url if url else None
 
     for key, value in data.items():
         setattr(item, key, value)
+    if hasattr(item, "serves_min") and hasattr(item, "serves_max"):
+        if int(item.serves_max or 1) < int(item.serves_min or 1):
+            item.serves_max = int(item.serves_min or 1)
 
     await db.flush()
     return {"ok": True, "item": _menu_item_dict(item)}
@@ -2615,9 +2668,11 @@ async def create_knowledge_item(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     org_id = admin_org_from_session(request)
+    kk_raw = (body.knowledge_kind or "facility").strip().lower()
+    kk = "persona" if kk_raw == "persona" else "facility"
     row = KnowledgeItem(
         organization_id=body.organization_id if body.organization_id is not None else org_id,
-        knowledge_kind=(body.knowledge_kind or "facility").strip().lower()[:32],
+        knowledge_kind=kk[:32],
         category=(body.category or "").strip(),
         question=body.question.strip(),
         answer=body.answer.strip(),
@@ -2651,6 +2706,9 @@ async def patch_knowledge_item(
         data["question"] = data["question"].strip()
     if "answer" in data and data["answer"] is not None:
         data["answer"] = data["answer"].strip()
+    if "knowledge_kind" in data and data["knowledge_kind"] is not None:
+        kk = str(data["knowledge_kind"]).strip().lower()
+        data["knowledge_kind"] = kk if kk == "persona" else "facility"
     for key, value in data.items():
         setattr(row, key, value)
     await db.flush()
@@ -4098,6 +4156,21 @@ async def analytics(
     menu_engineering = menu_engineering_rows(current_orders)
     delivery_geo = delivery_geo_rows(current_orders)
 
+    hour_buckets: list[dict[str, float | int]] = [
+        {"hour": h, "orders": 0, "revenue": 0.0} for h in range(24)
+    ]
+    for o in current_orders:
+        dt_h = o.created_at
+        if dt_h is None:
+            continue
+        if dt_h.tzinfo:
+            dt_u = dt_h.astimezone(timezone.utc)
+        else:
+            dt_u = dt_h.replace(tzinfo=timezone.utc)
+        hh = int(dt_u.hour)
+        hour_buckets[hh]["orders"] = int(hour_buckets[hh]["orders"]) + 1
+        hour_buckets[hh]["revenue"] = float(hour_buckets[hh]["revenue"]) + float(o.total_price or 0)
+
     heatmap_matrix = [[0 for _ in range(24)] for _ in range(7)]
     for o in current_orders:
         dt = o.created_at
@@ -4191,6 +4264,10 @@ async def analytics(
             "matrix": heatmap_matrix,
             "weekday_labels": ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"],
         },
+        "sales_by_hour_utc": [
+            {"hour": int(x["hour"]), "orders": int(x["orders"]), "revenue": round(float(x["revenue"]), 2)}
+            for x in hour_buckets
+        ],
     }
 
 

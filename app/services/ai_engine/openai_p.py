@@ -150,6 +150,21 @@ class OpenAIProvider(BaseAIProvider):
 
                 parsed = msg.parsed
                 if parsed is not None:
+                    try:
+                        us = getattr(completion, "usage", None)
+                        if us is not None:
+                            pt = getattr(us, "prompt_tokens", None)
+                            ct = getattr(us, "completion_tokens", None)
+                            tt = getattr(us, "total_tokens", None)
+                            logger.info(
+                                "[AI] provider=openai model=%s usage prompt=%s completion=%s total=%s",
+                                model,
+                                pt,
+                                ct,
+                                tt,
+                            )
+                    except Exception:
+                        pass
                     logger.info(
                         "[AI] provider=openai model=%s attempt=%d status=SUCCESS latency_ms=%d intent=%s",
                         model,

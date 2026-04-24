@@ -98,7 +98,7 @@ function adminParseLocationHash() {
         knowledge: 'restaurant',
         upsell: 'smart_sales',
         team: 'team',
-        test: 'technical',
+        test: 'bot_test',
     };
     if (legacyToSettings[path]) {
         return { tab: 'settings', settingsTab: legacyToSettings[path], phone: null };
@@ -230,6 +230,7 @@ function adminMixinState() {
         knowledgeEditForm: {
             id: null,
             category: '',
+            knowledge_kind: 'facility',
             question: '',
             answer: '',
             is_active: true,
@@ -488,9 +489,17 @@ function adminMixinState() {
             name: '',
             category: '',
             description: '',
+            tags: '',
             price: 0,
             is_available: true,
             image_url: '',
+            portion_kind: 'single',
+            serves_min: 1,
+            serves_max: 1,
+            allergens: '',
+            ingredients_summary: '',
+            dietary_tags: '',
+            upsell_pairs: '',
         },
         /** Порядок разделов как в бумажном меню */
         menuCategoryOrder: [
@@ -2287,6 +2296,7 @@ function adminMixinAuthKnowledge() {
             this.knowledgeEditForm = {
                 id: null,
                 category: '',
+                knowledge_kind: 'facility',
                 question: '',
                 answer: '',
                 is_active: true,
@@ -2298,9 +2308,11 @@ function adminMixinAuthKnowledge() {
         openKnowledgeEdit(k) {
             if (!k) return;
             this.knowledgeEditError = '';
+            const kk = (k.knowledge_kind || 'facility').toLowerCase() === 'persona' ? 'persona' : 'facility';
             this.knowledgeEditForm = {
                 id: k.id,
                 category: k.category || '',
+                knowledge_kind: kk,
                 question: k.question || '',
                 answer: k.answer || '',
                 is_active: !!k.is_active,
@@ -2324,8 +2336,10 @@ function adminMixinAuthKnowledge() {
             this.knowledgeSaveLoading = true;
             this.knowledgeEditError = '';
             try {
+                const kk = (f.knowledge_kind || 'facility').toLowerCase() === 'persona' ? 'persona' : 'facility';
                 const payload = {
                     category: (f.category || '').trim(),
+                    knowledge_kind: kk,
                     question: f.question.trim(),
                     answer: f.answer.trim(),
                     is_active: !!f.is_active,
@@ -3130,6 +3144,11 @@ function adminMixinWebSocketEvents() {
             );
             if (!ok) {
                 console.warn('resend', status, data);
+                const detail = data && typeof data.detail === 'string' ? data.detail : '';
+                void this.showUiAlert(
+                    detail || `Не удалось переотправить (${status}). Проверьте WhatsApp и права.`,
+                    'WhatsApp',
+                );
                 return;
             }
             await this.selectChat(this.activeChatPhone);
@@ -3182,7 +3201,7 @@ function adminMixinWebSocketEvents() {
             const label = this.chatDeliveryTitle(msg);
             const icon = this.chatDeliveryMark(msg);
             let cls = 'bg-white/15 text-white border-white/20';
-            if (s === 'sending') cls = 'bg-white/15 text-white border-white/20';
+            if (s === 'sending') cls = 'bg-amber-400/25 text-white border-amber-200/40 animate-pulse';
             else if (s === 'sent') cls = 'bg-white/15 text-white border-white/20';
             else if (s === 'delivered' || s === 'read') cls = 'bg-emerald-500/20 text-white border-emerald-200/30';
             else if (s === 'failed') cls = 'bg-rose-500/20 text-white border-rose-200/30';
@@ -3367,7 +3386,7 @@ function adminMixinLiveChat() {
         },
 
         /** Допустимые под-вкладки «Настройки». */
-        _adminSettingsTabIds: new Set(['restaurant', 'connections', 'smart_sales', 'team', 'technical']),
+        _adminSettingsTabIds: new Set(['restaurant', 'connections', 'smart_sales', 'team', 'technical', 'bot_test']),
 
         _pushAdminHash() {
             if (!this.authenticated || this._applyingHashFromBrowser) return;
@@ -3860,7 +3879,7 @@ function adminMixinDataChartsSettings() {
                 knowledge: 'restaurant',
                 upsell: 'smart_sales',
                 team: 'team',
-                test: 'technical',
+                test: 'bot_test',
             };
             const legacyTab = legacySettingsMap[this.currentTab];
             if (legacyTab) {
@@ -3905,6 +3924,8 @@ function adminMixinDataChartsSettings() {
                         await this.loadTeam();
                     } else if (this.settingsTab === 'technical') {
                         await Promise.all([this.loadSettingsOrders(), this.loadSettingsEnvironment()]);
+                    } else if (this.settingsTab === 'bot_test') {
+                        /* тест бота — без тяжёлых запросов */
                     } else {
                         // restaurant
                         await Promise.all([this.loadOrgProfile(), this.loadKnowledgeBase(), this.loadPackagingRules()]);
@@ -3952,7 +3973,7 @@ function adminMixinDataChartsSettings() {
         },
 
         setSettingsTab(tab) {
-            const allowed = new Set(['restaurant', 'connections', 'smart_sales', 'team', 'technical']);
+            const allowed = new Set(['restaurant', 'connections', 'smart_sales', 'team', 'technical', 'bot_test']);
             if (!allowed.has(String(tab || ''))) return;
             this.currentTab = 'settings';
             this.settingsTab = String(tab);
@@ -4716,9 +4737,17 @@ function adminMixinDataChartsSettings() {
                 name: '',
                 category: this.menuCategoryFilter || '',
                 description: '',
+                tags: '',
                 price: 0,
                 is_available: true,
                 image_url: '',
+                portion_kind: 'single',
+                serves_min: 1,
+                serves_max: 1,
+                allergens: '',
+                ingredients_summary: '',
+                dietary_tags: '',
+                upsell_pairs: '',
             };
             this.menuEditOpen = true;
         },
@@ -4730,9 +4759,17 @@ function adminMixinDataChartsSettings() {
                 name: item.name || '',
                 category: item.category || '',
                 description: item.description || '',
+                tags: item.tags || '',
                 price: Number(item.price) || 0,
                 is_available: !!item.is_available,
                 image_url: item.image_url || '',
+                portion_kind: (item.portion_kind === 'shareable' ? 'shareable' : 'single'),
+                serves_min: Math.max(1, Number(item.serves_min) || 1),
+                serves_max: Math.max(1, Number(item.serves_max) || 1),
+                allergens: item.allergens || '',
+                ingredients_summary: item.ingredients_summary || '',
+                dietary_tags: item.dietary_tags || '',
+                upsell_pairs: item.upsell_pairs || '',
             };
             this.menuEditOpen = true;
         },
@@ -4748,13 +4785,24 @@ function adminMixinDataChartsSettings() {
             if (!name) return;
             this.menuEditSaving = true;
             try {
+                const smin = Math.max(1, Math.min(99, Number(f.serves_min) || 1));
+                let smax = Math.max(1, Math.min(99, Number(f.serves_max) || 1));
+                if (smax < smin) smax = smin;
                 const payload = {
                     name,
                     category: String(f.category || '').trim(),
                     description: String(f.description || '').trim(),
+                    tags: String(f.tags || '').trim(),
                     price: Math.max(0, Number(f.price) || 0),
                     is_available: !!f.is_available,
                     image_url: String(f.image_url || '').trim() || null,
+                    portion_kind: (f.portion_kind === 'shareable' ? 'shareable' : 'single'),
+                    serves_min: smin,
+                    serves_max: smax,
+                    allergens: String(f.allergens || '').trim(),
+                    ingredients_summary: String(f.ingredients_summary || '').trim(),
+                    dietary_tags: String(f.dietary_tags || '').trim(),
+                    upsell_pairs: String(f.upsell_pairs || '').trim(),
                 };
                 let r;
                 if (f.id == null) {

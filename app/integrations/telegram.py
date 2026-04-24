@@ -117,6 +117,35 @@ async def _staff_chat_id_for_org(organization_id: int | None) -> str:
     return (settings.telegram_admin_chat_id or "").strip()
 
 
+async def send_prepayment_large_order_alert(
+    *,
+    organization_id: int,
+    order_id: int,
+    phone: str,
+    total: float,
+    threshold: float,
+) -> None:
+    """
+    Уведомление персоналу: крупный заказ с обязательной предоплатой (гость выбрал оплату, ждём перевод).
+    """
+    phone_code = _escape_html(format_phone_for_alert(phone))
+    orders_url = _absolute_admin_orders_url()
+    lines: list[str] = [
+        "💳 <b>Крупный заказ — нужна предоплата</b>",
+        "",
+        f"<b>Заказ:</b> <code>#{int(order_id)}</code>",
+        f"<b>Гость:</b> <code>{phone_code}</code>",
+        f"<b>Сумма:</b> <code>{_escape_html(f'{int(total):,}')} ₸</code>",
+        f"<b>Порог предоплаты:</b> <code>{_escape_html(f'{int(threshold):,}')} ₸</code>",
+        "",
+        "Гостю отправлено напоминание о предоплате. Отметьте оплату в админке, чтобы клиент смог ответить «Да».",
+        _primary_time_line_html(),
+    ]
+    if orders_url:
+        lines.extend(["", f"<a href=\"{_escape_html(orders_url)}\">Открыть заказы в админке</a>"])
+    await send_ops_notification_html("\n".join(lines), organization_id=organization_id)
+
+
 async def send_ops_notification_html(
     text: str,
     *,

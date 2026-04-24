@@ -252,6 +252,20 @@ class AIBrainResponse(BaseModel):
         default="",
         description="Когда забрать самовывоз или уточнение времени",
     )
+    guest_count_for_meal: int | None = Field(
+        default=None,
+        description=(
+            "Сколько человек будет есть этот заказ (не путать с бронью). "
+            "Если клиент сказал «нас четверо», «мы вдвоём» — укажи число. Если неизвестно — null."
+        ),
+    )
+    dietary_allergy_notes: str = Field(
+        default="",
+        description=(
+            "Ограничения и пожелания: аллергии, без лука, вегетарианство, халяль и т.д. "
+            "Кратко, как передаст кухне; пустая строка, если не обсуждалось."
+        ),
+    )
     recognized_speech: str | None = Field(
         default=None,
         description=(
@@ -278,6 +292,8 @@ class AIBrainResponse(BaseModel):
         "items",
         "order_actions",
         "rejected_upsell_iiko_ids",
+        "guest_count_for_meal",
+        "dietary_allergy_notes",
     })
 
     @model_validator(mode="before")

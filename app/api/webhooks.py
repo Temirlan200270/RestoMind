@@ -325,6 +325,15 @@ async def _send_order_to_iiko(
         ]
         if meta.get("delivery_address"):
             comment_bits.append(f"адрес: {meta['delivery_address'][:200]}")
+        try:
+            gc = int(meta.get("guest_count"))
+            if gc > 0:
+                comment_bits.append(f"гостей: {gc}")
+        except (TypeError, ValueError):
+            pass
+        diet = str(meta.get("dietary_allergy_notes") or "").strip()
+        if diet:
+            comment_bits.append(f"ограничения: {diet[:400]}")
         comment = " · ".join(comment_bits)
 
         terminal_group = (creds.terminal_group_id or "").strip()
@@ -602,6 +611,18 @@ async def handle_order_payment_choice(
         })
 
     if needs_prepay and prep_st not in ("paid", "waived"):
+        try:
+            from app.integrations.telegram import send_prepayment_large_order_alert
+
+            await send_prepayment_large_order_alert(
+                organization_id=int(organization_id),
+                order_id=int(order.id),
+                phone=phone,
+                total=float(order.total_price or 0),
+                threshold=float(settings.order_prepayment_threshold_kzt),
+            )
+        except Exception as exc:
+            logger.warning("Telegram prepayment alert skipped: %s", exc)
         await set_user_state(redis_client, phone, UserState.CHATTING, organization_id=organization_id)
         return (
             f"Принял способ оплаты: {pay_human}.\n\n"
