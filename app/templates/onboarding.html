@@ -232,9 +232,12 @@
                         <div class="text-xs text-gray-500 font-semibold uppercase tracking-wide mb-3">Что уже готово</div>
                         <div class="grid sm:grid-cols-2 gap-2">
                             <template x-for="s in (setupStatus.steps || [])" :key="s.id">
-                                <div class="flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-2">
-                                    <span class="h-2.5 w-2.5 rounded-full" :class="s.done ? 'bg-emerald-500' : 'bg-gray-300'"></span>
-                                    <span class="text-sm text-gray-800" x-text="s.label"></span>
+                                <div class="rounded-xl border border-gray-200 px-3 py-2 text-left">
+                                    <div class="flex items-center gap-2">
+                                        <span class="h-2.5 w-2.5 rounded-full shrink-0" :class="s.done ? 'bg-emerald-500' : 'bg-gray-300'"></span>
+                                        <span class="text-sm text-gray-800 font-medium" x-text="s.label"></span>
+                                    </div>
+                                    <p class="text-xs text-gray-500 mt-1 pl-5 leading-snug" x-show="!s.done && s.hint" x-text="s.hint"></p>
                                 </div>
                             </template>
                         </div>

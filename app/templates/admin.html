@@ -177,20 +177,38 @@
                                         :class="(setupStatus.score ?? 0) <= 30 ? 'bg-amber-500' : 'bg-emerald-500'"
                                         :style="'width:' + (setupStatus.score || 0) + '%'"></div>
                                 </div>
-                                <div class="mt-2 flex items-center justify-between gap-3">
-                                    <div class="text-[10px]"
-                                        :class="(setupStatus.score ?? 0) <= 30 ? 'text-amber-800' : 'text-gray-400'">
-                                        <span x-show="(setupStatus.score ?? 0) === 0" x-cloak>Начните настройку — добьём до 100%.</span>
-                                        <span x-show="(setupStatus.score ?? 0) > 0" x-cloak>Осталось немного — можно закончить за пару минут.</span>
+                                <div class="mt-2 space-y-2">
+                                    <p class="text-[10px] leading-snug"
+                                        :class="(setupStatus.score ?? 0) <= 30 ? 'text-amber-800' : 'text-gray-500'">
+                                        <span x-show="(setupStatus.score ?? 0) === 0" x-cloak>100% — когда закрыты все 6 пунктов ниже (каждый даёт ~17%).</span>
+                                        <span x-show="(setupStatus.score ?? 0) > 0 && (setupStatus.score ?? 0) < 100" x-cloak>До 100% осталось закрыть перечисленное — нажмите «Открыть» у нужного пункта.</span>
+                                    </p>
+                                    <ul class="space-y-1.5 max-h-40 overflow-y-auto pr-0.5" x-show="setupIncompleteSteps().length" x-cloak>
+                                        <template x-for="s in setupIncompleteSteps()" :key="s.id">
+                                            <li class="flex items-start gap-2 rounded-lg bg-white/80 border border-gray-100 px-2 py-1.5">
+                                                <span class="mt-0.5 h-1.5 w-1.5 rounded-full bg-amber-400 shrink-0" aria-hidden="true"></span>
+                                                <div class="min-w-0 flex-1">
+                                                    <div class="text-[10px] font-semibold text-gray-800" x-text="s.label"></div>
+                                                    <p class="text-[10px] text-gray-500 leading-snug mt-0.5" x-text="s.hint || ''"></p>
+                                                </div>
+                                                <button type="button"
+                                                    class="shrink-0 text-[10px] font-bold text-brand-600 hover:text-brand-700 px-1.5 py-0.5 rounded-lg border border-brand-200 bg-brand-50/80"
+                                                    @click="navigateToTab('settings', { settingsTab: s.open_tab || 'connections' })">
+                                                    Открыть
+                                                </button>
+                                            </li>
+                                        </template>
+                                    </ul>
+                                    <div class="flex items-center justify-end gap-2 pt-0.5">
+                                        <button type="button"
+                                            class="shrink-0 px-3 py-1.5 rounded-xl text-[10px] font-bold transition border min-h-[32px]"
+                                            :class="(setupStatus.score ?? 0) <= 30
+                                              ? 'bg-amber-600 text-white border-amber-600 hover:bg-amber-700'
+                                              : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'"
+                                            @click="openFirstIncompleteSetupStep()">
+                                            Следующий шаг
+                                        </button>
                                     </div>
-                                    <button type="button"
-                                        class="shrink-0 px-3 py-1.5 rounded-xl text-[10px] font-bold transition border min-h-[32px]"
-                                        :class="(setupStatus.score ?? 0) <= 30
-                                          ? 'bg-amber-600 text-white border-amber-600 hover:bg-amber-700'
-                                          : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'"
-                                        @click="navigateToTab('settings', { settingsTab: 'restaurant' })">
-                                        Завершить
-                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -2032,14 +2050,18 @@
 
                     <div class="rounded-xl border border-brand-100 bg-brand-50/40 p-4 mb-6">
                         <h4 class="text-sm font-bold text-gray-900 mb-2">Подключить кассу (iiko)</h4>
-                        <p class="text-xs text-gray-600 mb-3">Вставьте ключ из iiko Cloud. Мы проверим его и импортируем меню.</p>
+                        <p class="text-xs text-gray-600 mb-3">
+                            <strong class="text-gray-800">Два шага:</strong> сначала «Проверить» — ключ уходит на сервер только для проверки и
+                            <span class="font-semibold text-gray-800">не записывается в базу</span>.
+                            После появления списка филиалов нажмите «Сохранить и импортировать меню» — тогда ключ и организация сохраняются в БД этого заведения (и подтянется меню).
+                        </p>
                         <div class="space-y-3 max-w-xl">
                             <input type="password" autocomplete="off" x-model="iikoOnboardApiLogin" placeholder="Ключ iiko Cloud"
                                 class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm font-mono">
                             <div class="flex flex-wrap gap-2">
                                 <button type="button" @click="iikoVerifyOnboard()" :disabled="iikoOnboardVerifyLoading"
                                     class="px-4 py-2 rounded-xl bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 disabled:opacity-40">
-                                    <span x-show="!iikoOnboardVerifyLoading">Проверить</span>
+                                    <span x-show="!iikoOnboardVerifyLoading">Проверить (без сохранения)</span>
                                     <span x-show="iikoOnboardVerifyLoading" x-cloak>Запрос…</span>
                                 </button>
                             </div>
@@ -2059,7 +2081,10 @@
                                 </button>
                             </div>
                             <p class="text-[10px] text-amber-800" x-show="integrationStatus.iiko_secrets_encrypt_ready === false">
-                                Ключ можно хранить защищённо (шифрование). Если администратор сервера не включил шифрование, ключ сохранится как есть.
+                                После шага «Сохранить и импортировать меню» ключ попадёт в БД. С шифрованием (APP_SECRETS_FERNET_KEY) — защищённо; без него — в открытом виде (как в старых инсталляциях). В поле ввода ключ снова не показываем — это нормально.
+                            </p>
+                            <p class="text-[10px] text-slate-600" x-show="integrationStatus.iiko_configured">
+                                iiko уже привязан к этому филиалу. Поле выше нужно только если меняете ключ или переподключаете другую организацию.
                             </p>
                         </div>
                     </div>

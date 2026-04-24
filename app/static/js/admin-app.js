@@ -435,7 +435,7 @@ function adminMixinState() {
         integrationSyncLoading: false,
         integrationEvents: [],
         /** Онбординг (GET /api/admin/setup-status). */
-        setupStatus: { score: 0, steps: [], menu_items: 0, upsell_rules: 0 },
+        setupStatus: { score: 0, steps: [], menu_items: 0, upsell_rules: 0, packaging_rules: 0, knowledge_items: 0 },
         iikoOnboardApiLogin: '',
         iikoOnboardOrgs: [],
         iikoOnboardSelectedOrg: '',
@@ -2560,6 +2560,8 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                         steps: Array.isArray(r.data.steps) ? r.data.steps : [],
                         menu_items: Number(r.data.menu_items) || 0,
                         upsell_rules: Number(r.data.upsell_rules) || 0,
+                        packaging_rules: Number(r.data.packaging_rules) || 0,
+                        knowledge_items: Number(r.data.knowledge_items) || 0,
                     };
                 }
             } catch { /* ignore */ }
@@ -3439,6 +3441,22 @@ function adminMixinLiveChat() {
          * @param {string} tabId
          * @param {{ settingsTab?: string }} [opts]
          */
+        /** Невыполненные шаги готовности (подсказки в шапке). */
+        setupIncompleteSteps() {
+            return (this.setupStatus.steps || []).filter((s) => s && !s.done);
+        },
+
+        /** Перейти к первому невыполненному шагу онбординга (вкладка настроек из API). */
+        openFirstIncompleteSetupStep() {
+            const next = this.setupIncompleteSteps()[0];
+            const tab = next && typeof next.open_tab === 'string' ? next.open_tab.trim() : '';
+            if (tab && this._adminSettingsTabIds.has(tab)) {
+                this.navigateToTab('settings', { settingsTab: tab });
+                return;
+            }
+            this.navigateToTab('settings', { settingsTab: 'connections' });
+        },
+
         navigateToTab(tabId, opts) {
             const o = opts && typeof opts === 'object' ? opts : {};
             this.currentTab = tabId;

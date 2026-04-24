@@ -1838,13 +1838,60 @@ async def setup_status(request: Request, db: AsyncSession = Depends(get_db)) -> 
         )
         or 0,
     )
+    # Шесть равных «весов»: 100% только когда закрыты все пункты (см. подсказки в админке).
+    step_rows: list[tuple[str, str, bool, str, str]] = [
+        (
+            "iiko",
+            "iiko подключён",
+            iiko_ok,
+            "connections",
+            "«Подключения»: API-ключ iiko Cloud и сохранение с выбором организации.",
+        ),
+        (
+            "menu",
+            "Меню импортировано",
+            menu_n > 0,
+            "connections",
+            "«Подключения»: импорт меню (после iiko — «Сохранить и импортировать» или синхронизация). Нужен хотя бы один пункт.",
+        ),
+        (
+            "whatsapp",
+            "WhatsApp (номер или .env)",
+            wa_ok,
+            "connections",
+            "«Подключения»: Phone Number ID в форме или WHATSAPP_PHONE_NUMBER_ID и WHATSAPP_API_TOKEN в .env.",
+        ),
+        (
+            "packaging",
+            "Правила упаковки",
+            packaging_n > 0,
+            "restaurant",
+            "«Мой ресторан»: добавьте активное правило упаковки (надбавка за контейнер и т.п.).",
+        ),
+        (
+            "upsell",
+            "Правила допродаж",
+            rules_n > 0,
+            "smart_sales",
+            "«Умные продажи»: хотя бы одно активное правило допродаж.",
+        ),
+        (
+            "knowledge",
+            "База знаний",
+            kb_n > 0,
+            "restaurant",
+            "«Мой ресторан», блок «База знаний»: хотя бы одна активная запись для гостей и бота.",
+        ),
+    ]
     steps = [
-        {"id": "iiko", "label": "iiko подключён", "done": iiko_ok},
-        {"id": "menu", "label": "Меню импортировано", "done": menu_n > 0},
-        {"id": "whatsapp", "label": "WhatsApp (номер или .env)", "done": wa_ok},
-        {"id": "packaging", "label": "Правила упаковки", "done": packaging_n > 0},
-        {"id": "upsell", "label": "Правила допродаж", "done": rules_n > 0},
-        {"id": "knowledge", "label": "База знаний", "done": kb_n > 0},
+        {
+            "id": sid,
+            "label": label,
+            "done": done,
+            "open_tab": tab,
+            "hint": hint,
+        }
+        for sid, label, done, tab, hint in step_rows
     ]
     score = int(round(100 * sum(1 for s in steps if s["done"]) / max(len(steps), 1)))
     return {
@@ -1853,6 +1900,7 @@ async def setup_status(request: Request, db: AsyncSession = Depends(get_db)) -> 
         "menu_items": menu_n,
         "packaging_rules": packaging_n,
         "upsell_rules": rules_n,
+        "knowledge_items": kb_n,
     }
 
 
