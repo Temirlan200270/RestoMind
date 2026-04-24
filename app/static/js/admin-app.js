@@ -128,6 +128,21 @@ function defaultIntegrationStatus() {
     };
 }
 
+/** Базовая форма ручного черновика (модалка «+ Новый заказ (тест)»). */
+function defaultManualOrderForm() {
+    return {
+        phone: '+77001234567',
+        order_type: 'pickup',
+        payment_mode: 'single',
+        payment_method: 'cash',
+        split_cash: 0,
+        split_card: 0,
+        split_remote: 0,
+        delivery_address: '',
+        pickup_time_note: '',
+    };
+}
+
 /** Поля состояния (вкладки, сущности, UI) */
 function adminMixinState() {
     return {
@@ -353,6 +368,10 @@ function adminMixinState() {
         orderPaySplitRemote: 0,
         orderPaymentError: '',
         orderPaymentSaving: false,
+        showManualOrderModal: false,
+        manualOrderLoading: false,
+        manualOrderError: '',
+        manualOrderForm: defaultManualOrderForm(),
 
         showBookingModal: false,
         selectedBooking: null,
@@ -1243,6 +1262,67 @@ function adminMixinMenuOrdersUi() {
                     this.syncOrderPaymentFormFromSelected();
                 } catch (_e) { /* ignore */ }
             });
+        },
+
+        openManualOrderModal() {
+            this.manualOrderError = '';
+            this.manualOrderLoading = false;
+            this.manualOrderForm = defaultManualOrderForm();
+            this.showManualOrderModal = true;
+        },
+
+        closeManualOrderModal() {
+            this.showManualOrderModal = false;
+            this.manualOrderLoading = false;
+            this.manualOrderError = '';
+        },
+
+        async submitManualOrder() {
+            const f = this.manualOrderForm || {};
+            const phone = String(f.phone || '').trim();
+            if (!phone) {
+                this.manualOrderError = 'Укажите телефон гостя.';
+                return;
+            }
+            this.manualOrderLoading = true;
+            this.manualOrderError = '';
+            try {
+                const body = {
+                    phone,
+                    order_type: String(f.order_type || 'pickup'),
+                    payment_mode: String(f.payment_mode || 'single'),
+                    payment_method: String(f.payment_method || 'cash'),
+                    split_cash: Number(f.split_cash) || 0,
+                    split_card: Number(f.split_card) || 0,
+                    split_remote: Number(f.split_remote) || 0,
+                    delivery_address: String(f.delivery_address || '').trim(),
+                    pickup_time_note: String(f.pickup_time_note || '').trim(),
+                    food_lines: [],
+                };
+                const { ok, data } = await this.apiJsonResponse('/api/admin/orders/manual', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                if (!ok) {
+                    this.manualOrderError = this.formatApiError(data.detail || data) || 'Не удалось создать черновик';
+                    return;
+                }
+                this.showManualOrderModal = false;
+                await this.loadOrders();
+                await this.loadDashStats();
+                await this.syncDashboardChartIfVisible();
+                if (data && Number.isFinite(Number(data.id))) {
+                    const id = Number(data.id);
+                    const fresh = (this.orders || []).find((o) => Number(o.id) === id);
+                    if (fresh) this.selectedOrder = fresh;
+                }
+                void this.showUiAlert(`Черновик заказа #${data?.id ?? ''} создан`, 'Готово');
+            } catch {
+                this.manualOrderError = 'Ошибка сети. Проверьте соединение.';
+            } finally {
+                this.manualOrderLoading = false;
+            }
         },
 
         canEditOrderComposition(order) {

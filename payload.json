@@ -1,0 +1,26 @@
+{
+  "organizationId": "11111111-1111-1111-1111-111111111111",
+  "terminalGroupId": "22222222-2222-2222-2222-222222222222",
+  "order": {
+    "externalNumber": "RM-DIAG-001",
+    "customer": {
+      "phone": "+77001234567",
+      "name": "Diagnostic Guest"
+    },
+    "phone": "+77001234567",
+    "items": [
+      {
+        "productId": "33333333-3333-3333-3333-333333333333",
+        "type": "Product",
+        "amount": 1
+      }
+    ],
+    "orderTypeId": "44444444-4444-4444-4444-444444444444",
+    "comment": "RestoMind diagnostic payload"
+  },
+  "createOrderSettings": {
+    "servicePrint": false,
+    "transportToFrontTimeout": 0,
+    "checkStopList": false
+  }
+}

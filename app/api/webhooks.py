@@ -361,11 +361,16 @@ async def _send_order_to_iiko(
             msg = "Телефон клиента пустой — iiko deliveries/create требует customer.phone"
             logger.warning("Заказ #%d: %s", order_id, msg)
             return False, msg, None
+        # Некоторые аккаунты iiko валидируют обязательность customer.name.
+        customer_name = f"Гость #{order_id}"
         async with IikoClient(api_login=creds.api_login) as client:
             iiko_response = await client.create_delivery_order(
                 organization_id=creds.iiko_organization_id,
                 order_data={
-                    "customer": {"phone": phone_e164},
+                    "customer": {
+                        "phone": phone_e164,
+                        "name": customer_name,
+                    },
                     # Некоторые конфигурации iiko валидируют телефон на верхнем уровне заказа.
                     # Дублируем, чтобы избежать 400 "Parameter 'phone'" при корректном customer.phone.
                     "phone": phone_e164,
