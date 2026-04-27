@@ -167,6 +167,40 @@ def _menu_row_is_drink_candidate(m: Any) -> bool:
     return any(h in cat for h in drink_cat)
 
 
+def is_forbidden_upsell_candidate(menu_item: Any, *, cart_tags: set[str] | None = None) -> bool:
+    """True, если позицию нельзя предлагать как допродажу в текущем контексте."""
+    nm = _norm_item_name(str(getattr(menu_item, "name", "") or ""))
+    tags = parse_menu_tags(getattr(menu_item, "tags", None))
+    if tags & {"not_upsell", "internal"}:
+        return True
+
+    # Жёсткий стоп: позиции для завтраков и похожие не предлагать вне явного breakfast-контекста.
+    if "only_breakfast" in tags:
+        return True
+
+    milk_like = ("молоко", "milk", "кефир")
+    is_milk = any(x in nm for x in milk_like) or bool(tags & {"milk", "dairy"})
+    if not is_milk:
+        return False
+
+    ct = cart_tags or set()
+    breakfast_context = bool(ct & {"breakfast", "coffee", "dessert"})
+    hot_meat_context = bool(ct & {"main_course", "meat", "heavy", "hot", "плов", "шашлык", "мант"})
+    if hot_meat_context and not breakfast_context:
+        return True
+    return False
+
+
+def is_preferred_upsell_candidate(menu_item: Any) -> bool:
+    """True, если позиция в приоритетном списке для допродаж."""
+    nm = _norm_item_name(str(getattr(menu_item, "name", "") or ""))
+    tags = parse_menu_tags(getattr(menu_item, "tags", None))
+    if tags & {"upsell", "drink", "side_dish", "goes_well_with_meat"}:
+        return True
+    preferred_tokens = ("чай", "лимонад", "компот", "кола", "лепеш", "лепёш", "лаваш", "ачучук", "ачичук")
+    return any(t in nm for t in preferred_tokens)
+
+
 def find_pairing_by_tag(
     cart_tags: set[str],
     menu_items: Sequence[Any],
@@ -226,9 +260,7 @@ def find_pairing_by_tag(
             )
         if drink_pick is not None:
             picked.append(drink_pick)
-            hints.append(
-                "в заказе острое (тег spicy) — предложи напиток с тегом drink; в upsell_reasoning свяжи остроту и жажду",
-            )
+            hints.append("[Теги: spicy + drink]")
 
     main_hit = "main_course" in cart_tags or "основное" in cart_tags
     if main_hit and not cart_has_side_dish_tag:
@@ -261,9 +293,7 @@ def find_pairing_by_tag(
                     break
         if side_pick is not None:
             picked.append(side_pick)
-            hints.append(
-                "основное без гарнира (теги main_course / нет side_dish) — предложи позицию с goes_well_with_meat или side_dish; объясни связку в upsell_reasoning",
-            )
+            hints.append("[Теги: main_course + side_dish]")
 
     seen: set[str] = set()
     uniq: list[Any] = []

@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.db.session import get_db
 from app.services.payment_adapters import get_payment_adapter_class
-from app.services.payment_notify import run_payment_received_customer_notify
+from app.services.payment_autoprint_iiko import run_auto_send_to_iiko_after_payment
 from app.services.payment_webhook import apply_payment_webhook
 
 router = APIRouter(tags=["payments"])
@@ -84,11 +84,14 @@ async def _run_payment_webhook(
     await db.commit()
 
     if should_notify:
-        from app.services.task_queue import enqueue_job
+        from app.services.task_queue import dispatch_arq_or_background
 
-        ok = await enqueue_job("payment_notify_customer", order_id=int(body.order_id))
-        if not ok:
-            background_tasks.add_task(run_payment_received_customer_notify, body.order_id)
+        await dispatch_arq_or_background(
+            "payment_notify_customer",
+            background_tasks,
+            order_id=int(body.order_id),
+        )
+        background_tasks.add_task(run_auto_send_to_iiko_after_payment, int(body.order_id))
     return out
 
 

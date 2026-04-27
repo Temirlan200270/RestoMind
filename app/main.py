@@ -16,17 +16,19 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from jinja2 import Environment, FileSystemLoader, select_autoescape
-from sqlalchemy import text
+from sqlalchemy import select, text
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.api.admin import auth_router as admin_auth_router
 from app.api.admin import router as admin_router
 from app.api.admin import ws_router as admin_ws_router
 from app.api.payment_webhook import router as payment_webhook_router
+from app.api.superadmin import router as superadmin_router
 from app.api.webhooks import router as webhooks_router
 from app.core.config import settings
-from app.db.models import Base
+from app.db.models import Base, Organization
 from app.integrations.whatsapp import close_whatsapp_http_client, init_whatsapp_http_client
+from app.services.demo_data import seed_demo_data
 from app.db.session import (
     InMemoryRedis,
     async_engine,
@@ -475,8 +477,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS slug VARCHAR(120) DEFAULT ''",
         ),
         (
-            "ALTER TABLE organizations ADD COLUMN timezone VARCHAR(64) DEFAULT 'UTC'",
-            "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS timezone VARCHAR(64) DEFAULT 'UTC'",
+            "ALTER TABLE organizations ADD COLUMN timezone VARCHAR(64) DEFAULT 'Asia/Almaty'",
+            "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS timezone VARCHAR(64) DEFAULT 'Asia/Almaty'",
         ),
         (
             "ALTER TABLE organizations ADD COLUMN currency VARCHAR(8) DEFAULT 'KZT'",
@@ -490,6 +492,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             "ALTER TABLE organizations ADD COLUMN iiko_terminal_group_id VARCHAR(255) DEFAULT ''",
             "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS iiko_terminal_group_id VARCHAR(255) DEFAULT ''",
         ),
+        (
+            "ALTER TABLE organizations ADD COLUMN is_demo INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT false",
+        ),
+        (
+            "ALTER TABLE organizations ADD COLUMN schedule_json TEXT",
+            "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS schedule_json JSONB",
+        ),
     ):
         try:
             async with async_engine.begin() as conn:
@@ -499,6 +509,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     await conn.execute(text(sql_pg))
         except Exception as exc:
             _ddl_warn(sql_sqlite if settings.db_mode == "sqlite" else sql_pg, exc)
+
+    try:
+        async with async_engine.begin() as conn:
+            if settings.db_mode == "sqlite":
+                sql = "ALTER TABLE staff_users ADD COLUMN is_superadmin INTEGER NOT NULL DEFAULT 0"
+                await conn.execute(text(sql))
+            else:
+                sql = "ALTER TABLE staff_users ADD COLUMN IF NOT EXISTS is_superadmin BOOLEAN NOT NULL DEFAULT false"
+                await conn.execute(text(sql))
+    except Exception as exc:
+        _ddl_warn(sql, exc)
 
     # integration_events: поле organization_id нужно для мультитенантной админки; в legacy SQLite могло отсутствовать.
     try:
@@ -524,14 +545,55 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 "WHERE tenant_id IS NULL"
             )
             await conn.execute(text(sql2))
+            # Казахстан: по умолчанию используем единый локальный пояс UTC+5.
+            sql3 = (
+                "UPDATE organizations SET timezone = 'Asia/Almaty' "
+                "WHERE timezone IS NULL OR timezone = '' OR UPPER(timezone) = 'UTC'"
+            )
+            await conn.execute(text(sql3))
     except Exception as exc:
         # Это не DDL, но критично для мультитенантности — не глушим полностью.
         logger.warning("Startup seed/repair failed: %s", exc, exc_info=True)
+
+    try:
+        async with async_session_factory() as db:
+            demo_org = await db.scalar(
+                select(Organization).where(
+                    Organization.is_demo.is_(True),
+                ),
+            )
+            if demo_org is None:
+                demo_org = await db.scalar(
+                    select(Organization).where(Organization.slug == "demo"),
+                )
+                if demo_org is not None:
+                    demo_org.is_demo = True
+            if demo_org is None:
+                tenant_id = await db.scalar(text("SELECT id FROM tenants ORDER BY id ASC LIMIT 1"))
+                demo_org = Organization(
+                    tenant_id=int(tenant_id) if tenant_id is not None else None,
+                    name="Demo Cafe",
+                    slug="demo",
+                    is_active=True,
+                    is_demo=True,
+                    timezone="Asia/Almaty",
+                    currency="KZT",
+                )
+                db.add(demo_org)
+                await db.flush()
+            await seed_demo_data(db, organization_id=int(demo_org.id))
+            await db.commit()
+    except Exception as exc:
+        logger.warning("Demo organization seed failed: %s", exc, exc_info=True)
 
     for sql_sqlite, sql_pg in (
         (
             "ALTER TABLE organizations ADD COLUMN prepayment_enforced INTEGER NOT NULL DEFAULT 1",
             "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS prepayment_enforced BOOLEAN NOT NULL DEFAULT true",
+        ),
+        (
+            "ALTER TABLE organizations ADD COLUMN auto_send_to_iiko_after_payment INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS auto_send_to_iiko_after_payment BOOLEAN NOT NULL DEFAULT false",
         ),
         (
             "ALTER TABLE orders ADD COLUMN payment_provider VARCHAR(64)",
@@ -616,6 +678,7 @@ app.include_router(payment_webhook_router, prefix="/api")
 app.include_router(admin_auth_router, prefix="/api")
 app.include_router(admin_router, prefix="/api")
 app.include_router(admin_ws_router, prefix="/api")
+app.include_router(superadmin_router, prefix="/api")
 
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -701,13 +764,35 @@ async def admin_page(request: Request) -> HTMLResponse:
 
 @app.get("/onboarding", response_class=HTMLResponse, tags=["Admin Panel"])
 async def onboarding_page(request: Request) -> HTMLResponse:
-    """Self-serve мастер настройки (регистрация → интеграции → готово)."""
+    """Onboarding self-serve отключён: ведём на форму заявки."""
+    _ = request
+    return RedirectResponse(url="/request-access", status_code=307)
+
+
+@app.get("/request-access", response_class=HTMLResponse, tags=["Admin Panel"])
+async def request_access_page(request: Request) -> HTMLResponse:
+    """Форма заявки на подключение ресторана."""
     git_sha = (os.environ.get("RENDER_GIT_COMMIT") or os.environ.get("GIT_COMMIT") or "").strip()
     sha7 = git_sha[:7] if git_sha else ""
     asset_ver = settings.app_version + (f"-{sha7}" if sha7 else "")
     response = templates.TemplateResponse(
         request,
-        "onboarding.html",
+        "request_access.html",
+        {"asset_ver": asset_ver},
+    )
+    response.headers["Cache-Control"] = "no-store, max-age=0, must-revalidate"
+    return response
+
+
+@app.get("/superadmin", response_class=HTMLResponse, tags=["Admin Panel"])
+async def superadmin_page(request: Request) -> HTMLResponse:
+    """Панель владельца платформы (доступ проверяется API-эндпоинтами)."""
+    git_sha = (os.environ.get("RENDER_GIT_COMMIT") or os.environ.get("GIT_COMMIT") or "").strip()
+    sha7 = git_sha[:7] if git_sha else ""
+    asset_ver = settings.app_version + (f"-{sha7}" if sha7 else "")
+    response = templates.TemplateResponse(
+        request,
+        "superadmin.html",
         {"asset_ver": asset_ver},
     )
     response.headers["Cache-Control"] = "no-store, max-age=0, must-revalidate"

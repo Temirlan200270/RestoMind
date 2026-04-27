@@ -37,7 +37,7 @@ from app.services.ai_brain import (
     voice_supported,
 )
 from app.services.chat_delivery import apply_whatsapp_status_webhook
-from app.services.customer_context import build_customer_context
+from app.services.context_engine import fetch_ai_read_context
 from app.services.time_context import format_org_current_time_block
 from app.services.customer_reply import (
     reset_twilio_call_context,
@@ -67,18 +67,15 @@ from app.services.intent_router import (
     cancel_order,
     confirm_booking,
     confirm_order,
-    get_open_draft_order,
     get_or_create_user,
     route_intent,
 )
-from app.services.knowledge_context import load_knowledge_context_block
 from app.services.order_logic import (
     build_menu_context,
     build_summary_text_from_stored_items,
     detect_payment_method_from_text,
     format_draft_order_context_for_prompt,
     format_whatsapp_order_card,
-    load_available_menu,
     merge_total_into_items_json,
 )
 from app.services.sales_strategy import build_sales_strategy, format_strategy_for_prompt
@@ -190,6 +187,51 @@ def _normalize_phone_e164(phone: str) -> str:
         return f"+7{digits}"
     return f"+{digits}"
 
+
+def _is_plain_greeting(text: str) -> bool:
+    """
+    Простое приветствие без запроса (детерминированный short-circuit до LLM).
+    """
+    raw = (text or "").strip().lower()
+    if not raw:
+        return False
+    norm = re.sub(r"[^\w\s]+", " ", raw, flags=re.UNICODE)
+    words = [w for w in re.split(r"\s+", norm) if w]
+    if not words or len(words) > 4:
+        return False
+    greeting_words = {
+        "привет",
+        "здравствуйте",
+        "здравствуй",
+        "салам",
+        "ассаламуалейкум",
+        "hello",
+        "hi",
+        "добрый",
+        "день",
+        "вечер",
+        "утро",
+    }
+    intent_words = {
+        "меню",
+        "заказ",
+        "доставка",
+        "самовывоз",
+        "бронь",
+        "бронирование",
+        "адрес",
+        "часы",
+        "время",
+        "order",
+        "menu",
+    }
+    if any(w in intent_words for w in words):
+        return False
+    return all(w in greeting_words for w in words)
+
+
+def _greeting_reply() -> str:
+    return "Здравствуйте! Чем могу помочь?"
 
 
 async def _save_chat_log(
@@ -681,12 +723,18 @@ async def process_with_retry(
     После MAX_RETRIES неудач → сохраняет в FailedTask и извиняется перед клиентом.
     """
     org_id = int(settings.default_organization_id)
+    org_active = True
     if webhook_value is not None:
         try:
             async with async_session_factory() as db:
                 org_id = await organization_id_for_whatsapp_value(db, webhook_value)
+                org_ent = await db.get(Organization, int(org_id))
+                org_active = bool(org_ent.is_active) if org_ent is not None else True
         except Exception as exc:
             logger.warning("organization_id resolve: %s", exc)
+    if not org_active:
+        logger.info("org=%s inactive: webhook message ignored", org_id)
+        return
     wmid = (whatsapp_message_id or "").strip()
     if wmid:
         try:
@@ -759,6 +807,33 @@ async def process_message(
     Полный цикл обработки входящего сообщения с учётом State Machine.
     """
     try:
+        if message_text and _is_plain_greeting(message_text):
+            state_quick = await get_user_state(redis_client, phone, organization_id=organization_id)
+            if state_quick == UserState.CHATTING and voice_audio is None:
+                quick_reply = _greeting_reply()
+                outbound_id_quick: int | None = None
+                async with async_session_factory() as db_quick:
+                    outbound_id_quick = await _save_chat_log(
+                        db_quick,
+                        phone,
+                        message_text,
+                        quick_reply,
+                        organization_id=organization_id,
+                    )
+                    await db_quick.commit()
+                await append_to_history(redis_client, phone, "user", message_text, organization_id=organization_id)
+                await append_to_history(redis_client, phone, "assistant", quick_reply, organization_id=organization_id)
+                await publish_event("new_message", {
+                    "phone": phone,
+                    "role": "assistant",
+                    "content": quick_reply,
+                    "id": outbound_id_quick,
+                    "delivery_status": "sending",
+                    "organization_id": organization_id,
+                })
+                await send_customer_text(phone, quick_reply, outbound_chat_log_id=outbound_id_quick)
+                return
+
         wmid = (whatsapp_message_id or "").strip()
         if not await check_rate_limit(phone):
             logger.warning("Rate limit: %s заблокирован", phone)
@@ -961,49 +1036,41 @@ async def process_message(
 
         outbound_id_chat: int | None = None
         tg_alert_ctx: EscalationAlertExtras | None = None
-        # 1) DB: собрать контекст без удержания соединения во время OpenAI
-        menu_items: list[MenuItem] = []
-        menu_context = ""
-        kb_context = ""
-        draft_row: Order | None = None
-        draft_ctx = ""
-        strategy_ctx = ""
-        customer_ctx = ""
-        current_time_ctx = ""
-        u_row: User | None = None
-        async with async_session_factory() as db:
-            menu_items = await load_available_menu(db, organization_id=organization_id)
-            menu_context = build_menu_context(menu_items)
-            u_row = await db.scalar(
-                select(User).where(
-                    User.phone == phone,
-                    User.organization_id == organization_id,
-                ),
+        # 1) DB: параллельное чтение (несколько коротких сессий), затем сбор строк без I/O
+        read_ctx = await fetch_ai_read_context(phone, organization_id)
+        menu_items = read_ctx.menu_items
+        menu_context = build_menu_context(menu_items)
+        u_row = read_ctx.user
+        customer_ctx = read_ctx.customer_ctx
+        org_ent = read_ctx.org
+        current_time_ctx = format_org_current_time_block(
+            getattr(org_ent, "timezone", None) if org_ent is not None else "Asia/Almaty",
+            getattr(org_ent, "schedule_json", None) if org_ent is not None else None,
+        )
+        kb_context = read_ctx.kb_context
+        draft_row = read_ctx.draft_row
+        draft_ctx = format_draft_order_context_for_prompt(
+            draft_row.items_json if draft_row else None,
+        )
+        if draft_row and isinstance(draft_row.items_json, dict):
+            cart = [
+                x for x in (draft_row.items_json.get("items") or [])
+                if isinstance(x, dict)
+            ]
+            om = draft_row.items_json.get("order_meta")
+            meta_d = om if isinstance(om, dict) else {}
+            total = float(draft_row.total_price or 0)
+            decision = build_sales_strategy(
+                cart, total, meta_d, menu_items,
+                u_row.meta_json if u_row is not None else None,
             )
-            customer_ctx = await build_customer_context(db, u_row)
-            org_ent = await db.get(Organization, organization_id)
-            current_time_ctx = format_org_current_time_block(
-                getattr(org_ent, "timezone", None) if org_ent is not None else "UTC",
-            )
-            kb_context = await load_knowledge_context_block(db, organization_id)
-            draft_row = await get_open_draft_order(db, phone, organization_id)
-            draft_ctx = format_draft_order_context_for_prompt(
-                draft_row.items_json if draft_row else None,
-            )
-            if draft_row and isinstance(draft_row.items_json, dict):
-                cart = [
-                    x for x in (draft_row.items_json.get("items") or [])
-                    if isinstance(x, dict)
-                ]
-                om = draft_row.items_json.get("order_meta")
-                meta_d = om if isinstance(om, dict) else {}
-                total = float(draft_row.total_price or 0)
-                strategy_ctx = format_strategy_for_prompt(
-                    build_sales_strategy(
-                        cart, total, meta_d, menu_items,
-                        u_row.meta_json if u_row is not None else None,
-                    ),
-                )
+            strategy_ctx = format_strategy_for_prompt(decision)
+            sales_gastro_hint = (decision.gastro_hint or "").strip()
+            sales_target_iiko_ids = list(decision.target_iiko_ids or [])
+        else:
+            strategy_ctx = ""
+            sales_gastro_hint = ""
+            sales_target_iiko_ids = []
 
         # 2) OpenAI: без DB-сессии
         if had_voice:
@@ -1058,6 +1125,8 @@ async def process_message(
                 menu_items=menu_items,
                 organization_id=organization_id,
                 inbound_message_id=wmid,
+                sales_gastro_hint=sales_gastro_hint,
+                sales_target_iiko_ids=sales_target_iiko_ids,
             )
             log_pipeline_stage(
                 "route_ok",
@@ -1425,16 +1494,24 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks) -
         entry = body.get("entry", [{}])[0]
         changes = entry.get("changes", [{}])[0]
         value = changes.get("value", {})
+        try:
+            async with async_session_factory() as db:
+                org_id = await organization_id_for_whatsapp_value(db, value)
+                org_ent = await db.get(Organization, int(org_id))
+                if org_ent is not None and not bool(org_ent.is_active):
+                    logger.info("org=%s inactive: incoming webhook ignored", org_id)
+                    return {"status": "ok"}
+        except Exception as exc:
+            logger.warning("organization activity check failed: %s", exc)
         statuses = value.get("statuses", []) or []
         if statuses:
-            from app.services.task_queue import enqueue_job
+            from app.services.task_queue import dispatch_arq_or_background
 
-            ok = await enqueue_job(
+            await dispatch_arq_or_background(
                 "whatsapp_process_statuses",
+                background_tasks,
                 statuses=list(statuses),
             )
-            if not ok:
-                background_tasks.add_task(_process_whatsapp_status_batch, list(statuses))
 
         messages = value.get("messages", []) or []
 
@@ -1455,44 +1532,30 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks) -
             if msg_type == "audio":
                 media_id = (msg.get("audio") or {}).get("id") or ""
                 if media_id:
-                    from app.services.task_queue import enqueue_job
+                    from app.services.task_queue import dispatch_arq_or_background
 
-                    ok = await enqueue_job(
+                    await dispatch_arq_or_background(
                         "whatsapp_process_voice",
+                        background_tasks,
                         phone=phone,
                         media_id=media_id,
                         whatsapp_message_id=message_id,
                         webhook_value=value,
                     )
-                    if not ok:
-                        background_tasks.add_task(
-                            process_voice_message,
-                            phone,
-                            media_id,
-                            whatsapp_message_id=message_id,
-                            webhook_value=value,
-                        )
                     logger.info("Голосовое от %s поставлено в очередь", phone)
             else:
                 message_text = (msg.get("text") or {}).get("body") or ""
                 if message_text:
-                    from app.services.task_queue import enqueue_job
+                    from app.services.task_queue import dispatch_arq_or_background
 
-                    ok = await enqueue_job(
+                    await dispatch_arq_or_background(
                         "whatsapp_process_text",
+                        background_tasks,
                         phone=phone,
                         message_text=message_text,
                         whatsapp_message_id=message_id,
                         webhook_value=value,
                     )
-                    if not ok:
-                        background_tasks.add_task(
-                            process_with_retry,
-                            phone,
-                            message_text,
-                            whatsapp_message_id=message_id,
-                            webhook_value=value,
-                        )
                     logger.info("Сообщение от %s поставлено в очередь обработки", phone)
 
     except (IndexError, KeyError, TypeError) as exc:

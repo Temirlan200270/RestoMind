@@ -61,7 +61,7 @@ class Organization(Base):
         String(120), default="", server_default="", index=True, comment="URL-safe идентификатор арендатора",
     )
     timezone: Mapped[str] = mapped_column(
-        String(64), default="UTC", server_default="UTC", comment="IANA timezone (например Asia/Almaty)",
+        String(64), default="Asia/Almaty", server_default="Asia/Almaty", comment="IANA timezone (например Asia/Almaty)",
     )
     currency: Mapped[str] = mapped_column(String(8), default="KZT", server_default="KZT", comment="ISO код валюты")
     iiko_api_login: Mapped[str] = mapped_column(
@@ -83,10 +83,28 @@ class Organization(Base):
         nullable=False,
         comment="Ложь — не требовать предоплату по порогу; оператор подтверждает оплату вручную",
     )
+    auto_send_to_iiko_after_payment: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default="false",
+        nullable=False,
+        comment="После вебхука оплаты: подтвердить заказ и вызвать iiko deliveries/create без ручного шага",
+    )
     telegram_ops_chat_id: Mapped[str] = mapped_column(
         String(32), default="", server_default="", comment="Telegram chat_id для алертов персоналу (приоритет над глобальным env)",
     )
+    schedule_json: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON,
+        nullable=True,
+        comment="График работы по дням недели (структурированный JSON)",
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_demo: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default="false",
+        comment="Демо-организация для гостевого режима",
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     def __repr__(self) -> str:
@@ -115,10 +133,53 @@ class StaffUser(Base):
         String(32), default=StaffRole.ADMIN.value, server_default=StaffRole.ADMIN.value,
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_superadmin: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default="false",
+        comment="Права владельца платформы (доступ к Super Admin)",
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     def __repr__(self) -> str:
         return f"<StaffUser id={self.id} email='{self.email}' org={self.organization_id}>"
+
+
+class RegistrationRequest(Base):
+    """Заявка на подключение ресторана (до ручной модерации)."""
+
+    __tablename__ = "registration_requests"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    restaurant_name: Mapped[str] = mapped_column(String(255), nullable=False, comment="Название заведения")
+    contact_name: Mapped[str] = mapped_column(String(255), default="", server_default="", comment="Контактное лицо")
+    phone: Mapped[str] = mapped_column(String(32), default="", server_default="", comment="Телефон для связи")
+    email: Mapped[str] = mapped_column(String(255), default="", server_default="", comment="Email для связи")
+    has_iiko: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default="false",
+        comment="Есть ли iiko на стороне клиента",
+    )
+    note: Mapped[str] = mapped_column(Text, default="", server_default="", comment="Комментарий клиента")
+    status: Mapped[str] = mapped_column(
+        String(32),
+        default="pending",
+        server_default="pending",
+        index=True,
+        comment="pending | approved | rejected",
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    decided_by_staff_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("staff_users.id"),
+        nullable=True,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    def __repr__(self) -> str:
+        return f"<RegistrationRequest id={self.id} restaurant='{self.restaurant_name}' status={self.status}>"
 
 
 class OrderStatus(StrEnum):

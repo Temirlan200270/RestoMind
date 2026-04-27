@@ -125,6 +125,7 @@ function defaultIntegrationStatus() {
         last_menu_sync: { at: null, ok: false, error: null },
         iiko_secrets_encrypt_ready: false,
         prepayment_enforced: true,
+        auto_send_to_iiko_after_payment: false,
     };
 }
 
@@ -140,6 +141,20 @@ function defaultManualOrderForm() {
         split_remote: 0,
         delivery_address: '',
         pickup_time_note: '',
+    };
+}
+
+/** Полная форма создания правила упаковки (чтобы не заполнять поля постфактум). */
+function defaultPackagingRuleForm() {
+    return {
+        kind: '',
+        name: '',
+        price: 0,
+        keywords: '',
+        option_key: '',
+        iiko_product_id: '',
+        sort_order: 0,
+        is_active: true,
     };
 }
 
@@ -233,9 +248,14 @@ function adminMixinState() {
 
         packagingRules: [],
         packagingLoading: false,
+        packagingCreateOpen: false,
+        packagingCreateLoading: false,
+        packagingCreateError: '',
+        packagingCreateForm: defaultPackagingRuleForm(),
 
         /** Филиал: автоматическая предоплата по порогу (см. PATCH /organization/prefs). */
         orgPrepaymentEnforcedSaving: false,
+        orgAutoIikoSaving: false,
 
         knowledgeItems: [],
         knowledgeLoading: false,
@@ -323,7 +343,24 @@ function adminMixinState() {
             currency: '',
             whatsapp_phone_number_id: '',
             telegram_ops_chat_id: '',
+            schedule_json: null,
+            schedule_json_text: '',
+            operational_label: '',
+            is_business_open: false,
+            is_kitchen_open: false,
         },
+        scheduleEditorOpen: false,
+        scheduleEditorFallbackUsed: false,
+        scheduleEditor: {},
+        scheduleDayRows: [
+            { key: 'mon', label: 'Понедельник' },
+            { key: 'tue', label: 'Вторник' },
+            { key: 'wed', label: 'Среда' },
+            { key: 'thu', label: 'Четверг' },
+            { key: 'fri', label: 'Пятница' },
+            { key: 'sat', label: 'Суббота' },
+            { key: 'sun', label: 'Воскресенье' },
+        ],
         orgProfileLoading: false,
         orgProfileSaving: false,
         orders: [],
@@ -1098,8 +1135,8 @@ function adminMixinMenuOrdersUi() {
             return out;
         },
 
-        /** Человекочитаемая «причина» шага для персонала. */
-        salesInsightWhy(trace) {
+        /** Текст аргументации от модели (ИИ), без серверного gastro_hint. */
+        salesInsightAiReason(trace) {
             if (!trace || typeof trace !== 'object') return '';
             const reason = String(trace.reason || trace.upsell_reasoning || '').trim();
             if (reason) return reason;
@@ -1112,6 +1149,23 @@ function adminMixinMenuOrdersUi() {
             }
             if (src) return src;
             return 'Предложение в диалоге';
+        },
+        salesInsightGastroHint(trace) {
+            if (!trace || typeof trace !== 'object') return '';
+            return String(trace.gastro_hint || '').trim();
+        },
+        salesInsightStrategyLogic(trace) {
+            if (!trace || typeof trace !== 'object') return '';
+            return String(trace.strategy_logic || '').trim();
+        },
+        salesInsightShowLogicBlock(trace) {
+            return !!(
+                (trace && String(trace.gastro_hint || '').trim())
+                || (trace && String(trace.strategy_logic || '').trim() === 'Custom AI Choice')
+            );
+        },
+        salesInsightWhy(trace) {
+            return this.salesInsightAiReason(trace);
         },
 
         salesInsightSourceLabel(trace) {
@@ -2178,6 +2232,47 @@ function adminMixinAuthKnowledge() {
             }
         },
 
+        async submitDemoLogin() {
+            this.loginError = '';
+            this.auth401AlertShown = false;
+            this.loginLoading = true;
+            try {
+                const res = await this.apiFetch('/api/admin/auth/demo-login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                });
+                let data = {};
+                try { data = await res.json(); } catch { /* empty */ }
+                if (!res.ok) {
+                    this.loginError = typeof data.detail === 'string' ? data.detail : 'Не удалось открыть демо';
+                    return;
+                }
+                this.authenticated = true;
+                this.wsToken = data.ws_token || '';
+                this.staffRole = String(data.staff_role || 'operator').toLowerCase();
+                this._ensureAdminHashListener();
+                const parsedLogin = adminParseLocationHash();
+                if (!parsedLogin.tab) {
+                    this.currentTab = 'dashboard';
+                    this._pushAdminHash();
+                } else {
+                    this._applyParsedHash(parsedLogin);
+                }
+                this._installAdminHashWatch();
+                await this.refreshDemoStatus();
+                await this.loadOrgProfile();
+                this.connectWebSocket();
+                await this.loadTabData();
+                await this.loadIntegrationStatus();
+                await this.loadChatList();
+                await this._consumePendingHashChatPhone();
+            } catch {
+                this.loginError = 'Не удалось связаться с сервером';
+            } finally {
+                this.loginLoading = false;
+            }
+        },
+
         async loadOrgProfile() {
             this.orgProfileLoading = true;
             try {
@@ -2186,6 +2281,7 @@ function adminMixinAuthKnowledge() {
                     console.warn('GET /api/admin/organization/profile', status, data);
                     return;
                 }
+                const scheduleObj = (data?.schedule_json && typeof data.schedule_json === 'object') ? data.schedule_json : {};
                 this.orgProfile = {
                     id: data?.id ?? null,
                     organization_id: data?.organization_id ?? null,
@@ -2194,6 +2290,11 @@ function adminMixinAuthKnowledge() {
                     currency: (data?.currency || '').trim(),
                     whatsapp_phone_number_id: (data?.whatsapp_phone_number_id || '').trim(),
                     telegram_ops_chat_id: (data?.telegram_ops_chat_id || '').trim(),
+                    schedule_json: scheduleObj,
+                    schedule_json_text: JSON.stringify(scheduleObj, null, 2),
+                    operational_label: String(data?.operational_label || '').trim(),
+                    is_business_open: !!data?.is_business_open,
+                    is_kitchen_open: !!data?.is_kitchen_open,
                 };
             } finally {
                 this.orgProfileLoading = false;
@@ -2209,12 +2310,16 @@ function adminMixinAuthKnowledge() {
             }
             this.orgProfileSaving = true;
             try {
+                const scheduleJson = (this.orgProfile?.schedule_json && typeof this.orgProfile.schedule_json === 'object')
+                    ? this.orgProfile.schedule_json
+                    : {};
                 const body = {
                     name: nm,
                     timezone: String(this.orgProfile?.timezone || '').trim(),
                     currency: String(this.orgProfile?.currency || '').trim(),
                     whatsapp_phone_number_id: String(this.orgProfile?.whatsapp_phone_number_id || '').trim(),
                     telegram_ops_chat_id: String(this.orgProfile?.telegram_ops_chat_id || '').trim(),
+                    schedule_json: scheduleJson,
                 };
                 const { ok, status, data } = await this.apiJsonResponse('/api/admin/organization/profile', {
                     method: 'PATCH',
@@ -2234,10 +2339,137 @@ function adminMixinAuthKnowledge() {
                     currency: (data?.currency || '').trim(),
                     whatsapp_phone_number_id: (data?.whatsapp_phone_number_id || '').trim(),
                     telegram_ops_chat_id: (data?.telegram_ops_chat_id || '').trim(),
+                    schedule_json: (data?.schedule_json && typeof data.schedule_json === 'object') ? data.schedule_json : scheduleJson,
+                    schedule_json_text: JSON.stringify((data?.schedule_json && typeof data.schedule_json === 'object') ? data.schedule_json : scheduleJson, null, 2),
+                    operational_label: String(data?.operational_label || '').trim(),
+                    is_business_open: !!data?.is_business_open,
+                    is_kitchen_open: !!data?.is_kitchen_open,
                 };
             } finally {
                 this.orgProfileSaving = false;
             }
+        },
+
+        tzBadgeLabel(tz) {
+            const zone = String(tz || '').trim() || 'Asia/Almaty';
+            try {
+                const fmt = new Intl.DateTimeFormat('en-US', { timeZone: zone, timeZoneName: 'shortOffset' });
+                const parts = fmt.formatToParts(new Date());
+                const off = parts.find((p) => p.type === 'timeZoneName')?.value || '';
+                const m = off.match(/GMT([+-]\d{1,2})(?::(\d{2}))?/i);
+                if (m) {
+                    const hh = Number(m[1]);
+                    const mm = Number(m[2] || '00');
+                    const sign = hh >= 0 ? '+' : '-';
+                    const absH = Math.abs(hh);
+                    const label = `UTC${sign}${absH}${mm ? `:${String(mm).padStart(2,'0')}` : ''}`;
+                    const place = zone === 'Asia/Almaty' ? ' (Казахстан)' : '';
+                    return `${label}${place}`;
+                }
+            } catch { /* ignore */ }
+            const place = zone === 'Asia/Almaty' ? 'UTC+5 (Казахстан)' : `UTC (${zone})`;
+            return place;
+        },
+
+        _defaultDay() {
+            return { is_closed: false, open: '11:00', kitchen_close: '22:30', business_close: '23:00' };
+        },
+        normalizeSchedule(raw) {
+            let fallbackUsed = false;
+            const out = {};
+            const input = (raw && typeof raw === 'object') ? raw : {};
+            for (const d of this.scheduleDayRows) {
+                const src = (input[d.key] && typeof input[d.key] === 'object') ? input[d.key] : null;
+                if (!src) fallbackUsed = true;
+                const def = this._defaultDay();
+                out[d.key] = {
+                    is_closed: !!(src && typeof src.is_closed === 'boolean' ? src.is_closed : def.is_closed),
+                    open: String(src && src.open ? src.open : def.open),
+                    kitchen_close: String(src && src.kitchen_close ? src.kitchen_close : def.kitchen_close),
+                    business_close: String(src && src.business_close ? src.business_close : def.business_close),
+                };
+                if (!out[d.key].open || !out[d.key].kitchen_close || !out[d.key].business_close) {
+                    fallbackUsed = true;
+                    out[d.key].open = out[d.key].open || def.open;
+                    out[d.key].kitchen_close = out[d.key].kitchen_close || def.kitchen_close;
+                    out[d.key].business_close = out[d.key].business_close || def.business_close;
+                }
+            }
+            return { schedule: out, fallbackUsed };
+        },
+        openScheduleEditor() {
+            const normalized = this.normalizeSchedule(this.orgProfile?.schedule_json);
+            this.scheduleEditorOpen = true;
+            this.scheduleEditorFallbackUsed = normalized.fallbackUsed;
+            this.scheduleEditor = JSON.parse(JSON.stringify(normalized.schedule));
+        },
+        closeScheduleEditor() {
+            this.scheduleEditorOpen = false;
+            this.scheduleEditorFallbackUsed = false;
+            this.scheduleEditor = {};
+        },
+        applyMondayToWeek() {
+            const src = this.scheduleEditor?.mon || this._defaultDay();
+            for (const d of this.scheduleDayRows) {
+                if (d.key === 'mon') continue;
+                const day = this.scheduleEditor[d.key] || this._defaultDay();
+                if (!day.is_closed) {
+                    day.open = String(src.open || '11:00');
+                    day.kitchen_close = String(src.kitchen_close || '22:30');
+                    day.business_close = String(src.business_close || '23:00');
+                }
+                this.scheduleEditor[d.key] = day;
+            }
+        },
+        _hmToMin(hm) {
+            const s = String(hm || '').trim();
+            const parts = s.split(':');
+            if (parts.length !== 2) return null;
+            const hh = Number(parts[0]);
+            const mm = Number(parts[1]);
+            if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null;
+            if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
+            return hh * 60 + mm;
+        },
+        _relCloseFromOpen(openMin, closeMin) {
+            if (openMin == null || closeMin == null) return null;
+            return closeMin >= openMin ? closeMin : (closeMin + 1440);
+        },
+        isDayInvalid(dayKey) {
+            const d = (this.scheduleEditor && this.scheduleEditor[dayKey]) ? this.scheduleEditor[dayKey] : null;
+            if (!d || d.is_closed) return false;
+            const o = this._hmToMin(d.open);
+            const k = this._hmToMin(d.kitchen_close);
+            const b = this._hmToMin(d.business_close);
+            if (o == null || k == null || b == null) return true;
+            const kRel = this._relCloseFromOpen(o, k);
+            const bRel = this._relCloseFromOpen(o, b);
+            if (kRel == null || bRel == null) return true;
+            return kRel > bRel;
+        },
+        hasScheduleValidationErrors() {
+            for (const d of this.scheduleDayRows) {
+                if (this.isDayInvalid(d.key)) return true;
+            }
+            return false;
+        },
+        applyScheduleFromEditor() {
+            if (this.hasScheduleValidationErrors()) {
+                void this.showUiAlert('Исправьте ошибки в графике: прием заказов до не может быть позже закрытия.', 'Ошибка');
+                return;
+            }
+            const payload = {};
+            for (const d of this.scheduleDayRows) {
+                const src = this.scheduleEditor[d.key] || this._defaultDay();
+                payload[d.key] = {
+                    is_closed: !!src.is_closed,
+                    open: String(src.open || '11:00'),
+                    kitchen_close: String(src.kitchen_close || '22:30'),
+                    business_close: String(src.business_close || '23:00'),
+                };
+            }
+            this.orgProfile.schedule_json = payload;
+            this.closeScheduleEditor();
         },
 
         async logoutAdmin() {
@@ -2263,6 +2495,8 @@ function adminMixinAuthKnowledge() {
                 currency: '',
                 whatsapp_phone_number_id: '',
                 telegram_ops_chat_id: '',
+                schedule_json: null,
+                schedule_json_text: '',
             };
         },
 
@@ -2350,6 +2584,35 @@ function adminMixinAuthKnowledge() {
                 void this.showUiAlert('Ошибка сети', 'Ошибка');
             } finally {
                 this.orgPrepaymentEnforcedSaving = false;
+            }
+        },
+
+        async onAutoSendIikoAfterPaymentToggle(ev) {
+            const el = ev && ev.target;
+            if (!el) return;
+            const nextVal = !!el.checked;
+            this.orgAutoIikoSaving = true;
+            try {
+                const { ok, data } = await this.apiJsonResponse('/api/admin/organization/prefs', {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ auto_send_to_iiko_after_payment: nextVal }),
+                });
+                if (!ok) {
+                    el.checked = !nextVal;
+                    void this.showUiAlert(this.formatApiError(data.detail) || 'Не удалось сохранить', 'Ошибка');
+                    return;
+                }
+                this.mergeIntegrationStatus({
+                    ...this.integrationStatus,
+                    auto_send_to_iiko_after_payment: !!data.auto_send_to_iiko_after_payment,
+                });
+            } catch (e) {
+                el.checked = !nextVal;
+                console.error('[admin] onAutoSendIikoAfterPaymentToggle', e);
+                void this.showUiAlert('Ошибка сети', 'Ошибка');
+            } finally {
+                this.orgAutoIikoSaving = false;
             }
         },
 
@@ -2446,6 +2709,7 @@ function adminMixinAuthKnowledge() {
                 }
                 this.knowledgeEditOpen = false;
                 await this.loadKnowledgeBase();
+                await this.loadSetupStatus();
             } catch (e) {
                 console.error('[admin] saveKnowledgeItem', e);
                 this.knowledgeEditError = 'Ошибка сети';
@@ -2465,7 +2729,10 @@ function adminMixinAuthKnowledge() {
             try {
                 // POST — часть прокси режет HTTP DELETE; эндпоинт тот же по смыслу, что DELETE /knowledge/{id}
                 const res = await this.apiFetch(`/api/admin/knowledge/${id}/delete`, { method: 'POST' });
-                if (res.ok) await this.loadKnowledgeBase();
+                if (res.ok) {
+                    await this.loadKnowledgeBase();
+                    await this.loadSetupStatus();
+                }
                 else {
                     const data = await res.json().catch(() => ({}));
                     void this.showUiAlert(this.formatApiError(data), 'Ошибка');
@@ -2606,29 +2873,58 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
             finally { rule._saving = false; }
         },
         async packagingAddNew() {
-            const { ok, value } = await this.openUiConfirm({
-                title: 'Новое правило упаковки',
-                message: 'Уникальный ключ kind (латиница, например dessert).',
-                confirmText: 'Добавить',
-                showInput: true,
-                input: {
-                    label: 'kind',
-                    placeholder: 'например dessert',
-                    required: true,
-                },
-            });
-            if (!ok) return;
-            const kind = String(value || '').trim();
-            if (!kind) return;
+            this.packagingCreateForm = defaultPackagingRuleForm();
+            this.packagingCreateError = '';
+            this.packagingCreateOpen = true;
+        },
+
+        closePackagingCreateModal() {
+            if (this.packagingCreateLoading) return;
+            this.packagingCreateOpen = false;
+            this.packagingCreateError = '';
+        },
+
+        async submitPackagingCreate() {
+            const f = this.packagingCreateForm || defaultPackagingRuleForm();
+            const kind = String(f.kind || '').trim();
+            const name = String(f.name || '').trim();
+            if (!kind) {
+                this.packagingCreateError = 'Укажите уникальный ключ kind.';
+                return;
+            }
+            if (!name) {
+                this.packagingCreateError = 'Укажите понятное название правила.';
+                return;
+            }
+            this.packagingCreateLoading = true;
+            this.packagingCreateError = '';
             try {
                 const { ok, data: d } = await this.apiJsonResponse('/api/admin/packaging-rules', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ kind, name: 'Новое правило', price: 0, keywords: '', is_active: true, sort_order: 0 }),
+                    body: JSON.stringify({
+                        kind,
+                        name,
+                        price: Number(f.price) || 0,
+                        keywords: String(f.keywords || '').trim(),
+                        option_key: String(f.option_key || '').trim(),
+                        iiko_product_id: String(f.iiko_product_id || '').trim(),
+                        is_active: !!f.is_active,
+                        sort_order: Number(f.sort_order) || 0,
+                    }),
                 });
-                if (ok) await this.loadPackagingRules();
-                else void this.showUiAlert(this.formatApiError(d), 'Ошибка');
-            } catch (e) { console.error('[admin] packagingAddNew', e); }
+                if (!ok) {
+                    this.packagingCreateError = this.formatApiError(d) || 'Не удалось создать правило';
+                    return;
+                }
+                this.packagingCreateOpen = false;
+                await this.loadPackagingRules();
+            } catch (e) {
+                console.error('[admin] submitPackagingCreate', e);
+                this.packagingCreateError = 'Ошибка сети. Проверьте соединение.';
+            } finally {
+                this.packagingCreateLoading = false;
+            }
         },
 
         async loadSetupStatus() {
@@ -3240,18 +3536,30 @@ function adminMixinWebSocketEvents() {
         onMessageStatusUpdated(data) {
             const id = Number(data.chat_log_id);
             if (!id) return;
-            const row = this.chatMessages.find((m) => Number(m.id) === id);
-            if (!row) return;
-            row.delivery_status = data.delivery_status || row.delivery_status;
-            if (data.provider_message_id) row.provider_message_id = data.provider_message_id;
-            if (data.error_details !== undefined) row.error_details = data.error_details;
-            row.status_updated_at = new Date().toISOString();
+            const idx = this.chatMessages.findIndex((m) => Number(m.id) === id);
+            if (idx < 0) return;
+            const row = this.chatMessages[idx];
+            // Новый объект + splice: Alpine 3 гарантированно перерисует бейдж (иначе in-place-мутация
+            // иногда не тянет :class / x-text у вложенных вызовов chatDeliveryBadge).
+            const next = { ...row };
+            const st = (data.delivery_status != null && String(data.delivery_status) !== '')
+                ? data.delivery_status
+                : row.delivery_status;
+            next.delivery_status = st;
+            if (data.provider_message_id) next.provider_message_id = data.provider_message_id;
+            if (data.error_details !== undefined) next.error_details = data.error_details;
+            next.status_updated_at = new Date().toISOString();
+            this.chatMessages.splice(idx, 1, next);
         },
 
+        /**
+         * Иконки как в мессенджерах: часы → одна галочка (сервер/облако) → две (устройство) →
+         * две (прочитано, стиль в chatDeliveryBadge).
+         */
         chatDeliveryMark(msg) {
             const s = String(msg.delivery_status || '').toLowerCase();
             if (!s || msg.role === 'user') return '';
-            if (s === 'sending') return '\u231B';
+            if (s === 'sending') return '\u{1F550}';
             if (s === 'sent') return '\u2713';
             if (s === 'delivered' || s === 'read') return '\u2713\u2713';
             if (s === 'failed') return '\u26A0';
@@ -3268,10 +3576,10 @@ function adminMixinWebSocketEvents() {
                 }
             }
             const labels = {
-                sending: 'Отправляется\u2026',
-                sent: 'Отправлено',
-                delivered: 'Доставлено',
-                read: 'Прочитано',
+                sending: 'Отправка…',
+                sent: 'Доставлено в облако (сервер WhatsApp принял)',
+                delivered: 'Доставлено на устройство гостя',
+                read: 'Прочитано гостем',
                 failed: 'Не доставлено',
             };
             return labels[s] || '';
@@ -3284,8 +3592,9 @@ function adminMixinWebSocketEvents() {
             const icon = this.chatDeliveryMark(msg);
             let cls = 'bg-white/15 text-white border-white/20';
             if (s === 'sending') cls = 'bg-amber-400/25 text-white border-amber-200/40 animate-pulse';
-            else if (s === 'sent') cls = 'bg-white/15 text-white border-white/20';
-            else if (s === 'delivered' || s === 'read') cls = 'bg-emerald-500/20 text-white border-emerald-200/30';
+            else if (s === 'sent') cls = 'bg-slate-500/30 text-white border-slate-200/30';
+            else if (s === 'delivered') cls = 'bg-emerald-500/20 text-white border-emerald-200/30';
+            else if (s === 'read') cls = 'bg-sky-500/25 text-sky-50 border-sky-200/50';
             else if (s === 'failed') cls = 'bg-rose-500/20 text-white border-rose-200/30';
             return { s, label, icon, cls };
         },

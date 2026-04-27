@@ -10,7 +10,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import MenuItem, UpsellRule
 from app.schemas.ai_schemas import AIBrainResponse
-from app.services.upsell_utils import cart_iiko_ids, rejected_upsell_iiko_ids
+from app.services.upsell_utils import (
+    cart_iiko_ids,
+    collect_cart_tag_profile,
+    is_forbidden_upsell_candidate,
+    is_preferred_upsell_candidate,
+    rejected_upsell_iiko_ids,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +67,7 @@ def _menu_candidates(
     organization_id: int,
     suggest_substr: str,
     exclude_iiko: set[str],
+    cart_tags: set[str],
 ) -> list[MenuItem]:
     ss = (suggest_substr or "").strip().lower()
     out: list[MenuItem] = []
@@ -75,8 +82,10 @@ def _menu_candidates(
         iid = (m.iiko_id or "").strip().lower()
         if iid and iid in exclude_iiko:
             continue
+        if is_forbidden_upsell_candidate(m, cart_tags=cart_tags):
+            continue
         out.append(m)
-    out.sort(key=lambda x: float(x.price or 0))
+    out.sort(key=lambda x: (0 if is_preferred_upsell_candidate(x) else 1, float(x.price or 0)))
     return out
 
 
@@ -108,6 +117,7 @@ async def apply_db_upsell_rules(
         return reply_text, items_json
 
     cats = _cart_categories(items)
+    cart_tags, _has_side_tag, _has_drink_tag = collect_cart_tag_profile(items, menu_items)
     in_cart = cart_iiko_ids(items)
     rejected = _rejected_iiko(meta)
 
@@ -125,7 +135,7 @@ async def apply_db_upsell_rules(
             continue
 
         candidates = _menu_candidates(
-            menu_items, organization_id, rule.suggest_category, in_cart | rejected,
+            menu_items, organization_id, rule.suggest_category, in_cart | rejected, cart_tags,
         )
         if not candidates:
             continue

@@ -14,6 +14,7 @@ from collections import defaultdict
 from typing import Literal
 from datetime import date, datetime, time as dt_time, timedelta, timezone
 
+import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
 from sqlalchemy import delete as sql_delete
 from sqlalchemy import and_, exists, func, or_, select
@@ -38,6 +39,7 @@ from app.db.models import (
     Organization,
     PackagingRule,
     PaymentEvent,
+    RegistrationRequest,
     StaffRole,
     StaffUser,
     UpsellRule,
@@ -48,7 +50,7 @@ from app.integrations.whatsapp import send_message
 from app.services.admin_tokens import AdminWsClaims, create_admin_ws_token, parse_admin_ws_token
 from app.services.ai_brain import call_openai
 from app.services.customer_context import build_customer_context
-from app.services.time_context import format_org_current_time_block
+from app.services.time_context import check_operational_status, format_org_current_time_block, parse_schedule_json
 from app.services.demo_data import clear_demo_data, demo_data_exists, seed_demo_data
 from app.services.integration_health import (
     build_status_payload,
@@ -94,6 +96,7 @@ from app.services.order_logic import (
     validate_mixed_payment_total,
     validate_order,
 )
+from app.services.payment_autoprint_iiko import run_auto_send_to_iiko_after_payment
 from app.services.payment_notify import run_payment_received_customer_notify
 from app.services.sales_strategy import build_sales_strategy, format_strategy_for_prompt
 from app.services.intelligence_analytics import (
@@ -134,12 +137,39 @@ def require_admin_session(request: Request) -> None:
         raise HTTPException(status_code=401, detail="Требуется вход в админку")
 
 
+async def require_admin_session_active(request: Request, db: AsyncSession = Depends(get_db)) -> None:
+    """Проверка сессии + активности организации; Super Admin не блокируется статусом org."""
+    require_admin_session(request)
+    if bool(request.session.get("is_demo")) and request.method.upper() not in {"GET", "HEAD", "OPTIONS"}:
+        raise HTTPException(status_code=403, detail="Демо-режим: изменения запрещены")
+
+    sid = request.session.get("staff_id")
+    org_id = admin_org_from_session(request)
+
+    if sid is None:
+        org = await db.get(Organization, int(org_id))
+        if org is not None and not bool(org.is_active):
+            raise HTTPException(status_code=403, detail="Подписка приостановлена. Свяжитесь с администратором.")
+        return
+
+    staff = await db.get(StaffUser, int(sid))
+    if staff is None or not bool(staff.is_active):
+        raise HTTPException(status_code=403, detail="Недостаточно прав")
+    if bool(staff.is_superadmin):
+        return
+    if int(staff.organization_id) != int(org_id):
+        raise HTTPException(status_code=403, detail="Недостаточно прав")
+    org = await db.get(Organization, int(staff.organization_id))
+    if org is not None and not bool(org.is_active):
+        raise HTTPException(status_code=403, detail="Подписка приостановлена. Свяжитесь с администратором.")
+
+
 async def require_staff_admin(request: Request, db: AsyncSession = Depends(get_db)) -> None:
     """
     Доступ только для admin-ролей staff (или legacy admin без staff_id).
     Нужен для чувствительных действий (команда/права).
     """
-    require_admin_session(request)
+    await require_admin_session_active(request, db)
     sid = request.session.get("staff_id")
     if sid is None:
         return
@@ -160,10 +190,73 @@ def admin_org_from_session(request: Request) -> int:
 
 
 async def _order_in_org(db: AsyncSession, order_id: int, org_id: int) -> Order:
+    """
+    Заказ принадлежит филиалу: либо Order.organization_id совпадает, либо (legacy) NULL и user в этом org.
+    Иначе 404 — без утечки «существует ли id у чужого арендатора».
+    """
     order = await db.get(Order, order_id)
-    if order is None or int(order.organization_id or 0) != org_id:
+    if order is None:
+        raise HTTPException(status_code=404, detail="Заказ не найден")
+    oid = order.organization_id
+    if oid is not None:
+        if int(oid) != int(org_id):
+            raise HTTPException(status_code=404, detail="Заказ не найден")
+        return order
+    u = await db.get(User, order.user_id) if order.user_id else None
+    if u is None or int(u.organization_id) != int(org_id):
         raise HTTPException(status_code=404, detail="Заказ не найден")
     return order
+
+
+async def _iiko_login_org_for_tenant(
+    db: AsyncSession,
+    org_id: int,
+    api_login: str | None,
+    organization_id: str | None,
+) -> tuple[str, str, str | None]:
+    """
+    Учётные данные iiko только для филиала ``org_id``.
+    Не позволяет передать чужой api_login / iiko UUID в query (multi-tenant).
+    Пустой query → из настроек филиала / .env через resolve_org_iiko_credentials.
+    """
+    creds = await resolve_org_iiko_credentials(db, org_id)
+    if creds is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Задайте iiko в настройках филиала или IIKO_* в окружении.",
+        )
+    lq = (api_login or "").strip()
+    oq = (organization_id or "").strip()
+    if lq or oq:
+        if not lq or not oq:
+            raise HTTPException(
+                status_code=400,
+                detail="Передайте оба query api_login и organization_id или оставьте оба пустыми.",
+            )
+        if lq != (creds.api_login or "").strip() or oq != (creds.iiko_organization_id or "").strip():
+            raise HTTPException(
+                status_code=403,
+                detail="Учётные данные iiko не соответствуют этому филиалу",
+            )
+    return (creds.api_login, creds.iiko_organization_id, (creds.terminal_group_id or None))
+
+
+async def _menu_item_in_org(db: AsyncSession, item_id: int, org_id: int) -> MenuItem:
+    """
+    Позиция меню доступна для изменения этим филиалом.
+    Legacy-строки с organization_id IS NULL — только у арендатора default_organization_id
+    (общая номенклатура); остальные филиалы получают 404.
+    """
+    item = await db.get(MenuItem, item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Позиция не найдена")
+    if item.organization_id is not None:
+        if int(item.organization_id) != int(org_id):
+            raise HTTPException(status_code=404, detail="Позиция не найдена")
+        return item
+    if int(org_id) != int(settings.default_organization_id):
+        raise HTTPException(status_code=404, detail="Позиция не найдена")
+    return item
 
 
 def _menu_tenant_clause(org_id: int):
@@ -253,6 +346,15 @@ class SignupBody(BaseModel):
     password: str = Field(..., min_length=8, max_length=128)
 
 
+class RequestAccessBody(BaseModel):
+    restaurant_name: str = Field(..., min_length=2, max_length=255)
+    contact_name: str = Field(default="", max_length=255)
+    phone: str = Field(default="", max_length=32)
+    email: str = Field(default="", max_length=255)
+    has_iiko: bool = False
+    note: str = Field(default="", max_length=4000)
+
+
 @auth_router.post("/login")
 async def admin_login(request: Request, body: LoginBody, db: AsyncSession = Depends(get_db)) -> dict:
     """Staff по email или legacy ADMIN_USERNAME / ADMIN_PASSWORD."""
@@ -268,10 +370,18 @@ async def admin_login(request: Request, body: LoginBody, db: AsyncSession = Depe
             ),
         )
         if staff and verify_password(password, staff.password_hash):
+            if not bool(staff.is_superadmin):
+                org_login = await db.get(Organization, int(staff.organization_id))
+                if org_login is not None and not bool(org_login.is_active):
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Подписка приостановлена. Свяжитесь с администратором.",
+                    )
             request.session["admin_ok"] = True
             request.session["admin_user"] = staff.email
             request.session["staff_id"] = int(staff.id)
             request.session["organization_id"] = int(staff.organization_id)
+            request.session.pop("is_demo", None)
             ws_token = create_admin_ws_token(
                 organization_id=int(staff.organization_id),
                 email=staff.email,
@@ -290,10 +400,14 @@ async def admin_login(request: Request, body: LoginBody, db: AsyncSession = Depe
         # иначе при миграциях/демо-данных id может быть не 1 и админка будет "пустой".
         oid_db = await db.scalar(select(Organization.id).order_by(Organization.id.asc()).limit(1))
         oid = int(oid_db) if oid_db is not None else int(settings.default_organization_id)
+        org_login = await db.get(Organization, oid)
+        if org_login is not None and not bool(org_login.is_active):
+            raise HTTPException(status_code=403, detail="Подписка приостановлена. Свяжитесь с администратором.")
         request.session["admin_ok"] = True
         request.session["admin_user"] = body.username.strip()
         request.session["organization_id"] = oid
         request.session["staff_id"] = None
+        request.session.pop("is_demo", None)
         ws_token = create_admin_ws_token(
             organization_id=oid,
             email=body.username.strip(),
@@ -311,66 +425,89 @@ async def admin_login(request: Request, body: LoginBody, db: AsyncSession = Depe
 
 
 @auth_router.post("/signup")
-async def admin_signup(request: Request, body: SignupBody, db: AsyncSession = Depends(get_db)) -> dict:
-    """
-    PLG-регистрация: создаёт Tenant (опционально), Organization, StaffUser(admin) и авторизует в cookie-сессии.
-    """
-    email = (body.email or "").strip().lower()
-    if not email or "@" not in email:
-        raise HTTPException(status_code=400, detail="Укажите корректный email")
-    restaurant_name = (body.restaurant_name or "").strip()
-    if not restaurant_name:
-        raise HTTPException(status_code=400, detail="Укажите название ресторана")
-    password = body.password or ""
+async def admin_signup_disabled(request: Request, body: SignupBody) -> dict:
+    """Self-serve регистрация отключена: только заявка на модерацию."""
+    _ = request
+    _ = body
+    raise HTTPException(status_code=410, detail="Регистрация теперь по заявке на подключение")
 
+
+@auth_router.post("/demo-login")
+async def admin_demo_login(request: Request, db: AsyncSession = Depends(get_db)) -> dict:
+    """Гостевой вход в демо-организацию (read-only)."""
     request.session.clear()
-
-    existing = await db.scalar(select(StaffUser.id).where(StaffUser.email == email))
-    if existing is not None:
-        raise HTTPException(status_code=409, detail="Пользователь с таким email уже зарегистрирован")
-
-    tenant_id: int | None = None
-    network_name = (body.network_name or "").strip()
-    if network_name:
-        t = Tenant(name=network_name)
-        db.add(t)
-        await db.flush()
-        tenant_id = int(t.id)
-
-    org = Organization(name=restaurant_name, tenant_id=tenant_id)
-    db.add(org)
-    await db.flush()
-
-    staff = StaffUser(
-        organization_id=int(org.id),
-        email=email,
-        password_hash=hash_password(password),
-        role=StaffRole.ADMIN.value,
-        is_active=True,
+    demo_org = await db.scalar(
+        select(Organization).where(
+            Organization.is_demo.is_(True),
+        ),
     )
-    db.add(staff)
-    try:
-        await db.commit()
-    except IntegrityError:
-        await db.rollback()
-        raise HTTPException(status_code=409, detail="Не удалось создать пользователя (email занят)") from None
+    if demo_org is None:
+        demo_org = await db.scalar(select(Organization).where(Organization.slug == "demo"))
+    if demo_org is None:
+        raise HTTPException(status_code=503, detail="Демо временно недоступно")
+    if not bool(demo_org.is_active):
+        raise HTTPException(status_code=503, detail="Демо временно отключено")
 
     request.session["admin_ok"] = True
-    request.session["admin_user"] = staff.email
-    request.session["staff_id"] = int(staff.id)
-    request.session["organization_id"] = int(org.id)
+    request.session["admin_user"] = "demo-guest"
+    request.session["organization_id"] = int(demo_org.id)
+    request.session["staff_id"] = None
+    request.session["is_demo"] = True
 
     ws_token = create_admin_ws_token(
-        organization_id=int(org.id),
-        email=staff.email,
-        staff_id=int(staff.id),
+        organization_id=int(demo_org.id),
+        email="demo-guest",
+        staff_id=None,
     )
     return {
         "ok": True,
-        "username": staff.email,
-        "organization_id": int(org.id),
+        "username": "demo-guest",
+        "organization_id": int(demo_org.id),
+        "staff_role": StaffRole.OPERATOR.value,
         "ws_token": ws_token,
     }
+
+
+@auth_router.post("/request-access")
+async def admin_request_access(body: RequestAccessBody, db: AsyncSession = Depends(get_db)) -> dict:
+    """Создать заявку на модерацию подключения ресторана."""
+    req = RegistrationRequest(
+        restaurant_name=(body.restaurant_name or "").strip(),
+        contact_name=(body.contact_name or "").strip(),
+        phone=(body.phone or "").strip(),
+        email=(body.email or "").strip().lower(),
+        has_iiko=bool(body.has_iiko),
+        note=(body.note or "").strip(),
+        status="pending",
+    )
+    db.add(req)
+    await db.commit()
+    await db.refresh(req)
+
+    token = (settings.telegram_bot_token or "").strip()
+    chat_id = (settings.superadmin_telegram_chat_id or settings.telegram_admin_chat_id or "").strip()
+    if token and chat_id:
+        payload = {
+            "chat_id": chat_id,
+            "text": (
+                "🆕 <b>Новая заявка на подключение</b>\n"
+                f"Ресторан: <code>{req.restaurant_name}</code>\n"
+                f"Контакт: <code>{req.contact_name or '—'}</code>\n"
+                f"Телефон: <code>{req.phone or '—'}</code>\n"
+                f"Email: <code>{req.email or '—'}</code>\n"
+                f"iiko: <code>{'да' if req.has_iiko else 'нет'}</code>"
+            ),
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                resp = await client.post(f"https://api.telegram.org/bot{token}/sendMessage", json=payload)
+                resp.raise_for_status()
+        except Exception:
+            logger.warning("request-access: telegram notify failed", exc_info=True)
+
+    return {"ok": True, "request_id": int(req.id)}
 
 
 @auth_router.post("/logout")
@@ -397,15 +534,24 @@ async def admin_me(request: Request, db: AsyncSession = Depends(get_db)) -> dict
             request.session["organization_id"] = oid
     sid = request.session.get("staff_id")
     staff_role = StaffRole.ADMIN.value
+    is_demo = bool(request.session.get("is_demo"))
+    is_superadmin = False
     if sid is not None:
         staff_me = await db.get(StaffUser, int(sid))
         if staff_me is not None:
             staff_role = (staff_me.role or StaffRole.ADMIN.value).strip().lower()
+            is_superadmin = bool(staff_me.is_superadmin)
+    if not is_superadmin:
+        org_me = await db.get(Organization, int(oid))
+        if org_me is not None and not bool(org_me.is_active):
+            raise HTTPException(status_code=403, detail="Подписка приостановлена. Свяжитесь с администратором.")
     return {
         "authenticated": True,
         "username": user,
         "organization_id": oid,
         "staff_role": staff_role,
+        "is_demo": is_demo,
+        "is_superadmin": is_superadmin,
         "ws_token": create_admin_ws_token(
             organization_id=oid,
             email=str(user),
@@ -419,7 +565,7 @@ async def admin_me(request: Request, db: AsyncSession = Depends(get_db)) -> dict
 router = APIRouter(
     prefix="/admin",
     tags=["Admin Panel"],
-    dependencies=[Depends(require_admin_session)],
+    dependencies=[Depends(require_admin_session_active)],
 )
 
 
@@ -600,7 +746,10 @@ async def list_orders(
         select(Order, User.phone, User.name)
         .join(User, Order.user_id == User.id)
         .options(joinedload(Order.booking))
-        .where(Order.organization_id == org_id, User.organization_id == org_id)
+        .where(
+            User.organization_id == org_id,
+            _orders_tenant_clause(org_id),
+        )
     )
     if status:
         base_query = base_query.where(Order.status == status)
@@ -826,6 +975,7 @@ async def patch_order_payment_meta(
     await db.commit()
     if notify_paid:
         background_tasks.add_task(run_payment_received_customer_notify, order.id)
+        background_tasks.add_task(run_auto_send_to_iiko_after_payment, order.id)
     return {
         "ok": True,
         "id": order.id,
@@ -911,7 +1061,6 @@ async def patch_order_status(
                 update(Order)
                 .where(
                     Order.id == order.id,
-                    Order.organization_id == org_id,
                     Order.status == OrderStatus.CONFIRMED.value,
                     Order.row_version == expected,
                 )
@@ -1312,7 +1461,7 @@ async def create_manual_order(
             OrderItem(
                 name=(seed.name or "").strip(),
                 quantity=1,
-                iiko_item_id=(seed.iiko_item_id or "").strip(),
+                iiko_item_id=(seed.iiko_id or "").strip(),
                 packaging_plov_1kg="",
                 exclude_ingredients=[],
             ),
@@ -1529,6 +1678,9 @@ async def integrations_status(
     base["iiko_secrets_encrypt_ready"] = bool((settings.app_secrets_fernet_key or "").strip())
     org_row = await db.get(Organization, org_id)
     base["prepayment_enforced"] = bool(getattr(org_row, "prepayment_enforced", True)) if org_row else True
+    base["auto_send_to_iiko_after_payment"] = bool(
+        getattr(org_row, "auto_send_to_iiko_after_payment", False),
+    ) if org_row is not None else False
     tg_token_ok = bool(str(settings.telegram_bot_token or "").strip())
     tg_global_chat_ok = bool(str(settings.telegram_admin_chat_id or "").strip())
     tg_org_chat_ok = bool(
@@ -1545,6 +1697,10 @@ class OrganizationPrefsPatchBody(BaseModel):
         default=None,
         description="False — не требовать предоплату по порогу; оператор подтверждает оплату вручную",
     )
+    auto_send_to_iiko_after_payment: bool | None = Field(
+        default=None,
+        description="После оплаты (вебхук) автоматически подтвердить заказ и отправить в iiko",
+    )
 
 
 class OrganizationProfilePatchBody(BaseModel):
@@ -1559,6 +1715,10 @@ class OrganizationProfilePatchBody(BaseModel):
         max_length=32,
         description="Telegram chat_id группы персонала для SOS-алертов (если пусто — TELEGRAM_ADMIN_CHAT_ID из Render)",
     )
+    schedule_json: dict[str, object] | None = Field(
+        default=None,
+        description="Структурированный график работы по дням недели",
+    )
 
 
 @router.get("/organization/prefs")
@@ -1572,6 +1732,7 @@ async def get_organization_prefs(request: Request, db: AsyncSession = Depends(ge
         "name": org.name,
         "organization_id": org.id,
         "prepayment_enforced": bool(getattr(org, "prepayment_enforced", True)),
+        "auto_send_to_iiko_after_payment": bool(getattr(org, "auto_send_to_iiko_after_payment", False)),
     }
 
 
@@ -1587,9 +1748,15 @@ async def patch_organization_prefs(
         raise HTTPException(status_code=404, detail="Organization not found")
     if body.prepayment_enforced is not None:
         org.prepayment_enforced = bool(body.prepayment_enforced)
+    if body.auto_send_to_iiko_after_payment is not None:
+        org.auto_send_to_iiko_after_payment = bool(body.auto_send_to_iiko_after_payment)
     await db.commit()
     await db.refresh(org)
-    return {"ok": True, "prepayment_enforced": bool(getattr(org, "prepayment_enforced", True))}
+    return {
+        "ok": True,
+        "prepayment_enforced": bool(getattr(org, "prepayment_enforced", True)),
+        "auto_send_to_iiko_after_payment": bool(getattr(org, "auto_send_to_iiko_after_payment", False)),
+    }
 
 
 @router.get("/organization/profile")
@@ -1599,6 +1766,7 @@ async def get_organization_profile(request: Request, db: AsyncSession = Depends(
     org = await db.get(Organization, org_id)
     if org is None:
         raise HTTPException(status_code=404, detail="Organization not found")
+    op = check_operational_status(org.timezone, getattr(org, "schedule_json", None))
     return {
         "id": int(org.id),
         "organization_id": int(org.id),
@@ -1607,6 +1775,10 @@ async def get_organization_profile(request: Request, db: AsyncSession = Depends(
         "currency": org.currency,
         "whatsapp_phone_number_id": (org.whatsapp_phone_number_id or "").strip(),
         "telegram_ops_chat_id": (getattr(org, "telegram_ops_chat_id", None) or "").strip(),
+        "schedule_json": parse_schedule_json(getattr(org, "schedule_json", None)).model_dump(mode="json"),
+        "operational_label": op.human_label,
+        "is_business_open": op.is_business_open,
+        "is_kitchen_open": op.is_kitchen_open,
     }
 
 
@@ -1634,8 +1806,11 @@ async def patch_organization_profile(
         org.whatsapp_phone_number_id = (body.whatsapp_phone_number_id or "").strip()
     if body.telegram_ops_chat_id is not None:
         org.telegram_ops_chat_id = (body.telegram_ops_chat_id or "").strip()
+    if body.schedule_json is not None:
+        org.schedule_json = parse_schedule_json(body.schedule_json).model_dump(mode="json")
     await db.commit()
     await db.refresh(org)
+    op = check_operational_status(org.timezone, getattr(org, "schedule_json", None))
     return {
         "ok": True,
         "organization_id": int(org.id),
@@ -1644,6 +1819,10 @@ async def patch_organization_profile(
         "currency": org.currency,
         "whatsapp_phone_number_id": (org.whatsapp_phone_number_id or "").strip(),
         "telegram_ops_chat_id": (getattr(org, "telegram_ops_chat_id", None) or "").strip(),
+        "schedule_json": parse_schedule_json(getattr(org, "schedule_json", None)).model_dump(mode="json"),
+        "operational_label": op.human_label,
+        "is_business_open": op.is_business_open,
+        "is_kitchen_open": op.is_kitchen_open,
     }
 
 
@@ -2557,11 +2736,7 @@ async def patch_menu_item(
 ) -> dict:
     """Изменить поля позиции меню (цена, стоп-лист, название и т.д.)."""
     org_id = admin_org_from_session(request)
-    item = await db.get(MenuItem, item_id)
-    if item is None:
-        raise HTTPException(status_code=404, detail="Позиция не найдена")
-    if item.organization_id is not None and int(item.organization_id) != org_id:
-        raise HTTPException(status_code=404, detail="Позиция не найдена")
+    item = await _menu_item_in_org(db, item_id, org_id)
 
     data = body.model_dump(exclude_unset=True)
     if "name" in data and data["name"] is not None:
@@ -2638,11 +2813,7 @@ async def delete_menu_item(
 ) -> dict:
     """Удалить позицию из меню (осторожно: старые заказы ссылаются на названия в JSON)."""
     org_id = admin_org_from_session(request)
-    item = await db.get(MenuItem, item_id)
-    if item is None:
-        raise HTTPException(status_code=404, detail="Позиция не найдена")
-    if item.organization_id is not None and int(item.organization_id) != org_id:
-        raise HTTPException(status_code=404, detail="Позиция не найдена")
+    item = await _menu_item_in_org(db, item_id, org_id)
     await db.execute(sql_delete(MenuItem).where(MenuItem.id == item_id))
     await db.flush()
     return {"ok": True, "id": item_id}
@@ -2672,7 +2843,10 @@ class KnowledgeItemCreateBody(BaseModel):
     answer: str = Field(..., min_length=1, max_length=50_000)
     is_active: bool = True
     sort_order: int = Field(0, ge=-10_000, le=10_000)
-    organization_id: int | None = Field(None, description="NULL — общая запись для всех организаций")
+    organization_id: int | None = Field(
+        None,
+        description="Игнорируется: запись создаётся в филиале текущей сессии (multi-tenant).",
+    )
     knowledge_kind: str = Field(
         "facility",
         description="facility — справочник заведения; persona — тон и характер бота",
@@ -2719,7 +2893,7 @@ async def create_knowledge_item(
     kk_raw = (body.knowledge_kind or "facility").strip().lower()
     kk = "persona" if kk_raw == "persona" else "facility"
     row = KnowledgeItem(
-        organization_id=body.organization_id if body.organization_id is not None else org_id,
+        organization_id=org_id,
         knowledge_kind=kk[:32],
         category=(body.category or "").strip(),
         question=body.question.strip(),
@@ -2748,6 +2922,8 @@ async def patch_knowledge_item(
     if row.organization_id is not None and int(row.organization_id) != org_id:
         raise HTTPException(status_code=404, detail="Запись не найдена")
     data = body.model_dump(exclude_unset=True)
+    # Запрет переноса записи между филиалами через PATCH.
+    data.pop("organization_id", None)
     if "category" in data and data["category"] is not None:
         data["category"] = data["category"].strip()
     if "question" in data and data["question"] is not None:
@@ -2816,16 +2992,7 @@ async def sync_menu(
     Учётные данные из query, из настроек филиала или из .env. Совпадение по ``iiko_id``.
     """
     org_id = admin_org_from_session(request)
-    login = (api_login or "").strip()
-    org = (organization_id or "").strip()
-    if not login or not org:
-        creds = await resolve_org_iiko_credentials(db, org_id)
-        if creds is None:
-            raise HTTPException(
-                status_code=400,
-                detail="Задайте iiko в настройках филиала или IIKO_* в .env / query.",
-            )
-        login, org = creds.api_login, creds.iiko_organization_id
+    login, org, _tg = await _iiko_login_org_for_tenant(db, org_id, api_login, organization_id)
     try:
         stats = await sync_menu_from_iiko(
             db, login, org, restomind_organization_id=org_id,
@@ -2853,20 +3020,40 @@ async def sync_menu(
 
 @router.post("/menu/stop-lists")
 async def sync_stop_lists_endpoint(
-    api_login: str = Query(..., description="API-логин iiko"),
-    organization_id: str = Query(..., description="ID организации в iiko"),
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """
-    Принудительная синхронизация стоп-листов из iiko.
-    Ставит is_available=False для позиций, которых нет в наличии.
+    Синхронизация стоп-листов для **текущего филиала** (учётка из настроек org).
+    Раньше принимались произвольные api_login/organization_id (риск cross-tenant).
     """
+    org_id = admin_org_from_session(request)
+    login, org, tg = await _iiko_login_org_for_tenant(db, org_id, None, None)
     try:
-        stats = await sync_stop_lists(db, api_login, organization_id)
-        return {"status": "ok", **stats}
+        stats = await sync_stop_lists(
+            db, login, org, terminal_group_id=tg, menu_organization_id=org_id,
+        )
+        detail_s = (
+            f"Стоп-листы: успешно "
+            f"(в стопе: {stats.get('stopped', 0)}, восстановлено: {stats.get('restored', 0)})"
+        )
+        await record_stoplist_sync(
+            db, True, None, detail=detail_s, organization_id=org_id,
+        )
+        snap = await build_status_payload(
+            db,
+            iiko_configured=await _iiko_effective_configured(db, org_id),
+            whatsapp_configured=_whatsapp_env_configured(),
+        )
+        return {"ok": True, "status": "ok", **stats, "integration_status": snap}
     except Exception as exc:
+        err = str(exc)
         logger.error("Ошибка синхронизации стоп-листов: %s", exc, exc_info=True)
-        raise HTTPException(status_code=502, detail=f"Ошибка при обращении к iiko: {exc}")
+        await record_stoplist_sync(
+            db, False, err, detail=f"Стоп-листы: ошибка — {err[:400]}",
+            organization_id=org_id,
+        )
+        raise HTTPException(status_code=502, detail=f"Ошибка при обращении к iiko: {err}")
 
 
 @router.post("/stop-lists/sync")
@@ -2886,18 +3073,7 @@ async def sync_stop_lists_from_env(
     Синхронизация стоп-листов iiko → флаги is_available в menu_items (филиал, .env или query).
     """
     org_id = admin_org_from_session(request)
-    login = (api_login or "").strip()
-    org = (organization_id or "").strip()
-    tg: str | None = None
-    if not login or not org:
-        creds = await resolve_org_iiko_credentials(db, org_id)
-        if creds is None:
-            raise HTTPException(
-                status_code=400,
-                detail="Задайте iiko в настройках филиала или IIKO_* в .env / query.",
-            )
-        login, org = creds.api_login, creds.iiko_organization_id
-        tg = creds.terminal_group_id or None
+    login, org, tg = await _iiko_login_org_for_tenant(db, org_id, api_login, organization_id)
     try:
         stats = await sync_stop_lists(
             db, login, org, terminal_group_id=tg, menu_organization_id=org_id,
@@ -3133,7 +3309,13 @@ async def bulk_delete_orders(
     res = await db.execute(
         select(Order, User.phone)
         .outerjoin(User, Order.user_id == User.id)
-        .where(Order.id.in_(ids), Order.organization_id == org_id),
+        .where(
+            Order.id.in_(ids),
+            or_(
+                Order.organization_id == org_id,
+                and_(Order.organization_id.is_(None), User.organization_id == org_id),
+            ),
+        ),
     )
     rows = res.all()
     found = {o.id for o, _p in rows}
@@ -3173,7 +3355,13 @@ async def delete_single_order(
     res = await db.execute(
         select(Order, User.phone)
         .outerjoin(User, Order.user_id == User.id)
-        .where(Order.id == order_id, Order.organization_id == org_id),
+        .where(
+            Order.id == order_id,
+            or_(
+                Order.organization_id == org_id,
+                and_(Order.organization_id.is_(None), User.organization_id == org_id),
+            ),
+        ),
     )
     row = res.one_or_none()
     if row is None:
@@ -4515,7 +4703,8 @@ async def test_bot(request: Request, body: TextRequest) -> dict:
     async with async_session_factory() as db:
         org_ent = await db.get(Organization, org_id)
         current_time_ctx = format_org_current_time_block(
-            getattr(org_ent, "timezone", None) if org_ent is not None else "UTC",
+            getattr(org_ent, "timezone", None) if org_ent is not None else "Asia/Almaty",
+            getattr(org_ent, "schedule_json", None) if org_ent is not None else None,
         )
         menu_items = await load_available_menu(db, organization_id=org_id)
         menu_context = build_menu_context(menu_items)
@@ -4529,6 +4718,8 @@ async def test_bot(request: Request, body: TextRequest) -> dict:
             draft_row.items_json if draft_row else None,
         )
         strategy_ctx = ""
+        sales_gastro_hint = ""
+        sales_target_iiko_ids: list[str] = []
         if draft_row and isinstance(draft_row.items_json, dict):
             cart = [
                 x for x in (draft_row.items_json.get("items") or [])
@@ -4537,12 +4728,13 @@ async def test_bot(request: Request, body: TextRequest) -> dict:
             om = draft_row.items_json.get("order_meta")
             meta_d = om if isinstance(om, dict) else {}
             total = float(draft_row.total_price or 0)
-            strategy_ctx = format_strategy_for_prompt(
-                build_sales_strategy(
-                    cart, total, meta_d, menu_items,
-                    u_row.meta_json if u_row is not None else None,
-                ),
+            decision = build_sales_strategy(
+                cart, total, meta_d, menu_items,
+                u_row.meta_json if u_row is not None else None,
             )
+            strategy_ctx = format_strategy_for_prompt(decision)
+            sales_gastro_hint = (decision.gastro_hint or "").strip()
+            sales_target_iiko_ids = list(decision.target_iiko_ids or [])
         ai_response = await call_openai(
             history,
             message_text,
@@ -4562,6 +4754,8 @@ async def test_bot(request: Request, body: TextRequest) -> dict:
             menu_items=menu_items,
             organization_id=org_id,
             inbound_message_id=inbound_mid,
+            sales_gastro_hint=sales_gastro_hint,
+            sales_target_iiko_ids=sales_target_iiko_ids,
         )
         await update_user_session_fields_in_db(
             db,
@@ -4804,9 +4998,7 @@ async def preview_packaging_rules(
 
     org_id = admin_org_from_session(request)
 
-    menu_item = await db.get(MenuItem, int(body.menu_item_id))
-    if menu_item is None or int(menu_item.organization_id) != org_id:
-        raise HTTPException(status_code=404, detail="Позиция меню не найдена")
+    menu_item = await _menu_item_in_org(db, int(body.menu_item_id), org_id)
 
     qty = int(body.quantity)
     price = float(menu_item.price or 0.0)

@@ -8,11 +8,17 @@
 
 ### Изменено
 
+- **Доступы и блокировки:** `Organization.is_active=False` теперь блокирует вход staff в админку и игнорирует входящие WhatsApp webhooks для этого ресторана (без ретраев Meta).
+- **Self-serve onboarding:** legacy `POST /api/admin/auth/signup` переведён в `410 Gone`; маршрут `/onboarding` редиректит на `/request-access`.
 - **Деплой / БД:** добавлен [docs/SUPABASE_MIGRATION.md](docs/SUPABASE_MIGRATION.md) (Render Postgres → Supabase, Alembic, env); [render.yaml](render.yaml) — внешний секрет `DATABASE_URL` вместо managed PostgreSQL в Blueprint.
 - **AI:** чат и STT на **OpenAI** — structured output (`call_openai`, `beta.chat.completions.parse`), голос — **Whisper** (`openai_transcribe_voice`, `call_openai_with_audio`). Переменные окружения: `OPENAI_API_KEY`, опционально `OPENAI_MODEL`, `OPENAI_TRANSCRIPTION_MODEL`. Удалена зависимость `google-genai`.
 
 ### Добавлено
 
+- **Super Admin Panel (foundation):** `staff_users.is_superadmin`, `organizations.is_demo`, новая таблица `registration_requests`; API `/api/superadmin/*` для управления ресторанами, заявками, блокировкой `is_active`, технастройкой и force-sync меню.
+- **Approval onboarding:** `POST /api/admin/auth/request-access`, публичная страница `/request-access`, уведомление в Telegram на новый лид (`SUPERADMIN_TELEGRAM_CHAT_ID` с fallback на `TELEGRAM_ADMIN_CHAT_ID`).
+- **Demo guest mode:** `POST /api/admin/auth/demo-login`, login-экран с кнопкой «Попробовать демо»; для demo-сессий включён read-only guard на небезопасные методы.
+- **Служебные артефакты:** миграция `20260427_superadmin_foundation`, скрипт `scripts/grant_superadmin.py` для выдачи роли владельца.
 - **RestoMind v2.0 (логистика заказа):** тарификация контейнеров и доставки (`order_logic`, настройки `PRICING_*` в `.env`); расширенный `AIBrainResponse` (тип заказа, оплата, адрес/время); после «Да» в WhatsApp заказ только подтверждается — в iiko отправляет оператор из админки; комментарий к заказу в iiko с типом и пометкой WhatsApp; тесты `tests/test_pricing.py`.
 - **Демо-данные** (`demo_data.py`, `seed.py`): заказы собираются через `build_demo_order_payload` — в `items_json` есть `fee_lines`, `order_meta`, `foods_subtotal`, `total_price`; сценарии доставка/самовывоз/зал и способы оплаты; объёмные и «месячные» демо-заказы с чередованием типов.
 - **Админка — заказы:** бейджи типа/оплаты, строки `fee_lines` в модалке, кнопка «ПОДТВЕРДИТЬ И ПЕЧАТЬ В IIKO», колонка «Тип» в таблице и бейдж в мобильном списке.

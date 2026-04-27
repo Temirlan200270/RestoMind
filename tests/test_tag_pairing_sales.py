@@ -51,7 +51,9 @@ def test_build_sales_strategy_spicy_main_prioritizes_tagged_drink() -> None:
     d = build_sales_strategy(cart, 1990.0, {}, menu)
     assert d.goal == "upsell"
     assert d.target_iiko_ids[0] == "uuid-comp"
-    assert "остро" in (d.gastro_hint or "").lower() or "drink" in (d.gastro_hint or "").lower()
+    gh = d.gastro_hint or ""
+    assert "[Теги:" in gh
+    assert "spicy" in gh and "drink" in gh
 
 
 def test_build_sales_strategy_main_course_suggests_goes_well_side() -> None:

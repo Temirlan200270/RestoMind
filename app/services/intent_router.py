@@ -8,6 +8,7 @@
 """
 
 import logging
+import re
 from dataclasses import dataclass
 from dataclasses import field
 from datetime import date, time
@@ -46,6 +47,40 @@ from app.services.order_logic import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+_ORDER_CARD_HEADER_RE = re.compile(r"^\s*(✨\s*)?\*?\s*ваш\s+заказ\*?\s*$", re.IGNORECASE)
+_ORDER_TOTAL_RE = re.compile(r"итого", re.IGNORECASE)
+_ORDER_LINE_RE = re.compile(r"(×|x)\s*\d+.*₸", re.IGNORECASE)
+
+
+def _sanitize_reply_before_order_card(reply_text: str) -> str:
+    """
+    Если модель продублировала чек в reply_text, удаляем эти строки.
+    Источник правды по чеку — серверная карточка format_whatsapp_order_card.
+    """
+    src = (reply_text or "").strip()
+    if not src:
+        return ""
+    out: list[str] = []
+    for raw in src.splitlines():
+        line = raw.strip()
+        if not line:
+            out.append(raw)
+            continue
+        if _ORDER_CARD_HEADER_RE.match(line):
+            continue
+        if set(line) <= {"━", "-", "—", "_", "*"}:
+            continue
+        if _ORDER_TOTAL_RE.search(line):
+            continue
+        if _ORDER_LINE_RE.search(line):
+            continue
+        if line.startswith("•") and "₸" in line:
+            continue
+        out.append(raw)
+    cleaned = "\n".join(out).strip()
+    return cleaned or "Принял заказ. Сейчас уточню детали."
 
 
 async def get_open_draft_order(
@@ -132,6 +167,9 @@ def _blend_ai_with_stored_order_meta(ai: AIBrainResponse, meta: dict | None) -> 
 def _merge_recommendation_into_order_meta(
     items_json: dict[str, object],
     ai: AIBrainResponse,
+    *,
+    gastro_hint: str = "",
+    server_target_iiko_ids: list[str] | None = None,
 ) -> dict[str, object]:
     """
     Сохраняет upsell в order_meta для админки / аналитики (Phase 18).
@@ -156,6 +194,18 @@ def _merge_recommendation_into_order_meta(
     reason = (ai.upsell_reasoning or "").strip()
     if reason:
         rec["reason"] = reason
+    gh = (gastro_hint or "").strip()
+    if gh:
+        rec["gastro_hint"] = gh
+    targets = {str(x).strip().lower() for x in (server_target_iiko_ids or []) if str(x).strip()}
+    aid = (ai.upsell_offered_id or "").strip().lower()
+    if targets and aid and aid not in targets:
+        rec["strategy_logic"] = "Custom AI Choice"
+        logger.info(
+            "upsell strategy_logic=Custom AI Choice: server_targets=%s ai_offered_id=%s",
+            sorted(targets),
+            aid,
+        )
     meta["recommendation"] = rec
     prev_trace = meta.get("recommendation_trace")
     trace: list[object] = list(prev_trace) if isinstance(prev_trace, list) else []
@@ -353,6 +403,8 @@ async def _handle_order(
     *,
     organization_id: int,
     inbound_message_id: str = "",
+    sales_gastro_hint: str = "",
+    sales_target_iiko_ids: list[str] | None = None,
 ) -> RouteResult:
     """
     Обработка intent='order':
@@ -522,7 +574,12 @@ async def _handle_order(
         items_json,
         existing_draft.items_json if existing_draft else None,
     )
-    items_json = _merge_recommendation_into_order_meta(items_json, ai_eff)
+    items_json = _merge_recommendation_into_order_meta(
+        items_json,
+        ai_eff,
+        gastro_hint=sales_gastro_hint,
+        server_target_iiko_ids=sales_target_iiko_ids,
+    )
     items_json = _merge_rejected_upsell_into_order_meta(items_json, ai_eff)
     if ai_eff.rejected_upsell_iiko_ids:
         record_upsell_rejections_on_user(user, ai_eff.rejected_upsell_iiko_ids)
@@ -612,7 +669,8 @@ async def _handle_order(
         db.add(order)
 
     body_text = format_whatsapp_order_card(items_json, validated.summary_text)
-    reply = ai_response.reply_text + "\n\n" + body_text
+    reply_core = _sanitize_reply_before_order_card(ai_response.reply_text)
+    reply = reply_core + "\n\n" + body_text
 
     if validated.unknown_items:
         reply += "\n\nНе нашёл в меню некоторые позиции. Уточните, пожалуйста."
@@ -870,6 +928,8 @@ async def route_intent(
     menu_items: list[MenuItem] | None = None,
     organization_id: int | None = None,
     inbound_message_id: str = "",
+    sales_gastro_hint: str = "",
+    sales_target_iiko_ids: list[str] | None = None,
 ) -> RouteResult:
     """
     Главный маршрутизатор — вызывает обработчик в зависимости от intent.
@@ -889,6 +949,8 @@ async def route_intent(
             menu_items=menu_items,
             organization_id=oid,
             inbound_message_id=inbound_message_id,
+            sales_gastro_hint=sales_gastro_hint,
+            sales_target_iiko_ids=sales_target_iiko_ids,
         )
     elif intent == "book":
         return await _handle_booking(db, phone, ai_response, organization_id=oid)

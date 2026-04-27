@@ -13,6 +13,7 @@ import logging
 from typing import Any
 
 from app.core.config import settings
+from fastapi import BackgroundTasks
 
 logger = logging.getLogger(__name__)
 
@@ -74,4 +75,66 @@ async def enqueue_job(name: str, **kwargs: Any) -> bool:
     except Exception as exc:
         logger.error("ARQ enqueue_job(%s) failed: %s", name, exc)
         return False
+
+
+async def dispatch_arq_or_background(
+    job_name: str,
+    background_tasks: BackgroundTasks,
+    **kwargs: Any,
+) -> bool:
+    """
+    Enqueue в ARQ; при недоступности — тот же fallback, что раньше вручную через BackgroundTasks.
+    Возвращает True, если задача ушла в ARQ, False — если поставлен fallback.
+    """
+    ok = await enqueue_job(job_name, **kwargs)
+    if ok:
+        logger.debug("ARQ: task %s enqueued", job_name)
+        return True
+    # Ленивые импорты, чтобы не зацикливать webhooks ↔ task_queue
+    if job_name == "whatsapp_process_statuses":
+        from app.api.webhooks import _process_whatsapp_status_batch
+
+        statuses = kwargs.get("statuses")
+        if statuses is not None:
+            background_tasks.add_task(_process_whatsapp_status_batch, list(statuses))
+        else:
+            logger.error("ARQ fallback: whatsapp_process_statuses без statuses")
+        logger.warning("ARQ недоступен: whatsapp_process_statuses → BackgroundTasks")
+        return False
+    if job_name == "whatsapp_process_text":
+        from app.api.webhooks import process_with_retry
+
+        background_tasks.add_task(
+            process_with_retry,
+            kwargs["phone"],
+            kwargs.get("message_text", ""),
+            whatsapp_message_id=kwargs.get("whatsapp_message_id", ""),
+            voice_audio=kwargs.get("voice_audio"),
+            webhook_value=kwargs.get("webhook_value"),
+        )
+        logger.warning("ARQ недоступен: whatsapp_process_text → BackgroundTasks")
+        return False
+    if job_name == "whatsapp_process_voice":
+        from app.api.webhooks import process_voice_message
+
+        background_tasks.add_task(
+            process_voice_message,
+            kwargs["phone"],
+            kwargs["media_id"],
+            whatsapp_message_id=kwargs.get("whatsapp_message_id", ""),
+            webhook_value=kwargs.get("webhook_value"),
+        )
+        logger.warning("ARQ недоступен: whatsapp_process_voice → BackgroundTasks")
+        return False
+    if job_name == "payment_notify_customer":
+        from app.services.payment_notify import run_payment_received_customer_notify
+
+        background_tasks.add_task(
+            run_payment_received_customer_notify,
+            int(kwargs["order_id"]),
+        )
+        logger.warning("ARQ недоступен: payment_notify_customer → BackgroundTasks")
+        return False
+    logger.error("ARQ fallback: неизвестная задача %s (kwargs=%s)", job_name, list(kwargs))
+    return False
 

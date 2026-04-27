@@ -300,7 +300,7 @@ async def validate_order(
 
     summary = "\n".join(lines)
     if fuzzy_matched:
-        summary += "\n\n🔍 Уточнено автоматически: " + "; ".join(fuzzy_matched)
+        logger.info("Fuzzy matched items (hidden from customer): %s", "; ".join(fuzzy_matched))
     if unknown_items:
         summary += f"\n\n⚠️ Не нашёл в меню: {', '.join(unknown_items)}"
     summary += f"\n\n💰 Итого: {total_price:.0f} ₸"

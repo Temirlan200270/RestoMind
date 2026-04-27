@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Super Admin — RestoMind</title>
+    <link rel="stylesheet" href="/static/css/admin.css?v={{ asset_ver }}">
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body class="bg-slate-50 min-h-screen font-sans text-slate-800">
+<div class="max-w-7xl mx-auto px-4 py-8" x-data="superAdminPage()" x-init="init()">
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
+        <div>
+            <h1 class="text-2xl font-bold text-slate-900">Super Admin</h1>
+            <p class="text-sm text-slate-500">Управление заявками, клиентами и технастройкой.</p>
+        </div>
+        <a href="/admin" class="px-4 py-2 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 hover:bg-slate-50">Открыть админку</a>
+    </div>
+
+    <div x-show="error" x-cloak class="mb-4 rounded-xl border border-red-200 bg-red-50 text-red-700 px-4 py-3 text-sm" x-text="error"></div>
+    <div x-show="toast" x-cloak class="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-800 px-4 py-3 text-sm" x-text="toast"></div>
+
+    <section class="rounded-2xl bg-white border border-slate-200 shadow-sm p-5 mb-6">
+        <div class="flex items-center justify-between gap-3 mb-4">
+            <h2 class="text-lg font-bold text-slate-900">Заявки на подключение</h2>
+            <button type="button" @click="loadRequests()" class="px-3 py-2 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Обновить</button>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full min-w-[760px] text-sm">
+                <thead class="text-slate-500">
+                <tr class="border-b border-slate-200">
+                    <th class="text-left py-2">Ресторан</th>
+                    <th class="text-left py-2">Контакт</th>
+                    <th class="text-left py-2">iiko</th>
+                    <th class="text-left py-2">Создана</th>
+                    <th class="text-right py-2">Действия</th>
+                </tr>
+                </thead>
+                <tbody>
+                <template x-for="row in requests" :key="row.id">
+                    <tr class="border-b border-slate-100">
+                        <td class="py-2">
+                            <div class="font-semibold text-slate-900" x-text="row.restaurant_name"></div>
+                            <div class="text-xs text-slate-500" x-text="row.note || '—'"></div>
+                        </td>
+                        <td class="py-2">
+                            <div x-text="row.contact_name || '—'"></div>
+                            <div class="text-xs text-slate-500" x-text="row.phone || row.email || '—'"></div>
+                        </td>
+                        <td class="py-2" x-text="row.has_iiko ? 'Да' : 'Нет'"></td>
+                        <td class="py-2 text-xs text-slate-500" x-text="fmtDate(row.created_at)"></td>
+                        <td class="py-2">
+                            <div class="flex items-center justify-end gap-2">
+                                <button type="button" @click="approveRequest(row)" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700">Одобрить</button>
+                                <button type="button" @click="rejectRequest(row.id)" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-100 text-red-700 hover:bg-red-200">Отклонить</button>
+                            </div>
+                        </td>
+                    </tr>
+                </template>
+                <tr x-show="!requests.length">
+                    <td colspan="5" class="py-6 text-center text-slate-400">Нет заявок в статусе pending.</td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="rounded-2xl bg-white border border-slate-200 shadow-sm p-5 mb-6">
+        <h2 class="text-lg font-bold text-slate-900 mb-4">Создать ресторан вручную</h2>
+        <form class="grid grid-cols-1 md:grid-cols-4 gap-3" @submit.prevent="createOrganization()">
+            <input x-model="createForm.restaurant_name" required placeholder="Название ресторана" class="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+            <input x-model="createForm.tenant_name" placeholder="Сеть (опц.)" class="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+            <input x-model="createForm.admin_email" required placeholder="Email администратора" class="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+            <input x-model="createForm.admin_password" placeholder="Пароль (опц.)" class="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+            <div class="md:col-span-4">
+                <button type="submit" class="px-4 py-2 rounded-xl bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700">Создать</button>
+            </div>
+        </form>
+    </section>
+
+    <section class="rounded-2xl bg-white border border-slate-200 shadow-sm p-5">
+        <div class="flex items-center justify-between gap-3 mb-4">
+            <h2 class="text-lg font-bold text-slate-900">Рестораны</h2>
+            <button type="button" @click="loadOrganizations()" class="px-3 py-2 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Обновить</button>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full min-w-[980px] text-sm">
+                <thead class="text-slate-500">
+                <tr class="border-b border-slate-200">
+                    <th class="text-left py-2">Ресторан</th>
+                    <th class="text-left py-2">30д</th>
+                    <th class="text-left py-2">Интеграции</th>
+                    <th class="text-left py-2">Тех. настройки</th>
+                    <th class="text-left py-2">Доступ</th>
+                    <th class="text-right py-2">Действия</th>
+                </tr>
+                </thead>
+                <tbody>
+                <template x-for="org in organizations" :key="org.id">
+                    <tr class="border-b border-slate-100 align-top">
+                        <td class="py-2">
+                            <div class="font-semibold text-slate-900" x-text="org.name"></div>
+                            <div class="text-xs text-slate-500">
+                                <span x-text="org.tenant_name || 'Без сети'"></span>
+                                ·
+                                <span x-text="fmtDate(org.created_at)"></span>
+                            </div>
+                        </td>
+                        <td class="py-2">
+                            <div>Заказы: <span class="font-semibold" x-text="org.orders_30d"></span></div>
+                            <div>Выручка: <span class="font-semibold" x-text="fmtMoney(org.revenue_30d)"></span></div>
+                        </td>
+                        <td class="py-2">
+                            <div class="text-xs" :class="org.has_iiko ? 'text-emerald-700' : 'text-red-600'" x-text="org.has_iiko ? 'iiko: OK' : 'iiko: нет'"></div>
+                            <div class="text-xs" :class="org.has_whatsapp ? 'text-emerald-700' : 'text-red-600'" x-text="org.has_whatsapp ? 'WhatsApp: OK' : 'WhatsApp: нет'"></div>
+                            <div class="text-xs mt-1 text-slate-600" x-text="org.operational_label || ''"></div>
+                        </td>
+                        <td class="py-2">
+                            <div class="space-y-1">
+                                <input :value="org.iiko_organization_id || ''" @change="updateOrgCredentials(org.id, { iiko_organization_id: $event.target.value })" placeholder="iiko org id" class="w-full rounded-lg border border-slate-200 px-2 py-1 text-xs">
+                                <input :value="org.whatsapp_phone_number_id || ''" @change="updateOrgCredentials(org.id, { whatsapp_phone_number_id: $event.target.value })" placeholder="WA phone_number_id" class="w-full rounded-lg border border-slate-200 px-2 py-1 text-xs">
+                                <div class="rounded-lg border border-slate-200 bg-slate-50 p-2">
+                                    <div class="flex items-center justify-between gap-2">
+                                        <div class="text-[11px] text-slate-700">
+                                            <span class="font-semibold">Сегодня:</span>
+                                            <span x-text="todayScheduleSummary(org.schedule_json)"></span>
+                                        </div>
+                                        <span x-show="scheduleFallbackUsed(org.schedule_json)" class="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
+                                            fallback
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="py-2">
+                            <button type="button" @click="toggleActive(org)" :class="org.is_active ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-700'" class="px-3 py-1.5 rounded-lg text-xs font-semibold">
+                                <span x-text="org.is_active ? 'Активен' : 'Заблокирован'"></span>
+                            </button>
+                        </td>
+                        <td class="py-2">
+                            <div class="flex items-center justify-end gap-2">
+                                <button type="button" @click="openScheduleEditor(org)" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50">График</button>
+                                <button type="button" @click="syncMenu(org.id)" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Force Sync</button>
+                                <button type="button" @click="resetPassword(org)" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-brand-100 text-brand-700 hover:bg-brand-200">Сброс пароля</button>
+                            </div>
+                        </td>
+                    </tr>
+                </template>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <div x-show="scheduleEditorOpen" x-cloak class="fixed inset-0 z-[120] bg-black/40 backdrop-blur-sm p-4 flex items-center justify-center" @click.self="closeScheduleEditor()">
+        <div class="w-full max-w-3xl rounded-2xl bg-white border border-slate-200 shadow-2xl overflow-hidden">
+            <div class="px-5 py-4 border-b border-slate-200 flex items-center justify-between gap-3">
+                <div>
+                    <h3 class="text-base font-bold text-slate-900">График работы</h3>
+                    <p class="text-xs text-slate-500" x-text="scheduleEditorOrgName"></p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button type="button" @click="applyScheduleToAllDays()"
+                        class="px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                        Применить ко всем дням
+                    </button>
+                    <button type="button" class="text-slate-400 hover:text-slate-700 text-xl leading-none" @click="closeScheduleEditor()">&times;</button>
+                </div>
+            </div>
+            <div class="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
+                <div x-show="scheduleEditorFallbackUsed" class="rounded-xl border border-amber-200 bg-amber-50 text-amber-800 px-3 py-2 text-xs">
+                    Расписание в БД было неполным/поврежденным. Применен fallback-график по умолчанию — проверьте и сохраните.
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full min-w-[760px] text-sm">
+                        <thead class="text-slate-500">
+                            <tr class="border-b border-slate-200">
+                                <th class="text-left py-2">День</th>
+                                <th class="text-left py-2">Статус</th>
+                                <th class="text-left py-2">Открытие</th>
+                                <th class="text-left py-2">Прием заказов до</th>
+                                <th class="text-left py-2">Заведение работает до</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="d in dayRows" :key="d.key">
+                                <tr class="border-b border-slate-100 align-top">
+                                    <td class="py-2 font-semibold text-slate-900" x-text="d.label"></td>
+                                    <td class="py-2">
+                                        <label class="inline-flex items-center gap-2 text-xs text-slate-700">
+                                            <input type="checkbox"
+                                                :checked="scheduleEditor[d.key].is_closed"
+                                                @change="scheduleEditor[d.key].is_closed = !!$event.target.checked"
+                                                class="rounded border-slate-300 text-brand-600 focus:ring-brand-500">
+                                            Выходной
+                                        </label>
+                                    </td>
+                                    <td class="py-2">
+                                        <input type="time"
+                                            :disabled="scheduleEditor[d.key].is_closed"
+                                            :value="scheduleEditor[d.key].open"
+                                            @change="scheduleEditor[d.key].open = $event.target.value"
+                                            class="w-full rounded-lg border px-2 py-1.5 text-xs text-slate-800"
+                                            :class="scheduleEditor[d.key].is_closed ? 'bg-slate-50 border-slate-200' : (isDayInvalid(d.key) ? 'border-red-300 bg-red-50/40' : 'border-slate-200 bg-white')">
+                                    </td>
+                                    <td class="py-2">
+                                        <input type="time"
+                                            :disabled="scheduleEditor[d.key].is_closed"
+                                            :value="scheduleEditor[d.key].kitchen_close"
+                                            @change="scheduleEditor[d.key].kitchen_close = $event.target.value"
+                                            class="w-full rounded-lg border px-2 py-1.5 text-xs text-slate-800"
+                                            :class="scheduleEditor[d.key].is_closed ? 'bg-slate-50 border-slate-200' : (isDayInvalid(d.key) ? 'border-red-300 bg-red-50/40' : 'border-slate-200 bg-white')">
+                                        <div x-show="isDayInvalid(d.key)" x-cloak class="text-[11px] text-red-700 mt-1">
+                                            Прием заказов до не может быть позже времени закрытия.
+                                        </div>
+                                    </td>
+                                    <td class="py-2">
+                                        <input type="time"
+                                            :disabled="scheduleEditor[d.key].is_closed"
+                                            :value="scheduleEditor[d.key].business_close"
+                                            @change="scheduleEditor[d.key].business_close = $event.target.value"
+                                            class="w-full rounded-lg border px-2 py-1.5 text-xs text-slate-800"
+                                            :class="scheduleEditor[d.key].is_closed ? 'bg-slate-50 border-slate-200' : (isDayInvalid(d.key) ? 'border-red-300 bg-red-50/40' : 'border-slate-200 bg-white')">
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="px-5 py-4 border-t border-slate-200 flex items-center justify-end gap-2">
+                <button type="button" @click="closeScheduleEditor()" class="px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50">Отмена</button>
+                <button type="button" @click="saveScheduleEditor()" :disabled="hasScheduleValidationErrors()"
+                    class="px-3 py-2 rounded-lg text-xs font-semibold"
+                    :class="hasScheduleValidationErrors() ? 'bg-slate-200 text-slate-500 cursor-not-allowed' : 'bg-brand-600 text-white hover:bg-brand-700'">
+                    Сохранить график
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function superAdminPage() {
+    return {
+        error: '',
+        toast: '',
+        organizations: [],
+        requests: [],
+        scheduleEditorOpen: false,
+        scheduleEditorOrgId: null,
+        scheduleEditorOrgName: '',
+        scheduleEditorFallbackUsed: false,
+        scheduleEditor: {},
+        dayRows: [
+            { key: 'mon', label: 'Понедельник' },
+            { key: 'tue', label: 'Вторник' },
+            { key: 'wed', label: 'Среда' },
+            { key: 'thu', label: 'Четверг' },
+            { key: 'fri', label: 'Пятница' },
+            { key: 'sat', label: 'Суббота' },
+            { key: 'sun', label: 'Воскресенье' },
+        ],
+        createForm: {
+            restaurant_name: '',
+            tenant_name: '',
+            admin_email: '',
+            admin_password: '',
+        },
+        async init() {
+            await this.guard();
+            await Promise.all([this.loadRequests(), this.loadOrganizations()]);
+        },
+        fmtDate(iso) {
+            if (!iso) return '—';
+            const d = new Date(iso);
+            return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('ru-RU');
+        },
+        fmtMoney(v) {
+            const n = Number(v || 0);
+            return new Intl.NumberFormat('ru-RU').format(n) + ' ₸';
+        },
+        async api(path, options = {}) {
+            const res = await fetch(path, {
+                credentials: 'same-origin',
+                ...options,
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(options.headers || {}),
+                },
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                const msg = typeof data.detail === 'string' ? data.detail : `HTTP ${res.status}`;
+                throw new Error(msg);
+            }
+            return data;
+        },
+        async guard() {
+            try {
+                await this.api('/api/superadmin/me');
+            } catch (e) {
+                this.error = e.message || 'Нет доступа к Super Admin';
+            }
+        },
+        setToast(msg) {
+            this.toast = msg;
+            setTimeout(() => { this.toast = ''; }, 3500);
+        },
+        async loadRequests() {
+            try {
+                this.requests = (await this.api('/api/superadmin/registration-requests?status=pending')).items || [];
+            } catch (e) {
+                this.error = e.message || 'Не удалось загрузить заявки';
+            }
+        },
+        async loadOrganizations() {
+            try {
+                this.organizations = (await this.api('/api/superadmin/organizations')).items || [];
+            } catch (e) {
+                this.error = e.message || 'Не удалось загрузить организации';
+            }
+        },
+        async approveRequest(row) {
+            try {
+                const out = await this.api(`/api/superadmin/registration-requests/${row.id}/approve`, {
+                    method: 'POST',
+                    body: JSON.stringify({}),
+                });
+                const pwd = out.generated_password ? ` Временный пароль: ${out.generated_password}` : '';
+                this.setToast(`Заявка одобрена.${pwd}`);
+                await Promise.all([this.loadRequests(), this.loadOrganizations()]);
+            } catch (e) {
+                this.error = e.message || 'Не удалось одобрить заявку';
+            }
+        },
+        async rejectRequest(id) {
+            try {
+                await this.api(`/api/superadmin/registration-requests/${id}/reject`, {
+                    method: 'POST',
+                    body: JSON.stringify({}),
+                });
+                this.setToast('Заявка отклонена');
+                await this.loadRequests();
+            } catch (e) {
+                this.error = e.message || 'Не удалось отклонить заявку';
+            }
+        },
+        async createOrganization() {
+            try {
+                const out = await this.api('/api/superadmin/organizations', {
+                    method: 'POST',
+                    body: JSON.stringify(this.createForm),
+                });
+                const pwd = out.generated_password ? ` Временный пароль: ${out.generated_password}` : '';
+                this.setToast(`Организация создана.${pwd}`);
+                this.createForm.restaurant_name = '';
+                this.createForm.tenant_name = '';
+                this.createForm.admin_email = '';
+                this.createForm.admin_password = '';
+                await this.loadOrganizations();
+            } catch (e) {
+                this.error = e.message || 'Не удалось создать организацию';
+            }
+        },
+        async toggleActive(org) {
+            try {
+                await this.api(`/api/superadmin/organizations/${org.id}/status`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({ is_active: !org.is_active }),
+                });
+                org.is_active = !org.is_active;
+                this.setToast(org.is_active ? 'Доступ восстановлен' : 'Организация заблокирована');
+            } catch (e) {
+                this.error = e.message || 'Не удалось сменить статус';
+            }
+        },
+        async updateOrgCredentials(orgId, payload) {
+            try {
+                await this.api(`/api/superadmin/organizations/${orgId}/credentials`, {
+                    method: 'PATCH',
+                    body: JSON.stringify(payload),
+                });
+                await this.loadOrganizations();
+            } catch (e) {
+                this.error = e.message || 'Не удалось сохранить настройки';
+            }
+        },
+        _defaultDay() {
+            return { is_closed: false, open: '11:00', kitchen_close: '22:30', business_close: '23:00' };
+        },
+        normalizeSchedule(raw) {
+            let fallbackUsed = false;
+            const out = {};
+            const input = (raw && typeof raw === 'object') ? raw : {};
+            for (const d of this.dayRows) {
+                const src = (input[d.key] && typeof input[d.key] === 'object') ? input[d.key] : null;
+                if (!src) fallbackUsed = true;
+                const def = this._defaultDay();
+                out[d.key] = {
+                    is_closed: !!(src && typeof src.is_closed === 'boolean' ? src.is_closed : def.is_closed),
+                    open: String(src && src.open ? src.open : def.open),
+                    kitchen_close: String(src && src.kitchen_close ? src.kitchen_close : def.kitchen_close),
+                    business_close: String(src && src.business_close ? src.business_close : def.business_close),
+                };
+                if (!out[d.key].open || !out[d.key].kitchen_close || !out[d.key].business_close) {
+                    fallbackUsed = true;
+                    out[d.key].open = out[d.key].open || def.open;
+                    out[d.key].kitchen_close = out[d.key].kitchen_close || def.kitchen_close;
+                    out[d.key].business_close = out[d.key].business_close || def.business_close;
+                }
+            }
+            return { schedule: out, fallbackUsed };
+        },
+        scheduleFallbackUsed(raw) {
+            return this.normalizeSchedule(raw).fallbackUsed;
+        },
+        todayScheduleSummary(raw) {
+            const { schedule } = this.normalizeSchedule(raw);
+            const jsDay = new Date().getDay(); // 0=sun..6=sat
+            const idx = jsDay === 0 ? 6 : jsDay - 1;
+            const key = this.dayRows[idx].key;
+            const d = schedule[key];
+            if (d.is_closed) return 'выходной';
+            return `${d.open} - ${d.kitchen_close} (прием), до ${d.business_close}`;
+        },
+        openScheduleEditor(org) {
+            const normalized = this.normalizeSchedule(org.schedule_json);
+            this.scheduleEditorOpen = true;
+            this.scheduleEditorOrgId = org.id;
+            this.scheduleEditorOrgName = org.name || '';
+            this.scheduleEditorFallbackUsed = normalized.fallbackUsed;
+            this.scheduleEditor = JSON.parse(JSON.stringify(normalized.schedule));
+        },
+        applyScheduleToAllDays() {
+            if (!this.scheduleEditor) return;
+            const src = this.scheduleEditor.mon || this._defaultDay();
+            for (const d of this.dayRows) {
+                if (d.key === 'mon') continue;
+                const day = this.scheduleEditor[d.key] || this._defaultDay();
+                // Сохраняем выходной как есть, копируем только времена.
+                if (!day.is_closed) {
+                    day.open = String(src.open || '11:00');
+                    day.kitchen_close = String(src.kitchen_close || '22:30');
+                    day.business_close = String(src.business_close || '23:00');
+                }
+                this.scheduleEditor[d.key] = day;
+            }
+        },
+        _hmToMin(hm) {
+            const s = String(hm || '').trim();
+            const parts = s.split(':');
+            if (parts.length !== 2) return null;
+            const hh = Number(parts[0]);
+            const mm = Number(parts[1]);
+            if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null;
+            if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
+            return hh * 60 + mm;
+        },
+        _relCloseFromOpen(openMin, closeMin) {
+            if (openMin == null || closeMin == null) return null;
+            return closeMin >= openMin ? closeMin : (closeMin + 1440);
+        },
+        isDayInvalid(dayKey) {
+            const d = (this.scheduleEditor && this.scheduleEditor[dayKey]) ? this.scheduleEditor[dayKey] : null;
+            if (!d || d.is_closed) return false;
+            const o = this._hmToMin(d.open);
+            const k = this._hmToMin(d.kitchen_close);
+            const b = this._hmToMin(d.business_close);
+            if (o == null || k == null || b == null) return true;
+            const kRel = this._relCloseFromOpen(o, k);
+            const bRel = this._relCloseFromOpen(o, b);
+            if (kRel == null || bRel == null) return true;
+            return kRel > bRel;
+        },
+        hasScheduleValidationErrors() {
+            for (const d of this.dayRows) {
+                if (this.isDayInvalid(d.key)) return true;
+            }
+            return false;
+        },
+        closeScheduleEditor() {
+            this.scheduleEditorOpen = false;
+            this.scheduleEditorOrgId = null;
+            this.scheduleEditorOrgName = '';
+            this.scheduleEditorFallbackUsed = false;
+            this.scheduleEditor = {};
+        },
+        async saveScheduleEditor() {
+            if (!this.scheduleEditorOrgId) return;
+            if (this.hasScheduleValidationErrors()) {
+                this.error = 'Исправьте ошибки в расписании: время приема заказов не может быть позже закрытия.';
+                return;
+            }
+            const payload = {};
+            for (const d of this.dayRows) {
+                const src = this.scheduleEditor[d.key] || this._defaultDay();
+                payload[d.key] = {
+                    is_closed: !!src.is_closed,
+                    open: String(src.open || '11:00'),
+                    kitchen_close: String(src.kitchen_close || '22:30'),
+                    business_close: String(src.business_close || '23:00'),
+                };
+            }
+            try {
+                await this.api(`/api/superadmin/organizations/${this.scheduleEditorOrgId}/schedule`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({ schedule_json: payload }),
+                });
+                this.setToast('Расписание сохранено');
+                this.closeScheduleEditor();
+                await this.loadOrganizations();
+            } catch (e) {
+                this.error = e.message || 'Не удалось сохранить расписание';
+            }
+        },
+        async syncMenu(orgId) {
+            try {
+                await this.api(`/api/superadmin/organizations/${orgId}/sync-menu`, { method: 'POST' });
+                this.setToast('Синхронизация меню запущена');
+            } catch (e) {
+                this.error = e.message || 'Не удалось синхронизировать меню';
+            }
+        },
+        async resetPassword(org) {
+            try {
+                const staffRows = (await this.api(`/api/superadmin/organizations/${org.id}/staff`)).items || [];
+                const target = staffRows.find((x) => String(x.role || '').toLowerCase() === 'admin') || staffRows[0];
+                if (!target) {
+                    throw new Error('В организации нет сотрудников');
+                }
+                const out = await this.api(`/api/superadmin/organizations/${org.id}/staff/${target.id}/reset-password`, {
+                    method: 'POST',
+                    body: JSON.stringify({}),
+                });
+                this.setToast(`Новый пароль: ${out.new_password}`);
+            } catch (e) {
+                this.error = e.message || 'Не удалось сбросить пароль';
+            }
+        },
+    };
+}
+</script>
+</body>
+</html>

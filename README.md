@@ -172,8 +172,24 @@ RestoMind/
 | Метод | Путь | Описание |
 |-------|------|----------|
 | POST | `/api/admin/auth/login` | вход, сессия + `ws_token` |
+| POST | `/api/admin/auth/demo-login` | гостевой вход в демо-организацию (read-only) |
+| POST | `/api/admin/auth/request-access` | заявка на подключение ресторана (pending moderation) |
+| POST | `/api/admin/auth/signup` | отключён (`410`, регистрация только по заявке) |
 | POST | `/api/admin/auth/logout` | выход |
 | GET | `/api/admin/auth/me` | проверка сессии, перевыпуск `ws_token` |
+
+### Super Admin API (только `is_superadmin=true`)
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| GET | `/api/superadmin/organizations` | список заведений + KPI за 30 дней |
+| POST | `/api/superadmin/organizations` | ручное создание ресторана и первого admin |
+| PATCH | `/api/superadmin/organizations/{id}/status` | блокировка/разблокировка за неуплату |
+| PATCH | `/api/superadmin/organizations/{id}/credentials` | тех. настройки (iiko/WhatsApp/Telegram) |
+| POST | `/api/superadmin/organizations/{id}/sync-menu` | форс-синхронизация меню из iiko |
+| GET | `/api/superadmin/registration-requests` | список заявок |
+| POST | `/api/superadmin/registration-requests/{id}/approve` | одобрение заявки с созданием org+staff |
+| POST | `/api/superadmin/registration-requests/{id}/reject` | отклонение заявки |
 
 ### Защищённый Admin API (после входа)
 
@@ -192,6 +208,8 @@ RestoMind/
 
 - `GET /health` — healthcheck  
 - `GET /`, `GET /admin` — HTML админ-панели  
+- `GET /request-access` — публичная форма заявки  
+- `GET /superadmin` — UI панели владельца (доступ проверяется API)  
 
 ## Режимы работы
 
