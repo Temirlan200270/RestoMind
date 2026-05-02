@@ -6,6 +6,8 @@
 
 import asyncio
 import base64
+import hashlib
+import hmac
 import json
 import logging
 import uuid
@@ -13,6 +15,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import re
+import secrets
 from fastapi import APIRouter, BackgroundTasks, Query, Request, Response, WebSocket
 from starlette.websockets import WebSocketDisconnect
 
@@ -87,6 +90,27 @@ from app.services.whatsapp_idempotency import (
 from app.services.tts_edge import synthesize_speech_mp3
 
 logger = logging.getLogger(__name__)
+
+
+def _redact_msisdn_for_log(phone: str) -> str:
+    """Минимизация PII в логах: хвост номера вместо полного E.164."""
+    p = (phone or "").strip()
+    if len(p) <= 4:
+        return "***"
+    return f"…{p[-4:]}"
+
+
+def _verify_whatsapp_hub_signature256(raw_body: bytes, signature_header: str | None) -> bool:
+    """Проверка X-Hub-Signature-256 (Meta): sha256=<hex>."""
+    secret = (settings.whatsapp_app_secret or "").strip().encode()
+    if not secret:
+        return False
+    hdr = (signature_header or "").strip()
+    if not hdr.startswith("sha256="):
+        return False
+    theirs = hdr[7:].strip().lower()
+    mac = hmac.new(secret, raw_body, hashlib.sha256).hexdigest().lower()
+    return secrets.compare_digest(theirs, mac)
 
 router = APIRouter(prefix="/whatsapp", tags=["WhatsApp Webhook"])
 
@@ -1487,8 +1511,30 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks) -
     Моментально возвращает 200 OK (требование Meta API),
     а обработку сообщения передаёт в фоновую задачу.
     """
-    body = await request.json()
-    logger.debug("Входящий вебхук: %s", body)
+    raw_body = await request.body()
+    wa_secret_cfg = bool((settings.whatsapp_app_secret or "").strip())
+    if settings.is_prod_like and not wa_secret_cfg:
+        logger.error(
+            "WhatsApp webhook: в prod-like окружении (APP_ENV=production|staging) должен быть задан "
+            "WHATSAPP_APP_SECRET (подпись X-Hub-Signature-256)",
+        )
+        return Response(content="Service Unavailable", status_code=503)
+    if wa_secret_cfg:
+        sig = request.headers.get("x-hub-signature-256") or request.headers.get("X-Hub-Signature-256")
+        if not _verify_whatsapp_hub_signature256(raw_body, sig):
+            logger.warning("WhatsApp webhook: неверная или отсутствующая подпись X-Hub-Signature-256")
+            return Response(content="Forbidden", status_code=403)
+
+    try:
+        body = json.loads(raw_body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        logger.warning("WhatsApp webhook: тело не JSON")
+        return Response(content="Bad Request", status_code=400)
+
+    logger.debug(
+        "Входящий вебхук WhatsApp: entries=%s",
+        len(body.get("entry", [])) if isinstance(body, dict) else 0,
+    )
 
     try:
         entry = body.get("entry", [{}])[0]
@@ -1526,7 +1572,11 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks) -
                 continue
 
             if message_id and await _dedupe_whatsapp_message(message_id):
-                logger.info("Дубликат WhatsApp message_id=%s от %s — пропущен", message_id, phone)
+                logger.info(
+                    "Дубликат WhatsApp message_id=%s от %s — пропущен",
+                    message_id,
+                    _redact_msisdn_for_log(phone),
+                )
                 continue
 
             if msg_type == "audio":

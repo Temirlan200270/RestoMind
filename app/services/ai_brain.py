@@ -20,6 +20,7 @@ from app.services.ai_engine.base import BaseAIProvider
 from app.services.ai_engine.errors import TransientAiError
 from app.services.ai_engine.gemini_p import GeminiProvider
 from app.services.ai_engine.openai_p import OpenAIProvider
+from app.services.ai_engine.prompting import format_untrusted_user_text_for_model
 
 logger = logging.getLogger(__name__)
 
@@ -355,7 +356,8 @@ async def call_ai_with_audio(
         return _FALLBACK_RESPONSE
 
     augmented = (
-        f"{VOICE_FROM_STT_INSTRUCTION}\n\nТекст: {transcript}\n"
+        f"{VOICE_FROM_STT_INSTRUCTION}\n\n"
+        f"{format_untrusted_user_text_for_model(transcript)}\n"
         "Ответь клиенту; при необходимости уточни recognized_speech относительно этого текста."
     )
     result = await call_ai(

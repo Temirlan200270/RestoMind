@@ -148,6 +148,170 @@ def _ddl_warn(sql: str, exc: Exception) -> None:
     logger.warning("DDL на старте не применился: %s (%s)", sql, exc, exc_info=True)
 
 
+async def _apply_sqlite_startup_schema_patches() -> None:
+    """
+    SQLite (dev / embedded): догоняющие ALTER после create_all.
+    В PostgreSQL с несколькими подами те же ALTER создают гонку — только Alembic.
+    """
+    try:
+        async with async_engine.begin() as conn:
+            sql = "ALTER TABLE users ADD COLUMN operator_note TEXT DEFAULT ''"
+            await conn.execute(text(sql))
+    except Exception as exc:
+        _ddl_warn(sql, exc)
+
+    try:
+        async with async_engine.begin() as conn:
+            sql = "ALTER TABLE orders ADD COLUMN iiko_last_error VARCHAR(512)"
+            await conn.execute(text(sql))
+    except Exception as exc:
+        _ddl_warn(sql, exc)
+
+    try:
+        async with async_engine.begin() as conn:
+            sql = "ALTER TABLE users ADD COLUMN ai_paused BOOLEAN DEFAULT 0"
+            await conn.execute(text(sql))
+    except Exception as exc:
+        _ddl_warn(sql, exc)
+
+    try:
+        async with async_engine.begin() as conn:
+            sql = "ALTER TABLE chat_logs ADD COLUMN meta_json TEXT"
+            await conn.execute(text(sql))
+    except Exception as exc:
+        _ddl_warn(sql, exc)
+
+    for sql_sqlite in (
+        "ALTER TABLE chat_logs ADD COLUMN provider_message_id VARCHAR(128)",
+        "ALTER TABLE chat_logs ADD COLUMN delivery_status VARCHAR(32)",
+        "ALTER TABLE chat_logs ADD COLUMN error_details TEXT",
+        "ALTER TABLE chat_logs ADD COLUMN status_updated_at TIMESTAMP",
+    ):
+        try:
+            async with async_engine.begin() as conn:
+                await conn.execute(text(sql_sqlite))
+        except Exception as exc:
+            _ddl_warn(sql_sqlite, exc)
+
+    try:
+        async with async_engine.begin() as conn:
+            sql = "CREATE INDEX IF NOT EXISTS ix_chat_logs_provider_message_id ON chat_logs (provider_message_id)"
+            await conn.execute(text(sql))
+    except Exception as exc:
+        _ddl_warn(sql, exc)
+
+    try:
+        async with async_engine.begin() as conn:
+            sql = "ALTER TABLE bookings ADD COLUMN hall VARCHAR(20) DEFAULT 'hall_1'"
+            await conn.execute(text(sql))
+    except Exception as exc:
+        _ddl_warn(sql, exc)
+
+    try:
+        async with async_engine.begin() as conn:
+            sql = "ALTER TABLE orders ADD COLUMN version INTEGER NOT NULL DEFAULT 1"
+            await conn.execute(text(sql))
+    except Exception as exc:
+        _ddl_warn(sql, exc)
+
+    for sql_sqlite in (
+        "ALTER TABLE orders ADD COLUMN booking_id INTEGER",
+        "ALTER TABLE orders ADD COLUMN prepayment_status VARCHAR(30) DEFAULT 'not_required'",
+        "ALTER TABLE orders ADD COLUMN payment_link_url VARCHAR(1024)",
+    ):
+        try:
+            async with async_engine.begin() as conn:
+                await conn.execute(text(sql_sqlite))
+        except Exception as exc:
+            _ddl_warn(sql_sqlite, exc)
+
+    for sql_sqlite in (
+        "ALTER TABLE users ADD COLUMN current_state VARCHAR(50) DEFAULT 'chatting'",
+        "ALTER TABLE users ADD COLUMN current_pending_order_id INTEGER",
+        "ALTER TABLE users ADD COLUMN current_pending_booking_id INTEGER",
+    ):
+        try:
+            async with async_engine.begin() as conn:
+                await conn.execute(text(sql_sqlite))
+        except Exception as exc:
+            _ddl_warn(sql_sqlite, exc)
+
+    try:
+        async with async_engine.begin() as conn:
+            sql = "ALTER TABLE menu_items ADD COLUMN tags TEXT DEFAULT ''"
+            await conn.execute(text(sql))
+    except Exception as exc:
+        _ddl_warn(sql, exc)
+
+    for sql_sqlite in (
+        "ALTER TABLE menu_items ADD COLUMN portion_kind VARCHAR(20) DEFAULT 'single'",
+        "ALTER TABLE menu_items ADD COLUMN serves_min INTEGER DEFAULT 1",
+        "ALTER TABLE menu_items ADD COLUMN serves_max INTEGER DEFAULT 1",
+        "ALTER TABLE menu_items ADD COLUMN allergens TEXT DEFAULT ''",
+        "ALTER TABLE menu_items ADD COLUMN ingredients_summary TEXT DEFAULT ''",
+        "ALTER TABLE menu_items ADD COLUMN dietary_tags TEXT DEFAULT ''",
+        "ALTER TABLE menu_items ADD COLUMN upsell_pairs TEXT DEFAULT ''",
+    ):
+        try:
+            async with async_engine.begin() as conn:
+                await conn.execute(text(sql_sqlite))
+        except Exception as exc:
+            _ddl_warn(sql_sqlite, exc)
+
+    for sql_sqlite in (
+        "ALTER TABLE organizations ADD COLUMN tenant_id INTEGER",
+        "ALTER TABLE organizations ADD COLUMN slug VARCHAR(120) DEFAULT ''",
+        "ALTER TABLE organizations ADD COLUMN timezone VARCHAR(64) DEFAULT 'Asia/Almaty'",
+        "ALTER TABLE organizations ADD COLUMN currency VARCHAR(8) DEFAULT 'KZT'",
+        "ALTER TABLE organizations ADD COLUMN iiko_api_login_enc TEXT",
+        "ALTER TABLE organizations ADD COLUMN iiko_terminal_group_id VARCHAR(255) DEFAULT ''",
+        "ALTER TABLE organizations ADD COLUMN is_demo INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE organizations ADD COLUMN schedule_json TEXT",
+    ):
+        try:
+            async with async_engine.begin() as conn:
+                await conn.execute(text(sql_sqlite))
+        except Exception as exc:
+            _ddl_warn(sql_sqlite, exc)
+
+    try:
+        async with async_engine.begin() as conn:
+            sql = "ALTER TABLE staff_users ADD COLUMN is_superadmin INTEGER NOT NULL DEFAULT 0"
+            await conn.execute(text(sql))
+    except Exception as exc:
+        _ddl_warn(sql, exc)
+
+    try:
+        async with async_engine.begin() as conn:
+            sql = "ALTER TABLE integration_events ADD COLUMN organization_id INTEGER"
+            await conn.execute(text(sql))
+    except Exception as exc:
+        _ddl_warn(sql, exc)
+
+    for sql_sqlite in (
+        "ALTER TABLE organizations ADD COLUMN prepayment_enforced INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE organizations ADD COLUMN auto_send_to_iiko_after_payment INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE orders ADD COLUMN payment_provider VARCHAR(64)",
+        "ALTER TABLE orders ADD COLUMN external_payment_id VARCHAR(200)",
+        "ALTER TABLE orders ADD COLUMN payment_amount_captured NUMERIC(12,2)",
+    ):
+        try:
+            async with async_engine.begin() as conn:
+                await conn.execute(text(sql_sqlite))
+        except Exception as exc:
+            _ddl_warn(sql_sqlite, exc)
+
+    sql1 = ""
+    try:
+        async with async_engine.begin() as conn:
+            sql1 = "CREATE INDEX IF NOT EXISTS ix_orders_payment_provider ON orders (payment_provider)"
+            await conn.execute(text(sql1))
+            sql2 = "CREATE INDEX IF NOT EXISTS ix_orders_external_payment_id ON orders (external_payment_id)"
+            await conn.execute(text(sql2))
+    except Exception as exc:
+        _ddl_warn(sql1 or "ix_orders_payment_provider", exc)
+
+
 async def _stop_list_sync_loop() -> None:
     """Фоновая задача: синхронизирует стоп-листы из iiko каждые 15 минут."""
     from app.services.integration_health import record_stoplist_sync
@@ -250,7 +414,8 @@ async def _chat_log_retention_loop() -> None:
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     Жизненный цикл приложения:
-    - При старте: создаём таблицы (если SQLite), проверяем подключения, запускаем фоновые задачи.
+    - При старте: create_all; для SQLite — догоняющие ALTER; для Postgres — только Alembic (ALTER на старте отключены).
+    - Seed tenants/demo, фоновые задачи, Redis/WhatsApp.
     - При остановке: корректно закрываем все соединения.
     """
     logger.info("Запуск %s...", settings.app_name)
@@ -263,275 +428,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as exc:
         logger.warning("Не удалось создать таблицы: %s", exc)
 
-    # Колонка operator_note у users (create_all не добавляет поля в существующие таблицы)
-    try:
-        async with async_engine.begin() as conn:
-            if settings.db_mode == "sqlite":
-                sql = "ALTER TABLE users ADD COLUMN operator_note TEXT DEFAULT ''"
-                await conn.execute(text(sql))
-            else:
-                sql = "ALTER TABLE users ADD COLUMN IF NOT EXISTS operator_note TEXT DEFAULT ''"
-                await conn.execute(text(sql))
-    except Exception as exc:
-        _ddl_warn(sql, exc)
-
-    try:
-        async with async_engine.begin() as conn:
-            if settings.db_mode == "sqlite":
-                sql = "ALTER TABLE orders ADD COLUMN iiko_last_error VARCHAR(512)"
-                await conn.execute(text(sql))
-            else:
-                sql = "ALTER TABLE orders ADD COLUMN IF NOT EXISTS iiko_last_error VARCHAR(512)"
-                await conn.execute(text(sql))
-    except Exception as exc:
-        _ddl_warn(sql, exc)
-
-    try:
-        async with async_engine.begin() as conn:
-            if settings.db_mode == "sqlite":
-                sql = "ALTER TABLE users ADD COLUMN ai_paused BOOLEAN DEFAULT 0"
-                await conn.execute(text(sql))
-            else:
-                sql = "ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_paused BOOLEAN DEFAULT FALSE"
-                await conn.execute(text(sql))
-    except Exception as exc:
-        _ddl_warn(sql, exc)
-
-    try:
-        async with async_engine.begin() as conn:
-            if settings.db_mode == "sqlite":
-                sql = "ALTER TABLE chat_logs ADD COLUMN meta_json TEXT"
-                await conn.execute(text(sql))
-            else:
-                sql = "ALTER TABLE chat_logs ADD COLUMN IF NOT EXISTS meta_json JSONB"
-                await conn.execute(text(sql))
-    except Exception as exc:
-        _ddl_warn(sql, exc)
-
-    for sql_sqlite, sql_pg in (
-        (
-            "ALTER TABLE chat_logs ADD COLUMN provider_message_id VARCHAR(128)",
-            "ALTER TABLE chat_logs ADD COLUMN IF NOT EXISTS provider_message_id VARCHAR(128)",
-        ),
-        (
-            "ALTER TABLE chat_logs ADD COLUMN delivery_status VARCHAR(32)",
-            "ALTER TABLE chat_logs ADD COLUMN IF NOT EXISTS delivery_status VARCHAR(32)",
-        ),
-        (
-            "ALTER TABLE chat_logs ADD COLUMN error_details TEXT",
-            "ALTER TABLE chat_logs ADD COLUMN IF NOT EXISTS error_details JSONB",
-        ),
-        (
-            "ALTER TABLE chat_logs ADD COLUMN status_updated_at TIMESTAMP",
-            "ALTER TABLE chat_logs ADD COLUMN IF NOT EXISTS status_updated_at TIMESTAMPTZ",
-        ),
-    ):
-        try:
-            async with async_engine.begin() as conn:
-                if settings.db_mode == "sqlite":
-                    await conn.execute(text(sql_sqlite))
-                else:
-                    await conn.execute(text(sql_pg))
-        except Exception as exc:
-            _ddl_warn(sql_sqlite if settings.db_mode == "sqlite" else sql_pg, exc)
-
-    try:
-        async with async_engine.begin() as conn:
-            if settings.db_mode == "sqlite":
-                sql = "CREATE INDEX IF NOT EXISTS ix_chat_logs_provider_message_id ON chat_logs (provider_message_id)"
-                await conn.execute(text(sql))
-            else:
-                sql = "CREATE INDEX IF NOT EXISTS ix_chat_logs_provider_message_id ON chat_logs (provider_message_id)"
-                await conn.execute(text(sql))
-    except Exception as exc:
-        _ddl_warn(sql, exc)
-
-    try:
-        async with async_engine.begin() as conn:
-            if settings.db_mode == "sqlite":
-                sql = "ALTER TABLE bookings ADD COLUMN hall VARCHAR(20) DEFAULT 'hall_1'"
-                await conn.execute(text(sql))
-            else:
-                sql = "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS hall VARCHAR(20) DEFAULT 'hall_1'"
-                await conn.execute(text(sql))
-    except Exception as exc:
-        _ddl_warn(sql, exc)
-
-    # Заказ: optimistic locking (версия строки)
-    try:
-        async with async_engine.begin() as conn:
-            if settings.db_mode == "sqlite":
-                sql = "ALTER TABLE orders ADD COLUMN version INTEGER NOT NULL DEFAULT 1"
-                await conn.execute(text(sql))
-            else:
-                sql = "ALTER TABLE orders ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1"
-                await conn.execute(text(sql))
-    except Exception as exc:
-        _ddl_warn(sql, exc)
-
-    # Заказ: связь с бронью (предзаказ в зале) и поля предоплаты
-    for sql_sqlite, sql_pg in (
-        ("ALTER TABLE orders ADD COLUMN booking_id INTEGER", "ALTER TABLE orders ADD COLUMN IF NOT EXISTS booking_id INTEGER"),
-        (
-            "ALTER TABLE orders ADD COLUMN prepayment_status VARCHAR(30) DEFAULT 'not_required'",
-            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS prepayment_status VARCHAR(30) DEFAULT 'not_required'",
-        ),
-        (
-            "ALTER TABLE orders ADD COLUMN payment_link_url VARCHAR(1024)",
-            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_link_url VARCHAR(1024)",
-        ),
-    ):
-        try:
-            async with async_engine.begin() as conn:
-                if settings.db_mode == "sqlite":
-                    await conn.execute(text(sql_sqlite))
-                else:
-                    await conn.execute(text(sql_pg))
-        except Exception as exc:
-            _ddl_warn(sql_sqlite if settings.db_mode == "sqlite" else sql_pg, exc)
-
-    # State Recovery: поля сессии в User для восстановления после потери Redis
-    for sql_sqlite, sql_pg in (
-        (
-            "ALTER TABLE users ADD COLUMN current_state VARCHAR(50) DEFAULT 'chatting'",
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS current_state VARCHAR(50) DEFAULT 'chatting'",
-        ),
-        (
-            "ALTER TABLE users ADD COLUMN current_pending_order_id INTEGER",
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS current_pending_order_id INTEGER",
-        ),
-        (
-            "ALTER TABLE users ADD COLUMN current_pending_booking_id INTEGER",
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS current_pending_booking_id INTEGER",
-        ),
-    ):
-        try:
-            async with async_engine.begin() as conn:
-                if settings.db_mode == "sqlite":
-                    await conn.execute(text(sql_sqlite))
-                else:
-                    await conn.execute(text(sql_pg))
-        except Exception as exc:
-            _ddl_warn(sql_sqlite if settings.db_mode == "sqlite" else sql_pg, exc)
-
-    # Меню: теги сочетаемости для ИИ (§4.2); create_all не добавляет колонки в существующие таблицы
-    try:
-        async with async_engine.begin() as conn:
-            if settings.db_mode == "sqlite":
-                sql = "ALTER TABLE menu_items ADD COLUMN tags TEXT DEFAULT ''"
-                await conn.execute(text(sql))
-            else:
-                sql = "ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS tags TEXT DEFAULT ''"
-                await conn.execute(text(sql))
-    except Exception as exc:
-        _ddl_warn(sql, exc)
-
-    # Меню: структурный профиль блюда (порции, аллергены, допродажи) — для ИИ и iiko-комментария.
-    for sql_sqlite, sql_pg in (
-        (
-            "ALTER TABLE menu_items ADD COLUMN portion_kind VARCHAR(20) DEFAULT 'single'",
-            "ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS portion_kind VARCHAR(20) DEFAULT 'single'",
-        ),
-        (
-            "ALTER TABLE menu_items ADD COLUMN serves_min INTEGER DEFAULT 1",
-            "ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS serves_min INTEGER DEFAULT 1",
-        ),
-        (
-            "ALTER TABLE menu_items ADD COLUMN serves_max INTEGER DEFAULT 1",
-            "ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS serves_max INTEGER DEFAULT 1",
-        ),
-        (
-            "ALTER TABLE menu_items ADD COLUMN allergens TEXT DEFAULT ''",
-            "ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS allergens TEXT DEFAULT ''",
-        ),
-        (
-            "ALTER TABLE menu_items ADD COLUMN ingredients_summary TEXT DEFAULT ''",
-            "ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS ingredients_summary TEXT DEFAULT ''",
-        ),
-        (
-            "ALTER TABLE menu_items ADD COLUMN dietary_tags TEXT DEFAULT ''",
-            "ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS dietary_tags TEXT DEFAULT ''",
-        ),
-        (
-            "ALTER TABLE menu_items ADD COLUMN upsell_pairs TEXT DEFAULT ''",
-            "ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS upsell_pairs TEXT DEFAULT ''",
-        ),
-    ):
-        try:
-            async with async_engine.begin() as conn:
-                if settings.db_mode == "sqlite":
-                    await conn.execute(text(sql_sqlite))
-                else:
-                    await conn.execute(text(sql_pg))
-        except Exception as exc:
-            _ddl_warn(sql_sqlite if settings.db_mode == "sqlite" else sql_pg, exc)
-
-    # Franchise / iiko в БД: create_all создаёт новые таблицы; для существующих SQLite — колонки.
-    for sql_sqlite, sql_pg in (
-        (
-            "ALTER TABLE organizations ADD COLUMN tenant_id INTEGER",
-            "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS tenant_id INTEGER",
-        ),
-        (
-            "ALTER TABLE organizations ADD COLUMN slug VARCHAR(120) DEFAULT ''",
-            "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS slug VARCHAR(120) DEFAULT ''",
-        ),
-        (
-            "ALTER TABLE organizations ADD COLUMN timezone VARCHAR(64) DEFAULT 'Asia/Almaty'",
-            "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS timezone VARCHAR(64) DEFAULT 'Asia/Almaty'",
-        ),
-        (
-            "ALTER TABLE organizations ADD COLUMN currency VARCHAR(8) DEFAULT 'KZT'",
-            "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS currency VARCHAR(8) DEFAULT 'KZT'",
-        ),
-        (
-            "ALTER TABLE organizations ADD COLUMN iiko_api_login_enc TEXT",
-            "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS iiko_api_login_enc TEXT",
-        ),
-        (
-            "ALTER TABLE organizations ADD COLUMN iiko_terminal_group_id VARCHAR(255) DEFAULT ''",
-            "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS iiko_terminal_group_id VARCHAR(255) DEFAULT ''",
-        ),
-        (
-            "ALTER TABLE organizations ADD COLUMN is_demo INTEGER NOT NULL DEFAULT 0",
-            "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT false",
-        ),
-        (
-            "ALTER TABLE organizations ADD COLUMN schedule_json TEXT",
-            "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS schedule_json JSONB",
-        ),
-    ):
-        try:
-            async with async_engine.begin() as conn:
-                if settings.db_mode == "sqlite":
-                    await conn.execute(text(sql_sqlite))
-                else:
-                    await conn.execute(text(sql_pg))
-        except Exception as exc:
-            _ddl_warn(sql_sqlite if settings.db_mode == "sqlite" else sql_pg, exc)
-
-    try:
-        async with async_engine.begin() as conn:
-            if settings.db_mode == "sqlite":
-                sql = "ALTER TABLE staff_users ADD COLUMN is_superadmin INTEGER NOT NULL DEFAULT 0"
-                await conn.execute(text(sql))
-            else:
-                sql = "ALTER TABLE staff_users ADD COLUMN IF NOT EXISTS is_superadmin BOOLEAN NOT NULL DEFAULT false"
-                await conn.execute(text(sql))
-    except Exception as exc:
-        _ddl_warn(sql, exc)
-
-    # integration_events: поле organization_id нужно для мультитенантной админки; в legacy SQLite могло отсутствовать.
-    try:
-        async with async_engine.begin() as conn:
-            if settings.db_mode == "sqlite":
-                sql = "ALTER TABLE integration_events ADD COLUMN organization_id INTEGER"
-                await conn.execute(text(sql))
-            else:
-                sql = "ALTER TABLE integration_events ADD COLUMN IF NOT EXISTS organization_id INTEGER"
-                await conn.execute(text(sql))
-    except Exception as exc:
-        _ddl_warn(sql, exc)
+    if settings.db_mode == "sqlite":
+        await _apply_sqlite_startup_schema_patches()
+    else:
+        logger.info(
+            "PostgreSQL: стартовые ALTER отключены — схема только через Alembic "
+            "(например в Docker: ./start.sh выполняет `alembic upgrade heads` перед uvicorn).",
+        )
 
     try:
         async with async_engine.begin() as conn:
@@ -585,52 +488,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await db.commit()
     except Exception as exc:
         logger.warning("Demo organization seed failed: %s", exc, exc_info=True)
-
-    for sql_sqlite, sql_pg in (
-        (
-            "ALTER TABLE organizations ADD COLUMN prepayment_enforced INTEGER NOT NULL DEFAULT 1",
-            "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS prepayment_enforced BOOLEAN NOT NULL DEFAULT true",
-        ),
-        (
-            "ALTER TABLE organizations ADD COLUMN auto_send_to_iiko_after_payment INTEGER NOT NULL DEFAULT 0",
-            "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS auto_send_to_iiko_after_payment BOOLEAN NOT NULL DEFAULT false",
-        ),
-        (
-            "ALTER TABLE orders ADD COLUMN payment_provider VARCHAR(64)",
-            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_provider VARCHAR(64)",
-        ),
-        (
-            "ALTER TABLE orders ADD COLUMN external_payment_id VARCHAR(200)",
-            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS external_payment_id VARCHAR(200)",
-        ),
-        (
-            "ALTER TABLE orders ADD COLUMN payment_amount_captured NUMERIC(12,2)",
-            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_amount_captured NUMERIC(12,2)",
-        ),
-    ):
-        try:
-            async with async_engine.begin() as conn:
-                if settings.db_mode == "sqlite":
-                    await conn.execute(text(sql_sqlite))
-                else:
-                    await conn.execute(text(sql_pg))
-        except Exception as exc:
-            _ddl_warn(sql_sqlite if settings.db_mode == "sqlite" else sql_pg, exc)
-
-    try:
-        async with async_engine.begin() as conn:
-            if settings.db_mode == "sqlite":
-                sql1 = "CREATE INDEX IF NOT EXISTS ix_orders_payment_provider ON orders (payment_provider)"
-                await conn.execute(text(sql1))
-                sql2 = "CREATE INDEX IF NOT EXISTS ix_orders_external_payment_id ON orders (external_payment_id)"
-                await conn.execute(text(sql2))
-            else:
-                sql1 = "CREATE INDEX IF NOT EXISTS ix_orders_payment_provider ON orders (payment_provider)"
-                await conn.execute(text(sql1))
-                sql2 = "CREATE INDEX IF NOT EXISTS ix_orders_external_payment_id ON orders (external_payment_id)"
-                await conn.execute(text(sql2))
-    except Exception as exc:
-        _ddl_warn(sql1, exc)
 
     await init_redis_or_fallback()
 

@@ -846,9 +846,14 @@ async def _handle_escalate(
     Обработка intent='escalate':
     Переводим пользователя в HUMAN_MODE, AI замолкает.
     """
+    reply_tail = (ai_response.reply_text or "").strip().replace("\n", " ")
+    if len(reply_tail) > 120:
+        reply_tail = reply_tail[:120] + "…"
     logger.warning(
-        "🚨 ESCALATION: клиент %s просит оператора. AI: '%s'",
-        phone, ai_response.reply_text,
+        "🚨 ESCALATION: клиент %s просит оператора. AI_reply_len=%d preview=%r",
+        phone[-4:] if len(phone) >= 4 else "***",
+        len((ai_response.reply_text or "")),
+        reply_tail,
     )
     return RouteResult(
         reply_text=ai_response.reply_text,

@@ -11,13 +11,14 @@ import logging
 import secrets
 import uuid
 from collections import defaultdict
-from typing import Literal
+from typing import Any, Literal
 from datetime import date, datetime, time as dt_time, timedelta, timezone
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
 from sqlalchemy import delete as sql_delete
-from sqlalchemy import and_, exists, func, or_, select
+from sqlalchemy import and_, exists, func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -583,20 +584,23 @@ def _make_naive(dt: datetime | None) -> datetime | None:
 # ─── WebSocket (Live-события для админки) ────────────────
 
 def _ws_event_allowed_for_org(event_json: str, claims: AdminWsClaims) -> bool:
-    """События с чужим organization_id не отправляем подписчику."""
+    """События с чужим или неизвестным organization_id не отправляем подписчику."""
     try:
         payload = json.loads(event_json)
     except json.JSONDecodeError:
-        return True
+        return False
     data = payload.get("data")
     if not isinstance(data, dict):
-        return True
+        return False
     if "organization_id" not in data:
-        return True
+        return False
+    oid = data.get("organization_id")
+    if oid is None:
+        return False
     try:
-        return int(data["organization_id"]) == int(claims.organization_id)
+        return int(oid) == int(claims.organization_id)
     except (TypeError, ValueError):
-        return True
+        return False
 
 
 @ws_router.websocket("/ws")
@@ -3427,6 +3431,8 @@ async def settings_environment(request: Request, db: AsyncSession = Depends(get_
         "app_name": settings.app_name,
         "app_version": settings.app_version,
         "app_debug": settings.app_debug,
+        "app_environment": settings.app_environment,
+        "is_prod_like": settings.is_prod_like,
         "db_mode": settings.db_mode,
         "redis_enabled": settings.redis_enabled,
         "redis_memory_only": settings.redis_memory_only,
@@ -3776,14 +3782,18 @@ async def dashboard_stats(
     bucket: dict[str, dict[str, float | int]] = defaultdict(
         lambda: {"revenue": 0.0, "orders": 0, "ai_profit": 0.0},
     )
-    rows = await db.execute(
-        select(Order.created_at, Order.total_price, Order.items_json).where(
+    week_floor_sql = _sql_dt_for_filter(today_start - timedelta(days=6))
+    week_rows = await db.execute(
+        select(Order.created_at, Order.total_price, Order.items_json)
+        .where(
             not_cancelled,
             org_orders,
             Order.created_at.isnot(None),
-        ),
+            Order.created_at >= week_floor_sql,
+        )
+        .execution_options(yield_per=500),
     )
-    for created_at, total_price, items_json in rows.all():
+    for created_at, total_price, items_json in week_rows:
         dk = _order_day_key_utc(created_at)
         if dk and dk in valid_set:
             bucket[dk]["revenue"] += float(total_price or 0)
@@ -3823,12 +3833,14 @@ async def dashboard_stats(
     )
 
     upsell_rows = await db.execute(
-        select(Order.items_json).where(
+        select(Order.items_json)
+        .where(
             not_cancelled,
             org_orders,
             Order.created_at >= ts_lo,
             Order.created_at <= ts_hi,
-        ),
+        )
+        .execution_options(yield_per=500),
     )
     upsell_offered_today = 0
     upsell_accepted_today = 0
@@ -4195,8 +4207,8 @@ async def analytics(
     avg_check = current_revenue / current_count if current_count else 0
     prev_avg = prev_revenue / prev_count if prev_count else 0
 
-    # Загружаем только заказы текущего периода (для daily + top_items)
-    cur_orders_result = await db.execute(
+    # Заказы текущего периода (daily + top_items) — потоковая выборка без .all()
+    cur_stmt = (
         select(Order)
         .where(
             not_cancelled,
@@ -4204,15 +4216,19 @@ async def analytics(
             Order.created_at >= start_sql,
             Order.created_at <= end_sql,
         )
+        .execution_options(yield_per=200)
     )
-    current_orders = cur_orders_result.scalars().all()
+    cur_orders_result = await db.execute(cur_stmt)
 
     daily: dict[str, dict] = defaultdict(
         lambda: {"revenue": 0.0, "orders": 0}
     )
     daily_ai_profit: dict[str, float] = defaultdict(float)
     ai_profit_total = 0.0
-    for o in current_orders:
+    item_stats: dict[str, dict] = defaultdict(
+        lambda: {"quantity": 0, "revenue": 0.0, "ai_profit": 0.0}
+    )
+    for o in cur_orders_result.scalars():
         dk = _order_day_key_utc(o.created_at)
         if dk:
             daily[dk]["revenue"] += float(o.total_price or 0)
@@ -4224,27 +4240,6 @@ async def analytics(
             if dk:
                 daily_ai_profit[dk] += float(rev)
 
-    # Все календарные дни от start до end включительно (UTC), без off-by-one по .days
-    start_d = _dt_as_utc(start).date()
-    end_d = _dt_as_utc(end).date()
-    daily_data: list[dict] = []
-    walk = start_d
-    while walk <= end_d:
-        key = walk.isoformat()
-        entry = daily.get(key, {"revenue": 0.0, "orders": 0})
-        daily_data.append({
-            "date": key,
-            "revenue": entry["revenue"],
-            "orders": entry["orders"],
-            "ai_profit": round(float(daily_ai_profit.get(key, 0.0)), 2),
-        })
-        walk += timedelta(days=1)
-
-    # Топ позиций
-    item_stats: dict[str, dict] = defaultdict(
-        lambda: {"quantity": 0, "revenue": 0.0, "ai_profit": 0.0}
-    )
-    for o in current_orders:
         items_data = o.items_json or {}
         for item in items_data.get("items", []):
             name = item.get("name", "?")
@@ -4253,15 +4248,14 @@ async def analytics(
             item_stats[name]["quantity"] += qty
             item_stats[name]["revenue"] += float(total)
 
-        # Пытаемся атрибутировать accepted_revenue_kzt к конкретным позициям заказа (если есть iiko_id).
-        ij = items_data if isinstance(items_data, dict) else None
-        if not isinstance(ij, dict):
+        ij2 = items_data if isinstance(items_data, dict) else None
+        if not isinstance(ij2, dict):
             continue
-        meta = order_meta_from_items_json(ij)
+        meta = order_meta_from_items_json(ij2)
         trace = meta.get("recommendation_trace")
         if not isinstance(trace, list) or not trace:
             continue
-        items_list = ij.get("items")
+        items_list = ij2.get("items")
         if not isinstance(items_list, list) or not items_list:
             continue
         id_to_name: dict[str, str] = {}
@@ -4277,8 +4271,8 @@ async def analytics(
                 continue
             if ev.get("accepted") is not True:
                 continue
-            rev = float(ev.get("accepted_revenue_kzt") or 0)
-            if rev <= 0:
+            rev_tr = float(ev.get("accepted_revenue_kzt") or 0)
+            if rev_tr <= 0:
                 continue
             iid = str(ev.get("offered_iiko_id") or ev.get("accepted_iiko_id") or "").strip()
             if not iid:
@@ -4286,7 +4280,24 @@ async def analytics(
             nm = id_to_name.get(iid)
             if not nm:
                 continue
-            item_stats[nm]["ai_profit"] += float(rev)
+            item_stats[nm]["ai_profit"] += float(rev_tr)
+
+    start_d = _dt_as_utc(start).date()
+    end_d = _dt_as_utc(end).date()
+    daily_data: list[dict] = []
+    walk = start_d
+    while walk <= end_d:
+        key = walk.isoformat()
+        entry = daily.get(key, {"revenue": 0.0, "orders": 0})
+        daily_data.append(
+            {
+                "date": key,
+                "revenue": entry["revenue"],
+                "orders": entry["orders"],
+                "ai_profit": round(float(daily_ai_profit.get(key, 0.0)), 2),
+            },
+        )
+        walk += timedelta(days=1)
 
     top_items = sorted(
         [{"name": k, **v} for k, v in item_stats.items()],
@@ -4435,6 +4446,7 @@ async def analytics(
             Order.created_at >= prev_start_sql,
             Order.created_at < prev_end_sql,
         )
+        .execution_options(yield_per=500),
     )
     for (ij,) in prev_orders_result.all():
         items_json = ij if isinstance(ij, dict) else None

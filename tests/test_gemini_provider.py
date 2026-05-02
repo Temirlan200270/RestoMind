@@ -124,10 +124,10 @@ async def test_gemini_provider_is_stateless_across_concurrent_calls() -> None:
     resp_b.text = '{"intent":"faq","reply_text":"B"}'
 
     async def _side_effect(prompt: str, *_args: object, **_kwargs: object) -> MagicMock:
-        # В prompt GeminiProvider пишет "USER: {user_text}"
-        if "USER: A" in prompt:
+        # Пользовательский текст оборачивается маркерами (см. format_untrusted_user_text_for_model).
+        if "<<<USER_MESSAGE>>>\nA\n<<</USER_MESSAGE>>>" in prompt:
             return resp_a
-        if "USER: B" in prompt:
+        if "<<<USER_MESSAGE>>>\nB\n<<</USER_MESSAGE>>>" in prompt:
             return resp_b
         raise RuntimeError("Unexpected prompt")
 

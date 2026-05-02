@@ -13,7 +13,7 @@ from app.core.config import settings
 from app.schemas.ai_schemas import AIBrainResponse
 from app.services.ai_engine.base import BaseAIProvider
 from app.services.ai_engine.errors import TransientAiError
-from app.services.ai_engine.prompting import build_system_prompt
+from app.services.ai_engine.prompting import build_system_prompt, format_untrusted_user_text_for_model
 
 logger = logging.getLogger(__name__)
 
@@ -232,11 +232,12 @@ class GeminiProvider(BaseAIProvider):
         history_block = _history_to_gemini_text(history)
 
         # Single prompt payload: system + history + user + hard JSON-only constraints.
+        user_wrapped = format_untrusted_user_text_for_model(user_text)
         prompt = (
             f"{system_prompt}\n\n"
             f"{_JSON_ONLY_INSTRUCTION}\n\n"
             f"{history_block}\n\n"
-            f"USER: {user_text.strip()}\n"
+            f"{user_wrapped}\n"
         ).strip()
 
         last_error: Exception | None = None

@@ -88,6 +88,7 @@ class IikoClient:
         json: Mapping[str, Any] | None = None,
         timeout: float | None = None,
         retry_on_4xx: bool = False,
+        retry_transient: bool = True,
     ) -> dict[str, Any]:
         """
         Единая точка политики HTTP-вызовов:
@@ -96,6 +97,9 @@ class IikoClient:
         - единые логи тела ошибки для диагностики
 
         Возвращает JSON-ответ iiko как dict.
+
+        ``retry_transient=False`` — для мутаций вроде deliveries/create: повтор после таймаута
+        может создать второй заказ в iiko, пока первый уже ушёл на сервер.
         """
         if not self._http:
             raise RuntimeError("HTTP-клиент не инициализирован.")
@@ -104,8 +108,9 @@ class IikoClient:
 
         last_exc: Exception | None = None
         refreshed = False
+        max_attempts = MAX_RETRIES if retry_transient else 1
 
-        for attempt in range(1, MAX_RETRIES + 1):
+        for attempt in range(1, max_attempts + 1):
             try:
                 response = await self._http.request(
                     method=method,
@@ -136,7 +141,7 @@ class IikoClient:
                         path,
                         response.status_code,
                         attempt,
-                        MAX_RETRIES,
+                        max_attempts,
                         body_preview,
                     )
 
@@ -154,7 +159,7 @@ class IikoClient:
                     method,
                     path,
                     attempt,
-                    MAX_RETRIES,
+                    max_attempts,
                     exc,
                 )
             except httpx.HTTPStatusError as exc:
@@ -166,7 +171,7 @@ class IikoClient:
                         method,
                         path,
                         attempt,
-                        MAX_RETRIES,
+                        max_attempts,
                         status,
                     )
                 elif retry_on_4xx and status >= 400:
@@ -175,13 +180,13 @@ class IikoClient:
                         method,
                         path,
                         attempt,
-                        MAX_RETRIES,
+                        max_attempts,
                         status,
                     )
                 else:
                     raise
 
-            if attempt < MAX_RETRIES:
+            if attempt < max_attempts:
                 await asyncio.sleep(RETRY_DELAY * attempt)
 
         raise last_exc or RuntimeError(f"iiko: не удалось выполнить {method} {path}")
@@ -250,16 +255,22 @@ class IikoClient:
         if tg:
             payload["terminalGroupId"] = tg
 
-        # Debug: логируем минимум про customer.phone, чтобы быстро ловить null/не тот формат.
         try:
             order_obj = payload.get("order") if isinstance(payload, dict) else None
             customer_obj = order_obj.get("customer") if isinstance(order_obj, dict) else None
             phone = customer_obj.get("phone") if isinstance(customer_obj, dict) else None
-            logger.info("iiko: deliveries/create payload customer.phone=%r", phone)
+            ph = str(phone or "").strip()
+            tail = ph[-4:] if len(ph) >= 4 else ("****" if ph else "")
+            logger.info("iiko: deliveries/create order_id_hint=%s phone_tail=%s", order_data.get("externalNumber"), tail)
         except Exception:
             pass
 
-        result = await self._request("POST", "/api/1/deliveries/create", json=payload)
+        result = await self._request(
+            "POST",
+            "/api/1/deliveries/create",
+            json=payload,
+            retry_transient=False,
+        )
         correlation_id = result.get("correlationId", "?")
         logger.info("iiko: заказ создан, correlationId=%s", correlation_id)
         return result

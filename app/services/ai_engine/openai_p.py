@@ -13,7 +13,7 @@ from app.core.config import settings
 from app.schemas.ai_schemas import AIBrainResponse
 from app.services.ai_engine.base import BaseAIProvider
 from app.services.ai_engine.errors import TransientAiError
-from app.services.ai_engine.prompting import build_system_prompt
+from app.services.ai_engine.prompting import build_system_prompt, format_untrusted_user_text_for_model
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +122,7 @@ class OpenAIProvider(BaseAIProvider):
         )
         messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
         messages.extend(_history_to_openai_messages(history))
-        messages.append({"role": "user", "content": user_text})
+        messages.append({"role": "user", "content": format_untrusted_user_text_for_model(user_text)})
 
         max_retries = 2
         last_error: Exception | None = None

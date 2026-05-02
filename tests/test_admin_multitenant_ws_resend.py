@@ -22,15 +22,21 @@ def test_ws_event_blocked_other_org() -> None:
     assert _ws_event_allowed_for_org(payload, claims) is False
 
 
-def test_ws_event_allowed_without_org_in_payload() -> None:
-    """События без organization_id не отсекаем (обратная совместимость)."""
+def test_ws_event_blocked_without_org_in_payload() -> None:
+    """Без organization_id событие не показываем — иначе общий Redis-канал утекает между арендаторами."""
     claims = AdminWsClaims(email="op@test.local", organization_id=7, staff_id=3)
-    assert _ws_event_allowed_for_org('{"type":"legacy","data":{}}', claims) is True
+    assert _ws_event_allowed_for_org('{"type":"legacy","data":{}}', claims) is False
 
 
-def test_ws_malformed_json_allowed() -> None:
+def test_ws_malformed_json_blocked() -> None:
     claims = AdminWsClaims(email="op@test.local", organization_id=7, staff_id=3)
-    assert _ws_event_allowed_for_org("not-json", claims) is True
+    assert _ws_event_allowed_for_org("not-json", claims) is False
+
+
+def test_ws_event_blocked_invalid_org_value() -> None:
+    claims = AdminWsClaims(email="op@test.local", organization_id=7, staff_id=3)
+    payload = '{"type":"x","data":{"organization_id":null}}'
+    assert _ws_event_allowed_for_org(payload, claims) is False
 
 
 @pytest.mark.asyncio

@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     # --- Приложение ---
     app_name: str = "RestoMind"
     app_debug: bool = False
+    # Режим развёртывания: от него зависят обязательные секреты (webhook оплаты, WhatsApp), не от app_debug.
+    # Локально оставьте development (по умолчанию). В проде/staging: production | prod | staging.
+    app_environment: str = Field(
+        default="development",
+        validation_alias=AliasChoices("APP_ENV", "ENVIRONMENT", "app_environment"),
+    )
 
     # --- Режим базы данных ---
     # "sqlite" — работает без установки (по умолчанию для разработки)
@@ -106,6 +112,15 @@ class Settings(BaseSettings):
     whatsapp_api_token: str = ""
     whatsapp_verify_token: str = ""
     whatsapp_phone_number_id: str = ""
+    # App Secret из кабинета Meta (WhatsApp / приложение): подпись входящих POST X-Hub-Signature-256.
+    whatsapp_app_secret: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "WHATSAPP_APP_SECRET",
+            "META_APP_SECRET",
+            "whatsapp_app_secret",
+        ),
+    )
     whatsapp_api_version: str = Field(
         default="v21.0",
         validation_alias=AliasChoices("WHATSAPP_API_VERSION", "whatsapp_api_version"),
@@ -176,6 +191,14 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices(
             "PAYMENT_WEBHOOK_BEARER_TOKEN",
             "payment_webhook_bearer_token",
+        ),
+    )
+    # HMAC-SHA256(raw POST body, hex) в X-RestoMind-Payment-Signature. В production (app_debug=False) обязателен.
+    payment_webhook_hmac_secret: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "PAYMENT_WEBHOOK_HMAC_SECRET",
+            "payment_webhook_hmac_secret",
         ),
     )
 
@@ -460,6 +483,12 @@ class Settings(BaseSettings):
                     "Разрешено только потому, что включён ALLOW_INSECURE_PROD_SETTINGS=true."
                 )
         return self
+
+    @property
+    def is_prod_like(self) -> bool:
+        """True для production/staging: строгие проверки webhook (HMAC, Meta app secret). Не путать с app_debug."""
+        e = (self.app_environment or "").strip().lower()
+        return e in ("production", "prod", "staging")
 
     @property
     def session_secret_key(self) -> str:

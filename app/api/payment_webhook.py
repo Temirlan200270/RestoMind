@@ -1,5 +1,7 @@
 """
-Публичный webhook оплаты: Bearer-токен в Authorization, идемпотентность по provider+payment_id.
+Публичный webhook оплаты: Bearer и в prod-like окружении обязательная HMAC подпись тела.
+
+Prod-like: ``APP_ENV`` = ``production`` | ``prod`` | ``staging``. В development достаточно Bearer или только HMAC.
 
 Расширение под подписи банков: ``POST /api/webhooks/payment/providers/{provider_slug}`` —
 для slug вне простого списка ожидается класс в ``payment_adapters.ADAPTER_REGISTRY`` (пока 501).
@@ -7,11 +9,12 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import secrets
 from typing import Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,7 +27,8 @@ from app.services.payment_webhook import apply_payment_webhook
 router = APIRouter(tags=["payments"])
 
 _SIMPLE_PROVIDER_SLUGS = frozenset({"generic", "json", "bearer", "internal"})
-_bearer_scheme = HTTPBearer(auto_error=False)
+
+_PAYMENT_SIG_HEADER = "x-restomind-payment-signature"
 
 
 class PaymentWebhookBody(BaseModel):
@@ -36,20 +40,51 @@ class PaymentWebhookBody(BaseModel):
     provider: str = Field(default="generic", max_length=64)
 
 
-def verify_webhook_token(
-    creds: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
-) -> None:
-    expected_token = (settings.payment_webhook_bearer_token or "").strip()
-    if not expected_token:
+def _payment_webhook_auth_configured() -> tuple[bool, bool]:
+    bearer_ok = bool((settings.payment_webhook_bearer_token or "").strip())
+    hmac_ok = bool((settings.payment_webhook_hmac_secret or "").strip())
+    return bearer_ok, hmac_ok
+
+
+def _extract_bearer_token(request: Request) -> str | None:
+    auth = (request.headers.get("Authorization") or "").strip()
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    return None
+
+
+def _verify_payment_webhook_request(request: Request, raw_body: bytes) -> None:
+    bearer_cfg, hmac_cfg = _payment_webhook_auth_configured()
+    if not bearer_cfg and not hmac_cfg:
         raise HTTPException(
             status_code=503,
-            detail="Payment webhook is not configured (set PAYMENT_WEBHOOK_BEARER_TOKEN)",
+            detail=(
+                "Payment webhook is not configured "
+                "(set PAYMENT_WEBHOOK_BEARER_TOKEN and/or PAYMENT_WEBHOOK_HMAC_SECRET)"
+            ),
         )
-    if creds is None or not (creds.credentials or "").strip():
-        raise HTTPException(status_code=401, detail="Expected Authorization: Bearer <token>")
-    got = (creds.credentials or "").strip()
-    if not secrets.compare_digest(got, expected_token):
-        raise HTTPException(status_code=401, detail="Invalid token")
+
+    if settings.is_prod_like and not hmac_cfg:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Payment webhook: in production PAYMENT_WEBHOOK_HMAC_SECRET is required "
+                "(send raw JSON body + hex HMAC-SHA256 in X-RestoMind-Payment-Signature)"
+            ),
+        )
+
+    if bearer_cfg:
+        expected_token = (settings.payment_webhook_bearer_token or "").strip()
+        got = _extract_bearer_token(request) or ""
+        if not got or not secrets.compare_digest(got, expected_token):
+            raise HTTPException(status_code=401, detail="Invalid or missing Bearer token")
+
+    if hmac_cfg:
+        secret = (settings.payment_webhook_hmac_secret or "").strip().encode()
+        sig_hdr = (request.headers.get(_PAYMENT_SIG_HEADER) or "").strip()
+        mac = hmac.new(secret, raw_body, hashlib.sha256).hexdigest()
+        if not sig_hdr or not secrets.compare_digest(sig_hdr, mac):
+            raise HTTPException(status_code=401, detail="Invalid payment webhook signature")
 
 
 async def _run_payment_webhook(
@@ -97,22 +132,26 @@ async def _run_payment_webhook(
 
 @router.post("/webhooks/payment")
 async def post_payment_webhook(
-    body: PaymentWebhookBody,
+    request: Request,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    _: None = Depends(verify_webhook_token),
 ) -> dict:
+    raw_body = await request.body()
+    _verify_payment_webhook_request(request, raw_body)
+    body = PaymentWebhookBody.model_validate_json(raw_body)
     return await _run_payment_webhook(body, db, background_tasks)
 
 
 @router.post("/webhooks/payment/providers/{provider_slug}")
 async def post_payment_webhook_by_provider(
     provider_slug: str,
-    body: PaymentWebhookBody,
+    request: Request,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    _: None = Depends(verify_webhook_token),
 ) -> dict:
+    raw_body = await request.body()
+    _verify_payment_webhook_request(request, raw_body)
+    body = PaymentWebhookBody.model_validate_json(raw_body)
     slug = (provider_slug or "").strip().lower()
     adapter_cls = get_payment_adapter_class(slug)
     if adapter_cls is not None:
