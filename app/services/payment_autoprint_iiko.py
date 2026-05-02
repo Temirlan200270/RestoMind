@@ -13,8 +13,8 @@ from datetime import datetime, timezone
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db import session as db_session
 from app.db.models import Order, OrderStatus, Organization, User
-from app.db.session import async_session_factory, redis_client
 from app.services.dialog_mgr import clear_pending_order
 from app.services.events import publish_event
 from app.services.intent_router import confirm_order
@@ -49,7 +49,7 @@ async def run_auto_send_to_iiko_after_payment(order_id: int) -> None:
     from app.api.admin import _check_mixed_payment_split
     from app.api.webhooks import _send_order_to_iiko
 
-    async with async_session_factory() as db:
+    async with db_session.async_session_factory() as db:
         order = await db.get(Order, order_id)
         if order is None:
             return
@@ -99,7 +99,7 @@ async def run_auto_send_to_iiko_after_payment(order_id: int) -> None:
                 evt_data["created_at"] = created_at_iso
             await publish_event("order_updated", evt_data)
             if phone_s:
-                await clear_pending_order(redis_client, phone_s, organization_id=org_id)
+                await clear_pending_order(db_session.redis_client, phone_s, organization_id=org_id)
             order = o2
             cur = (order.status or "").strip().lower()
 
@@ -142,7 +142,7 @@ async def run_auto_send_to_iiko_after_payment(order_id: int) -> None:
         restaurant_organization_id=org_id,
     )
 
-    async with async_session_factory() as db2:
+    async with db_session.async_session_factory() as db2:
         locked = await db2.get(Order, order_id)
         if locked is None:
             return

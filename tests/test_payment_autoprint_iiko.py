@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 
 import app.db.session as db_session_module
-import app.services.payment_autoprint_iiko as autoprint_module
 from app.db.models import Base, Order, OrderStatus, Organization, User
 from app.services.payment_autoprint_iiko import run_auto_send_to_iiko_after_payment
 
@@ -30,7 +29,6 @@ async def autoprint_db(monkeypatch):
         await conn.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
     monkeypatch.setattr(db_session_module, "async_session_factory", factory)
-    monkeypatch.setattr(autoprint_module, "async_session_factory", factory)
     yield factory
     await engine.dispose()
 
