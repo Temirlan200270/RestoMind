@@ -43,17 +43,30 @@ async def apply_payment_webhook(
     Обновляет prepayment_status при status=paid, пишет PaymentEvent.
     Дубликат по (order, event_type, note) возвращает duplicate=True без повторной записи.
     """
+    if not (payment_id or "").strip():
+        raise ValueError("invalid_payment_id")
+    prov = _normalize_provider_slug(provider)
+    note_key = _idempotency_note(prov, payment_id)
+
     order = await db.get(Order, order_id)
     if order is None:
         raise LookupError("order_not_found")
     oid = order.organization_id
     if oid is None or int(oid) != int(organization_id):
+        insert_stmt_m = sqlite_insert(PaymentEvent) if settings.db_mode == "sqlite" else pg_insert(PaymentEvent)
+        mismatch_note = f"{note_key}:org_mismatch:expected={oid}:got={organization_id}"
+        await db.execute(
+            insert_stmt_m.values(
+                order_id=order.id,
+                event_type="webhook_failed",
+                actor="webhook",
+                amount=float(amount) if amount is not None else None,
+                note=mismatch_note[:500],
+            ).on_conflict_do_nothing(
+                index_elements=["order_id", "event_type", "note"],
+            ),
+        )
         raise PermissionError("organization_mismatch")
-
-    if not (payment_id or "").strip():
-        raise ValueError("invalid_payment_id")
-    prov = _normalize_provider_slug(provider)
-    note_key = _idempotency_note(prov, payment_id)
 
     if status == "paid":
         insert_stmt = sqlite_insert(PaymentEvent) if settings.db_mode == "sqlite" else pg_insert(PaymentEvent)

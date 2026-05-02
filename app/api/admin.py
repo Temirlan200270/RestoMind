@@ -11,7 +11,7 @@ import logging
 import secrets
 import uuid
 from collections import defaultdict
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from datetime import date, datetime, time as dt_time, timedelta, timezone
 
 import httpx
@@ -99,6 +99,11 @@ from app.services.order_logic import (
 )
 from app.services.payment_autoprint_iiko import run_auto_send_to_iiko_after_payment
 from app.services.payment_notify import run_payment_received_customer_notify
+from app.services.tenant_scope import (
+    failed_tasks_tenant_clause as _failed_tasks_tenant_clause,
+    orders_tenant_clause as _orders_tenant_clause,
+    phones_subquery_for_org as _phones_subquery_for_org,
+)
 from app.services.sales_strategy import build_sales_strategy, format_strategy_for_prompt
 from app.services.intelligence_analytics import (
     delivery_geo_rows,
@@ -107,6 +112,7 @@ from app.services.intelligence_analytics import (
     upsell_stats_from_items_json,
 )
 from app.services.owner_roi import aggregate_org_window, build_achievements_week, build_today_narrative_ru
+from app.services.readiness import build_admin_readiness_payload
 from app.api.webhooks import _normalize_phone_e164
 
 logger = logging.getLogger(__name__)
@@ -180,6 +186,27 @@ async def require_staff_admin(request: Request, db: AsyncSession = Depends(get_d
         raise HTTPException(status_code=403, detail="Недостаточно прав")
     if (staff.role or "").strip().lower() != StaffRole.ADMIN.value:
         raise HTTPException(status_code=403, detail="Недостаточно прав")
+
+
+async def _session_staff_user(request: Request, db: AsyncSession) -> StaffUser | None:
+    sid = request.session.get("staff_id")
+    if sid is None:
+        return None
+    try:
+        return await db.get(StaffUser, int(sid))
+    except (TypeError, ValueError):
+        return None
+
+
+async def _session_is_superadmin(request: Request, db: AsyncSession) -> bool:
+    staff = await _session_staff_user(request, db)
+    return bool(staff is not None and staff.is_active and staff.is_superadmin)
+
+
+async def require_superadmin(request: Request, db: AsyncSession = Depends(get_db)) -> None:
+    await require_admin_session_active(request, db)
+    if not await _session_is_superadmin(request, db):
+        raise HTTPException(status_code=403, detail="Только Super Admin")
 
 
 def admin_org_from_session(request: Request) -> int:
@@ -273,17 +300,6 @@ def _knowledge_tenant_clause(org_id: int):
     return or_(KnowledgeItem.organization_id == org_id, KnowledgeItem.organization_id.is_(None))
 
 
-def _orders_tenant_clause(org_id: int):
-    """Заказы филиала: явный organization_id или legacy через user."""
-    return or_(
-        Order.organization_id == org_id,
-        and_(
-            Order.organization_id.is_(None),
-            Order.user_id.in_(select(User.id).where(User.organization_id == org_id)),
-        ),
-    )
-
-
 def _bookings_tenant_clause(org_id: int):
     return or_(
         Booking.organization_id == org_id,
@@ -292,10 +308,6 @@ def _bookings_tenant_clause(org_id: int):
             Booking.user_id.in_(select(User.id).where(User.organization_id == org_id)),
         ),
     )
-
-
-def _phones_subquery_for_org(org_id: int):
-    return select(User.phone).where(User.organization_id == org_id)
 
 
 def _escalation_tenant_clause(org_id: int):
@@ -313,16 +325,6 @@ def _integration_events_tenant_clause(org_id: int):
     if int(org_id) == int(settings.default_organization_id):
         return or_(IntegrationEvent.organization_id == org_id, IntegrationEvent.organization_id.is_(None))
     return IntegrationEvent.organization_id == org_id
-
-
-def _failed_tasks_tenant_clause(org_id: int):
-    return or_(
-        FailedTask.organization_id == org_id,
-        and_(
-            FailedTask.organization_id.is_(None),
-            FailedTask.phone.in_(_phones_subquery_for_org(org_id)),
-        ),
-    )
 
 
 # ─── Публичные эндпоинты входа (без сессии) ──────────────
@@ -393,6 +395,7 @@ async def admin_login(request: Request, body: LoginBody, db: AsyncSession = Depe
                 "username": staff.email,
                 "organization_id": int(staff.organization_id),
                 "staff_role": (staff.role or StaffRole.ADMIN.value).strip().lower(),
+                "is_superadmin": bool(staff.is_superadmin),
                 "ws_token": ws_token,
             }
 
@@ -419,6 +422,7 @@ async def admin_login(request: Request, body: LoginBody, db: AsyncSession = Depe
             "username": body.username.strip(),
             "organization_id": oid,
             "staff_role": StaffRole.ADMIN.value,
+            "is_superadmin": False,
             "ws_token": ws_token,
         }
 
@@ -465,6 +469,7 @@ async def admin_demo_login(request: Request, db: AsyncSession = Depends(get_db))
         "username": "demo-guest",
         "organization_id": int(demo_org.id),
         "staff_role": StaffRole.OPERATOR.value,
+        "is_superadmin": False,
         "ws_token": ws_token,
     }
 
@@ -854,6 +859,147 @@ async def list_orders(
     }
 
 
+ORDER_TIMELINE_CHAT_LIMIT = 15
+
+
+def _timeline_payment_title(ev: PaymentEvent) -> str:
+    et = (ev.event_type or "").strip().lower()
+    mapping = {
+        "prepayment_confirmed": "Предоплата подтверждена",
+        "prepayment_waived": "Предоплата снята",
+        "webhook_paid": "Вебхук: оплата получена",
+        "webhook_failed": "Вебхук оплаты: ошибка / несоответствие",
+        "manual_reset": "Предоплата сброшена вручную",
+    }
+    return mapping.get(et, f"Платёж: {et or 'событие'}")
+
+
+@router.get("/orders/{order_id}/timeline")
+async def admin_order_timeline(
+    request: Request,
+    order_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Хронология заказа: создание, оплаты, чат, ошибка iiko, текущий статус (без полной истории смен статусов в БД)."""
+    org_id = admin_org_from_session(request)
+    order = await _order_in_org(db, order_id, org_id)
+
+    raw_events: list[tuple[datetime | None, dict[str, Any]]] = []
+
+    if order.created_at:
+        raw_events.append(
+            (
+                order.created_at,
+                {
+                    "kind": "order_created",
+                    "title": "Заказ создан",
+                    "detail": "",
+                    "meta": {"status": order.status},
+                },
+            ),
+        )
+
+    pay_rows = (
+        await db.execute(
+            select(PaymentEvent)
+            .where(PaymentEvent.order_id == order.id)
+            .order_by(PaymentEvent.created_at.asc(), PaymentEvent.id.asc()),
+        )
+    ).scalars().all()
+    for ev in pay_rows:
+        note_s = (ev.note or "").strip()
+        if len(note_s) > 280:
+            note_s = note_s[:279] + "…"
+        raw_events.append(
+            (
+                ev.created_at,
+                {
+                    "kind": "payment",
+                    "title": _timeline_payment_title(ev),
+                    "detail": note_s or f"{ev.event_type} · {ev.actor}",
+                    "meta": {
+                        "event_type": ev.event_type,
+                        "actor": ev.actor,
+                        "amount": float(ev.amount) if ev.amount is not None else None,
+                    },
+                },
+            ),
+        )
+
+    chat_rows = (
+        await db.execute(
+            select(ChatLog)
+            .where(
+                ChatLog.user_id == order.user_id,
+                ChatLog.organization_id == org_id,
+            )
+            .order_by(ChatLog.created_at.desc(), ChatLog.id.desc())
+            .limit(ORDER_TIMELINE_CHAT_LIMIT),
+        )
+    ).scalars().all()
+    for log in reversed(chat_rows):
+        ct = (log.content or "").strip()
+        if len(ct) > 160:
+            ct = ct[:159] + "…"
+        ds = (log.delivery_status or "").strip()
+        extra = f" · {ds}" if ds and log.role != "user" else ""
+        raw_events.append(
+            (
+                log.created_at,
+                {
+                    "kind": "chat",
+                    "title": f"Чат ({log.role})",
+                    "detail": ct + extra,
+                    "meta": {"role": log.role, "delivery_status": log.delivery_status},
+                },
+            ),
+        )
+
+    err_txt = (order.iiko_last_error or "").strip()
+    if err_txt:
+        at_err = order.updated_at or order.created_at
+        raw_events.append(
+            (
+                at_err,
+                {
+                    "kind": "iiko_error",
+                    "title": "Ошибка отправки в iiko",
+                    "detail": err_txt[:400],
+                    "meta": {},
+                },
+            ),
+        )
+
+    def _sort_key(tup: tuple[datetime | None, Any]) -> datetime:
+        dt = tup[0]
+        if dt is None:
+            return datetime.min.replace(tzinfo=timezone.utc)
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+    raw_events.sort(key=_sort_key)
+
+    snap_at = order.updated_at or order.created_at
+    raw_events.append(
+        (
+            snap_at,
+            {
+                "kind": "current_status",
+                "title": f"Текущее состояние: {order.status}",
+                "detail": "Фактический статус строки заказа (история переходов в отдельной таблице не хранится).",
+                "meta": {"status": order.status, "prepayment_status": getattr(order, "prepayment_status", None)},
+            },
+        ),
+    )
+
+    events_out: list[dict[str, Any]] = []
+    for at, payload in raw_events:
+        ev_out = dict(payload)
+        ev_out["at"] = at.isoformat() if at else None
+        events_out.append(ev_out)
+
+    return {"ok": True, "order_id": int(order.id), "events": events_out}
+
+
 class OrderPatchBody(BaseModel):
     """Смена статуса заказа из админки (канбан, ручное подтверждение)."""
 
@@ -1188,8 +1334,9 @@ async def list_failed_tasks(
 ) -> dict:
     """Очередь ошибок обработки сообщений (retry исчерпан)."""
     org_id = admin_org_from_session(request)
-    q = select(FailedTask).where(FailedTask.organization_id == org_id)
-    cnt_q = select(func.count(FailedTask.id)).where(FailedTask.organization_id == org_id)
+    task_scope = _failed_tasks_tenant_clause(org_id)
+    q = select(FailedTask).where(task_scope)
+    cnt_q = select(func.count(FailedTask.id)).where(task_scope)
     if resolved == "true":
         q = q.where(FailedTask.resolved.is_(True))
         cnt_q = cnt_q.where(FailedTask.resolved.is_(True))
@@ -1217,7 +1364,7 @@ async def patch_failed_task(
     res = await db.execute(
         select(FailedTask).where(
             FailedTask.id == task_id,
-            FailedTask.organization_id == org_id,
+            _failed_tasks_tenant_clause(org_id),
         ),
     )
     t = res.scalar_one_or_none()
@@ -1570,7 +1717,7 @@ async def global_search(
     oq = (
         select(Order, User.phone, User.name)
         .join(User, Order.user_id == User.id)
-        .where(Order.organization_id == org_id, User.organization_id == org_id, or_(*o_clauses))
+        .where(_orders_tenant_clause(org_id), User.organization_id == org_id, or_(*o_clauses))
         .order_by(Order.created_at.desc())
         .limit(limit)
     )
@@ -1692,6 +1839,574 @@ async def integrations_status(
     ) if org_row is not None else False
     base["telegram_configured"] = tg_token_ok and (tg_global_chat_ok or tg_org_chat_ok)
     return base
+
+
+@router.get("/readiness")
+async def admin_readiness(request: Request, db: AsyncSession = Depends(get_db)) -> dict:
+    """Сводка состояния окружения для вкладки «Состояние» (без секретов)."""
+    org_id = admin_org_from_session(request)
+    out = await build_admin_readiness_payload(db, org_id)
+    out["organization_id"] = org_id
+    return out
+
+
+INCIDENT_SAMPLE_LIMIT = 6
+INCIDENT_PAYMENT_LOOKBACK_DAYS = 14
+INCIDENT_WHATSAPP_LOOKBACK_DAYS = 7
+
+
+def _incident_dt_iso(dt: datetime | None) -> str | None:
+    return dt.isoformat() if dt else None
+
+
+def _incident_short_text(value: Any, limit: int = 220) -> str:
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "…"
+
+
+def _incident_group(
+    *,
+    group_id: str,
+    title: str,
+    severity: str,
+    items: list[dict[str, Any]],
+    count: int | None = None,
+    description: str = "",
+    action: dict[str, Any] | None = None,
+) -> dict:
+    return {
+        "id": group_id,
+        "title": title,
+        "severity": severity,
+        "description": description,
+        "count": int(count if count is not None else len(items)),
+        "items": items,
+        "action": action or {},
+    }
+
+
+def _incident_severity(counts: dict[str, int]) -> str:
+    if counts.get("critical", 0) > 0:
+        return "critical"
+    if counts.get("warning", 0) > 0:
+        return "warning"
+    if counts.get("info", 0) > 0:
+        return "info"
+    return "ok"
+
+
+def _build_hero_actions(groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """До 4 кнопок «Сейчас»: критичные первыми, затем по убыванию count."""
+    rank_map = {"critical": 0, "warning": 1, "info": 2, "ok": 3}
+    ranked: list[tuple[tuple[int, int], dict[str, Any]]] = []
+    for g in groups:
+        n = int(g.get("count") or 0)
+        if n <= 0:
+            continue
+        action = g.get("action") if isinstance(g.get("action"), dict) else {}
+        tab = action.get("tab")
+        if not tab:
+            continue
+        sev = str(g.get("severity") or "info")
+        r = rank_map.get(sev, 9)
+        target: dict[str, Any] = {"tab": tab}
+        st = action.get("settingsTab") or action.get("settings_tab")
+        if st:
+            target["settingsTab"] = st
+        title = str(g.get("title") or g.get("id") or "incident")
+        ranked.append(
+            (
+                (r, -n),
+                {
+                    "id": str(g.get("id") or ""),
+                    "label": f"{title} ({n})",
+                    "count": n,
+                    "severity": sev,
+                    "target": target,
+                },
+            ),
+        )
+    ranked.sort(key=lambda x: x[0])
+    return [x[1] for x in ranked[:4]]
+
+
+@router.get("/incidents")
+async def admin_incidents(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    mode: Annotated[
+        str,
+        Query(description="full — полные группы; summary — только счётчики и hero_actions"),
+    ] = "full",
+) -> dict:
+    """Единый центр того, что требует внимания оператора или владельца платформы."""
+    summary_mode = (mode or "full").strip().lower() == "summary"
+    org_id = admin_org_from_session(request)
+    is_superadmin = await _session_is_superadmin(request, db)
+    now_utc = datetime.now(tz=timezone.utc)
+    whatsapp_since = _sql_dt_for_filter(now_utc - timedelta(days=INCIDENT_WHATSAPP_LOOKBACK_DAYS))
+    payment_since = _sql_dt_for_filter(now_utc - timedelta(days=INCIDENT_PAYMENT_LOOKBACK_DAYS))
+    not_cancelled = Order.status != OrderStatus.CANCELLED.value
+    org_orders = _orders_tenant_clause(org_id)
+
+    groups: list[dict[str, Any]] = []
+
+    iiko_where = [
+        User.organization_id == org_id,
+        org_orders,
+        not_cancelled,
+        Order.iiko_last_error.isnot(None),
+        func.coalesce(Order.iiko_last_error, "") != "",
+    ]
+    iiko_count = int(
+        await db.scalar(
+            select(func.count(Order.id))
+            .select_from(Order)
+            .join(User, Order.user_id == User.id)
+            .where(*iiko_where),
+        )
+        or 0,
+    )
+    if iiko_count:
+        items_iiko: list[dict[str, Any]] = []
+        if not summary_mode:
+            rows_iiko = (
+                await db.execute(
+                    select(Order, User.phone, User.name)
+                    .join(User, Order.user_id == User.id)
+                    .where(*iiko_where)
+                    .order_by(func.coalesce(Order.updated_at, Order.created_at).desc(), Order.id.desc())
+                    .limit(INCIDENT_SAMPLE_LIMIT),
+                )
+            ).all()
+            items_iiko = [
+                {
+                    "id": f"order:{o.id}:iiko",
+                    "title": f"Заказ #{o.id}",
+                    "subtitle": phone or name or "Клиент без телефона",
+                    "detail": _incident_short_text(o.iiko_last_error),
+                    "created_at": _incident_dt_iso(o.updated_at or o.created_at),
+                    "meta": [
+                        {"label": "Статус", "value": o.status},
+                        {"label": "Сумма", "value": float(o.total_price or 0)},
+                    ],
+                    "target": {"tab": "orders", "order_id": int(o.id)},
+                }
+                for o, phone, name in rows_iiko
+            ]
+        groups.append(
+            _incident_group(
+                group_id="iiko_failed",
+                title="iiko не принял заказ",
+                severity="critical",
+                count=iiko_count,
+                description="Заказ есть в админке, но последняя отправка в iiko завершилась ошибкой.",
+                action={"tab": "orders", "label": "Открыть заказы"},
+                items=items_iiko,
+            ),
+        )
+
+    prepay_where = [
+        User.organization_id == org_id,
+        org_orders,
+        not_cancelled,
+        Order.prepayment_status == "pending",
+    ]
+    prepay_count = int(
+        await db.scalar(
+            select(func.count(Order.id))
+            .select_from(Order)
+            .join(User, Order.user_id == User.id)
+            .where(*prepay_where),
+        )
+        or 0,
+    )
+    if prepay_count:
+        items_prepay: list[dict[str, Any]] = []
+        if not summary_mode:
+            rows_prepay = (
+                await db.execute(
+                    select(Order, User.phone, User.name)
+                    .join(User, Order.user_id == User.id)
+                    .where(*prepay_where)
+                    .order_by(func.coalesce(Order.updated_at, Order.created_at).desc(), Order.id.desc())
+                    .limit(INCIDENT_SAMPLE_LIMIT),
+                )
+            ).all()
+            items_prepay = [
+                {
+                    "id": f"order:{o.id}:prepayment",
+                    "title": f"Заказ #{o.id}",
+                    "subtitle": phone or name or "Клиент без телефона",
+                    "detail": "Предоплата в статусе pending",
+                    "created_at": _incident_dt_iso(o.updated_at or o.created_at),
+                    "meta": [
+                        {"label": "Статус", "value": o.status},
+                        {"label": "Сумма", "value": float(o.total_price or 0)},
+                    ],
+                    "target": {"tab": "orders", "order_id": int(o.id)},
+                }
+                for o, phone, name in rows_prepay
+            ]
+        groups.append(
+            _incident_group(
+                group_id="prepayment_pending",
+                title="Ждут предоплату",
+                severity="warning",
+                count=prepay_count,
+                description="Заказы нельзя безопасно отправлять дальше, пока оплата не подтверждена.",
+                action={"tab": "orders", "label": "Открыть заказы"},
+                items=items_prepay,
+            ),
+        )
+
+    failed_tasks_where = [
+        FailedTask.resolved.is_(False),
+        _failed_tasks_tenant_clause(org_id),
+    ]
+    failed_tasks_count = int(
+        await db.scalar(select(func.count(FailedTask.id)).where(*failed_tasks_where)) or 0,
+    )
+    if failed_tasks_count:
+        items_ft: list[dict[str, Any]] = []
+        if not summary_mode:
+            tasks = (
+                await db.execute(
+                    select(FailedTask)
+                    .where(*failed_tasks_where)
+                    .order_by(FailedTask.created_at.desc(), FailedTask.id.desc())
+                    .limit(INCIDENT_SAMPLE_LIMIT),
+                )
+            ).scalars().all()
+            items_ft = [
+                {
+                    "id": f"failed_task:{t.id}",
+                    "title": t.phone,
+                    "subtitle": _incident_short_text(t.message_text, 120),
+                    "detail": _incident_short_text(t.error),
+                    "created_at": _incident_dt_iso(t.created_at),
+                    "meta": [{"label": "Попыток", "value": int(t.attempts or 0)}],
+                    "target": {"tab": "operator_queue", "failed_task_id": int(t.id)},
+                }
+                for t in tasks
+            ]
+        groups.append(
+            _incident_group(
+                group_id="failed_tasks",
+                title="WhatsApp/AI обработка сорвалась",
+                severity="critical",
+                count=failed_tasks_count,
+                description="Бот исчерпал retry и ждёт ручной помощи.",
+                action={"tab": "operator_queue", "label": "Открыть помощь клиентам"},
+                items=items_ft,
+            ),
+        )
+
+    whatsapp_where = [
+        ChatLog.organization_id == org_id,
+        User.organization_id == org_id,
+        ChatLog.delivery_status == "failed",
+        ChatLog.created_at >= whatsapp_since,
+    ]
+    whatsapp_count = int(
+        await db.scalar(
+            select(func.count(ChatLog.id))
+            .select_from(ChatLog)
+            .join(User, ChatLog.user_id == User.id)
+            .where(*whatsapp_where),
+        )
+        or 0,
+    )
+    if whatsapp_count:
+        items_wa: list[dict[str, Any]] = []
+        if not summary_mode:
+            rows_wa = (
+                await db.execute(
+                    select(ChatLog, User.phone, User.name)
+                    .join(User, ChatLog.user_id == User.id)
+                    .where(*whatsapp_where)
+                    .order_by(ChatLog.created_at.desc(), ChatLog.id.desc())
+                    .limit(INCIDENT_SAMPLE_LIMIT),
+                )
+            ).all()
+            items_wa = [
+                {
+                    "id": f"chat_log:{log.id}",
+                    "title": phone or name or "Клиент",
+                    "subtitle": _incident_short_text(log.content, 140),
+                    "detail": _incident_short_text(log.error_details if log.error_details else "Meta вернула failed"),
+                    "created_at": _incident_dt_iso(log.created_at),
+                    "meta": [{"label": "Сообщение", "value": int(log.id)}],
+                    "target": {"tab": "chats", "phone": phone},
+                }
+                for log, phone, name in rows_wa
+            ]
+        groups.append(
+            _incident_group(
+                group_id="whatsapp_failed",
+                title="WhatsApp failed",
+                severity="warning",
+                count=whatsapp_count,
+                description=f"Исходящие сообщения со статусом failed за {INCIDENT_WHATSAPP_LOOKBACK_DAYS} дней.",
+                action={"tab": "chats", "label": "Открыть диалоги"},
+                items=items_wa,
+            ),
+        )
+
+    payment_where = [
+        PaymentEvent.event_type == "webhook_failed",
+        PaymentEvent.created_at >= payment_since,
+        org_orders,
+    ]
+    payment_count = int(
+        await db.scalar(
+            select(func.count(PaymentEvent.id))
+            .select_from(PaymentEvent)
+            .join(Order, PaymentEvent.order_id == Order.id)
+            .outerjoin(User, Order.user_id == User.id)
+            .where(*payment_where),
+        )
+        or 0,
+    )
+    if payment_count:
+        items_pay: list[dict[str, Any]] = []
+        if not summary_mode:
+            rows_pay = (
+                await db.execute(
+                    select(PaymentEvent, Order, User.phone, User.name)
+                    .join(Order, PaymentEvent.order_id == Order.id)
+                    .outerjoin(User, Order.user_id == User.id)
+                    .where(*payment_where)
+                    .order_by(PaymentEvent.created_at.desc(), PaymentEvent.id.desc())
+                    .limit(INCIDENT_SAMPLE_LIMIT),
+                )
+            ).all()
+            items_pay = [
+                {
+                    "id": f"payment_event:{ev.id}",
+                    "title": f"Заказ #{order.id}",
+                    "subtitle": phone or name or "Клиент без телефона",
+                    "detail": _incident_short_text(ev.note),
+                    "created_at": _incident_dt_iso(ev.created_at),
+                    "meta": [
+                        {"label": "Событие", "value": ev.event_type},
+                        {"label": "Сумма", "value": float(ev.amount) if ev.amount is not None else None},
+                    ],
+                    "target": {"tab": "orders", "order_id": int(order.id)},
+                }
+                for ev, order, phone, name in rows_pay
+            ]
+        groups.append(
+            _incident_group(
+                group_id="payment_webhook",
+                title="Webhook оплаты не прошёл сверку",
+                severity="critical",
+                count=payment_count,
+                description=f"Платёжный webhook вернул failed или не совпал с заказом за {INCIDENT_PAYMENT_LOOKBACK_DAYS} дней.",
+                action={"tab": "orders", "label": "Открыть заказы"},
+                items=items_pay,
+            ),
+        )
+
+    iiko_configured = await _iiko_effective_configured(db, org_id)
+    integ = await build_status_payload(
+        db,
+        iiko_configured=iiko_configured,
+        whatsapp_configured=_whatsapp_env_configured(),
+    )
+    integration_items: list[dict[str, Any]] = []
+    if not integ.get("iiko_configured"):
+        integration_items.append(
+            {
+                "id": "integration:iiko_config",
+                "title": "iiko не настроен",
+                "subtitle": "Заказы не смогут уходить на кухню автоматически.",
+                "detail": "Проверьте подключение филиала в настройках.",
+                "created_at": None,
+                "target": {"tab": "settings", "settings_tab": "connections"},
+            },
+        )
+    for key, title in (("last_menu_sync", "Синхронизация меню iiko"), ("last_stoplist", "Синхронизация стоп-листа iiko")):
+        slot = integ.get(key) if isinstance(integ, dict) else None
+        if slot and slot.get("at") and not slot.get("ok"):
+            integration_items.append(
+                {
+                    "id": f"integration:{key}",
+                    "title": title,
+                    "subtitle": "Последняя синхронизация завершилась ошибкой.",
+                    "detail": _incident_short_text(slot.get("error") or "Ошибка без текста"),
+                    "created_at": slot.get("at"),
+                    "target": {"tab": "settings", "settings_tab": "connections"},
+                },
+            )
+    if not integ.get("whatsapp_configured"):
+        integration_items.append(
+            {
+                "id": "integration:whatsapp_config",
+                "title": "WhatsApp не настроен",
+                "subtitle": "Бот не сможет отправлять ответы гостям.",
+                "detail": "Проверьте токен и phone_number_id.",
+                "created_at": None,
+                "target": {"tab": "settings", "settings_tab": "connections"},
+            },
+        )
+    ai_provider = (settings.ai_provider or "openai").strip().lower()
+    ai_configured = (
+        bool(str(settings.gemini_api_key or "").strip())
+        if ai_provider == "gemini"
+        else bool(str(settings.openai_api_key or "").strip())
+    )
+    if not ai_configured:
+        integration_items.append(
+            {
+                "id": "integration:ai_config",
+                "title": "AI не настроен",
+                "subtitle": "Бот не сможет стабильно разбирать заявки и отвечать гостям.",
+                "detail": f"Активный провайдер: {ai_provider or 'openai'}",
+                "created_at": None,
+                "target": {"tab": "settings", "settings_tab": "technical"},
+            },
+        )
+    if integration_items:
+        groups.append(
+            _incident_group(
+                group_id="integrations_degraded",
+                title="Интеграции degraded",
+                severity="warning",
+                description="Сервис работает, но часть внешних подключений требует проверки.",
+                action={"tab": "settings", "settingsTab": "connections", "label": "Открыть подключения"},
+                items=integration_items,
+            ),
+        )
+
+    super_items: list[dict[str, Any]] = []
+    if settings.db_mode == "sqlite" and settings.is_prod_like:
+        super_items.append(
+            {
+                "id": "system:sqlite_prod",
+                "title": "Production работает на SQLite",
+                "subtitle": "Это риск потери данных и блокировок при нагрузке.",
+                "detail": "Переведите DATABASE_URL/DB_MODE на PostgreSQL.",
+                "severity": "critical",
+            },
+        )
+    if settings.redis_memory_only or not settings.redis_enabled:
+        super_items.append(
+            {
+                "id": "system:redis_memory",
+                "title": "Redis заменён in-memory хранилищем",
+                "subtitle": "Сессии, pending_order и Pub/Sub живут только внутри процесса.",
+                "detail": "Для production нужен внешний Redis.",
+                "severity": "warning",
+            },
+        )
+    if settings.is_prod_like and not str(settings.payment_webhook_hmac_secret or "").strip():
+        super_items.append(
+            {
+                "id": "system:payment_hmac",
+                "title": "Нет HMAC-секрета для webhook оплаты",
+                "subtitle": "В production подпись webhook должна быть обязательной.",
+                "detail": "Задайте PAYMENT_WEBHOOK_HMAC_SECRET.",
+                "severity": "critical",
+            },
+        )
+    if settings.is_prod_like and not str(settings.whatsapp_app_secret or "").strip():
+        super_items.append(
+            {
+                "id": "system:whatsapp_signature",
+                "title": "Нет App Secret для WhatsApp webhook",
+                "subtitle": "Входящие webhook сложнее проверять на подлинность.",
+                "detail": "Задайте WHATSAPP_APP_SECRET/META_APP_SECRET.",
+                "severity": "critical",
+            },
+        )
+    if not str(settings.public_base_url or "").strip():
+        super_items.append(
+            {
+                "id": "system:public_base_url",
+                "title": "PUBLIC_BASE_URL не задан",
+                "subtitle": "В админке и интеграциях не будет корректного публичного webhook URL.",
+                "detail": "Задайте публичный HTTPS-адрес приложения.",
+                "severity": "warning",
+            },
+        )
+    if not str(settings.app_secrets_fernet_key or "").strip():
+        super_items.append(
+            {
+                "id": "system:fernet_key",
+                "title": "Нет ключа шифрования секретов iiko",
+                "subtitle": "Новые iiko apiLogin лучше хранить зашифрованными.",
+                "detail": "Задайте APP_SECRETS_FERNET_KEY.",
+                "severity": "warning",
+            },
+        )
+
+    if is_superadmin and super_items:
+        platform_items = [] if summary_mode else super_items
+        groups.append(
+            _incident_group(
+                group_id="platform_risks",
+                title="Опасные настройки платформы",
+                severity="critical" if any(i.get("severity") == "critical" for i in super_items) else "warning",
+                description="Этот блок виден только Super Admin.",
+                action={"tab": "settings", "settingsTab": "technical", "label": "Открыть техдоступ"},
+                count=len(super_items),
+                items=platform_items,
+            ),
+        )
+
+    summary = {"critical": 0, "warning": 0, "info": 0, "restricted": 0}
+    total_open = 0
+    for g in groups:
+        n = int(g.get("count") or 0)
+        total_open += n
+        sev = str(g.get("severity") or "info")
+        if sev in summary:
+            summary[sev] += n
+        else:
+            summary["info"] += n
+    if not is_superadmin:
+        summary["restricted"] = len(super_items)
+
+    hero_actions = _build_hero_actions(groups)
+
+    if summary_mode:
+        return {
+            "ok": True,
+            "mode": "summary",
+            "organization_id": org_id,
+            "generated_at": now_utc.isoformat(),
+            "is_superadmin": is_superadmin,
+            "severity": _incident_severity(summary),
+            "total_open": total_open,
+            "summary": summary,
+            "restricted_count": int(summary["restricted"]),
+            "hero_actions": hero_actions,
+            "lookback_days": {
+                "whatsapp_failed": INCIDENT_WHATSAPP_LOOKBACK_DAYS,
+                "payment_webhook": INCIDENT_PAYMENT_LOOKBACK_DAYS,
+            },
+        }
+
+    return {
+        "ok": True,
+        "organization_id": org_id,
+        "generated_at": now_utc.isoformat(),
+        "is_superadmin": is_superadmin,
+        "severity": _incident_severity(summary),
+        "total_open": total_open,
+        "summary": summary,
+        "restricted_count": int(summary["restricted"]),
+        "hero_actions": hero_actions,
+        "groups": groups,
+        "superadmin_only": super_items if is_superadmin else [],
+        "lookback_days": {
+            "whatsapp_failed": INCIDENT_WHATSAPP_LOOKBACK_DAYS,
+            "payment_webhook": INCIDENT_PAYMENT_LOOKBACK_DAYS,
+        },
+    }
 
 
 class OrganizationPrefsPatchBody(BaseModel):
@@ -2784,6 +3499,7 @@ async def patch_menu_item(
 async def clear_all_menu_items(
     request: Request,
     body: ClearMenuBody,
+    _perm: None = Depends(require_superadmin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """
@@ -3208,6 +3924,7 @@ async def _clear_redis_pending_if_matches(
 async def purge_operational_data(
     request: Request,
     body: PurgeOperationalBody,
+    _perm: None = Depends(require_superadmin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """
@@ -3261,6 +3978,7 @@ async def purge_operational_data(
 async def clear_menu_and_stop_snapshot(
     request: Request,
     body: ClearMenuBody,
+    _perm: None = Depends(require_superadmin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """
@@ -3296,6 +4014,7 @@ async def clear_menu_and_stop_snapshot(
 async def bulk_delete_orders(
     request: Request,
     body: DeleteOrdersBulkBody,
+    _perm: None = Depends(require_superadmin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Удалить заказы по списку id. Клиенты (users) не удаляются."""
@@ -3469,7 +4188,11 @@ async def settings_environment(request: Request, db: AsyncSession = Depends(get_
 
 
 @router.post("/settings/redis-purge-phone")
-async def redis_purge_phone(request: Request, body: RedisPurgePhoneBody) -> dict:
+async def redis_purge_phone(
+    request: Request,
+    body: RedisPurgePhoneBody,
+    _perm: None = Depends(require_superadmin),
+) -> dict:
     """Удалить из Redis/in-memory ключи chat:history, user:state, pending_order/booking для номера."""
     if not body.confirm:
         raise HTTPException(
@@ -3489,6 +4212,7 @@ async def redis_purge_phone(request: Request, body: RedisPurgePhoneBody) -> dict
 @router.post("/settings/chat-logs/run-retention")
 async def run_chat_log_retention_manual(
     body: RetentionRunBody,
+    _perm: None = Depends(require_superadmin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Разовый запуск политики ретеншна (та же, что в фоне по расписанию)."""
@@ -3508,6 +4232,7 @@ async def run_chat_log_retention_manual(
 async def bulk_cancel_orders(
     request: Request,
     body: DeleteOrdersBulkBody,
+    _perm: None = Depends(require_superadmin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Перевести заказы в статус cancelled (строки в БД сохраняются)."""
@@ -3524,7 +4249,7 @@ async def bulk_cancel_orders(
     res = await db.execute(
         select(Order, User.phone)
         .join(User, Order.user_id == User.id)
-        .where(Order.id.in_(ids), Order.organization_id == org_id),
+        .where(Order.id.in_(ids), _orders_tenant_clause(org_id)),
     )
     rows = res.all()
     found = {o.id for o, _p in rows}
@@ -3579,7 +4304,7 @@ async def export_orders_csv(
         select(Order, User.phone, User.name)
         .join(User, Order.user_id == User.id)
         .where(
-            Order.organization_id == org_id,
+            _orders_tenant_clause(org_id),
             User.organization_id == org_id,
             Order.created_at >= lo_sql,
             Order.created_at < hi_sql,
@@ -3732,7 +4457,7 @@ async def dashboard_stats(
     ys_lo = _sql_dt_for_filter(today_start - timedelta(days=1))
 
     not_cancelled = Order.status != OrderStatus.CANCELLED
-    org_orders = Order.organization_id == org_id
+    org_orders = _orders_tenant_clause(org_id)
 
     total_q = await db.execute(
         select(func.count(Order.id), func.coalesce(func.sum(Order.total_price), 0))
@@ -3791,7 +4516,6 @@ async def dashboard_stats(
             Order.created_at.isnot(None),
             Order.created_at >= week_floor_sql,
         )
-        .execution_options(yield_per=500),
     )
     for created_at, total_price, items_json in week_rows:
         dk = _order_day_key_utc(created_at)
@@ -3813,7 +4537,7 @@ async def dashboard_stats(
     ]
 
     bookings_result = await db.execute(
-        select(func.count(Booking.id)).where(Booking.organization_id == org_id),
+        select(func.count(Booking.id)).where(_bookings_tenant_clause(org_id)),
     )
     bookings_count = bookings_result.scalar() or 0
 
@@ -3826,7 +4550,7 @@ async def dashboard_stats(
         await db.scalar(
             select(func.count(FailedTask.id)).where(
                 FailedTask.resolved.is_(False),
-                FailedTask.organization_id == org_id,
+                _failed_tasks_tenant_clause(org_id),
             ),
         )
         or 0,
@@ -3840,7 +4564,6 @@ async def dashboard_stats(
             Order.created_at >= ts_lo,
             Order.created_at <= ts_hi,
         )
-        .execution_options(yield_per=500),
     )
     upsell_offered_today = 0
     upsell_accepted_today = 0
@@ -3987,7 +4710,7 @@ async def dashboard_activity(
     # Последние заказы
     o_rows = await db.execute(
         select(Order.id, Order.status, Order.total_price, Order.created_at).where(
-            Order.organization_id == org_id,
+            _orders_tenant_clause(org_id),
             Order.created_at.isnot(None),
             Order.created_at >= since,
         )
@@ -4010,7 +4733,7 @@ async def dashboard_activity(
     # Эскалации (бот попросил помощи)
     e_rows = await db.execute(
         select(EscalationEvent.phone, EscalationEvent.created_at, EscalationEvent.reason).where(
-            EscalationEvent.organization_id == org_id,
+            _escalation_tenant_clause(org_id),
             EscalationEvent.created_at.isnot(None),
             EscalationEvent.created_at >= since,
         )
@@ -4057,7 +4780,7 @@ async def dashboard_activity(
     # Бронирования
     b_rows = await db.execute(
         select(Booking.id, Booking.created_at).where(
-            Booking.organization_id == org_id,
+            _bookings_tenant_clause(org_id),
             Booking.created_at.isnot(None),
             Booking.created_at >= since,
         )
@@ -4103,7 +4826,7 @@ async def analytics(
     response.headers["Cache-Control"] = "no-store"
 
     org_id = admin_org_from_session(request)
-    org_orders = Order.organization_id == org_id
+    org_orders = _orders_tenant_clause(org_id)
 
     now = datetime.now(tz=timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -4143,10 +4866,7 @@ async def analytics(
     prev_start_sql = _sql_dt_for_filter(prev_start)
     prev_end_sql = _sql_dt_for_filter(prev_end)
 
-    esc_scope = or_(
-        EscalationEvent.organization_id == org_id,
-        EscalationEvent.organization_id.is_(None),
-    )
+    esc_scope = _escalation_tenant_clause(org_id)
     esc_count = int(
         await db.scalar(
             select(func.count(EscalationEvent.id)).where(
@@ -4216,7 +4936,6 @@ async def analytics(
             Order.created_at >= start_sql,
             Order.created_at <= end_sql,
         )
-        .execution_options(yield_per=200)
     )
     cur_orders_result = await db.execute(cur_stmt)
 
@@ -4228,7 +4947,9 @@ async def analytics(
     item_stats: dict[str, dict] = defaultdict(
         lambda: {"quantity": 0, "revenue": 0.0, "ai_profit": 0.0}
     )
+    current_orders: list[Order] = []
     for o in cur_orders_result.scalars():
+        current_orders.append(o)
         dk = _order_day_key_utc(o.created_at)
         if dk:
             daily[dk]["revenue"] += float(o.total_price or 0)
@@ -4446,7 +5167,6 @@ async def analytics(
             Order.created_at >= prev_start_sql,
             Order.created_at < prev_end_sql,
         )
-        .execution_options(yield_per=500),
     )
     for (ij,) in prev_orders_result.all():
         items_json = ij if isinstance(ij, dict) else None

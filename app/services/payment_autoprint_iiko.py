@@ -11,14 +11,37 @@ import logging
 from datetime import datetime, timezone
 
 from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Order, OrderStatus, Organization, User
 from app.db.session import async_session_factory, redis_client
 from app.services.dialog_mgr import clear_pending_order
 from app.services.events import publish_event
 from app.services.intent_router import confirm_order
+from app.services.tenant_scope import orders_tenant_clause
 
 logger = logging.getLogger(__name__)
+
+
+async def _resolve_order_restaurant_org(
+    db: AsyncSession,
+    order: Order,
+) -> tuple[Organization | None, int | None]:
+    """
+    Организация ресторана для заказа: прямой organization_id или legacy (NULL) через user.
+    """
+    if order.organization_id is not None:
+        oid = int(order.organization_id)
+        org = await db.get(Organization, oid)
+        return org, oid
+    if order.user_id is None:
+        return None, None
+    u_oid = await db.scalar(select(User.organization_id).where(User.id == order.user_id))
+    if u_oid is None:
+        return None, None
+    oid = int(u_oid)
+    org = await db.get(Organization, oid)
+    return org, oid
 
 
 async def run_auto_send_to_iiko_after_payment(order_id: int) -> None:
@@ -30,8 +53,12 @@ async def run_auto_send_to_iiko_after_payment(order_id: int) -> None:
         order = await db.get(Order, order_id)
         if order is None:
             return
-        org = await db.get(Organization, order.organization_id)
-        if org is None or not bool(getattr(org, "auto_send_to_iiko_after_payment", False)):
+        org, org_id = await _resolve_order_restaurant_org(db, order)
+        if (
+            org is None
+            or org_id is None
+            or not bool(getattr(org, "auto_send_to_iiko_after_payment", False))
+        ):
             return
         if (order.prepayment_status or "").strip().lower() != "paid":
             return
@@ -51,8 +78,6 @@ async def run_auto_send_to_iiko_after_payment(order_id: int) -> None:
         if split_warn:
             logger.warning("auto_iiko skipped order=%s: %s", order_id, split_warn)
             return
-
-        org_id = int(order.organization_id or 0)
 
         if cur == OrderStatus.DRAFT.value:
             o2 = await confirm_order(db, order_id)
@@ -88,7 +113,7 @@ async def run_auto_send_to_iiko_after_payment(order_id: int) -> None:
                 update(Order)
                 .where(
                     Order.id == order.id,
-                    Order.organization_id == org_id,
+                    orders_tenant_clause(org_id),
                     Order.status == OrderStatus.CONFIRMED.value,
                     Order.row_version == expected,
                 )

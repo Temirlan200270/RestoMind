@@ -99,6 +99,9 @@
                                 <span x-show="item.id === 'chats' && unreadChats > 0"
                                     class="absolute right-3 top-2 min-w-[1.25rem] h-5 px-1 bg-red-500 rounded-full text-[10px] font-bold flex items-center justify-center"
                                     x-text="unreadChats"></span>
+                                <span x-show="item.id === 'incidents' && incidentsTotalOpen() > 0"
+                                    class="absolute right-3 top-2 min-w-[1.25rem] h-5 px-1 bg-amber-500 rounded-full text-[10px] font-bold flex items-center justify-center"
+                                    x-text="incidentsTotalOpen()"></span>
                                 <span x-show="item.id === 'orders' && ordersIikoErrorCount() > 0"
                                     class="absolute right-3 top-2 min-w-[1.25rem] h-5 px-1 bg-rose-600 rounded-full text-[10px] font-bold flex items-center justify-center"
                                     x-text="ordersIikoErrorCount()"></span>
@@ -141,6 +144,7 @@
                                 <div class="text-xs font-semibold text-gray-700 truncate" x-text="orgProfile?.name || '—'"></div>
                             </div>
                             <div class="text-[10px] text-gray-400 tabular-nums shrink-0" x-show="orgProfile?.organization_id" x-text="'ID ' + orgProfile.organization_id"></div>
+                            <span x-show="isDemoSession" x-cloak class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-100 text-violet-800 border border-violet-200 shrink-0">Демо</span>
                         </div>
                         <div class="flex items-center gap-2 min-w-0">
                             <h1 class="text-lg sm:text-xl md:text-2xl font-bold text-gray-900 truncate flex-1 min-w-0"
@@ -149,7 +153,10 @@
                                     : settingsTab === 'connections' ? 'Подключения'
                                     : settingsTab === 'smart_sales' ? 'Умные продажи'
                                     : settingsTab === 'team' ? 'Команда'
-                                    : 'Технический доступ')
+                                    : settingsTab === 'health' ? 'Состояние'
+                                    : settingsTab === 'technical' ? 'Технический доступ'
+                                    : settingsTab === 'bot_test' ? 'Тест бота'
+                                    : 'Настройки')
                                   : (navItems.find(i => i.id === currentTab)?.label)"></h1>
                             <button type="button" @click="openGlobalSearch()"
                                 class="md:hidden shrink-0 min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 hover:bg-gray-50"
@@ -163,25 +170,35 @@
                                 : settingsTab === 'connections' ? 'iiko, WhatsApp и синхронизация'
                                 : settingsTab === 'smart_sales' ? 'Допродажи и сценарии продаж'
                                 : settingsTab === 'team' ? 'Доступ сотрудников к панели управления'
-                                : 'Экспорт, сбросы и диагностика')
+                                : settingsTab === 'health' ? 'БД, Redis, миграции и ключевые интеграции'
+                                : settingsTab === 'technical' ? 'Экспорт, сбросы и диагностика'
+                                : settingsTab === 'bot_test' ? 'Песочница для промптов'
+                                : '')
                               : (navItems.find(i => i.id === currentTab)?.desc)"></p>
                         <div x-show="authenticated && (setupStatus.score ?? 100) < 100" x-cloak class="w-full max-w-md mt-2">
                             <div class="rounded-2xl p-3 border transition"
                                 :class="(setupStatus.score ?? 0) <= 30
                                   ? 'border-amber-200 bg-amber-50/70 shadow-sm'
                                   : 'border-gray-200 bg-white/60'">
-                                <div class="flex items-center justify-between gap-3 text-[10px] mb-1"
+                                <div class="flex flex-wrap items-center justify-between gap-2 text-[10px]"
                                     :class="(setupStatus.score ?? 0) <= 30 ? 'text-amber-900' : 'text-gray-500'">
-                                    <span class="font-semibold tracking-wide">Готовность филиала</span>
-                                    <span class="tabular-nums font-bold" x-text="(setupStatus.score ?? 0) + '%'"></span>
+                                    <span class="font-semibold tracking-wide shrink-0 tabular-nums"
+                                        x-text="'Готовность филиала — ' + (setupStatus.score ?? 0) + '%'"></span>
+                                    <button type="button"
+                                        x-show="(setupStatus.score ?? 0) > 30"
+                                        class="ml-auto shrink-0 px-2 py-1 rounded-lg border text-[10px] font-semibold min-h-[28px]"
+                                        :class="(setupStatus.score ?? 0) <= 30 ? 'border-amber-300 bg-white/80 text-amber-900' : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'"
+                                        @click="setupProgressExpanded = !setupProgressExpanded">
+                                        <span x-text="setupProgressExpanded ? 'Свернуть' : 'Развернуть'"></span>
+                                    </button>
                                 </div>
-                                <div class="h-2 rounded-full overflow-hidden"
-                                    :class="(setupStatus.score ?? 0) <= 30 ? 'bg-amber-200/70' : 'bg-gray-200'">
-                                    <div class="h-full transition-all duration-700"
-                                        :class="(setupStatus.score ?? 0) <= 30 ? 'bg-amber-500' : 'bg-emerald-500'"
-                                        :style="'width:' + (setupStatus.score || 0) + '%'"></div>
-                                </div>
-                                <div class="mt-2 space-y-2">
+                                <div x-show="(setupStatus.score ?? 0) <= 30 || setupProgressExpanded" x-cloak class="mt-2 space-y-2">
+                                    <div class="h-2 rounded-full overflow-hidden"
+                                        :class="(setupStatus.score ?? 0) <= 30 ? 'bg-amber-200/70' : 'bg-gray-200'">
+                                        <div class="h-full transition-all duration-700"
+                                            :class="(setupStatus.score ?? 0) <= 30 ? 'bg-amber-500' : 'bg-emerald-500'"
+                                            :style="'width:' + (setupStatus.score || 0) + '%'"></div>
+                                    </div>
                                     <p class="text-[10px] leading-snug"
                                         :class="(setupStatus.score ?? 0) <= 30 ? 'text-amber-800' : 'text-gray-500'">
                                         <span x-show="(setupStatus.score ?? 0) === 0" x-cloak>100% — когда закрыты все 6 пунктов ниже (каждый даёт ~17%).</span>
@@ -226,26 +243,9 @@
                         <span>Поиск…</span>
                         <kbd class="text-[10px] px-1.5 py-0.5 rounded-md bg-gray-100 text-gray-500 font-mono border border-gray-200/80">Ctrl K</kbd>
                     </button>
-                    <button type="button" @click="seedDemoData()" :disabled="demoActionLoading || hasDemoData"
-                        class="min-h-[44px] shrink-0 px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-medium border transition shadow-sm disabled:opacity-40 disabled:cursor-not-allowed bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100">
-                        Демо-данные
-                    </button>
-                    <button type="button" x-show="hasDemoData" @click="openDemoDeleteModal()"
-                        class="min-h-[44px] shrink-0 px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-medium border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 transition shadow-sm flex items-center gap-2">
-                        <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-                        Удалить демо
-                    </button>
                     <button type="button" @click="logoutAdmin()"
                         class="min-h-[44px] shrink-0 px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-medium border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 transition shadow-sm">
                         Выйти
-                    </button>
-                    <button type="button" @click="syncStopListOnly()"
-                        :disabled="stopListSyncLoading || integrationSyncLoading || !integrationStatus.iiko_configured"
-                        :title="integrationStatus.iiko_configured ? 'Синхронизировать стоп-лист из iiko' : 'Сначала подключите iiko в Настройках → Подключения'"
-                        class="min-h-[44px] shrink-0 flex items-center gap-2 px-3 sm:px-4 py-2 rounded-xl border text-xs sm:text-sm font-semibold transition shadow-sm disabled:opacity-45 disabled:cursor-not-allowed bg-orange-50 text-orange-900 border-orange-200 hover:bg-orange-100">
-                        <span :class="stopListSyncLoading ? 'animate-spin' : ''">&#x21bb;</span>
-                        <span class="hidden sm:inline">Стоп-лист iiko</span>
-                        <span class="sm:hidden">Стоп</span>
                     </button>
                 </div>
             </div>
@@ -296,6 +296,37 @@
                             Подробная аналитика
                         </button>
                     </div>
+                </div>
+
+                <!-- Блок «Сейчас»: быстрые переходы по инцидентам (GET /incidents?mode=summary) -->
+                <div class="rounded-2xl border border-slate-200/90 bg-white p-4 sm:p-5 shadow-sm ring-1 ring-slate-900/5">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                            <h3 class="text-sm font-bold text-slate-900">Сейчас</h3>
+                            <p class="text-xs text-slate-500 mt-0.5">Что требует внимания — переходите в раздел одним нажатием.</p>
+                        </div>
+                        <div class="flex items-center gap-2 text-xs">
+                            <span x-show="attentionSummaryLoading" class="text-slate-400">Обновляем…</span>
+                            <span x-show="!attentionSummaryLoading && attentionSummary" x-cloak class="font-semibold tabular-nums text-slate-700">
+                                Открыто: <span x-text="attentionSummary.total_open ?? 0"></span>
+                            </span>
+                        </div>
+                    </div>
+                    <div x-show="attentionSummaryLoading && !attentionSummary" class="mt-4 h-14 rounded-xl bg-slate-100 animate-pulse"></div>
+                    <div class="mt-4 flex flex-wrap gap-2" x-show="Array.isArray(attentionSummary?.hero_actions) && attentionSummary.hero_actions.length" x-cloak>
+                        <template x-for="a in (attentionSummary.hero_actions || [])" :key="a.id || a.label">
+                            <button type="button"
+                                @click="heroAttentionGo(a.target)"
+                                class="min-h-[40px] px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold border transition shadow-sm"
+                                :class="heroActionButtonClass(a.severity)">
+                                <span x-text="a.label"></span>
+                            </button>
+                        </template>
+                    </div>
+                    <p x-show="!attentionSummaryLoading && attentionSummary && !(attentionSummary.hero_actions || []).length"
+                        x-cloak class="mt-4 text-sm text-slate-600">
+                        Нет открытых задач по мониторингу — можно продолжать работу.
+                    </p>
                 </div>
 
                 <!-- ROI hero + достижения недели (компонент ui_card — единый стиль с «Упаковкой») -->
@@ -523,6 +554,107 @@
                             </button>
                         </div>
                     </div>
+                </div>
+            </div>
+
+            <!-- ========== ТРЕБУЕТ ВНИМАНИЯ ========== -->
+            <div x-show="currentTab === 'incidents'" x-cloak class="fade-in space-y-5">
+                <div class="flex flex-wrap items-end justify-between gap-4">
+                    <div class="min-w-0">
+                        <h2 class="text-xl sm:text-2xl font-extrabold tracking-tight text-slate-900">Требует внимания</h2>
+                        <p class="text-sm text-slate-500 mt-0.5">Единая очередь ошибок по заказам, оплатам, WhatsApp и интеграциям.</p>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <span x-show="incidents.generated_at" x-cloak class="text-xs text-slate-400">
+                            <span>Обновлено </span><span x-text="fmt.time(incidents.generated_at)"></span>
+                        </span>
+                        <button type="button" @click="loadIncidents()" :disabled="incidentsLoading"
+                            class="min-h-[40px] px-3.5 py-2 rounded-xl text-sm font-semibold bg-white text-slate-800 ring-1 ring-slate-900/10 hover:bg-slate-50 disabled:opacity-50 transition">
+                            <span x-show="!incidentsLoading">Обновить</span>
+                            <span x-show="incidentsLoading" x-cloak>Обновляем…</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                    <div class="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-900/5">
+                        <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Всего открыто</div>
+                        <div class="mt-2 text-2xl font-extrabold tabular-nums" :class="incidentsTotalOpen() > 0 ? 'text-amber-600' : 'text-emerald-600'" x-text="incidentsTotalOpen()"></div>
+                    </div>
+                    <div class="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-900/5">
+                        <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Критично</div>
+                        <div class="mt-2 text-2xl font-extrabold tabular-nums text-red-600" x-text="incidentSummaryCount('critical')"></div>
+                    </div>
+                    <div class="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-900/5">
+                        <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Внимание</div>
+                        <div class="mt-2 text-2xl font-extrabold tabular-nums text-amber-600" x-text="incidentSummaryCount('warning')"></div>
+                    </div>
+                    <div class="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-900/5">
+                        <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Super Admin</div>
+                        <div class="mt-2 text-2xl font-extrabold tabular-nums" :class="isSuperadmin ? 'text-slate-900' : 'text-slate-400'" x-text="isSuperadmin ? (incidents.groups || []).filter(g => g.id === 'platform_risks').reduce((n, g) => n + (Number(g.count) || 0), 0) : (incidents.restricted_count || 0)"></div>
+                    </div>
+                </div>
+
+                <div x-show="incidentsLoading && !incidentsLoadedOnce" class="grid gap-3">
+                    <div class="h-24 rounded-2xl bg-slate-100 animate-pulse"></div>
+                    <div class="h-24 rounded-2xl bg-slate-100 animate-pulse"></div>
+                </div>
+
+                <div x-show="!incidentsLoading && incidentsLoadedOnce && incidentsTotalOpen() === 0" x-cloak
+                    class="rounded-2xl border border-emerald-200 bg-emerald-50/80 px-5 py-6 text-emerald-900">
+                    <div class="font-bold">Открытых инцидентов нет</div>
+                    <div class="text-sm text-emerald-800 mt-1">Заказы, доставки сообщений, оплаты и интеграции сейчас без явных ошибок.</div>
+                </div>
+
+                <div x-show="!isSuperadmin && (incidents.restricted_count || 0) > 0" x-cloak
+                    class="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+                    <span class="font-semibold text-slate-900">Часть технических рисков скрыта.</span>
+                    Доступ к опасным настройкам есть только у Super Admin.
+                </div>
+
+                <div class="space-y-4" x-show="Array.isArray(incidents.groups) && incidents.groups.length" x-cloak>
+                    <template x-for="group in incidents.groups" :key="group.id">
+                        <section class="rounded-2xl bg-white shadow-sm ring-1 ring-slate-900/5 overflow-hidden">
+                            <div class="p-4 sm:p-5 border-b border-slate-100">
+                                <div class="flex flex-wrap items-start justify-between gap-3">
+                                    <div class="min-w-0">
+                                        <div class="flex flex-wrap items-center gap-2">
+                                            <span class="h-2.5 w-2.5 rounded-full shrink-0" :class="incidentDotClass(group.severity)"></span>
+                                            <h3 class="text-base font-bold text-slate-900" x-text="group.title"></h3>
+                                            <span class="text-xs font-bold px-2 py-1 rounded-full border"
+                                                :class="incidentSeverityClass(group.severity)"
+                                                x-text="incidentSeverityLabel(group.severity)"></span>
+                                            <span class="text-xs font-bold px-2 py-1 rounded-full bg-slate-100 text-slate-700 tabular-nums" x-text="group.count"></span>
+                                        </div>
+                                        <p class="text-sm text-slate-500 mt-1" x-text="group.description || ''"></p>
+                                    </div>
+                                    <button type="button" x-show="group.action && group.action.tab" x-cloak
+                                        @click="incidentGo(group.action)"
+                                        class="min-h-[40px] px-3.5 py-2 rounded-xl text-sm font-semibold bg-slate-900 text-white hover:bg-slate-800 transition"
+                                        x-text="group.action.label || 'Открыть'"></button>
+                                </div>
+                            </div>
+                            <div class="divide-y divide-slate-100">
+                                <template x-for="item in incidentGroupPreviewItems(group)" :key="item.id">
+                                    <button type="button" @click="incidentGo(item.target || group.action)"
+                                        class="w-full text-left px-4 sm:px-5 py-3 hover:bg-slate-50 transition">
+                                        <div class="flex flex-wrap items-start justify-between gap-3">
+                                            <div class="min-w-0 flex-1">
+                                                <div class="font-semibold text-slate-900 truncate" x-text="item.title || ''"></div>
+                                                <div class="text-sm text-slate-500 truncate" x-text="item.subtitle || ''"></div>
+                                                <div class="text-xs text-slate-600 mt-1 line-clamp-2" x-text="item.detail || ''"></div>
+                                                <div class="text-[11px] text-slate-400 mt-1" x-show="incidentMetaText(item.meta)" x-text="incidentMetaText(item.meta)"></div>
+                                            </div>
+                                            <div class="text-[11px] text-slate-400 tabular-nums shrink-0" x-show="item.created_at" x-text="fmt.date(item.created_at) + ' ' + fmt.time(item.created_at)"></div>
+                                        </div>
+                                    </button>
+                                </template>
+                            </div>
+                            <div class="px-4 sm:px-5 py-3 bg-slate-50 text-xs text-slate-500" x-show="Number(group.count || 0) > incidentGroupPreviewItems(group).length">
+                                Показаны последние <span x-text="incidentGroupPreviewItems(group).length"></span> из <span x-text="group.count"></span>.
+                            </div>
+                        </section>
+                    </template>
                 </div>
             </div>
 
@@ -1655,7 +1787,7 @@
                                     class="text-sm font-semibold px-4 py-2.5 rounded-xl bg-brand-600 text-white hover:bg-brand-700 shadow-sm shadow-brand-600/20 transition">
                                     + Добавить позицию
                                 </button>
-                                <button type="button" x-show="menuItems.length > 0" :disabled="menuClearLoading"
+                                <button type="button" x-show="isSuperadmin && menuItems.length > 0" :disabled="menuClearLoading"
                                     @click="clearAllMenuFromDb()"
                                     class="text-sm font-semibold px-4 py-2.5 rounded-xl border border-red-200 bg-white text-red-700 hover:bg-red-50 shadow-sm transition disabled:opacity-50">
                                     <span x-show="!menuClearLoading">Очистить всё меню</span>
@@ -2804,15 +2936,89 @@
                 </div>
             </div>
 
+            <!-- ========== НАСТРОЙКИ: Состояние (readiness) ========== -->
+            <div x-show="currentTab === 'settings' && settingsTab === 'health'" x-cloak class="fade-in max-w-3xl space-y-6 pb-16">
+                {{ settings_tabs() }}
+                <div class="rounded-2xl border border-slate-200 bg-white shadow-sm p-5 sm:p-6 space-y-4">
+                    <div class="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                            <h3 class="text-base font-bold text-slate-900">Проверки окружения</h3>
+                            <p class="text-xs text-slate-500 mt-0.5">БД, Redis, миграции и ключевые интеграции — без отображения секретов.</p>
+                        </div>
+                        <button type="button" @click="loadReadiness()" :disabled="readinessLoading"
+                            class="text-xs font-semibold px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 min-h-[40px] shrink-0">
+                            <span x-show="!readinessLoading">Проверить снова</span>
+                            <span x-show="readinessLoading" x-cloak>Запрос…</span>
+                        </button>
+                    </div>
+                    <div x-show="readinessLoading && !readinessPayload" class="h-24 rounded-xl bg-slate-100 animate-pulse"></div>
+                    <ul x-show="readinessPayload?.checks?.length" x-cloak class="space-y-2">
+                        <template x-for="c in (readinessPayload.checks || [])" :key="c.id">
+                            <li class="flex gap-3 rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-2.5 text-sm">
+                                <span class="shrink-0 mt-0.5 text-lg leading-none" aria-hidden="true"
+                                    x-text="c.ok ? '✓' : '⚠'"></span>
+                                <div class="min-w-0 flex-1">
+                                    <div class="font-semibold text-slate-900" x-text="c.label"></div>
+                                    <div class="text-xs text-slate-600 mt-0.5 leading-snug break-words" x-text="c.detail"></div>
+                                </div>
+                            </li>
+                        </template>
+                    </ul>
+                    <div class="rounded-xl border border-slate-100 bg-white px-3 py-3 space-y-2">
+                        <div class="text-xs font-bold uppercase tracking-wide text-slate-500">Ссылки для интеграций</div>
+                        <div class="flex flex-wrap gap-2">
+                            <button type="button" @click="copyReadinessLink('payment_webhook')"
+                                class="text-xs font-semibold px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 min-h-[40px]">
+                                Копировать URL webhook оплаты
+                            </button>
+                            <button type="button" @click="copyReadinessLink('whatsapp')"
+                                class="text-xs font-semibold px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 min-h-[40px]">
+                                Копировать URL WhatsApp
+                            </button>
+                            <button type="button" @click="copyReadinessLink('public_base')"
+                                class="text-xs font-semibold px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 min-h-[40px]">
+                                Копировать PUBLIC_BASE_URL
+                            </button>
+                        </div>
+                        <p class="text-[11px] text-slate-500 font-mono break-all" x-show="readinessPayload?.links?.payment_webhook_url"
+                            x-text="'Оплата: ' + (readinessPayload.links.payment_webhook_url || '')"></p>
+                    </div>
+                    <p class="text-[11px] text-slate-400" x-show="readinessPayload?.generated_at" x-text="'Проверено: ' + (readinessPayload.generated_at || '')"></p>
+                </div>
+            </div>
+
             <!-- ========== НАСТРОЙКИ ========== -->
             <div x-show="currentTab === 'settings' && settingsTab === 'technical'" x-cloak class="fade-in max-w-3xl space-y-6 pb-16">
                 {{ settings_tabs() }}
-                <div class="rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-950">
+                <div x-show="!isSuperadmin" x-cloak class="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+                    <strong class="font-semibold text-slate-900">Технические действия ограничены.</strong>
+                    Экспорт и статус окружения доступны, а сбросы, очистки и массовые удаления видит только Super Admin.
+                </div>
+                <div x-show="isSuperadmin" x-cloak class="rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-950">
                     <strong class="font-semibold">Опасная зона.</strong> Действия необратимы. Клиентская база (профили гостей) при этом не удаляется.
                     <details class="mt-2 text-xs text-amber-900/90">
                         <summary class="cursor-pointer font-semibold text-amber-800">Для разработчика</summary>
                         <span class="font-mono">users</span> — таблица клиентов в БД; сбросы не трогают её и отдельные удаления заказов тоже.
                     </details>
+                </div>
+
+                <!-- Демо-данные (перенесено из шапки) -->
+                <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-3">
+                    <h3 class="text-base font-bold text-gray-900">Демо-данные</h3>
+                    <p class="text-sm text-gray-600">Заполните филиал примерами заказов и позиций меню для презентации. Удаление демо доступно, если данные уже созданы.</p>
+                    <p x-show="isDemoSession" x-cloak class="text-xs text-violet-700 font-medium">Демо-сессия: мутации отключены на сервере — кнопки недоступны.</p>
+                    <div class="flex flex-wrap gap-2">
+                        <button type="button" @click="seedDemoData()" :disabled="demoActionLoading || hasDemoData || isDemoSession"
+                            class="min-h-[44px] shrink-0 px-4 py-2 rounded-xl text-sm font-medium border transition shadow-sm disabled:opacity-40 disabled:cursor-not-allowed bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100">
+                            Демо-данные
+                        </button>
+                        <button type="button" x-show="hasDemoData" @click="openDemoDeleteModal()"
+                            :disabled="isDemoSession"
+                            class="min-h-[44px] shrink-0 px-4 py-2 rounded-xl text-sm font-medium border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 transition shadow-sm disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2">
+                            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                            Удалить демо
+                        </button>
+                    </div>
                 </div>
 
                 <!-- Окружение (read-only) -->
@@ -2869,7 +3075,7 @@
                 </div>
 
                 <!-- Сброс Redis по телефону -->
-                <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-3">
+                <div x-show="isSuperadmin" x-cloak class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-3">
                     <h3 class="text-base font-bold text-gray-900">Сброс памяти бота по номеру</h3>
                     <p class="text-sm text-gray-600">Очистить «память» диалога для клиента: бот снова не помнит черновик и контекст, как при первом сообщении. Записи в базе не меняются.</p>
                     <div class="flex flex-col sm:flex-row gap-2 sm:items-center">
@@ -2900,7 +3106,7 @@
                 </div>
 
                 <!-- Ретеншн chat_logs -->
-                <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-3">
+                <div x-show="isSuperadmin" x-cloak class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-3">
                     <h3 class="text-base font-bold text-gray-900">Хранение истории переписки</h3>
                     <p class="text-sm text-gray-600">Фоновая задача удаляет старые сообщения из архива чата по заданным в сервере срокам. При сроке «0 дней» очистка выключена.</p>
                     <details class="text-xs text-gray-500">
@@ -2914,7 +3120,7 @@
                     </button>
                 </div>
 
-                <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-4">
+                <div x-show="isSuperadmin" x-cloak class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-4">
                     <h3 class="text-base font-bold text-gray-900">Операционные данные</h3>
                     <p class="text-sm text-gray-600">Заказы, брони, история чатов в БД, эскалации и журнал синхронизаций. Меню и список клиентов сохраняются.</p>
                     <button type="button" @click="settingsPurgeModalOpen = true; settingsPurgePhrase = ''; settingsPurgeAck = false; settingsPurgeError = ''"
@@ -2923,7 +3129,7 @@
                     </button>
                 </div>
 
-                <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-4">
+                <div x-show="isSuperadmin" x-cloak class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-4">
                     <h3 class="text-base font-bold text-gray-900">Меню и «нет в наличии»</h3>
                     <p class="text-sm text-gray-600">Стоп-лист из iiko отражается в галочке «в наличии» у каждой позиции в вашем каталоге.</p>
                     <div class="flex flex-col sm:flex-row flex-wrap gap-3">
@@ -2940,7 +3146,7 @@
                     </div>
                 </div>
 
-                <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-4">
+                <div x-show="isSuperadmin" x-cloak class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-4">
                     <div class="flex flex-wrap items-center justify-between gap-3">
                         <h3 class="text-base font-bold text-gray-900">Удаление заказов</h3>
                         <button type="button" @click="loadSettingsOrders()" :disabled="settingsOrdersLoading"
@@ -3004,7 +3210,7 @@
                     </div>
                 </div>
 
-                <details class="hint-details rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
+                <details x-show="isSuperadmin" x-cloak class="hint-details rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
                     <summary class="cursor-pointer text-sm font-semibold text-gray-800 select-none flex items-center gap-2">
                         <svg class="w-4 h-4 text-gray-500 shrink-0 transition-transform duration-200 hint-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
                         Идеи на будущее
@@ -3433,6 +3639,22 @@
                         <div class="text-xs text-gray-500 mb-0.5">Клиент (WhatsApp)</div>
                         <div class="font-mono text-gray-900" x-text="selectedOrder?.user_phone || '—'"></div>
                         <div class="text-gray-600 mt-1" x-show="selectedOrder?.user_name" x-text="selectedOrder?.user_name"></div>
+                    </div>
+                    <div class="mb-4">
+                        <div class="text-xs font-bold uppercase tracking-wide text-gray-500 mb-2">Хронология</div>
+                        <div x-show="orderTimelineLoading" class="text-sm text-gray-400 py-2">Загрузка…</div>
+                        <div x-show="!orderTimelineLoading && orderTimeline.length" x-cloak class="relative pl-4 border-l-2 border-gray-200 space-y-4">
+                            <template x-for="(ev, tidx) in orderTimeline" :key="'otl-' + tidx + '-' + (ev.kind || '') + '-' + (ev.at || '')">
+                                <div class="relative -ml-px">
+                                    <span class="absolute -left-[21px] top-1.5 h-2.5 w-2.5 rounded-full ring-2 ring-white bg-gray-400" aria-hidden="true"></span>
+                                    <div class="text-[11px] text-gray-400 tabular-nums"
+                                        x-text="ev.at ? (fmt.date(ev.at) + ', ' + fmt.time(ev.at)) : '—'"></div>
+                                    <div class="text-sm font-semibold text-gray-900 mt-0.5" x-text="ev.title"></div>
+                                    <div class="text-xs text-gray-600 mt-1 whitespace-pre-wrap break-words" x-show="ev.detail" x-text="ev.detail"></div>
+                                </div>
+                            </template>
+                        </div>
+                        <p x-show="!orderTimelineLoading && !orderTimeline.length" x-cloak class="text-sm text-gray-400">Нет событий для отображения.</p>
                     </div>
                     <div x-show="selectedOrder?.iiko_last_error" class="mb-4 flex gap-3 rounded-xl border-2 border-red-400 bg-gradient-to-r from-red-50 to-rose-50 px-4 py-3 shadow-sm" role="alert">
                         <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-600 text-white text-lg font-black shadow-md" aria-hidden="true">!</div>

@@ -26,6 +26,12 @@
       Команда
     </button>
     <button type="button"
+      @click="setSettingsTab('health')"
+      :class="settingsTab === 'health' ? 'bg-slate-800 text-white shadow-sm' : 'bg-white text-slate-700 hover:bg-slate-50 border border-slate-200'"
+      class="px-4 py-2 rounded-xl text-sm font-semibold transition min-h-[44px]">
+      Состояние
+    </button>
+    <button type="button"
       @click="setSettingsTab('technical')"
       :class="settingsTab === 'technical' ? 'bg-slate-900 text-white shadow-sm' : 'bg-white text-slate-700 hover:bg-slate-50 border border-slate-200'"
       class="px-4 py-2 rounded-xl text-sm font-semibold transition min-h-[44px]">

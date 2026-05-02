@@ -9,6 +9,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 import app.core.config as app_config
 import app.db.session as db_session_module
@@ -19,6 +20,20 @@ from app.main import app
 
 PW_HOOK_BEARER = "hook-secret"
 PW_HOOK_HMAC = "pw-test-hmac"
+
+
+def _memory_sqlite_engine():
+    """
+    Одна in-memory БД на все соединения пула.
+
+    Иначе sqlite :memory: без StaticPool даёт отдельную пустую БД на каждое соединение —
+    падают BackgroundTasks (run_auto_send_to_iiko_after_payment и т.д.) с no such table: orders.
+    """
+    return create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
 
 
 def _payment_hmac_hex(secret: str, raw: bytes) -> str:
@@ -56,7 +71,7 @@ async def pw_client(monkeypatch):
     monkeypatch.setattr(app_config.settings, "payment_webhook_bearer_token", PW_HOOK_BEARER)
     monkeypatch.setattr(app_config.settings, "payment_webhook_hmac_secret", PW_HOOK_HMAC)
 
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    engine = _memory_sqlite_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     session_factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
@@ -105,7 +120,7 @@ async def _seed_order(session_factory: async_sessionmaker[AsyncSession]) -> tupl
 @pytest.mark.asyncio
 async def test_payment_webhook_not_configured_returns_503(monkeypatch):
     monkeypatch.setattr(app_config.settings, "payment_webhook_bearer_token", "")
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    engine = _memory_sqlite_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     session_factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
@@ -216,6 +231,17 @@ async def test_payment_webhook_wrong_org_forbidden(pw_client):
         },
     )
     assert r.status_code == 403
+    async with sf() as db:
+        ev = (
+            await db.execute(
+                select(PaymentEvent).where(
+                    PaymentEvent.order_id == order_id,
+                    PaymentEvent.event_type == "webhook_failed",
+                    PaymentEvent.note.like("%org_mismatch%"),
+                ),
+            )
+        ).scalars().first()
+        assert ev is not None
 
 
 @pytest.mark.asyncio
@@ -279,7 +305,7 @@ async def test_payment_webhook_hmac_only_success(monkeypatch):
     monkeypatch.setattr(app_config.settings, "payment_webhook_bearer_token", "")
     monkeypatch.setattr(app_config.settings, "payment_webhook_hmac_secret", "hm-shared")
 
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    engine = _memory_sqlite_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     session_factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
@@ -345,7 +371,7 @@ async def test_payment_webhook_hmac_invalid_when_configured(monkeypatch):
     monkeypatch.setattr(app_config.settings, "payment_webhook_bearer_token", "")
     monkeypatch.setattr(app_config.settings, "payment_webhook_hmac_secret", "hm-shared")
 
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    engine = _memory_sqlite_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     session_factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
@@ -423,7 +449,7 @@ async def test_payment_webhook_hmac_required_when_prod_like(monkeypatch):
     monkeypatch.setattr(app_config.settings, "payment_webhook_hmac_secret", "")
     monkeypatch.setattr(app_config.settings, "app_environment", "production")
 
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    engine = _memory_sqlite_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     session_factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)

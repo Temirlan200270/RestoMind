@@ -105,6 +105,7 @@ async def _run_payment_webhook(
     except LookupError:
         raise HTTPException(status_code=404, detail="Order not found") from None
     except PermissionError:
+        await db.commit()
         raise HTTPException(status_code=403, detail="organization_id does not match order") from None
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None

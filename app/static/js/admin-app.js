@@ -108,7 +108,7 @@ function adminParseLocationHash() {
 
 /** Допустимые верхнеуровневые вкладки (id из navItems). */
 const ADMIN_TOP_TAB_IDS = new Set([
-    'dashboard', 'analytics', 'orders', 'operator_queue', 'bookings', 'chats', 'menu', 'stoplist', 'settings',
+    'dashboard', 'analytics', 'incidents', 'orders', 'operator_queue', 'bookings', 'chats', 'menu', 'stoplist', 'settings',
 ]);
 
 /** Начальное состояние GET /integrations/status — чтобы Alpine не падал на undefined до первой загрузки. */
@@ -172,6 +172,7 @@ function adminMixinState() {
         wsToken: '',
         /** Роль staff из API: admin | operator (для стартовой вкладки). */
         staffRole: '',
+        isSuperadmin: false,
         _adminHashWatchInstalled: false,
         _applyingHashFromBrowser: false,
         _hashPushTimer: null,
@@ -293,6 +294,8 @@ function adminMixinState() {
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25A2.25 2.25 0 018.25 10.5H6A2.25 2.25 0 013.75 8.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z"/></svg>' },
             { id: 'analytics', section: 'overview', label: 'Аналитика', desc: 'Выручка, средний чек, динамика продаж',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/></svg>' },
+            { id: 'incidents', section: 'operations', label: 'Требует внимания', desc: 'iiko, WhatsApp, оплаты и деградация сервисов',
+              icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m0 3.75h.007M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>' },
             { id: 'orders', section: 'operations', label: 'Заказы', desc: 'По этапам (черновик → подтверждён → кухня) или общий список',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z"/></svg>' },
             { id: 'operator_queue', section: 'operations', label: 'Помощь клиентам', desc: 'Обращения, где нужен человек (цель — «пусто»)',
@@ -393,6 +396,29 @@ function adminMixinState() {
         failedTasksFilter: 'open',
         failedTasksPhone: '',
         failedTasksLoading: false,
+        incidents: {
+            groups: [],
+            summary: { critical: 0, warning: 0, info: 0, restricted: 0 },
+            total_open: 0,
+            severity: 'ok',
+            restricted_count: 0,
+            generated_at: null,
+            is_superadmin: false,
+        },
+        incidentsLoading: false,
+        incidentsLoadedOnce: false,
+        /** GET /incidents?mode=summary — блок «Сейчас» на дашборде и счётчик в сайдбаре без тяжёлых групп */
+        attentionSummary: null,
+        attentionSummaryLoading: false,
+        /** Время последнего успешного GET /incidents?mode=summary (кэш ~45 с на дашборде) */
+        attentionSummaryFetchedAt: 0,
+        orderTimeline: [],
+        orderTimelineLoading: false,
+        readinessPayload: null,
+        readinessLoading: false,
+        /** Сессия demo-login — read-only для мутаций на бэке; для UI дизейбла кнопок демо */
+        isDemoSession: false,
+        setupProgressExpanded: false,
         orderRebuildDraftJson: '',
         orderRebuildError: '',
         orderRebuildLoading: false,
@@ -893,6 +919,12 @@ function adminMixinMenuOrdersUi() {
             return String(raw) || fallback || 'Ошибка запроса';
         },
 
+        ensureSuperadminAction() {
+            if (this.isSuperadmin) return true;
+            void this.showUiAlert('Это действие доступно только Super Admin.', 'Недостаточно прав');
+            return false;
+        },
+
         /**
          * Модальное подтверждение или ввод текста. Возвращает { ok, value? }.
          * @param {object} opts
@@ -1057,6 +1089,53 @@ function adminMixinMenuOrdersUi() {
 
         ordersIikoErrorCount() {
             return (this.orders || []).filter((o) => o.iiko_last_error).length;
+        },
+
+        incidentsTotalOpen() {
+            const a = this.attentionSummary;
+            if (a && typeof a.total_open === 'number') return Number(a.total_open);
+            return Number(this.incidents?.total_open || 0);
+        },
+
+        incidentSummaryCount(key) {
+            return Number(this.incidents?.summary?.[key] || 0);
+        },
+
+        incidentSeverityClass(severity) {
+            const s = String(severity || 'info');
+            if (s === 'critical') return 'border-red-200 bg-red-50/80 text-red-900';
+            if (s === 'warning') return 'border-amber-200 bg-amber-50/80 text-amber-950';
+            if (s === 'ok') return 'border-emerald-200 bg-emerald-50/80 text-emerald-900';
+            return 'border-slate-200 bg-slate-50 text-slate-700';
+        },
+
+        incidentDotClass(severity) {
+            const s = String(severity || 'info');
+            if (s === 'critical') return 'bg-red-500';
+            if (s === 'warning') return 'bg-amber-500';
+            if (s === 'ok') return 'bg-emerald-500';
+            return 'bg-slate-400';
+        },
+
+        incidentSeverityLabel(severity) {
+            const s = String(severity || 'info');
+            if (s === 'critical') return 'Критично';
+            if (s === 'warning') return 'Внимание';
+            if (s === 'ok') return 'ОК';
+            return 'Инфо';
+        },
+
+        incidentMetaText(meta) {
+            if (!Array.isArray(meta)) return '';
+            return meta
+                .filter((m) => m && m.value !== null && m.value !== undefined && String(m.value).trim() !== '')
+                .map((m) => `${m.label}: ${m.value}`)
+                .join(' · ');
+        },
+
+        incidentGroupPreviewItems(group) {
+            const items = Array.isArray(group?.items) ? group.items : [];
+            return items.slice(0, 4);
         },
 
         integrationErrorBadge() {
@@ -1310,6 +1389,7 @@ function adminMixinMenuOrdersUi() {
             this.orderCompositionOpen = false;
             this.orderRebuildError = '';
             this.showOrderModal = true;
+            void this.loadOrderTimeline(id);
             this.$nextTick(() => {
                 try {
                     this.initOrderRebuildFromSelected();
@@ -2144,7 +2224,20 @@ function adminMixinAuthKnowledge() {
             this.orgProfileLoading = false;
             this.integrationStatus = defaultIntegrationStatus();
             this.integrationEvents = [];
+            this.incidents = {
+                groups: [],
+                summary: { critical: 0, warning: 0, info: 0, restricted: 0 },
+                total_open: 0,
+                severity: 'ok',
+                restricted_count: 0,
+                generated_at: null,
+                is_superadmin: false,
+            };
+            this.incidentsLoadedOnce = false;
+            this.attentionSummary = null;
+            this.isSuperadmin = false;
             this.hasDemoData = false;
+            this.isDemoSession = false;
             this.menuViewRevision += 1;
         },
 
@@ -2156,7 +2249,9 @@ function adminMixinAuthKnowledge() {
                     this.authenticated = true;
                     this.auth401AlertShown = false;
                     this.wsToken = data.ws_token || '';
+                    this.isDemoSession = !!data.is_demo;
                     this.staffRole = String(data.staff_role || 'admin').toLowerCase();
+                    this.isSuperadmin = !!data.is_superadmin;
                     this._ensureAdminHashListener();
                     const parsed = adminParseLocationHash();
                     if (!parsed.tab) {
@@ -2208,7 +2303,9 @@ function adminMixinAuthKnowledge() {
                 this.authenticated = true;
                 this.wsToken = data.ws_token || '';
                 this.loginPassword = '';
+                this.isDemoSession = false;
                 this.staffRole = String(data.staff_role || 'admin').toLowerCase();
+                this.isSuperadmin = !!data.is_superadmin;
                 this._ensureAdminHashListener();
                 const parsedLogin = adminParseLocationHash();
                 if (!parsedLogin.tab) {
@@ -2249,7 +2346,9 @@ function adminMixinAuthKnowledge() {
                 }
                 this.authenticated = true;
                 this.wsToken = data.ws_token || '';
+                this.isDemoSession = true;
                 this.staffRole = String(data.staff_role || 'operator').toLowerCase();
+                this.isSuperadmin = !!data.is_superadmin;
                 this._ensureAdminHashListener();
                 const parsedLogin = adminParseLocationHash();
                 if (!parsedLogin.tab) {
@@ -2485,6 +2584,18 @@ function adminMixinAuthKnowledge() {
             this._adminHashWatchInstalled = false;
             this.wsChannelReady = false;
             this._clearWsReadyTimer();
+            this.staffRole = '';
+            this.isSuperadmin = false;
+            this.incidentsLoadedOnce = false;
+            this.incidents = {
+                groups: [],
+                summary: { critical: 0, warning: 0, info: 0, restricted: 0 },
+                total_open: 0,
+                severity: 'ok',
+                restricted_count: 0,
+                generated_at: null,
+                is_superadmin: false,
+            };
             this.hasDemoData = false;
             this.auth401AlertShown = false;
             this.orgProfile = {
@@ -2939,6 +3050,9 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                         packaging_rules: Number(r.data.packaging_rules) || 0,
                         knowledge_items: Number(r.data.knowledge_items) || 0,
                     };
+                    const sc = Number(this.setupStatus.score ?? 0);
+                    if (sc >= 60) this.setupProgressExpanded = false;
+                    else if (sc <= 30) this.setupProgressExpanded = true;
                 }
             } catch { /* ignore */ }
         },
@@ -3777,7 +3891,7 @@ function adminMixinLiveChat() {
         },
 
         /** Допустимые под-вкладки «Настройки». */
-        _adminSettingsTabIds: new Set(['restaurant', 'connections', 'smart_sales', 'team', 'technical', 'bot_test']),
+        _adminSettingsTabIds: new Set(['restaurant', 'connections', 'smart_sales', 'team', 'health', 'technical', 'bot_test']),
 
         _pushAdminHash() {
             if (!this.authenticated || this._applyingHashFromBrowser) return;
@@ -4308,10 +4422,13 @@ function adminMixinDataChartsSettings() {
                         this.loadDashStats(),
                         this.loadDashRoiSummary(),
                         this.loadDashActivity(),
+                        this.loadAttentionSummary(),
                         this.loadOrders(),
                     ]);
                 } else if (this.currentTab === 'analytics') {
                     await this.loadAnalytics();
+                } else if (this.currentTab === 'incidents') {
+                    await this.loadIncidents();
                 } else if (this.currentTab === 'orders') {
                     await this.loadOrders();
                 } else if (this.currentTab === 'operator_queue') {
@@ -4329,8 +4446,14 @@ function adminMixinDataChartsSettings() {
                         await this.loadUpsellRules();
                     } else if (this.settingsTab === 'team') {
                         await this.loadTeam();
+                    } else if (this.settingsTab === 'health') {
+                        await this.loadReadiness();
                     } else if (this.settingsTab === 'technical') {
-                        await Promise.all([this.loadSettingsOrders(), this.loadSettingsEnvironment()]);
+                        if (this.isSuperadmin) {
+                            await Promise.all([this.loadSettingsOrders(), this.loadSettingsEnvironment()]);
+                        } else {
+                            await this.loadSettingsEnvironment();
+                        }
                     } else if (this.settingsTab === 'bot_test') {
                         /* тест бота — без тяжёлых запросов */
                     } else {
@@ -4380,7 +4503,7 @@ function adminMixinDataChartsSettings() {
         },
 
         setSettingsTab(tab) {
-            const allowed = new Set(['restaurant', 'connections', 'smart_sales', 'team', 'technical', 'bot_test']);
+            const allowed = new Set(['restaurant', 'connections', 'smart_sales', 'team', 'health', 'technical', 'bot_test']);
             if (!allowed.has(String(tab || ''))) return;
             this.currentTab = 'settings';
             this.settingsTab = String(tab);
@@ -4434,6 +4557,150 @@ function adminMixinDataChartsSettings() {
             } finally {
                 this.dashActivityLoading = false;
             }
+        },
+
+        async loadAttentionSummary(force = false) {
+            const ttlMs = 45000;
+            const now = Date.now();
+            if (
+                !force &&
+                this.attentionSummary &&
+                this.attentionSummaryFetchedAt > 0 &&
+                now - this.attentionSummaryFetchedAt < ttlMs
+            ) {
+                return;
+            }
+            this.attentionSummaryLoading = true;
+            try {
+                const { ok, data } = await this.apiJsonResponse('/api/admin/incidents?mode=summary');
+                if (ok && data) {
+                    this.attentionSummary = data;
+                    this.attentionSummaryFetchedAt = Date.now();
+                    if (typeof data.is_superadmin === 'boolean') this.isSuperadmin = data.is_superadmin;
+                }
+            } catch (e) {
+                console.error('[admin] loadAttentionSummary', e);
+            } finally {
+                this.attentionSummaryLoading = false;
+            }
+        },
+
+        /** Классы кнопок блока «Сейчас» по серьёзности группы инцидентов */
+        heroActionButtonClass(severity) {
+            const s = String(severity || '').toLowerCase();
+            if (s === 'critical') {
+                return 'border-red-300 bg-red-50 text-red-900 hover:bg-red-100 ring-1 ring-red-900/5';
+            }
+            if (s === 'warning') {
+                return 'border-amber-300 bg-amber-50 text-amber-950 hover:bg-amber-100 ring-1 ring-amber-900/5';
+            }
+            return 'border-slate-200 bg-white text-slate-800 hover:bg-slate-50 ring-1 ring-slate-900/5';
+        },
+
+        async loadReadiness() {
+            this.readinessLoading = true;
+            try {
+                const { ok, data } = await this.apiJsonResponse('/api/admin/readiness');
+                if (ok && data) this.readinessPayload = data;
+            } catch (e) {
+                console.error('[admin] loadReadiness', e);
+            } finally {
+                this.readinessLoading = false;
+            }
+        },
+
+        async loadOrderTimeline(orderId) {
+            const id = Number(orderId);
+            if (!Number.isFinite(id) || id < 1) return;
+            this.orderTimelineLoading = true;
+            this.orderTimeline = [];
+            try {
+                const { ok, data } = await this.apiJsonResponse(`/api/admin/orders/${id}/timeline`);
+                if (ok && data && Array.isArray(data.events)) this.orderTimeline = data.events;
+            } catch (e) {
+                console.error('[admin] loadOrderTimeline', e);
+            } finally {
+                this.orderTimelineLoading = false;
+            }
+        },
+
+        heroAttentionGo(target) {
+            this.incidentGo(target);
+        },
+
+        async copyReadinessLink(kind) {
+            const p = this.readinessPayload && this.readinessPayload.links ? this.readinessPayload.links : {};
+            let s = '';
+            if (kind === 'payment_webhook') s = p.payment_webhook_url || '';
+            else if (kind === 'whatsapp') s = p.whatsapp_webhook_url || '';
+            else if (kind === 'public_base') s = p.public_base_url || '';
+            if (!s) {
+                void this.showUiAlert('Нет URL — задайте PUBLIC_BASE_URL на сервере.', 'Внимание');
+                return;
+            }
+            try {
+                await navigator.clipboard.writeText(s);
+                void this.showUiAlert('Скопировано в буфер обмена', 'Готово');
+            } catch {
+                void this.showUiAlert('Не удалось скопировать', 'Ошибка');
+            }
+        },
+
+        async loadIncidents() {
+            this.incidentsLoading = true;
+            try {
+                const { ok, status, data } = await this.apiJsonResponse('/api/admin/incidents?mode=full');
+                if (!ok) {
+                    console.warn('GET /api/admin/incidents', status, data);
+                    if (!this.incidentsLoadedOnce) {
+                        this.incidents = {
+                            groups: [],
+                            summary: { critical: 0, warning: 0, info: 0, restricted: 0 },
+                            total_open: 0,
+                            severity: 'ok',
+                            restricted_count: 0,
+                            generated_at: null,
+                            is_superadmin: this.isSuperadmin,
+                        };
+                    }
+                    return;
+                }
+                this.incidents = {
+                    groups: Array.isArray(data.groups) ? data.groups : [],
+                    summary: data.summary || { critical: 0, warning: 0, info: 0, restricted: 0 },
+                    total_open: Number(data.total_open || 0),
+                    severity: data.severity || 'ok',
+                    restricted_count: Number(data.restricted_count || 0),
+                    generated_at: data.generated_at || null,
+                    is_superadmin: !!data.is_superadmin,
+                    superadmin_only: Array.isArray(data.superadmin_only) ? data.superadmin_only : [],
+                };
+                this.isSuperadmin = !!data.is_superadmin;
+                this.incidentsLoadedOnce = true;
+            } catch (e) {
+                console.error('[admin] loadIncidents', e);
+            } finally {
+                this.incidentsLoading = false;
+            }
+        },
+
+        incidentGo(target) {
+            const t = target && typeof target === 'object' ? target : {};
+            const tab = String(t.tab || '').trim();
+            if (!tab) return;
+            if (tab === 'settings') {
+                this.navigateToTab('settings', {
+                    settingsTab: t.settingsTab || t.settings_tab || 'connections',
+                });
+                return;
+            }
+            if (tab === 'chats' && t.phone) {
+                const phone = String(t.phone);
+                this.navigateToTab('chats');
+                setTimeout(() => this.selectChat(phone), 80);
+                return;
+            }
+            this.navigateToTab(tab);
         },
 
         async loadDashRoiSummary() {
@@ -4844,6 +5111,7 @@ function adminMixinDataChartsSettings() {
         },
 
         async settingsPurgeRedisSession() {
+            if (!this.ensureSuperadminAction()) return;
             const phone = (this.settingsRedisPhone || '').trim();
             if (!phone || this.settingsRedisPurgeLoading) return;
             const { ok } = await this.openUiConfirm({
@@ -4914,6 +5182,7 @@ function adminMixinDataChartsSettings() {
         },
 
         async settingsBulkCancelOrders() {
+            if (!this.ensureSuperadminAction()) return;
             const ids = [...new Set(this.settingsSelectedOrderIds.map((x) => Number(x)).filter((n) => Number.isFinite(n) && n > 0))];
             if (!ids.length || this.settingsBulkCancelLoading) return;
             const { ok } = await this.openUiConfirm({
@@ -4947,6 +5216,7 @@ function adminMixinDataChartsSettings() {
         },
 
         async settingsRunChatRetention() {
+            if (!this.ensureSuperadminAction()) return;
             if (this.settingsRetentionRunLoading) return;
             const { ok } = await this.openUiConfirm({
                 message: 'Удалить старые записи chat_logs по политике CHAT_LOG_RETENTION_DAYS?',
@@ -4977,12 +5247,14 @@ function adminMixinDataChartsSettings() {
         },
 
         async settingsBulkDeleteOrders() {
+            if (!this.ensureSuperadminAction()) return;
             const ids = [...new Set(this.settingsSelectedOrderIds.map((x) => Number(x)).filter((n) => Number.isFinite(n) && n > 0))];
             if (!ids.length) return;
             await this.confirmAndDeleteOrders(ids, 'settings_bulk');
         },
 
         async settingsClearMenuOnly() {
+            if (!this.ensureSuperadminAction()) return;
             if (this.settingsMenuClearLoading) return;
             let r = await this.openUiConfirm({
                 message: 'Удалить все позиции меню из базы? Заказы в БД не удаляются.',
@@ -5019,6 +5291,7 @@ function adminMixinDataChartsSettings() {
         },
 
         async settingsClearMenuAndStopSnapshot() {
+            if (!this.ensureSuperadminAction()) return;
             if (this.settingsMenuStopClearLoading) return;
             let r = await this.openUiConfirm({
                 message: 'Удалить все позиции меню, привязанные к этому филиалу? (Глобальный индикатор интеграций и legacy-меню без филиала не затрагиваются.)',
@@ -5060,6 +5333,7 @@ function adminMixinDataChartsSettings() {
         },
 
         async confirmSettingsPurgeOperational() {
+            if (!this.ensureSuperadminAction()) return;
             if (this.settingsPurgeLoading) return;
             this.settingsPurgeError = '';
             this.settingsPurgeLoading = true;
@@ -5099,6 +5373,7 @@ function adminMixinDataChartsSettings() {
         },
 
         async clearAllMenuFromDb() {
+            if (!this.ensureSuperadminAction()) return;
             const n = this.menuItems.length;
             if (!n || this.menuClearLoading) return;
             let r = await this.openUiConfirm({

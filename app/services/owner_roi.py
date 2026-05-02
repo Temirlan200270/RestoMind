@@ -16,11 +16,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from zoneinfo import ZoneInfo
 
 from app.core.config import settings
-from app.db.models import ChatLog, FailedTask, Order, OrderStatus, Organization
+from app.db.models import ChatLog, FailedTask, Order, OrderStatus, Organization, User
 from app.services.intelligence_analytics import (
     list_recommendation_events,
     menu_engineering_rows,
     upsell_stats_from_items_json,
+)
+from app.services.tenant_scope import (
+    failed_tasks_tenant_clause as _failed_tasks_tenant_clause,
+    orders_tenant_clause as _orders_tenant_clause,
 )
 
 logger = logging.getLogger(__name__)
@@ -72,7 +76,7 @@ async def aggregate_org_window(
 ) -> dict[str, Any]:
     """Сводка за полуинтервал [ts_lo, ts_hi] в UTC (как в /stats)."""
     not_cancelled = Order.status != OrderStatus.CANCELLED
-    org_orders = Order.organization_id == org_id
+    org_orders = _orders_tenant_clause(org_id)
     ts_lo = _sql_dt_for_filter(ts_lo_utc)
     ts_hi = _sql_dt_for_filter(ts_hi_utc)
 
@@ -134,7 +138,7 @@ async def aggregate_org_window(
     help_events = int(
         await db.scalar(
             select(func.count(FailedTask.id)).where(
-                FailedTask.organization_id == org_id,
+                _failed_tasks_tenant_clause(org_id),
                 FailedTask.created_at >= ts_lo,
                 FailedTask.created_at <= ts_hi,
             ),
@@ -251,7 +255,7 @@ async def build_achievements_week(
     ts_lo, ts_hi = _bounds_to_utc_naive_pair(start_local, end_local)
 
     not_cancelled = Order.status != OrderStatus.CANCELLED
-    org_orders = Order.organization_id == org_id
+    org_orders = _orders_tenant_clause(org_id)
     o_rows = await db.execute(
         select(Order).where(
             not_cancelled,
