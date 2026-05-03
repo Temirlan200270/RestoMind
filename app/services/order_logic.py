@@ -12,14 +12,15 @@ import uuid
 from copy import deepcopy
 from dataclasses import dataclass
 from difflib import get_close_matches
-from typing import Literal
+from typing import Any, Literal
 
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.data.plovxana_menu import build_mock_menu_dict
-from app.db.models import MenuItem, Organization, PackagingRule
+from app.db.models import MenuItem, Order, OrderStatus, Organization, PackagingRule
+from app.services.menu_embeddings import embed_query_vector, top_k_menu_items_by_similarity
 from app.schemas.ai_schemas import AIBrainResponse, OrderAction, OrderItem
 
 logger = logging.getLogger(__name__)
@@ -494,6 +495,11 @@ def compute_order_action_stable_id(
     explicit = (act.action_id or "").strip()
     if explicit:
         return explicit[:128]
+    logger.debug(
+        "order_action без action_id: fingerprint по message_id+дельта (iiko_id=%s action=%s)",
+        (act.item_id or "")[:24],
+        act.action,
+    )
     mid = (inbound_message_id or "").strip()
     basis = f"{mid}|{idx}|{act.item_id}|{act.action}|{int(act.quantity)}"
     return hashlib.sha256(basis.encode("utf-8")).hexdigest()[:32]
@@ -550,6 +556,40 @@ def merge_applied_order_action_ids_into_items_json(
 
 # Синоним для документации / ТЗ (транзакционный merge — одна реализация)
 apply_order_merge = merge_cart_actions
+
+
+async def persist_draft_order_optimistic_update(
+    db: AsyncSession,
+    *,
+    order_id: int,
+    expected_row_version: int,
+    items_json: dict[str, Any],
+    total_price: float,
+    prepayment_status: str,
+    booking_id: int | None,
+    organization_id: int,
+) -> bool:
+    """
+    Один UPDATE черновика с оптимистичной блокировкой (version).
+    Возвращает True, если ровно одна строка обновлена. Без commit — в той же транзакции, что и merge/fee.
+    """
+    res = await db.execute(
+        update(Order)
+        .where(
+            Order.id == order_id,
+            Order.status == OrderStatus.DRAFT.value,
+            Order.row_version == expected_row_version,
+        )
+        .values(
+            items_json=items_json,
+            total_price=total_price,
+            prepayment_status=prepayment_status,
+            booking_id=booking_id,
+            organization_id=organization_id,
+            row_version=Order.row_version + 1,
+        )
+    )
+    return int(res.rowcount or 0) == 1
 
 
 def enrich_merged_items_from_menu(
@@ -753,6 +793,44 @@ def build_menu_context(db_items: list[MenuItem]) -> str:
         )
 
     return "\n".join(lines)
+
+
+async def build_menu_context_for_ai(menu_items: list[MenuItem], user_query: str) -> str:
+    """
+    Текст меню для промпта: при E12 и большом каталоге — семантический срез по запросу гостя.
+    """
+    if not settings.menu_rag_enabled:
+        return build_menu_context(menu_items)
+    if len(menu_items) < int(settings.menu_rag_min_items):
+        return build_menu_context(menu_items)
+    q = (user_query or "").strip()
+    if not q:
+        return build_menu_context(menu_items)
+
+    total = len(menu_items)
+    with_emb = sum(1 for m in menu_items if m.embedding)
+    if with_emb < total:
+        logger.info(
+            "menu RAG: не все позиции проиндексированы (%s/%s) — полный каталог",
+            with_emb,
+            total,
+        )
+        return build_menu_context(menu_items)
+
+    qvec = await embed_query_vector(q)
+    if not qvec:
+        logger.warning("menu RAG: не удалось получить эмбеддинг запроса — полный каталог")
+        return build_menu_context(menu_items)
+
+    top_k = int(settings.menu_rag_top_k)
+    subset = top_k_menu_items_by_similarity(menu_items, qvec, top_k=top_k)
+    if not subset:
+        return build_menu_context(menu_items)
+
+    header = (
+        f"[Фрагмент меню: по смыслу отобрано {len(subset)} из {total} позиций под текущую реплику гостя]\n"
+    )
+    return header + build_menu_context(subset)
 
 
 def _norm_txt(s: str) -> str:

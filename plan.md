@@ -1,6 +1,6 @@
 # RestoMind — архитектура и соглашения
 
-Документ описывает **текущее состояние** репозитория и правила разработки. Исторический каталог `rest_ai_agent/` не используется — код живёт в `app/` (см. [README.md](README.md)).
+Документ описывает **текущее состояние** репозитория и правила разработки. Исторический каталог `rest_ai_agent/` не используется — код живёт в `app/` (см. [README.md](README.md)). Дерево каталогов и ориентация по модулям — [codebase.md](codebase.md).
 
 ---
 
@@ -17,7 +17,7 @@
 | Backend | Python 3.11+, FastAPI |
 | БД | PostgreSQL (прод) / SQLite (разработка), SQLAlchemy 2.0, Alembic |
 | Кэш / сессии / события | Redis при `REDIS_ENABLED=true`, иначе in-memory заглушка |
-| AI | **OpenAI** (OpenAI API, `gpt-4o-mini`), ответы в JSON по схеме `AIBrainResponse` |
+| AI | **OpenAI** по умолчанию (`gpt-4o-mini`); опционально **Gemini** (`AI_PROVIDER`); ответы в JSON по схеме `AIBrainResponse` (см. `app/services/ai_engine/`) |
 | Мессенджер | Meta WhatsApp Cloud API |
 | РМС | iiko Cloud API (синхронизация меню, стоп-листы, создание заказа доставки) |
 | Админка | Jinja2, Alpine.js, Tailwind CSS, Chart.js |
@@ -33,13 +33,15 @@ RestoMind/
 ├── app/
 │   ├── api/
 │   │   ├── webhooks.py     # WhatsApp: верификация, приём, BackgroundTasks → process_message
-│   │   └── admin.py        # Auth, REST, WebSocket, test-bot
+│   │   ├── admin.py        # Auth, REST, WebSocket, test-bot, инциденты, readiness, timeline
+│   │   ├── payment_webhook.py
+│   │   └── superadmin.py
 │   ├── core/               # config, rate_limiter
 │   ├── data/               # каталоги меню (bootstrap)
 │   ├── db/                 # models, session (async + Redis)
 │   ├── integrations/       # whatsapp, iiko_client, telegram, telephony (заготовка)
 │   ├── schemas/            # ai_schemas и др.
-│   ├── services/           # ai_brain, dialog_mgr, intent_router, order_logic, events, …
+│   ├── services/           # ai_brain, ai_engine/, dialog_mgr, intent_router, order_logic, events, …
 │   ├── templates/          # admin.html
 │   └── main.py
 ├── alembic/
@@ -156,9 +158,9 @@ RestoMind/
 
 | Задача (prompt.md) | Зачем | Состояние в репозитории | В техплане |
 |--------------------|-------|-------------------------|------------|
-| **Статусы исходящих сообщений** (отправка / доставлено / ошибка, повтор) | Оператор и продукт видят, дошёл ли ответ до WhatsApp | **Сделано:** в `chat_logs` — `provider_message_id`, `delivery_status`, `error_details`, `status_updated_at`; после отправки — `finalize_outbound_delivery`; вебхук Meta `statuses` → `apply_whatsapp_status_webhook` (`app/services/chat_delivery.py`); в админке — метки доставки + WebSocket `message_status_updated` (`admin-app.js`). **Остаётся продуктово:** явный UI «повторить отправку» при `failed` (сейчас — диагностика и статусы) | §4.11 / observability |
+| **Статусы исходящих сообщений** (отправка / доставлено / ошибка, повтор) | Оператор и продукт видят, дошёл ли ответ до WhatsApp | **Сделано:** в `chat_logs` — `provider_message_id`, `delivery_status`, `error_details`, `status_updated_at`; после отправки — `finalize_outbound_delivery`; вебхук Meta `statuses` → `apply_whatsapp_status_webhook` (`app/services/chat_delivery.py`); в админке — метки доставки + WebSocket `message_status_updated` (`admin-app.js`). **UI «Переотправить»** при `failed` для исходящих ролей `operator` / `assistant` / `system`: кнопка в ленте чата + `POST /api/admin/chats/{phone}/messages/{id}/resend` (`admin.py`, `admin.html`). Доп. точки (очередь оператора только списком failed) — по необходимости | §4.11 / observability |
 | **Multi-tenant на уровне продукта** | Продажа нескольким заведениям | Есть **`organizations`**, изоляция по `organization_id`; в БД — **`tenants`** и **`organizations.tenant_id`** (миграция `20260417_franchise_upsell`). **Нет** ещё «продаваемого» слоя: онбординг сети, роль владельца франшизы, брендинг (лого/тема в шапке) как в prompt | Расширение **v3 §12** + админка «несколько филиалов» |
-| **Dashboard: деньги + вклад ИИ** (сегодня: заказы, выручка, доля через бота, upsell) | Ответ: «сколько приносит бот» | Аналитика и канбан есть; блок **AI Value** и конверсия советов — осмысленны после трассировки рекомендаций | **После / параллельно** §4.8 и стабильных полей `order_meta` / `recommendation_trace` |
+| **Dashboard: деньги + вклад ИИ** (сегодня: заказы, выручка, доля через бота, upsell) | Ответ: «сколько приносит бот» | **Частично закрыто:** главная — `/api/admin/stats`, `/api/admin/roi/today`; вкладка **«Вклад ИИ»** — периодные метрики `GET /api/admin/ai-value?period=7d|30d|90d` ([`admin.py`](app/api/admin.py) / `admin-app.js`). Сводка на дашборде — блок «Ценность ИИ». Полный набор KPI из product — см. [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) §E3 | **Дальше** — углубление §E3, §4.8 |
 
 #### P1 — UX продукта
 
@@ -470,12 +472,12 @@ RestoMind/
 | **Phase 18 (§4)** | ✅ Инкрементальная корзина, merge, **теги**, upsell, **§4.8** трасса + дашборд; расширенные тесты §4.7, optional `replace` в схеме. |
 | **Деньги «вперёд»** | **Webhook:** `POST /api/webhooks/payment` (Bearer) → `prepayment_status=paid` + `payment_events`, идемпотентность; на заказе — `payment_provider`, `external_payment_id`. **Уведомление клиенту в WhatsApp** после успешного webhook — `run_payment_received_customer_notify` (очередь `payment_notify_customer` или BackgroundTasks). **Остаётся:** raw payload в БД, HMAC/подпись конкретного эквайринга, адаптеры в `payment_adapters` для не-JSON провайдеров. |
 | **Фаза 13.1** | Latency PSTN: streaming TTS, filler-фразы, метрики этапов. |
-| **Операторка** | Вкладка **«Очередь ошибок»** — список **`failed_tasks`**, фильтр, `PATCH` resolved (см. `/api/admin/failed-tasks`). |
+| **Операторка** | Вкладка **«Очередь ошибок»** — список **`failed_tasks`**, фильтр, `PATCH` resolved и `POST` retry (см. `/api/admin/failed-tasks`); в UI есть кнопки «Повторить» и «Закрыто». |
 
 **Статус:** «вау»-слой, **ядро Phase 18** и **§4.8** (трасса + дашборд) **в коде**. **Дальше по приоритету:** платёжный webhook «как у банка» (подпись, сырой payload) → нагрузочные тесты диалога → TTS/шаблоны WA по бюджету.
 
 - **Закрыто:** персонализация (`customer_context`), теги меню, инкрементальная корзина, оформление итога в WhatsApp, аналитика допродаж (§4.8), ручное изменение состава заказа в админке (Phase 16 / rebuild-draft), базовый платёжный webhook + колонки провайдера + WA-уведомление об оплате.
-- **Открыто:** расширение платёжного webhook (HMAC провайдера, persisted raw payload), опционально доработки split/предоплаты в модалке, премиум-голос и шаблоны Meta, UI «повтор отправки» при сбое доставки WA.
+- **Открыто:** расширение платёжного webhook (HMAC провайдера, persisted raw payload), опционально доработки split/предоплаты в модалке, премиум-голос и шаблоны Meta (см. `docs/WHATSAPP_PHASE13_TEMPLATES.md`). ~~UI «повтор отправки» при сбое доставки WA~~ — в чате админки есть кнопка «Переотправить» для failed.
 
 ---
 

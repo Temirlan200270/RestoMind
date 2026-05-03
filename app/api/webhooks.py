@@ -32,6 +32,7 @@ from app.integrations.telegram import EscalationAlertExtras, send_tg_fallback_al
 from app.integrations.twilio_client import verify_twilio_signature
 from app.integrations.twilio_media import mulaw_8k_to_wav
 from app.integrations.whatsapp import download_media_bytes, send_template, send_voice_message
+from app.services.prepayment_legal import append_prepayment_legal_disclaimer
 from app.services.ai_brain import (
     call_ai_with_audio,
     call_openai,
@@ -74,7 +75,7 @@ from app.services.intent_router import (
     route_intent,
 )
 from app.services.order_logic import (
-    build_menu_context,
+    build_menu_context_for_ai,
     build_summary_text_from_stored_items,
     detect_payment_method_from_text,
     format_draft_order_context_for_prompt,
@@ -487,11 +488,12 @@ async def handle_confirmation(
                     if prepay_enf:
                         pst = (order_row.prepayment_status or "").strip().lower()
                         if pst not in ("paid", "waived"):
-                            return (
+                            core = (
                                 "По сумме заказа нужна **предоплата**. Пока платёж не отмечен оператором, "
                                 "подтвердить заказ нельзя — как только оплатите, оператор отметит в системе, "
                                 "и вы сможете ответить «Да» ещё раз."
                             )
+                            return await append_prepayment_legal_disclaimer(db, organization_id, core)
 
             order = await confirm_order(db, order_id)
             await db.commit()
@@ -695,12 +697,17 @@ async def handle_order_payment_choice(
         except Exception as exc:
             logger.warning("Telegram prepayment alert skipped: %s", exc)
         await set_user_state(redis_client, phone, UserState.CHATTING, organization_id=organization_id)
-        return (
+        prepay_reply = (
             f"Принял способ оплаты: {pay_human}.\n\n"
             f"{body}\n\n"
             f"💳 Сумма от **{int(settings.order_prepayment_threshold_kzt):,}** ₸ — нужна предоплата. "
             "Оператор пришлёт реквизиты или ссылку. После оплаты вы сможете подтвердить заказ ответом «Да»."
         )
+        async with async_session_factory() as db_legal:
+            prepay_reply = await append_prepayment_legal_disclaimer(
+                db_legal, organization_id, prepay_reply,
+            )
+        return prepay_reply
 
     await set_user_state(redis_client, phone, UserState.CONFIRMING_ORDER, organization_id=organization_id)
     return reply
@@ -741,14 +748,15 @@ async def process_with_retry(
     whatsapp_message_id: str = "",
     voice_audio: tuple[bytes, str] | None = None,
     webhook_value: dict[str, Any] | None = None,
+    organization_id: int | None = None,
 ) -> None:
     """
     Обёртка с retry + exponential backoff.
     После MAX_RETRIES неудач → сохраняет в FailedTask и извиняется перед клиентом.
     """
-    org_id = int(settings.default_organization_id)
+    org_id = int(organization_id) if organization_id is not None else int(settings.default_organization_id)
     org_active = True
-    if webhook_value is not None:
+    if webhook_value is not None and organization_id is None:
         try:
             async with async_session_factory() as db:
                 org_id = await organization_id_for_whatsapp_value(db, webhook_value)
@@ -756,6 +764,13 @@ async def process_with_retry(
                 org_active = bool(org_ent.is_active) if org_ent is not None else True
         except Exception as exc:
             logger.warning("organization_id resolve: %s", exc)
+    elif organization_id is not None:
+        try:
+            async with async_session_factory() as db:
+                org_ent = await db.get(Organization, int(org_id))
+                org_active = bool(org_ent.is_active) if org_ent is not None else True
+        except Exception as exc:
+            logger.warning("organization activity check failed (org=%s): %s", org_id, exc)
     if not org_active:
         logger.info("org=%s inactive: webhook message ignored", org_id)
         return
@@ -1063,7 +1078,7 @@ async def process_message(
         # 1) DB: параллельное чтение (несколько коротких сессий), затем сбор строк без I/O
         read_ctx = await fetch_ai_read_context(phone, organization_id)
         menu_items = read_ctx.menu_items
-        menu_context = build_menu_context(menu_items)
+        menu_context = await build_menu_context_for_ai(menu_items, message_text)
         u_row = read_ctx.user
         customer_ctx = read_ctx.customer_ctx
         org_ent = read_ctx.org

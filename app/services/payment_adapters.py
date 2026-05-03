@@ -9,20 +9,37 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from dataclasses import dataclass
+from typing import Any, Literal, Protocol
 
 from starlette.requests import Request
+
+PaymentParseStatus = Literal["paid", "failed"]
+
+
+@dataclass(frozen=True)
+class ParsedPayment:
+    """Нормализованный результат разбора тела webhook провайдера."""
+
+    order_id: int
+    organization_id: int
+    payment_id: str
+    status: PaymentParseStatus
+    amount: float | None
+    raw: dict[str, Any]
 
 
 class PaymentWebhookAdapter(Protocol):
     """Проверка подлинности вебхука и извлечение полей заказа."""
 
-    async def verify(self, request: Request) -> bool:
-        """HMAC / подпись провайдера."""
+    provider_slug: str
+
+    async def verify(self, request: Request, raw_body: bytes) -> bool:
+        """HMAC / подпись провайдера (сырое тело POST)."""
         ...
 
-    async def parse(self, body: bytes) -> dict[str, Any]:
-        """Нормализация к полям apply_payment_webhook (order_id, organization_id, …)."""
+    async def parse(self, raw_body: bytes) -> ParsedPayment:
+        """Нормализация к полям apply_payment_webhook."""
         ...
 
 

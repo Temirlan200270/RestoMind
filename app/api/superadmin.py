@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import base64
 import secrets
 from datetime import datetime, timedelta, timezone
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.admin import require_admin_session
 from app.core.config import settings
 from app.core.passwords import hash_password
-from app.db.models import Order, Organization, RegistrationRequest, StaffRole, StaffUser, Tenant
+from app.db.models import Order, Organization, PaymentWebhookEvent, RegistrationRequest, StaffRole, StaffUser, Tenant
 from app.db.session import get_db
 from app.services.menu_sync import sync_menu_from_iiko
 from app.services.org_iiko import resolve_org_iiko_credentials
@@ -516,3 +518,101 @@ async def superadmin_reject_registration_request(
     req.decided_by_staff_id = int(current.id)
     await db.commit()
     return {"ok": True}
+
+
+@router.get("/payment-webhook-events")
+async def superadmin_payment_webhook_events(
+    provider: str | None = None,
+    applied: bool | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    _staff: StaffUser = Depends(require_superadmin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Аудит входящих платёжных webhook (сырой payload)."""
+    lim = max(1, min(int(limit or 50), 200))
+    off = max(0, int(offset or 0))
+    q = select(PaymentWebhookEvent).order_by(PaymentWebhookEvent.received_at.desc())
+    if provider and (provider.strip()):
+        q = q.where(PaymentWebhookEvent.provider_slug == provider.strip().lower()[:64])
+    if applied is not None:
+        q = q.where(PaymentWebhookEvent.applied == bool(applied))
+    q = q.offset(off).limit(lim)
+    rows = (await db.execute(q)).scalars().all()
+    items = []
+    for ev in rows:
+        items.append(
+            {
+                "id": int(ev.id),
+                "provider_slug": ev.provider_slug,
+                "organization_id": int(ev.organization_id) if ev.organization_id is not None else None,
+                "order_id": int(ev.order_id) if ev.order_id is not None else None,
+                "external_payment_id": ev.external_payment_id,
+                "verified": bool(ev.verified),
+                "verify_error": (ev.verify_error or "")[:500],
+                "applied": bool(ev.applied),
+                "duplicate": bool(ev.duplicate),
+                "payment_event_id": int(ev.payment_event_id) if ev.payment_event_id is not None else None,
+                "received_at": ev.received_at.isoformat() if ev.received_at else None,
+                "has_payload": bool(ev.payload_bytes or ev.payload_text),
+            },
+        )
+
+        )
+    return {"items": items, "limit": lim, "offset": off}
+
+
+@router.get("/payment-webhook-events/{event_id}")
+async def superadmin_payment_webhook_event_detail(
+    event_id: int,
+    _staff: StaffUser = Depends(require_superadmin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    ev = await db.get(PaymentWebhookEvent, int(event_id))
+    if ev is None:
+        raise HTTPException(status_code=404, detail="Запись не найдена")
+    payload_b64 = None
+    if ev.payload_bytes:
+        payload_b64 = base64.b64encode(bytes(ev.payload_bytes)).decode("ascii")
+    return {
+        "id": int(ev.id),
+        "provider_slug": ev.provider_slug,
+        "organization_id": int(ev.organization_id) if ev.organization_id is not None else None,
+        "order_id": int(ev.order_id) if ev.order_id is not None else None,
+        "external_payment_id": ev.external_payment_id,
+        "signature_header": ev.signature_header,
+        "http_headers_json": ev.http_headers_json,
+        "payload_text": ev.payload_text,
+        "payload_bytes_base64": payload_b64,
+        "verified": bool(ev.verified),
+        "verify_error": ev.verify_error or "",
+        "parsed_status": ev.parsed_status,
+        "parsed_amount": float(ev.parsed_amount) if ev.parsed_amount is not None else None,
+        "applied": bool(ev.applied),
+        "duplicate": bool(ev.duplicate),
+        "payment_event_id": int(ev.payment_event_id) if ev.payment_event_id is not None else None,
+        "received_at": ev.received_at.isoformat() if ev.received_at else None,
+    }
+
+
+# ── E1 хвост ── сырой payload для отладки (кнопка в superadmin.html)
+
+
+@router.get("/payment-webhook-events/{event_id}/payload.bin")
+async def superadmin_payment_webhook_payload_bin(
+    event_id: int,
+    _staff: StaffUser = Depends(require_superadmin),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Скачивание сырого тела webhook (как пришло), для Super Admin."""
+    ev = await db.get(PaymentWebhookEvent, int(event_id))
+    if ev is None:
+        raise HTTPException(status_code=404, detail="Запись не найдена")
+    body = bytes(ev.payload_bytes) if ev.payload_bytes else b""
+    return Response(
+        content=body,
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="payment_webhook_{int(event_id)}.bin"',
+        },
+    )

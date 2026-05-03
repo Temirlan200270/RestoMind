@@ -550,3 +550,35 @@ async def send_voice_message(phone: str, audio_mp3: bytes) -> bool:
     if result.ok:
         return True
     return False
+
+
+def phase13_order_receipt_template_name() -> str | None:
+    """Имя шаблона Meta для «чека» / подтверждения заказа (Phase 13.1). Пусто — не используется."""
+    name = (getattr(settings, "whatsapp_template_order_receipt", "") or "").strip()
+    return name or None
+
+
+def phase13_order_status_template_name() -> str | None:
+    """Имя интерактивного шаблона со статусом / кнопками (Phase 13.1). Пусто — не используется."""
+    name = (getattr(settings, "whatsapp_template_order_status_buttons", "") or "").strip()
+    return name or None
+
+
+def phase13_template_language_code() -> str:
+    """Языковой код шаблонов в Meta (совпадает с одобренным языком в Business Manager)."""
+    return (getattr(settings, "whatsapp_template_language", "") or "ru").strip() or "ru"
+
+
+async def send_phase13_order_receipt_template(
+    phone: str,
+    parameters: list[str] | None = None,
+) -> bool:
+    """
+    Обёртка над send_template для сценария «чек после заказа».
+    Требует WHATSAPP_TEMPLATE_ORDER_RECEIPT в окружении и одобрения шаблона в Business Manager.
+    """
+    t = phase13_order_receipt_template_name()
+    if not t:
+        logger.info("Phase 13.1: WHATSAPP_TEMPLATE_ORDER_RECEIPT не задан — пропуск send_template")
+        return False
+    return await send_template(phone, t, language_code=phase13_template_language_code(), parameters=parameters)

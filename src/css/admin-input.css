@@ -2,6 +2,58 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Фокус клавиатуры для админки (не перекрывает мышиный :focus) */
+@layer base {
+    .admin-root :where(button, [role='button'], a[href]):focus-visible {
+        @apply outline-none ring-2 ring-brand-500 ring-offset-2;
+    }
+}
+
+/*
+ * Карточные пресеты админки (единый вид секций).
+ * rm-card-surface — основная белая карточка (rounded-2xl).
+ * rm-card-spotlight — акцентные блоки / превью (rounded-3xl).
+ * rm-card-nested — вложенный блок внутри секции.
+ */
+@layer components {
+    .rm-card-surface {
+        @apply bg-white rounded-2xl border border-gray-100 shadow-sm;
+    }
+    .rm-card-spotlight {
+        @apply bg-white rounded-3xl border border-gray-100 shadow-sm;
+    }
+    .rm-card-nested {
+        @apply rounded-xl border border-gray-100 bg-slate-50/80;
+    }
+    .rm-page-narrow {
+        @apply max-w-4xl mx-auto w-full;
+    }
+    .rm-page-wide {
+        @apply max-w-7xl mx-auto w-full;
+    }
+    .rm-empty-panel {
+        @apply flex flex-col items-center justify-center py-14 px-4 text-center border-2 border-dashed border-gray-200 rounded-2xl bg-gray-50/50;
+    }
+    .rm-loading-line {
+        @apply flex items-center gap-2 text-sm text-gray-500 py-3 px-1;
+    }
+    .rm-toast-success {
+        @apply fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] px-5 py-3 rounded-xl text-sm font-medium shadow-xl max-w-[90vw] text-center bg-emerald-900 text-white border border-emerald-700/50;
+    }
+    .rm-toast-warning {
+        @apply fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] px-5 py-3 rounded-xl text-sm font-medium shadow-xl max-w-[90vw] text-center bg-amber-900 text-amber-50 border border-amber-700/40;
+    }
+    .rm-toast-error {
+        @apply fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] px-5 py-3 rounded-xl text-sm font-medium shadow-xl max-w-[90vw] text-center bg-red-900 text-white border border-red-700/50;
+    }
+    .rm-toast-info {
+        @apply fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] px-5 py-3 rounded-xl text-sm font-medium shadow-xl shadow-slate-900/20 max-w-[90vw] text-center bg-slate-900 text-white;
+    }
+    .rm-focusable {
+        @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2;
+    }
+}
+
 /* --- RestoMind admin UI (survives `npm run build:admin-css`) --- */
 [x-cloak] {
     display: none !important;

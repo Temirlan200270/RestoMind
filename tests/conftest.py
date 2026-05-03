@@ -51,3 +51,46 @@ async def db_with_menu(db_session: AsyncSession) -> AsyncSession:
     db_session.add_all(items)
     await db_session.flush()
     return db_session
+
+
+@pytest_asyncio.fixture
+async def asgi_memory_client(monkeypatch):
+    """
+    FastAPI-приложение с SQLite :memory: (StaticPool) и переопределённым get_db.
+
+    Для тестов админ-сессии и cookie (login → /auth/me).
+    """
+    import app.db.session as db_session_module
+    from app.db.models import Base
+    from app.db.session import get_db
+    from app.main import app
+    from httpx import ASGITransport, AsyncClient
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+    from sqlalchemy.pool import StaticPool
+
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    session_factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+    monkeypatch.setattr(db_session_module, "async_session_factory", session_factory)
+
+    async def _override_db():
+        async with session_factory() as session:
+            try:
+                yield session
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
+
+    app.dependency_overrides[get_db] = _override_db
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        yield ac, session_factory
+
+    app.dependency_overrides.clear()
+    await engine.dispose()

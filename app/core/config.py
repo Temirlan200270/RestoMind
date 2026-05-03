@@ -96,6 +96,37 @@ class Settings(BaseSettings):
         default="",
         validation_alias=AliasChoices("OPENAI_BASE_URL", "openai_base_url"),
     )
+    openai_embedding_model: str = Field(
+        default="text-embedding-3-small",
+        validation_alias=AliasChoices("OPENAI_EMBEDDING_MODEL", "openai_embedding_model"),
+    )
+    # Потолок длины ответа (structured output AIBrainResponse) — снижает p95 и стоимость.
+    ai_openai_max_completion_tokens: int = Field(
+        default=2048,
+        ge=256,
+        le=16_384,
+        validation_alias=AliasChoices(
+            "AI_OPENAI_MAX_COMPLETION_TOKENS",
+            "ai_openai_max_completion_tokens",
+        ),
+    )
+    # E12: семантический срез меню в system prompt при большом каталоге
+    menu_rag_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("MENU_RAG_ENABLED", "menu_rag_enabled"),
+    )
+    menu_rag_min_items: int = Field(
+        default=200,
+        ge=1,
+        le=50_000,
+        validation_alias=AliasChoices("MENU_RAG_MIN_ITEMS", "menu_rag_min_items"),
+    )
+    menu_rag_top_k: int = Field(
+        default=50,
+        ge=5,
+        le=200,
+        validation_alias=AliasChoices("MENU_RAG_TOP_K", "menu_rag_top_k"),
+    )
 
     # --- AI Engine v2 (provider switch + Gemini) ---
     ai_provider: str = Field(
@@ -152,6 +183,28 @@ class Settings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("WHATSAPP_VOICE_REPLIES", "whatsapp_voice_replies"),
     )
+    # Phase 13.1: имена одобренных в Meta шаблонов (пусто — сценарий не шлёт template из кода).
+    whatsapp_template_order_receipt: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "WHATSAPP_TEMPLATE_ORDER_RECEIPT",
+            "whatsapp_template_order_receipt",
+        ),
+    )
+    whatsapp_template_order_status_buttons: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "WHATSAPP_TEMPLATE_ORDER_STATUS_BUTTONS",
+            "whatsapp_template_order_status_buttons",
+        ),
+    )
+    whatsapp_template_language: str = Field(
+        default="ru",
+        validation_alias=AliasChoices(
+            "WHATSAPP_TEMPLATE_LANGUAGE",
+            "whatsapp_template_language",
+        ),
+    )
     # Голос Microsoft Edge TTS (ru-RU-SvetlanaNeural, и др.)
     edge_tts_voice: str = Field(
         default="ru-RU-SvetlanaNeural",
@@ -199,6 +252,27 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices(
             "PAYMENT_WEBHOOK_HMAC_SECRET",
             "payment_webhook_hmac_secret",
+        ),
+    )
+    cloudpayments_api_secret: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "CLOUDPAYMENTS_API_SECRET",
+            "cloudpayments_api_secret",
+        ),
+    )
+    kaspi_webhook_hmac_secret: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "KASPI_HMAC_SECRET",
+            "kaspi_webhook_hmac_secret",
+        ),
+    )
+    freedom_pay_webhook_secret: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "FREEDOM_PAY_WEBHOOK_SECRET",
+            "freedom_pay_webhook_secret",
         ),
     )
 

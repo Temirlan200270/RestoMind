@@ -14,6 +14,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     JSON,
+    LargeBinary,
     Numeric,
     String,
     Text,
@@ -83,6 +84,11 @@ class Organization(Base):
         nullable=False,
         comment="Ложь — не требовать предоплату по порогу; оператор подтверждает оплату вручную",
     )
+    prepayment_legal_text: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Дополнительный дисклеймер для гостя при предоплате по порогу суммы (редактируется в админке)",
+    )
     auto_send_to_iiko_after_payment: Mapped[bool] = mapped_column(
         Boolean,
         default=False,
@@ -126,6 +132,13 @@ class StaffUser(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     organization_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("organizations.id"), nullable=False, index=True,
+    )
+    tenant_owner_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("tenants.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="Идентификатор сети (tenants.id): все филиалы с organizations.tenant_id = tenant_owner_id доступны в селекторе; NULL — один филиал",
     )
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     password_hash: Mapped[str] = mapped_column(String(512), nullable=False)
@@ -553,6 +566,11 @@ class MenuItem(Base):
     price: Mapped[float] = mapped_column(Numeric(10, 2), default=0, comment="Цена в тенге")
     is_available: Mapped[bool] = mapped_column(Boolean, default=True, comment="Есть ли в наличии")
     image_url: Mapped[str | None] = mapped_column(String(500), nullable=True, comment="Ссылка на фото")
+    embedding: Mapped[bytes | None] = mapped_column(
+        LargeBinary,
+        nullable=True,
+        comment="float32 LE vector bytes для семантического top-k (E12)",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -745,6 +763,43 @@ class FailedTask(Base):
 
     def __repr__(self) -> str:
         return f"<FailedTask id={self.id} phone={self.phone} resolved={self.resolved}>"
+
+
+class PaymentWebhookEvent(Base):
+    """
+    Сырые входящие HTTP запросы платёжного webhook (аудит до/после проверки подписи).
+    """
+
+    __tablename__ = "payment_webhook_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("organizations.id"), nullable=True, index=True,
+    )
+    order_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("orders.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    provider_slug: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    external_payment_id: Mapped[str | None] = mapped_column(String(200), nullable=True, index=True)
+    signature_header: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    http_headers_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    payload_bytes: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    payload_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    verify_error: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    parsed_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    parsed_amount: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    applied: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    duplicate: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    payment_event_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("payment_events.id"), nullable=True,
+    )
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True,
+    )
+
+    def __repr__(self) -> str:
+        return f"<PaymentWebhookEvent id={self.id} provider={self.provider_slug} verified={self.verified}>"
 
 
 class PaymentEvent(Base):

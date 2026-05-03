@@ -83,14 +83,32 @@ async def apply_payment_webhook(
         )
         res = await db.execute(stmt)
         if (res.rowcount or 0) == 0:
-            return {"ok": True, "duplicate": True, "prepayment_status": order.prepayment_status}
+            return {
+                "ok": True,
+                "duplicate": True,
+                "prepayment_status": order.prepayment_status,
+                "payment_event_id": None,
+            }
         order.prepayment_status = "paid"
         amt = float(amount) if amount is not None else float(order.total_price or 0)
         ext_id = (payment_id or "").strip()[:200]
         order.payment_provider = prov
         order.external_payment_id = ext_id
         order.payment_amount_captured = amt
-        return {"ok": True, "duplicate": False, "prepayment_status": order.prepayment_status}
+        await db.flush()
+        pe_id = await db.scalar(
+            select(PaymentEvent.id).where(
+                PaymentEvent.order_id == order.id,
+                PaymentEvent.event_type == "webhook_paid",
+                PaymentEvent.note == note_key,
+            ).order_by(PaymentEvent.id.desc()).limit(1),
+        )
+        return {
+            "ok": True,
+            "duplicate": False,
+            "prepayment_status": order.prepayment_status,
+            "payment_event_id": int(pe_id) if pe_id is not None else None,
+        }
 
     insert_stmt_f = sqlite_insert(PaymentEvent) if settings.db_mode == "sqlite" else pg_insert(PaymentEvent)
     stmt_f = (
@@ -106,5 +124,23 @@ async def apply_payment_webhook(
     )
     res_f = await db.execute(stmt_f)
     if (res_f.rowcount or 0) == 0:
-        return {"ok": True, "duplicate": True, "prepayment_status": order.prepayment_status}
-    return {"ok": True, "duplicate": False, "prepayment_status": order.prepayment_status}
+        return {
+            "ok": True,
+            "duplicate": True,
+            "prepayment_status": order.prepayment_status,
+            "payment_event_id": None,
+        }
+    await db.flush()
+    pe_id_f = await db.scalar(
+        select(PaymentEvent.id).where(
+            PaymentEvent.order_id == order.id,
+            PaymentEvent.event_type == "webhook_failed",
+            PaymentEvent.note == note_key,
+        ).order_by(PaymentEvent.id.desc()).limit(1),
+    )
+    return {
+        "ok": True,
+        "duplicate": False,
+        "prepayment_status": order.prepayment_status,
+        "payment_event_id": int(pe_id_f) if pe_id_f is not None else None,
+    }

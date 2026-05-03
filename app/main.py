@@ -291,6 +291,7 @@ async def _apply_sqlite_startup_schema_patches() -> None:
     for sql_sqlite in (
         "ALTER TABLE organizations ADD COLUMN prepayment_enforced INTEGER NOT NULL DEFAULT 1",
         "ALTER TABLE organizations ADD COLUMN auto_send_to_iiko_after_payment INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE organizations ADD COLUMN prepayment_legal_text TEXT",
         "ALTER TABLE orders ADD COLUMN payment_provider VARCHAR(64)",
         "ALTER TABLE orders ADD COLUMN external_payment_id VARCHAR(200)",
         "ALTER TABLE orders ADD COLUMN payment_amount_captured NUMERIC(12,2)",

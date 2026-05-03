@@ -6,15 +6,47 @@
 
 ## [Unreleased] — 2026-03-20
 
+### Добавлено
+
+- **Админка (клиентский лог):** объект `adminLogger` в [`admin-app.js`](app/static/js/admin-app.js) — единый префикс `[RestoMind]`, уровни `debug` / `info` / `warn` через `?admin_log=…`, `localStorage.restomind_admin_log=debug` или `window.__RESTOMIND_ADMIN_LOG_LEVEL__` (0–4); **`error` всегда пишется в консоль**; глобально `window.adminLogger` для отладки.
+- **Админка / E2.2.F (UI):** вкладка настроек **«Брендинг»** — название, акцентный цвет, загрузка лого (до 1 МБ), предпросмотр шапки; сохранение через `PATCH /api/admin/branding` и `POST /api/admin/branding/logo` при наличии **E2.2.B**; до этого API корректно обрабатывает 404. Шапка использует `brand_color_hex` для фона аватара и буквы из бренда / названия филиала.
+
 ### Изменено
+
+- **Доступность (WCAG):** у ряда кнопок с только иконкой или символом добавлены осмысленные `aria-label` и `aria-hidden` для декоративных SVG в [`admin.html`](app/templates/admin.html); ссылка скачивания payload в [`superadmin.html`](app/templates/superadmin.html).
+- **Доступность (WCAG, продолжение):** универсальное окно подтверждения `uiConfirm` — `role="dialog"` на белой панели, `aria-labelledby` / условный `aria-describedby`; модалки заказа, тестового заказа и брони — связка заголовка с диалогом; чек-лист готовности и редактор графика в Super Admin — уточнённые подписи для кнопок закрытия.
+- **Админка / настройки:** вкладка «Мой ресторан» — липкая панель с подвкладками настроек и быстрыми ссылками «Профиль», «База знаний», «Упаковка» (якоря с `scroll-margin`); блок упаковки перенесён в общий поток страницы сразу после профиля и базы знаний, чтобы при прокрутке липкая навигация оставалась доступной.
+
+### Изменено
+
+- **Документация:** [PARALLEL_AI_PLAN.md](PARALLEL_AI_PLAN.md) — таблица **sync-точек** (после PR E0.1, после E2.2.B / E2.3.B / E3 хвоста) и явные **запреты** до завершения E0.1; [docs/AI2_PARALLEL_PROMPT.md](docs/AI2_PARALLEL_PROMPT.md) — уточнение зоны `app/api/admin/`.
+- **Документация (ранее):** добавлен эпик **[§E0](IMPLEMENTATION_PLAN.md)** (техдолг: раскол админ-API, E0.1–E0.7); §11 и спринт A: приоритет **E0.1**, правила для пакета `app/api/admin/`.
+- **Документация (ранее):** [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md), [PARALLEL_AI_PLAN.md](PARALLEL_AI_PLAN.md), [docs/AI2_PARALLEL_PROMPT.md](docs/AI2_PARALLEL_PROMPT.md) — актуализация: E2.1.F и E2 (частично), E1 payload.bin, E3/E16; очередь E2.2.B → E2.2.F.
+- **Документация (ранее):** [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) (статусы E1/E3/E17, §E3 и `/ai-value`, порядок спринтов, §S2 CI), [plan.md](plan.md) (AI Value), [codebase.md](codebase.md), [README.md](README.md) — Super Admin аудит webhook, вкладка «Вклад ИИ», навигация «Ошибки»; ссылка на AI2 для параллельных агентов.
 
 - **Доступы и блокировки:** `Organization.is_active=False` теперь блокирует вход staff в админку и игнорирует входящие WhatsApp webhooks для этого ресторана (без ретраев Meta).
 - **Self-serve onboarding:** legacy `POST /api/admin/auth/signup` переведён в `410 Gone`; маршрут `/onboarding` редиректит на `/request-access`.
 - **Деплой / БД:** добавлен [docs/SUPABASE_MIGRATION.md](docs/SUPABASE_MIGRATION.md) (Render Postgres → Supabase, Alembic, env); [render.yaml](render.yaml) — внешний секрет `DATABASE_URL` вместо managed PostgreSQL в Blueprint.
 - **AI:** чат и STT на **OpenAI** — structured output (`call_openai`, `beta.chat.completions.parse`), голос — **Whisper** (`openai_transcribe_voice`, `call_openai_with_audio`). Переменные окружения: `OPENAI_API_KEY`, опционально `OPENAI_MODEL`, `OPENAI_TRANSCRIPTION_MODEL`. Удалена зависимость `google-genai`.
 
+### Изменено
+
+- **E0.1 (часть 1):** монолитный `app/api/admin.py` заменён на пакет [`app/api/admin/`](app/api/admin/) — логика во временном [`_monolith.py`](app/api/admin/_monolith.py), общие проверки сессии и tenant-clause вынесены в [`deps.py`](app/api/admin/deps.py); импорт `from app.api.admin import …` без изменений для [`main.py`](app/main.py) и тестов.
+
 ### Добавлено
 
+- **Super Admin / E1 хвост:** `GET /api/superadmin/payment-webhook-events/{id}/payload.bin` (`application/octet-stream`) — сырой payload для кнопки скачивания в [`superadmin.html`](app/templates/superadmin.html).
+
+- **E2.1 мультифилиальность (backend):** колонка `staff_users.tenant_owner_id` (FK на `tenants`), миграция `20260504_e21_owner`; расширенный контракт `GET /api/admin/auth/me` (`tenant_owner_id`, `active_organization_id`, `available_organizations`, `tenant`, `branding`-заглушка), `POST /api/admin/auth/select-org`; защищённые маршруты админки принимают активный филиал из сессии для владельца сети; тесты `tests/test_select_org.py`, `tests/test_tenant_owner_scope.py`.
+
+- **Админка / UX (ИИ 2):** в Super Admin добавлен read-only просмотр `payment_webhook_events` (таблица + карточка), в админке появился раздел «Вклад ИИ» с периодами 7d/30d/90d и fallback на `/api/admin/stats`, отдельный пункт «Ошибки» ведёт на существующую очередь `failed_tasks`; добавлен дефолтный текст предоплаты через константу `DEFAULT_PREPAYMENT_LEGAL_TEXT`.
+
+- **Надёжный merge / регрессия (E4, E10):** хелпер `persist_draft_order_optimistic_update` для одного optimistic UPDATE черновика; тесты `tests/test_action_id_dedup.py`, `tests/test_atomic_merge.py`; каталог `tests/regression/` с маркером `regression` (цепочки корзины, граница бесплатной доставки, mixed payment, анти-повтор upsell); в CI отдельный шаг прогона регрессии.
+
+- **Админка / E3:** `GET /api/admin/ai-value` (периоды `7d`/`30d`/`90d`/`custom`) — метрики допродаж, сообщений ассистента, automation (`bot_orders` / `takeover_orders`), эскалаций и `daily_series` для вкладки «Вклад ИИ»; тесты `tests/test_ai_value_metrics.py`. Ранее по ИИ 2: вкладка «Вклад ИИ», пункт «Ошибки» (тот же UI, что «Помощь клиентам»), аудит webhook в Super Admin.
+
+- **Платежи / аудит webhook:** таблица `payment_webhook_events` (сырой body до проверки подписи), запись на каждый `POST /api/webhooks/payment*`, superadmin `GET /api/superadmin/payment-webhook-events`; адаптеры `generic_hmac`, `cloudpayments` и каркасы `kaspi`, `freedom_pay` на `/api/webhooks/payment/providers/{slug}`; переменные `CLOUDPAYMENTS_API_SECRET`, `KASPI_HMAC_SECRET`, `FREEDOM_PAY_WEBHOOK_SECRET`.
+- **Админка / операторка:** у `failed_tasks` появился ручной повтор обработки (`POST /api/admin/failed-tasks/{id}/retry`) с tenant-scope проверкой; в очереди ошибок добавлена кнопка «Повторить», а Auto Setup Score в шапке стал компактным индикатором с чек-листом в модалке.
 - **Super Admin Panel (foundation):** `staff_users.is_superadmin`, `organizations.is_demo`, новая таблица `registration_requests`; API `/api/superadmin/*` для управления ресторанами, заявками, блокировкой `is_active`, технастройкой и force-sync меню.
 - **Approval onboarding:** `POST /api/admin/auth/request-access`, публичная страница `/request-access`, уведомление в Telegram на новый лид (`SUPERADMIN_TELEGRAM_CHAT_ID` с fallback на `TELEGRAM_ADMIN_CHAT_ID`).
 - **Demo guest mode:** `POST /api/admin/auth/demo-login`, login-экран с кнопкой «Попробовать демо»; для demo-сессий включён read-only guard на небезопасные методы.

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from dataclasses import field
 from datetime import date, time
 from typing import Any
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -29,6 +29,7 @@ from app.services.booking_halls import (
 from app.schemas.ai_schemas import AIBrainResponse, PaymentSplit
 from app.services.dialog_mgr import UserState
 from app.services.upsell_utils import record_upsell_rejections_on_user
+from app.services.prepayment_legal import append_prepayment_legal_disclaimer
 from app.services.order_logic import (
     ValidatedOrder,
     applied_order_action_ids_from_items_json,
@@ -42,6 +43,7 @@ from app.services.order_logic import (
     load_packaging_rules,
     merge_applied_order_action_ids_into_items_json,
     merge_cart_actions,
+    persist_draft_order_optimistic_update,
     validate_mixed_payment_total,
     validate_order,
 )
@@ -622,25 +624,17 @@ async def _handle_order(
     if existing_draft and (use_merge or ai_response.items):
         expected_ver = int(existing_draft.row_version)
         new_booking_id = booking_row.id if booking_row is not None else existing_draft.booking_id
-        upd = (
-            await db.execute(
-                update(Order)
-                .where(
-                    Order.id == existing_draft.id,
-                    Order.status == OrderStatus.DRAFT.value,
-                    Order.row_version == expected_ver,
-                )
-                .values(
-                    items_json=items_json,
-                    total_price=grand_total,
-                    prepayment_status=prepayment_status,
-                    booking_id=new_booking_id,
-                    organization_id=organization_id,
-                    row_version=Order.row_version + 1,
-                )
-            )
-        ).rowcount
-        if upd != 1:
+        ok_upd = await persist_draft_order_optimistic_update(
+            db,
+            order_id=existing_draft.id,
+            expected_row_version=expected_ver,
+            items_json=items_json,
+            total_price=grand_total,
+            prepayment_status=prepayment_status,
+            booking_id=new_booking_id,
+            organization_id=organization_id,
+        )
+        if not ok_upd:
             logger.warning(
                 "Optimistic lock: заказ id=%s версия=%s не обновлён (гонка)",
                 existing_draft.id,
@@ -733,6 +727,9 @@ async def _handle_order(
     reply = apply_guest_meal_guidance_reply(reply, items_json, menu_items or [])
     order.items_json = items_json
     await db.flush()
+
+    if requires_big_order_prepay:
+        reply = await append_prepayment_legal_disclaimer(db, organization_id, reply)
 
     logger.info(
         "Заказ #%d (DRAFT): %d позиций блюд, %.2f ₸ — %s",

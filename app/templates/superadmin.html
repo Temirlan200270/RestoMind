@@ -21,6 +21,131 @@
     <div x-show="toast" x-cloak class="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-800 px-4 py-3 text-sm" x-text="toast"></div>
 
     <section class="rounded-2xl bg-white border border-slate-200 shadow-sm p-5 mb-6">
+        <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-4">
+            <div>
+                <h2 class="text-lg font-bold text-slate-900">Аудит платежных webhook</h2>
+                <p class="text-sm text-slate-500">Только чтение: входящие события, верификация и результат применения.</p>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+                <input x-model="webhookFilter.provider" @keydown.enter="loadWebhookEvents()" placeholder="provider"
+                    class="w-36 rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                <select x-model="webhookFilter.applied" @change="loadWebhookEvents()"
+                    class="rounded-lg border border-slate-200 px-3 py-2 text-sm bg-white">
+                    <option value="">Все</option>
+                    <option value="true">Applied</option>
+                    <option value="false">Not applied</option>
+                </select>
+                <button type="button" @click="loadWebhookEvents()"
+                    class="px-3 py-2 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Обновить</button>
+            </div>
+        </div>
+        <div class="grid grid-cols-1 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.9fr)] gap-5">
+            <div class="overflow-x-auto">
+                <table class="w-full min-w-[980px] text-sm">
+                    <thead class="text-slate-500">
+                    <tr class="border-b border-slate-200">
+                        <th class="text-left py-2">ID</th>
+                        <th class="text-left py-2">Provider</th>
+                        <th class="text-left py-2">Филиал / Заказ</th>
+                        <th class="text-left py-2">Ext ID</th>
+                        <th class="text-left py-2">Статус</th>
+                        <th class="text-left py-2">Получено</th>
+                        <th class="text-right py-2">RAW</th>
+                        <th class="text-right py-2">Деталь</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <template x-for="ev in webhookEvents" :key="'pwe-' + ev.id">
+                        <tr class="border-b border-slate-100 align-top" :class="selectedWebhookEvent?.id === ev.id ? 'bg-brand-50/50' : ''">
+                            <td class="py-2 font-mono text-xs" x-text="ev.id"></td>
+                            <td class="py-2">
+                                <div class="font-semibold text-slate-900" x-text="ev.provider_slug || '—'"></div>
+                                <div class="text-xs text-slate-500" x-text="ev.payment_event_id ? ('событие #' + ev.payment_event_id) : '—'"></div>
+                            </td>
+                            <td class="py-2 text-xs text-slate-600">
+                                <div x-text="ev.organization_id ? ('филиал #' + ev.organization_id) : 'филиал —'"></div>
+                                <div x-text="ev.order_id ? ('заказ #' + ev.order_id) : 'заказ —'"></div>
+                            </td>
+                            <td class="py-2 font-mono text-xs max-w-[120px] truncate" x-text="ev.external_payment_id || '—'" :title="ev.external_payment_id || ''"></td>
+                            <td class="py-2">
+                                <div class="flex flex-wrap gap-1.5">
+                                    <span class="px-2 py-0.5 rounded-full text-[11px] font-semibold" :class="ev.verified ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-700'" x-text="ev.verified ? 'проверено' : 'ошибка подписи'"></span>
+                                    <span class="px-2 py-0.5 rounded-full text-[11px] font-semibold" :class="ev.applied ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-600'" x-text="ev.applied ? 'принято' : 'не принято'"></span>
+                                    <span x-show="ev.duplicate" class="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-800">дубликат</span>
+                                </div>
+                            </td>
+                            <td class="py-2 text-xs text-slate-500" x-text="fmtDate(ev.received_at)"></td>
+                            <td class="py-2 text-right">
+                                <template x-if="ev.has_payload">
+                                    <a :href="'/api/superadmin/payment-webhook-events/' + ev.id + '/payload.bin'" 
+                                       download title="Скачать исходные данные"
+                                       aria-label="Скачать сырой payload webhook"
+                                       class="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-brand-600 transition">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                                    </a>
+                                </template>
+                                <template x-if="!ev.has_payload">
+                                    <span class="p-1.5 text-slate-200" title="Нет данных">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                                    </span>
+                                </template>
+                            </td>
+                            <td class="py-2 text-right">
+                                <button type="button" @click="openWebhookEvent(ev)"
+                                    class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50">Открыть</button>
+                            </td>
+                        </tr>
+                    </template>
+                    <tr x-show="!webhookEvents.length && !webhookEventsLoading">
+                        <td colspan="8" class="py-6 text-center text-slate-400">Событий пока нет.</td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+            <aside class="rounded-2xl border border-slate-200 bg-slate-50 p-4 min-h-[260px]">
+                <div x-show="webhookEventsLoading" class="text-sm text-slate-400">Загрузка…</div>
+                <div x-show="!selectedWebhookEvent && !webhookEventsLoading" class="text-sm text-slate-500">Выберите строку, чтобы открыть карточку события.</div>
+                <div x-show="selectedWebhookEvent" x-cloak class="space-y-3">
+                    <div class="flex items-start justify-between gap-3">
+                        <div>
+                            <div class="text-xs text-slate-500">Событие</div>
+                            <div class="text-lg font-bold text-slate-900" x-text="'#' + selectedWebhookEvent.id"></div>
+                        </div>
+                        <button type="button" @click="selectedWebhookEvent = null" class="text-slate-400 hover:text-slate-700 text-xl leading-none" aria-label="Закрыть карточку события">&times;</button>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2 text-xs">
+                        <div class="rounded-lg bg-white border border-slate-200 p-2">
+                            <div class="text-slate-500">Provider</div>
+                            <div class="font-semibold text-slate-900" x-text="selectedWebhookEvent.provider_slug || '—'"></div>
+                        </div>
+                        <div class="rounded-lg bg-white border border-slate-200 p-2">
+                            <div class="text-slate-500">Amount</div>
+                            <div class="font-semibold text-slate-900" x-text="selectedWebhookEvent.parsed_amount == null ? '—' : fmtMoney(selectedWebhookEvent.parsed_amount)"></div>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="text-xs font-semibold text-slate-500 mb-1">Headers</div>
+                        <pre class="max-h-36 overflow-auto rounded-xl bg-slate-900 text-slate-100 p-3 text-[11px]" x-text="formatJson(selectedWebhookEvent.http_headers_json)"></pre>
+                    </div>
+                    <div>
+                        <div class="flex items-center justify-between mb-1">
+                            <div class="text-xs font-semibold text-slate-500">Исходные данные (payload)</div>
+                            <template x-if="selectedWebhookEvent.payload_text || selectedWebhookEvent.payload_bytes_base64">
+                                <a :href="'/api/superadmin/payment-webhook-events/' + selectedWebhookEvent.id + '/payload.bin'" 
+                                   download class="text-[11px] font-bold text-brand-600 hover:text-brand-700">Скачать raw payload (.bin)</a>
+                            </template>
+                            <template x-if="!(selectedWebhookEvent.payload_text || selectedWebhookEvent.payload_bytes_base64)">
+                                <span class="text-[11px] font-bold text-slate-300 cursor-not-allowed">Данные отсутствуют</span>
+                            </template>
+                        </div>
+                        <pre class="max-h-56 overflow-auto rounded-xl bg-slate-900 text-slate-100 p-3 text-[11px]" x-text="selectedWebhookEvent.payload_text || selectedWebhookEvent.payload_bytes_base64 || '—'"></pre>
+                    </div>
+                </div>
+            </aside>
+        </div>
+    </section>
+
+    <section class="rounded-2xl bg-white border border-slate-200 shadow-sm p-5 mb-6">
         <div class="flex items-center justify-between gap-3 mb-4">
             <h2 class="text-lg font-bold text-slate-900">Заявки на подключение</h2>
             <button type="button" @click="loadRequests()" class="px-3 py-2 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Обновить</button>
@@ -152,10 +277,10 @@
     </section>
 
     <div x-show="scheduleEditorOpen" x-cloak class="fixed inset-0 z-[120] bg-black/40 backdrop-blur-sm p-4 flex items-center justify-center" @click.self="closeScheduleEditor()">
-        <div class="w-full max-w-3xl rounded-2xl bg-white border border-slate-200 shadow-2xl overflow-hidden">
+        <div class="w-full max-w-3xl rounded-2xl bg-white border border-slate-200 shadow-2xl overflow-hidden" role="dialog" aria-modal="true" aria-labelledby="superadmin-schedule-editor-title">
             <div class="px-5 py-4 border-b border-slate-200 flex items-center justify-between gap-3">
                 <div>
-                    <h3 class="text-base font-bold text-slate-900">График работы</h3>
+                    <h3 id="superadmin-schedule-editor-title" class="text-base font-bold text-slate-900">График работы</h3>
                     <p class="text-xs text-slate-500" x-text="scheduleEditorOrgName"></p>
                 </div>
                 <div class="flex items-center gap-2">
@@ -163,7 +288,7 @@
                         class="px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50">
                         Применить ко всем дням
                     </button>
-                    <button type="button" class="text-slate-400 hover:text-slate-700 text-xl leading-none" @click="closeScheduleEditor()">&times;</button>
+                    <button type="button" class="text-slate-400 hover:text-slate-700 text-xl leading-none" @click="closeScheduleEditor()" aria-label="Закрыть редактор графика работы">&times;</button>
                 </div>
             </div>
             <div class="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
@@ -246,6 +371,13 @@ function superAdminPage() {
         toast: '',
         organizations: [],
         requests: [],
+        webhookEvents: [],
+        webhookEventsLoading: false,
+        selectedWebhookEvent: null,
+        webhookFilter: {
+            provider: '',
+            applied: '',
+        },
         scheduleEditorOpen: false,
         scheduleEditorOrgId: null,
         scheduleEditorOrgName: '',
@@ -268,7 +400,7 @@ function superAdminPage() {
         },
         async init() {
             await this.guard();
-            await Promise.all([this.loadRequests(), this.loadOrganizations()]);
+            await Promise.all([this.loadRequests(), this.loadOrganizations(), this.loadWebhookEvents()]);
         },
         fmtDate(iso) {
             if (!iso) return '—';
@@ -278,6 +410,14 @@ function superAdminPage() {
         fmtMoney(v) {
             const n = Number(v || 0);
             return new Intl.NumberFormat('ru-RU').format(n) + ' ₸';
+        },
+        formatJson(v) {
+            if (v == null || v === '') return '—';
+            try {
+                return JSON.stringify(typeof v === 'string' ? JSON.parse(v) : v, null, 2);
+            } catch (_e) {
+                return String(v);
+            }
         },
         async api(path, options = {}) {
             const res = await fetch(path, {
@@ -318,6 +458,31 @@ function superAdminPage() {
                 this.organizations = (await this.api('/api/superadmin/organizations')).items || [];
             } catch (e) {
                 this.error = e.message || 'Не удалось загрузить организации';
+            }
+        },
+        async loadWebhookEvents() {
+            this.webhookEventsLoading = true;
+            try {
+                const q = new URLSearchParams();
+                const provider = (this.webhookFilter.provider || '').trim();
+                if (provider) q.set('provider', provider);
+                if (this.webhookFilter.applied) q.set('applied', this.webhookFilter.applied);
+                q.set('limit', '50');
+                this.webhookEvents = (await this.api(`/api/superadmin/payment-webhook-events?${q.toString()}`)).items || [];
+                if (this.selectedWebhookEvent && !this.webhookEvents.some((x) => x.id === this.selectedWebhookEvent.id)) {
+                    this.selectedWebhookEvent = null;
+                }
+            } catch (e) {
+                this.error = e.message || 'Не удалось загрузить аудит платежных webhook';
+            } finally {
+                this.webhookEventsLoading = false;
+            }
+        },
+        async openWebhookEvent(ev) {
+            try {
+                this.selectedWebhookEvent = await this.api(`/api/superadmin/payment-webhook-events/${ev.id}`);
+            } catch (e) {
+                this.error = e.message || 'Не удалось открыть событие webhook';
             }
         },
         async approveRequest(row) {

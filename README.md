@@ -1,8 +1,8 @@
 # RestoMind
 
-AI-оператор для ресторана: принимает заказы и бронирует столики через WhatsApp, используя **OpenAI** (structured output по схеме `AIBrainResponse`; голос — **Whisper**) для понимания естественной речи. Интегрируется с **iiko** для синхронизации меню и отправки заказов на кухню.
+AI-оператор для ресторана: принимает заказы и бронирует столики через WhatsApp, используя LLM (**OpenAI** по умолчанию; опционально **Gemini** через `AI_PROVIDER`) — structured output по схеме `AIBrainResponse`; голос — **Whisper**. Интегрируется с **iiko** для синхронизации меню и отправки заказов на кухню.
 
-Подробный список изменений и возможностей — в [CHANGELOG.md](CHANGELOG.md). Архитектура, соглашения по коду и идеи развития — в [plan.md](plan.md).
+Подробный список изменений и возможностей — в [CHANGELOG.md](CHANGELOG.md). Архитектура, соглашения по коду и идеи развития — в [plan.md](plan.md). **Дерево проекта и суть кодовой базы** — в [codebase.md](codebase.md).
 
 ## Возможности
 
@@ -22,10 +22,10 @@ AI-оператор для ресторана: принимает заказы �
 | Backend | Python 3.11+, FastAPI |
 | Database | PostgreSQL / SQLite (dev), SQLAlchemy 2.0, **Alembic** |
 | Cache | Redis (опционально, есть in-memory fallback) |
-| AI | OpenAI (`gpt-4o-mini`, env `OPENAI_MODEL`), structured output + Whisper (`OPENAI_TRANSCRIPTION_MODEL`); опц. `OPENAI_BASE_URL` |
+| AI | OpenAI (`gpt-4o-mini`, env `OPENAI_MODEL`) или Gemini (`AI_PROVIDER=gemini`, `GEMINI_API_KEY`); structured output + Whisper (`OPENAI_TRANSCRIPTION_MODEL`); опц. `OPENAI_BASE_URL` |
 | Интеграции | Meta WhatsApp API, iiko Cloud API |
 | Админка | Jinja2 + Alpine.js + Tailwind CSS + Chart.js |
-| Тесты | pytest, pytest-asyncio (`tests/`, ~25 тестов) |
+| Тесты | pytest, pytest-asyncio (`tests/`, порядка 200 тестов — см. CI) |
 | Продакшен | Docker; **Render** ([DEPLOY_RENDER.md](DEPLOY_RENDER.md)); либо VPS + [DEPLOY_GUIDE.md](DEPLOY_GUIDE.md) |
 
 ## Быстрый старт
@@ -115,52 +115,29 @@ curl -b cookies.txt -X POST http://localhost:8000/api/admin/test-bot \
 
 ## Структура проекта
 
+Актуальное **дерево каталогов**, потоки данных и точки входа — в **[codebase.md](codebase.md)**. Ниже — краткая схема.
+
 ```
 RestoMind/
 ├── app/
-│   ├── api/
-│   │   ├── webhooks.py        # WhatsApp webhook + BackgroundTasks
-│   │   └── admin.py           # Auth, REST, WebSocket, тест-бот
-│   ├── core/                  # config, rate_limiter
-│   ├── data/                  # каталоги меню (bootstrap)
-│   ├── db/
-│   │   ├── models.py          # Organization, User, Order, ChatLog, Booking, MenuItem
-│   │   └── session.py         # AsyncSession + Redis / InMemoryRedis
-│   ├── integrations/
-│   │   ├── iiko_client.py
-│   │   ├── whatsapp.py
-│   │   └── telephony.py       # заготовка голоса (v2)
-│   ├── schemas/
-│   │   └── ai_schemas.py
-│   ├── services/
-│   │   ├── ai_brain.py        # OpenAI (чат + Whisper)
-│   │   ├── dialog_mgr.py      # состояния, история, подтверждения
-│   │   ├── intent_router.py
-│   │   ├── order_logic.py
-│   │   ├── menu_sync.py
-│   │   ├── demo_data.py
-│   │   ├── events.py          # Pub/Sub для WebSocket
-│   │   ...
-│   ├── templates/
-│   │   └── admin.html
+│   ├── api/           # admin.py, webhooks.py, payment_webhook.py, superadmin.py
+│   ├── core/          # config, rate_limiter
+│   ├── db/            # models, session (async + Redis)
+│   ├── integrations/  # whatsapp, iiko, telegram, twilio…
+│   ├── schemas/       # ai_schemas и др.
+│   ├── services/      # бизнес-логика (ai_brain, dialog_mgr, intent_router, …)
+│   ├── templates/     # Jinja2 + components
+│   ├── static/        # admin-app.js, CSS
 │   └── main.py
-├── alembic/                   # миграции БД
-├── tests/                     # pytest
-├── .github/workflows/         # CI (pytest), deploy
-├── docker-compose.yml
-├── docker-compose.prod.yml
-├── Dockerfile
-├── render.yaml               # Blueprint Render (веб-сервис; БД через DATABASE_URL)
-├── DEPLOY_RENDER.md
-├── docs/
-│   ├── SUPABASE_MIGRATION.md # Render Postgres → Supabase, DATABASE_URL
-│   └── VERCEL.md             # почему API не на Vercel
-├── seed.py
-├── requirements.txt
+├── alembic/
+├── tests/
+├── scripts/
+├── .github/workflows/
+├── codebase.md        # обзор репозитория для онбординга
 ├── plan.md
-├── DEPLOY_GUIDE.md
 ├── CHANGELOG.md
-└── .env.example
+├── DEPLOY_*.md
+└── docs/
 ```
 
 ## API (кратко)
@@ -193,7 +170,7 @@ RestoMind/
 
 ### Защищённый Admin API (после входа)
 
-Включая: заказы, брони, чаты, `GET /api/admin/customers/{phone}/summary`, заметка оператора, меню (CRUD + sync + стоп-листы), статистика, аналитика, демо-данные, takeover/release/send_message, `test-bot`, и т.д.
+Включая: заказы, брони, чаты, `GET /api/admin/customers/{phone}/summary`, заметка оператора, меню (CRUD + sync + стоп-листы), `GET /api/admin/stats`, `GET /api/admin/analytics`, `GET /api/admin/ai-value`, демо-данные, takeover/release/send_message, `test-bot`, и т.д.
 
 ### WebSocket
 

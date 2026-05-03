@@ -13,6 +13,63 @@ const charts = {
     analyticsSparks: {},
 };
 
+/** Ссылка на нативный console — не переопределять через adminLogger (избегаем рекурсии). */
+const _adminConsole = typeof console !== 'undefined' ? console : { debug() {}, info() {}, warn() {}, error() {} };
+
+/**
+ * Централизованный лог клиентской админки: один префикс, управление шумом.
+ * Уровень по умолчанию — info (видны info/warn/error, скрыт шум debug). Сообщения `error` всегда выводятся.
+ * Параметры: `?admin_log=debug|info|warn|error|silent`, `localStorage.restomind_admin_log=debug`,
+ * либо `window.__RESTOMIND_ADMIN_LOG_LEVEL__` = 0…4 (silent…debug).
+ */
+const ADMIN_LOG_LEVELS = { silent: 0, error: 1, warn: 2, info: 3, debug: 4 };
+
+function resolveAdminLogLevel() {
+    try {
+        if (typeof window !== 'undefined' && window.__RESTOMIND_ADMIN_LOG_LEVEL__ != null) {
+            const n = Number(window.__RESTOMIND_ADMIN_LOG_LEVEL__);
+            if (Number.isFinite(n)) return Math.max(0, Math.min(4, n));
+        }
+        if (typeof window !== 'undefined') {
+            const p = new URLSearchParams(window.location.search);
+            const q = (p.get('admin_log') || '').toLowerCase();
+            if (q === 'silent' || q === '0') return 0;
+            if (q === 'error' || q === '1') return 1;
+            if (q === 'warn' || q === '2') return 2;
+            if (q === 'info' || q === '3') return 3;
+            if (q === 'debug' || q === '4') return 4;
+            try {
+                if (window.localStorage?.getItem('restomind_admin_log') === 'debug') return 4;
+            } catch (_e) { /* ignore */ }
+        }
+    } catch (_e) { /* ignore */ }
+    return ADMIN_LOG_LEVELS.info;
+}
+
+const adminLogger = {
+    _level: resolveAdminLogLevel(),
+    setLevel(n) {
+        const x = Number(n);
+        if (Number.isFinite(x)) this._level = Math.max(0, Math.min(4, x));
+    },
+    debug(...args) {
+        if (this._level >= ADMIN_LOG_LEVELS.debug) _adminConsole.debug('[RestoMind]', ...args);
+    },
+    info(...args) {
+        if (this._level >= ADMIN_LOG_LEVELS.info) _adminConsole.info('[RestoMind]', ...args);
+    },
+    warn(...args) {
+        if (this._level >= ADMIN_LOG_LEVELS.warn) _adminConsole.warn('[RestoMind]', ...args);
+    },
+    error(...args) {
+        _adminConsole.error('[RestoMind]', ...args);
+    },
+};
+
+if (typeof window !== 'undefined') {
+    window.adminLogger = adminLogger;
+}
+
 /** Форматирование вне Alpine — без лишних замыканий в шаблоне; единый символ ₸. */
 const adminFormat = {
     /** Число с разделителями, без символа валюты (для подписей Chart.js и сборки строк). */
@@ -108,7 +165,7 @@ function adminParseLocationHash() {
 
 /** Допустимые верхнеуровневые вкладки (id из navItems). */
 const ADMIN_TOP_TAB_IDS = new Set([
-    'dashboard', 'analytics', 'incidents', 'orders', 'operator_queue', 'bookings', 'chats', 'menu', 'stoplist', 'settings',
+    'dashboard', 'analytics', 'ai_value', 'incidents', 'orders', 'operator_queue', 'errors', 'bookings', 'chats', 'menu', 'stoplist', 'settings',
 ]);
 
 /** Начальное состояние GET /integrations/status — чтобы Alpine не падал на undefined до первой загрузки. */
@@ -182,6 +239,9 @@ function adminMixinState() {
         demoDeleteAck: false,
         demoDeleteError: '',
         demoToastMessage: '',
+        /** Вариант стиля нижнего тоста: success | warning | error | info */
+        demoToastKind: 'info',
+        _demoToastTimer: null,
 
         /** Универсальная модалка вместо window.confirm / window.prompt */
         uiConfirmOpen: false,
@@ -288,7 +348,7 @@ function adminMixinState() {
             { id: 'settings', title: 'Управление' },
         ],
         /** Вкладка внутри Settings (Stripe-like). */
-        settingsTab: 'restaurant', // restaurant | connections | smart_sales | team | technical
+        settingsTab: 'restaurant', // restaurant | branding | connections | smart_sales | team | …
         navItems: [
             { id: 'dashboard', section: 'overview', label: 'Дашборд', desc: 'Общая статистика и последние заказы',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25A2.25 2.25 0 018.25 10.5H6A2.25 2.25 0 013.75 8.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z"/></svg>' },
@@ -346,6 +406,7 @@ function adminMixinState() {
             currency: '',
             whatsapp_phone_number_id: '',
             telegram_ops_chat_id: '',
+            prepayment_legal_text: '',
             schedule_json: null,
             schedule_json_text: '',
             operational_label: '',
@@ -364,6 +425,27 @@ function adminMixinState() {
             { key: 'sat', label: 'Суббота' },
             { key: 'sun', label: 'Воскресенье' },
         ],
+        /** Данные текущего пользователя (доступные филиалы, брендинг). */
+        userData: {
+            id: null,
+            email: '',
+            role: 'operator',
+            is_superadmin: false,
+            tenant_owner_id: null,
+            active_organization_id: null,
+            available_organizations: [],
+            tenant: null,
+            branding: null,
+        },
+        /** Черновик E2.2.F — синхронизируется с `userData.branding` из `/auth/me`; сохранение через PATCH когда есть E2.2.B. */
+        brandingDraft: { brand_name: '', brand_color_hex: '#2563eb' },
+        brandingSaving: false,
+        brandingLogoPending: null,
+        brandingLogoPendingLabel: '',
+        /** Локальный preview выбранного файла (revoke при смене). */
+        brandingPreviewObjectUrl: '',
+        /** True после 404 на PATCH — показываем подсказку до появления API. */
+        brandingApiUnavailable: false,
         orgProfileLoading: false,
         orgProfileSaving: false,
         orders: [],
@@ -379,6 +461,11 @@ function adminMixinState() {
 
         // Заказы
         ordersView: 'kanban',
+        /** Подсказка режима заказов (канбан / таблица), скрывается через localStorage */
+        ordersKanbanHintDismissed:
+            typeof localStorage !== 'undefined' &&
+            localStorage.getItem('rm_orders_view_hint_v1') === '1',
+        menuEmbeddingsReindexLoading: false,
         orderFilter: '',
         /** Поиск и фильтр суммы (список заказов) */
         orderSearchQ: '',
@@ -396,6 +483,14 @@ function adminMixinState() {
         failedTasksFilter: 'open',
         failedTasksPhone: '',
         failedTasksLoading: false,
+        failedTaskRetryingId: null,
+        aiValuePeriod: '7d',
+        aiValueCustom: false,
+        aiValueFrom: '',
+        aiValueTo: '',
+        aiValueLoading: false,
+        aiValueData: null,
+        aiValueSource: '',
         incidents: {
             groups: [],
             summary: { critical: 0, warning: 0, info: 0, restricted: 0 },
@@ -419,6 +514,7 @@ function adminMixinState() {
         /** Сессия demo-login — read-only для мутаций на бэке; для UI дизейбла кнопок демо */
         isDemoSession: false,
         setupProgressExpanded: false,
+        setupChecklistOpen: false,
         orderRebuildDraftJson: '',
         orderRebuildError: '',
         orderRebuildLoading: false,
@@ -799,7 +895,33 @@ function adminMixinMenuOrdersUi() {
             return list;
         },
 
+        ensureAi2NavItems() {
+            if (!this.navItems.some((x) => x.id === 'ai_value')) {
+                const analyticsIdx = this.navItems.findIndex((x) => x.id === 'analytics');
+                const item = {
+                    id: 'ai_value',
+                    section: 'overview',
+                    label: 'Вклад ИИ',
+                    desc: 'Допродажи, экономия времени и вклад ассистента',
+                    icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/></svg>',
+                };
+                this.navItems.splice(analyticsIdx >= 0 ? analyticsIdx + 1 : 1, 0, item);
+            }
+            if (!this.navItems.some((x) => x.id === 'errors')) {
+                const opIdx = this.navItems.findIndex((x) => x.id === 'operator_queue');
+                const item = {
+                    id: 'errors',
+                    section: 'operations',
+                    label: 'Ошибки',
+                    desc: 'Failed tasks: повтор обработки и закрытие',
+                    icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6v6l3.5 2M12 3.75a8.25 8.25 0 108.25 8.25A8.25 8.25 0 0012 3.75z"/></svg>',
+                };
+                this.navItems.splice(opIdx >= 0 ? opIdx + 1 : this.navItems.length, 0, item);
+            }
+        },
+
         async init() {
+            this.ensureAi2NavItems();
             const today = new Date();
             const weekAgo = new Date(today);
             weekAgo.setDate(weekAgo.getDate() - 7);
@@ -876,7 +998,7 @@ function adminMixinMenuOrdersUi() {
                     charts.analytics.update('none');
                 }
             } catch (e) {
-                console.warn('Chart resize', e);
+                adminLogger.warn('Chart resize', e);
             }
         },
 
@@ -1728,8 +1850,7 @@ function adminMixinMenuOrdersUi() {
             }
             const ok = await this.patchOrderStatus(order.id, 'sent_to_iiko');
             if (ok) {
-                this.demoToastMessage = `Заказ #${order.id} передан в iiko`;
-                setTimeout(() => { this.demoToastMessage = ''; }, 3500);
+                this.flashToast(`Заказ #${order.id} передан в iiko`, 'success', 3500);
             }
         },
 
@@ -1802,8 +1923,7 @@ function adminMixinMenuOrdersUi() {
                         this.showOrderModal = false;
                         this.selectedOrder = null;
                     }
-                    this.demoToastMessage = `Заказ #${id} удалён`;
-                    setTimeout(() => { this.demoToastMessage = ''; }, 3500);
+                    this.flashToast(`Заказ #${id} удалён`, 'success', 3500);
                 } else {
                     const { ok, data } = await this.apiJsonResponse('/api/admin/orders/bulk-delete', {
                         method: 'POST',
@@ -1819,18 +1939,17 @@ function adminMixinMenuOrdersUi() {
                         });
                         return;
                     }
-                    this.demoToastMessage = `Удалено заказов: ${data.deleted ?? ids.length}`;
-                    setTimeout(() => { this.demoToastMessage = ''; }, 4000);
+                    this.flashToast(`Удалено заказов: ${data.deleted ?? ids.length}`, 'success', 4000);
                 }
                 this.removeOrderIdsFromLocalState(ids);
                 try {
                     await Promise.all([this.loadOrders(), this.loadDashStats(), this.loadSettingsOrders()]);
                     await this.syncDashboardChartIfVisible();
                 } catch (refreshErr) {
-                    console.error('[admin] обновление списков после удаления заказа', refreshErr);
+                    adminLogger.error('[admin] обновление списков после удаления заказа', refreshErr);
                 }
             } catch (e) {
-                console.error('[admin] _executeOrderDeleteDirect', e);
+                adminLogger.error('[admin] _executeOrderDeleteDirect', e);
                 await this.openUiConfirm({
                     title: 'Ошибка',
                     message: 'Ошибка сети. Проверьте соединение.',
@@ -1863,9 +1982,45 @@ function adminMixinSearchBookings() {
             this.globalSearchLastFetchedQ = '';
             this.globalSearchResults = { orders: [], chats: [], bookings: [] };
             this.$nextTick(() => {
-                const el = document.getElementById('global-search-input');
-                if (el) el.focus();
+                requestAnimationFrame(() => {
+                    const el = document.getElementById('global-search-input');
+                    if (el) {
+                        el.focus();
+                        el.select();
+                    }
+                });
             });
+        },
+
+        dismissOrdersViewHint() {
+            try {
+                localStorage.setItem('rm_orders_view_hint_v1', '1');
+            } catch {
+                /* ignore */
+            }
+            this.ordersKanbanHintDismissed = true;
+        },
+
+        async reindexMenuEmbeddings() {
+            if (this.menuEmbeddingsReindexLoading) return;
+            this.menuEmbeddingsReindexLoading = true;
+            try {
+                const { ok, data } = await this.apiJsonResponse('/api/admin/menu/reindex-embeddings', {
+                    method: 'POST',
+                });
+                if (ok && data) {
+                    const st = data.embedding_stats || data;
+                    const u = st.updated ?? 0;
+                    const t = st.total_items ?? '—';
+                    this.flashToast(`Индекс меню для ИИ: обновлено ${u} из ${t} позиций`, 'success', 4500);
+                } else {
+                    this.flashToast((data && data.detail) || 'Не удалось переиндексировать меню', 'error', 5000);
+                }
+            } catch {
+                this.flashToast('Ошибка запроса индекса меню', 'error', 4000);
+            } finally {
+                this.menuEmbeddingsReindexLoading = false;
+            }
         },
 
         async runGlobalSearch() {
@@ -2013,7 +2168,7 @@ function adminMixinSearchBookings() {
                     if (field === 'hall') this.bookings[ix].hall = prev;
                     else this.bookings[ix].status = prev;
                 }
-                console.error(e);
+                adminLogger.error(e);
                 await this.openUiConfirm({
                     title: 'Ошибка сети',
                     message: 'Не удалось связаться с сервером. Проверьте соединение.',
@@ -2027,8 +2182,7 @@ function adminMixinSearchBookings() {
             const p = this.selectedBooking?.user_phone;
             if (!p) return;
             const toast = () => {
-                this.demoToastMessage = 'Телефон скопирован';
-                setTimeout(() => { this.demoToastMessage = ''; }, 2500);
+                this.flashToast('Телефон скопирован', 'success', 2500);
             };
             try {
                 await navigator.clipboard.writeText(p);
@@ -2120,8 +2274,7 @@ function adminMixinSearchBookings() {
             }
             try {
                 await navigator.clipboard.writeText(u);
-                this.demoToastMessage = 'URL скопирован';
-                setTimeout(() => { this.demoToastMessage = ''; }, 2500);
+                this.flashToast('URL скопирован', 'success', 2500);
             } catch {
                 await this.openUiConfirm({
                     title: 'Скопируйте URL',
@@ -2220,6 +2373,7 @@ function adminMixinAuthKnowledge() {
                 currency: '',
                 whatsapp_phone_number_id: '',
                 telegram_ops_chat_id: '',
+                prepayment_legal_text: '',
             };
             this.orgProfileLoading = false;
             this.integrationStatus = defaultIntegrationStatus();
@@ -2239,6 +2393,63 @@ function adminMixinAuthKnowledge() {
             this.hasDemoData = false;
             this.isDemoSession = false;
             this.menuViewRevision += 1;
+            this.brandingDraft = { brand_name: '', brand_color_hex: '#2563eb' };
+            this.brandingSaving = false;
+            this.brandingLogoPending = null;
+            this.brandingLogoPendingLabel = '';
+            if (this.brandingPreviewObjectUrl) {
+                try { URL.revokeObjectURL(this.brandingPreviewObjectUrl); } catch (_e) { /* ignore */ }
+            }
+            this.brandingPreviewObjectUrl = '';
+            this.brandingApiUnavailable = false;
+        },
+
+        normalizeMePayload(data) {
+            const root = data && typeof data === 'object' ? data : {};
+            return {
+                id: root.id ?? null,
+                email: root.email || '',
+                role: String(root.role || 'operator').toLowerCase(),
+                is_superadmin: !!root.is_superadmin,
+                tenant_owner_id: root.tenant_owner_id ?? null,
+                active_organization_id: root.active_organization_id ?? null,
+                available_organizations: Array.isArray(root.available_organizations) ? root.available_organizations : [],
+                tenant: root.tenant || null,
+                branding: root.branding || null,
+                ws_token: root.ws_token || '',
+            };
+        },
+
+        async selectOrganization(orgId) {
+            if (!orgId || (this.orgProfile && orgId === this.orgProfile.id)) return;
+            this.aiValueLoading = true;
+            try {
+                const { ok, status, data } = await this.apiJsonResponse('/api/admin/auth/select-org', {
+                    method: 'POST',
+                    body: JSON.stringify({ organization_id: orgId }),
+                });
+                if (!ok) {
+                    void this.showUiAlert(`Не удалось переключить филиал: ${data?.detail || status}`, 'Ошибка');
+                    return;
+                }
+                const me = this.normalizeMePayload(data);
+                this.userData = me;
+                this.syncBrandingDraftFromUser();
+                this.wsToken = me.ws_token;
+                this.staffRole = me.role;
+                this.isSuperadmin = me.is_superadmin;
+                
+                await this.loadOrgProfile();
+                this.connectWebSocket();
+                await this.loadTabData();
+                await this.loadIntegrationStatus();
+                await this.loadChatList();
+                this.setToast('Филиал переключен');
+            } catch (e) {
+                adminLogger.error('[admin] selectOrganization', e);
+            } finally {
+                this.aiValueLoading = false;
+            }
         },
 
         async checkSession() {
@@ -2246,12 +2457,15 @@ function adminMixinAuthKnowledge() {
                 const res = await this.apiFetch('/api/admin/auth/me');
                 if (res.ok) {
                     const data = await res.json();
+                    const me = this.normalizeMePayload(data);
+                    this.userData = me;
+                    this.syncBrandingDraftFromUser();
                     this.authenticated = true;
                     this.auth401AlertShown = false;
-                    this.wsToken = data.ws_token || '';
+                    this.wsToken = me.ws_token;
                     this.isDemoSession = !!data.is_demo;
-                    this.staffRole = String(data.staff_role || 'admin').toLowerCase();
-                    this.isSuperadmin = !!data.is_superadmin;
+                    this.staffRole = me.role;
+                    this.isSuperadmin = me.is_superadmin;
                     this._ensureAdminHashListener();
                     const parsed = adminParseLocationHash();
                     if (!parsed.tab) {
@@ -2299,13 +2513,15 @@ function adminMixinAuthKnowledge() {
                     this.loginError = typeof data.detail === 'string' ? data.detail : 'Неверный логин или пароль';
                     return;
                 }
+                const me = this.normalizeMePayload(data);
+                this.userData = me;
                 this.auth401AlertShown = false;
                 this.authenticated = true;
-                this.wsToken = data.ws_token || '';
+                this.wsToken = me.ws_token;
                 this.loginPassword = '';
                 this.isDemoSession = false;
-                this.staffRole = String(data.staff_role || 'admin').toLowerCase();
-                this.isSuperadmin = !!data.is_superadmin;
+                this.staffRole = me.role;
+                this.isSuperadmin = me.is_superadmin;
                 this._ensureAdminHashListener();
                 const parsedLogin = adminParseLocationHash();
                 if (!parsedLogin.tab) {
@@ -2377,7 +2593,7 @@ function adminMixinAuthKnowledge() {
             try {
                 const { ok, status, data } = await this.apiJsonResponse('/api/admin/organization/profile');
                 if (!ok) {
-                    console.warn('GET /api/admin/organization/profile', status, data);
+                    adminLogger.warn('GET /api/admin/organization/profile', status, data);
                     return;
                 }
                 const scheduleObj = (data?.schedule_json && typeof data.schedule_json === 'object') ? data.schedule_json : {};
@@ -2389,6 +2605,7 @@ function adminMixinAuthKnowledge() {
                     currency: (data?.currency || '').trim(),
                     whatsapp_phone_number_id: (data?.whatsapp_phone_number_id || '').trim(),
                     telegram_ops_chat_id: (data?.telegram_ops_chat_id || '').trim(),
+                    prepayment_legal_text: String(data?.prepayment_legal_text ?? '').trim(),
                     schedule_json: scheduleObj,
                     schedule_json_text: JSON.stringify(scheduleObj, null, 2),
                     operational_label: String(data?.operational_label || '').trim(),
@@ -2418,6 +2635,7 @@ function adminMixinAuthKnowledge() {
                     currency: String(this.orgProfile?.currency || '').trim(),
                     whatsapp_phone_number_id: String(this.orgProfile?.whatsapp_phone_number_id || '').trim(),
                     telegram_ops_chat_id: String(this.orgProfile?.telegram_ops_chat_id || '').trim(),
+                    prepayment_legal_text: String(this.orgProfile?.prepayment_legal_text ?? '').trim(),
                     schedule_json: scheduleJson,
                 };
                 const { ok, status, data } = await this.apiJsonResponse('/api/admin/organization/profile', {
@@ -2438,6 +2656,7 @@ function adminMixinAuthKnowledge() {
                     currency: (data?.currency || '').trim(),
                     whatsapp_phone_number_id: (data?.whatsapp_phone_number_id || '').trim(),
                     telegram_ops_chat_id: (data?.telegram_ops_chat_id || '').trim(),
+                    prepayment_legal_text: String(data?.prepayment_legal_text ?? '').trim(),
                     schedule_json: (data?.schedule_json && typeof data.schedule_json === 'object') ? data.schedule_json : scheduleJson,
                     schedule_json_text: JSON.stringify((data?.schedule_json && typeof data.schedule_json === 'object') ? data.schedule_json : scheduleJson, null, 2),
                     operational_label: String(data?.operational_label || '').trim(),
@@ -2446,6 +2665,162 @@ function adminMixinAuthKnowledge() {
                 };
             } finally {
                 this.orgProfileSaving = false;
+            }
+        },
+
+        normalizeBrandingColorHex(raw) {
+            let s = String(raw ?? '').trim();
+            if (!s) return '#2563eb';
+            if (!s.startsWith('#')) s = `#${s}`;
+            if (/^#[0-9A-Fa-f]{6}$/.test(s)) return s.toLowerCase();
+            if (/^#[0-9A-Fa-f]{3}$/.test(s)) {
+                const r = s[1];
+                const g = s[2];
+                const b = s[3];
+                return `#${r}${r}${g}${g}${b}${b}`.toLowerCase();
+            }
+            return '#2563eb';
+        },
+
+        syncBrandingDraftFromUser() {
+            const b = this.userData?.branding;
+            this.brandingDraft = {
+                brand_name: b?.brand_name != null ? String(b.brand_name) : '',
+                brand_color_hex: this.normalizeBrandingColorHex(b?.brand_color_hex),
+            };
+            if (this.brandingPreviewObjectUrl) {
+                try { URL.revokeObjectURL(this.brandingPreviewObjectUrl); } catch (_e) { /* ignore */ }
+            }
+            this.brandingPreviewObjectUrl = '';
+            this.brandingLogoPending = null;
+            this.brandingLogoPendingLabel = '';
+            try {
+                const el = this.$refs?.brandingLogoInput;
+                if (el) el.value = '';
+            } catch (_e) { /* ignore */ }
+        },
+
+        headerBrandAvatarStyle() {
+            const raw = this.userData?.branding?.brand_color_hex;
+            const bg = raw ? this.normalizeBrandingColorHex(raw) : '#2563eb';
+            return { backgroundColor: bg };
+        },
+
+        headerBrandInitialLetter() {
+            const bn = String(this.userData?.branding?.brand_name || '').trim();
+            const on = String(this.orgProfile?.name || 'R').trim();
+            const s = bn || on;
+            const ch = s.slice(0, 1).toUpperCase();
+            return ch || 'R';
+        },
+
+        brandingPreviewTitle() {
+            const b = String(this.brandingDraft?.brand_name || '').trim();
+            return b || String(this.orgProfile?.name || 'Ресторан').trim();
+        },
+
+        brandingPreviewInitials() {
+            const t = this.brandingPreviewTitle();
+            const parts = t.split(/\s+/).filter(Boolean);
+            if (parts.length >= 2) return `${parts[0][0] || ''}${parts[1][0] || ''}`.toUpperCase().slice(0, 2);
+            return t.slice(0, 2).toUpperCase();
+        },
+
+        brandingPreviewHeaderStyle() {
+            const hx = this.normalizeBrandingColorHex(this.brandingDraft?.brand_color_hex);
+            return { boxShadow: `inset 0 0 0 1px ${hx}40` };
+        },
+
+        brandingPreviewLogoSrc() {
+            if (this.brandingPreviewObjectUrl) return this.brandingPreviewObjectUrl;
+            const u = this.userData?.branding?.brand_logo_url;
+            return u ? String(u) : '';
+        },
+
+        onBrandingLogoSelected(ev) {
+            const input = ev?.target;
+            const f = input?.files?.[0];
+            if (this.brandingPreviewObjectUrl) {
+                try { URL.revokeObjectURL(this.brandingPreviewObjectUrl); } catch (_e) { /* ignore */ }
+            }
+            this.brandingPreviewObjectUrl = '';
+            if (!f) {
+                this.brandingLogoPending = null;
+                this.brandingLogoPendingLabel = '';
+                return;
+            }
+            if (f.size > 1024 * 1024) {
+                void this.showUiAlert('Файл больше 1 МБ — выберите PNG или JPG меньшего размера.', 'Ошибка');
+                input.value = '';
+                return;
+            }
+            const okMime = f.type === 'image/png' || f.type === 'image/jpeg';
+            if (!okMime) {
+                void this.showUiAlert('Нужен PNG или JPG.', 'Ошибка');
+                input.value = '';
+                return;
+            }
+            this.brandingLogoPending = f;
+            this.brandingLogoPendingLabel = `Выбран файл: ${f.name}`;
+            this.brandingPreviewObjectUrl = URL.createObjectURL(f);
+        },
+
+        async refreshAuthMeBranding() {
+            const res = await this.apiFetch('/api/admin/auth/me');
+            if (!res.ok) return;
+            const data = await res.json();
+            const me = this.normalizeMePayload(data);
+            this.userData = me;
+            this.wsToken = me.ws_token;
+            this.syncBrandingDraftFromUser();
+        },
+
+        async saveBranding() {
+            if (this.brandingSaving || this.isDemoSession) return;
+            const hex = this.normalizeBrandingColorHex(this.brandingDraft?.brand_color_hex);
+            this.brandingDraft.brand_color_hex = hex;
+            this.brandingSaving = true;
+            try {
+                const body = {
+                    brand_name: String(this.brandingDraft?.brand_name || '').trim() || null,
+                    brand_color_hex: hex,
+                };
+                const { ok, status, data } = await this.apiJsonResponse('/api/admin/branding', {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                if (status === 404 || status === 405) {
+                    this.brandingApiUnavailable = true;
+                    void this.showUiAlert(
+                        'Серверное API брендинга ещё не развёрнуто (этап E2.2.B). Предпросмотр обновляется локально; после обновления платформы сохранение заработает.',
+                        'Подсказка',
+                    );
+                    return;
+                }
+                if (!ok) {
+                    const msg = this.formatApiError(data?.detail) || `Не удалось сохранить (${status})`;
+                    void this.showUiAlert(msg, 'Ошибка');
+                    return;
+                }
+                this.brandingApiUnavailable = false;
+                let logoWarn = '';
+                if (this.brandingLogoPending) {
+                    const fd = new FormData();
+                    fd.append('file', this.brandingLogoPending);
+                    const res = await this.apiFetch('/api/admin/branding/logo', { method: 'POST', body: fd });
+                    if (!res.ok) {
+                        if (res.status === 404 || res.status === 405) this.brandingApiUnavailable = true;
+                        logoWarn = res.status === 404 || res.status === 405
+                            ? 'Текст сохранён; загрузка лого будет доступна после E2.2.B.'
+                            : 'Текст сохранён; файл лого не принят сервером.';
+                    }
+                }
+                await this.refreshAuthMeBranding();
+                if (logoWarn) void this.showUiAlert(logoWarn, 'Внимание');
+                else this.setToast('Брендинг сохранён');
+            } finally {
+                this.brandingSaving = false;
             }
         },
 
@@ -2606,6 +2981,7 @@ function adminMixinAuthKnowledge() {
                 currency: '',
                 whatsapp_phone_number_id: '',
                 telegram_ops_chat_id: '',
+                prepayment_legal_text: '',
                 schedule_json: null,
                 schedule_json_text: '',
             };
@@ -2691,7 +3067,7 @@ function adminMixinAuthKnowledge() {
                 });
             } catch (e) {
                 el.checked = !nextVal;
-                console.error('[admin] onPrepaymentEnforcedToggle', e);
+                adminLogger.error('[admin] onPrepaymentEnforcedToggle', e);
                 void this.showUiAlert('Ошибка сети', 'Ошибка');
             } finally {
                 this.orgPrepaymentEnforcedSaving = false;
@@ -2720,7 +3096,7 @@ function adminMixinAuthKnowledge() {
                 });
             } catch (e) {
                 el.checked = !nextVal;
-                console.error('[admin] onAutoSendIikoAfterPaymentToggle', e);
+                adminLogger.error('[admin] onAutoSendIikoAfterPaymentToggle', e);
                 void this.showUiAlert('Ошибка сети', 'Ошибка');
             } finally {
                 this.orgAutoIikoSaving = false;
@@ -2738,7 +3114,7 @@ function adminMixinAuthKnowledge() {
                     this.knowledgeItems = [];
                 }
             } catch (e) {
-                console.error('[admin] loadKnowledgeBase', e);
+                adminLogger.error('[admin] loadKnowledgeBase', e);
                 this.knowledgeItems = [];
             } finally {
                 this.knowledgeLoading = false;
@@ -2822,7 +3198,7 @@ function adminMixinAuthKnowledge() {
                 await this.loadKnowledgeBase();
                 await this.loadSetupStatus();
             } catch (e) {
-                console.error('[admin] saveKnowledgeItem', e);
+                adminLogger.error('[admin] saveKnowledgeItem', e);
                 this.knowledgeEditError = 'Ошибка сети';
             } finally {
                 this.knowledgeSaveLoading = false;
@@ -2849,7 +3225,7 @@ function adminMixinAuthKnowledge() {
                     void this.showUiAlert(this.formatApiError(data), 'Ошибка');
                 }
             } catch (e) {
-                console.error('[admin] deleteKnowledgeItem', e);
+                adminLogger.error('[admin] deleteKnowledgeItem', e);
                 void this.showUiAlert('Ошибка сети. Проверьте соединение.', 'Ошибка');
             }
         },
@@ -2922,7 +3298,7 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                 }
                 this.packagingPreviewResult = data;
             } catch (e) {
-                console.error('[admin] packagingPreviewRun', e);
+                adminLogger.error('[admin] packagingPreviewRun', e);
                 void this.showUiAlert('Ошибка сети. Проверьте соединение.', 'Ошибка');
             } finally {
                 this.packagingPreviewLoading = false;
@@ -2937,7 +3313,7 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                     ? data.items.map(r => ({ ...r, _saving: false, _packSaveDebounce: null }))
                     : [];
             } catch (e) {
-                console.error('[admin] loadPackagingRules', e);
+                adminLogger.error('[admin] loadPackagingRules', e);
                 this.packagingRules = [];
             } finally {
                 this.packagingLoading = false;
@@ -2966,7 +3342,7 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                     }),
                 });
                 if (!ok) void this.showUiAlert(this.formatApiError(d), 'Ошибка');
-            } catch (e) { console.error('[admin] packagingSave', e); }
+            } catch (e) { adminLogger.error('[admin] packagingSave', e); }
             finally { rule._saving = false; }
         },
         async packagingDelete(rule) {
@@ -2980,7 +3356,7 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                 const { ok, data: d } = await this.apiJsonResponse(`/api/admin/packaging-rules/${rule.id}`, { method: 'DELETE' });
                 if (ok) this.packagingRules = this.packagingRules.filter(r => r.id !== rule.id);
                 else void this.showUiAlert(this.formatApiError(d), 'Ошибка');
-            } catch (e) { console.error('[admin] packagingDelete', e); }
+            } catch (e) { adminLogger.error('[admin] packagingDelete', e); }
             finally { rule._saving = false; }
         },
         async packagingAddNew() {
@@ -3031,7 +3407,7 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                 this.packagingCreateOpen = false;
                 await this.loadPackagingRules();
             } catch (e) {
-                console.error('[admin] submitPackagingCreate', e);
+                adminLogger.error('[admin] submitPackagingCreate', e);
                 this.packagingCreateError = 'Ошибка сети. Проверьте соединение.';
             } finally {
                 this.packagingCreateLoading = false;
@@ -3053,6 +3429,10 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                     const sc = Number(this.setupStatus.score ?? 0);
                     if (sc >= 60) this.setupProgressExpanded = false;
                     else if (sc <= 30) this.setupProgressExpanded = true;
+                    if (sc >= 100 && sessionStorage.getItem('restomind_setup_done_toast') !== '1') {
+                        sessionStorage.setItem('restomind_setup_done_toast', '1');
+                        void this.showUiAlert('Готово: филиал полностью настроен.', 'Готово');
+                    }
                 }
             } catch { /* ignore */ }
         },
@@ -3092,7 +3472,7 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                     this.iikoOnboardSelectedOrg = this.iikoOnboardOrgs[0].id || '';
                 }
             } catch (e) {
-                console.error(e);
+                adminLogger.error(e);
                 void this.showUiAlert('Ошибка сети', 'Ошибка');
             } finally {
                 this.iikoOnboardVerifyLoading = false;
@@ -3131,7 +3511,7 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                 this.menuViewRevision += 1;
                 await this.loadMenu();
             } catch (e) {
-                console.error(e);
+                adminLogger.error(e);
                 void this.showUiAlert('Ошибка сети', 'Ошибка');
             } finally {
                 this.iikoOnboardSetupLoading = false;
@@ -3144,7 +3524,7 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                 const { ok, data } = await this.apiJsonResponse('/api/admin/upsell-rules');
                 this.upsellRules = ok && Array.isArray(data.items) ? data.items : [];
             } catch (e) {
-                console.error('[admin] loadUpsellRules', e);
+                adminLogger.error('[admin] loadUpsellRules', e);
                 this.upsellRules = [];
             } finally {
                 this.upsellLoading = false;
@@ -3181,7 +3561,7 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                     await this.loadSetupStatus();
                 } else void this.showUiAlert(this.formatApiError(d.detail || d), 'Ошибка');
             } catch (e) {
-                console.error('[admin] upsellAddRule', e);
+                adminLogger.error('[admin] upsellAddRule', e);
                 void this.showUiAlert('Ошибка сети', 'Ошибка');
             }
         },
@@ -3197,7 +3577,7 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                     rule.is_active = !rule.is_active;
                     await this.loadSetupStatus();
                 } else void this.showUiAlert(this.formatApiError(d), 'Ошибка');
-            } catch (e) { console.error(e); }
+            } catch (e) { adminLogger.error(e); }
         },
 
         async upsellDeleteRule(rule) {
@@ -3212,7 +3592,7 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                     this.upsellRules = this.upsellRules.filter(r => r.id !== rule.id);
                     await this.loadSetupStatus();
                 } else void this.showUiAlert(this.formatApiError(d), 'Ошибка');
-            } catch (e) { console.error(e); }
+            } catch (e) { adminLogger.error(e); }
         },
 
         async syncIntegrationsNow() {
@@ -3221,37 +3601,36 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
             try {
                 const { ok, status, data } = await this.apiJsonResponse('/api/admin/integrations/sync', { method: 'POST' });
                 if (!ok) {
-                    console.error('[admin] POST /integrations/sync', status, data);
+                    adminLogger.error('[admin] POST /integrations/sync', status, data);
                     void this.showUiAlert(this.formatApiError(data.detail) || 'Синхронизация не удалась', 'Ошибка');
                     return;
                 }
                 if (data.status) {
                     this.mergeIntegrationStatus(data.status);
                 } else {
-                    console.warn('[admin] ответ без status, подгружаем статус');
+                    adminLogger.warn('[admin] ответ без status, подгружаем статус');
                     await this.loadIntegrationStatus();
                 }
                 const ev = await this.apiJsonResponse('/api/admin/integrations/events?limit=40');
                 if (ev.ok) this.integrationEvents = ev.data.events || [];
                 const mOk = data.menu && data.menu.ok;
                 const sOk = data.stop_lists && data.stop_lists.ok;
-                console.info('[admin] синхронизация iiko', { menu: data.menu, stop_lists: data.stop_lists });
+                adminLogger.info('[admin] синхронизация iiko', { menu: data.menu, stop_lists: data.stop_lists });
                 if (mOk && sOk) {
-                    this.demoToastMessage = 'Меню и стоп-листы обновлены из iiko';
+                    this.flashToast('Меню и стоп-листы обновлены из iiko', 'success', 5500);
                 } else if (mOk && !sOk) {
-                    this.demoToastMessage = 'Меню обновлено; стоп-листы: ошибка (см. журнал ниже)';
+                    this.flashToast('Меню обновлено; стоп-листы: ошибка (см. журнал ниже)', 'warning', 5500);
                 } else if (!mOk && sOk) {
-                    this.demoToastMessage = 'Стоп-листы обновлены; меню: ошибка (см. журнал)';
+                    this.flashToast('Стоп-листы обновлены; меню: ошибка (см. журнал)', 'warning', 5500);
                 } else {
-                    this.demoToastMessage = 'Синхронизация завершена с предупреждениями — см. журнал';
+                    this.flashToast('Синхронизация завершена с предупреждениями — см. журнал', 'warning', 5500);
                 }
-                setTimeout(() => { this.demoToastMessage = ''; }, 5500);
                 this.menuViewRevision += 1;
                 await this.loadMenu();
                 if (this.currentTab === 'stoplist') await this.loadStopList();
                 await this.loadSetupStatus();
             } catch (e) {
-                console.error('[admin] integrations/sync', e);
+                adminLogger.error('[admin] integrations/sync', e);
                 void this.showUiAlert('Ошибка сети. Проверьте соединение.', 'Ошибка');
             } finally {
                 this.integrationSyncLoading = false;
@@ -3268,7 +3647,7 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
             try {
                 const { ok, status, data } = await this.apiJsonResponse('/api/admin/stop-lists/sync', { method: 'POST' });
                 if (!ok) {
-                    console.error('[admin] POST /stop-lists/sync', status, data);
+                    adminLogger.error('[admin] POST /stop-lists/sync', status, data);
                     void this.showUiAlert(this.formatApiError(data.detail) || 'Синхронизация стоп-листа не удалась', 'Ошибка');
                     return;
                 }
@@ -3281,14 +3660,13 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                 if (ev.ok) this.integrationEvents = ev.data.events || [];
                 const st = data.stopped != null ? data.stopped : 0;
                 const rs = data.restored != null ? data.restored : 0;
-                console.info('[admin] стоп-лист iiko', { stopped: st, restored: rs });
-                this.demoToastMessage = `Стоп-лист iiko: в стоп ${st}, восстановлено ${rs}`;
-                setTimeout(() => { this.demoToastMessage = ''; }, 5000);
+                adminLogger.info('[admin] стоп-лист iiko', { stopped: st, restored: rs });
+                this.flashToast(`Стоп-лист iiko: в стоп ${st}, восстановлено ${rs}`, 'success', 5000);
                 this.menuViewRevision += 1;
                 await this.loadMenu();
                 if (this.currentTab === 'stoplist') await this.loadStopList();
             } catch (e) {
-                console.error('[admin] stop-lists/sync', e);
+                adminLogger.error('[admin] stop-lists/sync', e);
                 void this.showUiAlert('Ошибка сети. Проверьте соединение.', 'Ошибка');
             } finally {
                 this.stopListSyncLoading = false;
@@ -3316,11 +3694,9 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                 // В JS лучше считать стопом любое "не доступно": false или 0.
                 const derived = fullMenu.filter((i) => i && !i.is_available);
                 this.stopListItems = derived;
-                this.demoToastMessage = `Стоп-лист: ${derived.length} поз.`;
-                setTimeout(() => { this.demoToastMessage = ''; }, 4000);
                 this._recalcStopListFiltered();
             } catch (e) {
-                console.error('[admin] loadStopList', e);
+                adminLogger.error('[admin] loadStopList', e);
                 this.stopListItems = [];
                 this.stopListFilteredItems = [];
                 this.stopListLoadError = 'Ошибка сети';
@@ -3335,8 +3711,7 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                 if (ok && data.ok) {
                     await this.loadIntegrationStatus();
                     const sk = data.skipped != null ? `, пропущено ${data.skipped}` : '';
-                    this.demoToastMessage = `Меню из iiko: новых ${data.created ?? 0}, обновлено ${data.updated ?? 0}${sk}`;
-                    setTimeout(() => { this.demoToastMessage = ''; }, 5000);
+                    this.flashToast(`Меню из iiko: новых ${data.created ?? 0}, обновлено ${data.updated ?? 0}${sk}`, 'success', 5000);
                     this.menuViewRevision += 1;
                     await this.loadMenu();
                 } else {
@@ -3355,20 +3730,18 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                 const { ok, data } = await this.apiJsonResponse('/api/admin/demo/seed', { method: 'POST' });
                 if (ok) {
                     if (data.partial && data.message) {
-                        this.demoToastMessage = data.message;
-                        setTimeout(() => { this.demoToastMessage = ''; }, 5000);
+                        this.flashToast(data.message, 'warning', 5000);
                     } else {
                         const m = data.menu_items_added ? `Меню: +${data.menu_items_added} поз.` : '';
                         const u = data.users_created != null ? `Пользователей: ${data.users_created}. ` : '';
                         const o = data.orders_added != null ? `Заказов: ${data.orders_added}. ` : '';
-                        this.demoToastMessage = (u + o + m).trim() || 'Демо-данные загружены';
-                        setTimeout(() => { this.demoToastMessage = ''; }, 5000);
+                        this.flashToast((u + o + m).trim() || 'Демо-данные загружены', 'success', 5000);
                     }
                     await this.refreshDemoStatus();
                     try {
                         await this.loadTabData();
                     } catch (e) {
-                        console.error('loadTabData после демо', e);
+                        adminLogger.error('loadTabData после демо', e);
                     }
                 } else {
                     void this.showUiAlert(this.formatApiError(data.detail) || 'Не удалось загрузить демо', 'Ошибка');
@@ -3405,10 +3778,11 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                     if (u) parts.push(`пользователей: ${u}`);
                     if (data.orders_deleted) parts.push(`заказов: ${data.orders_deleted}`);
                     if (data.bookings_deleted) parts.push(`броней: ${data.bookings_deleted}`);
-                    this.demoToastMessage = parts.length
-                        ? `Демо удалено (${parts.join(', ')})`
-                        : 'Демо-данные удалены';
-                    setTimeout(() => { this.demoToastMessage = ''; }, 4500);
+                    this.flashToast(
+                        parts.length ? `Демо удалено (${parts.join(', ')})` : 'Демо-данные удалены',
+                        'success',
+                        4500,
+                    );
                     this.showDemoDeleteModal = false;
                     await this.refreshDemoStatus();
                     await this.loadTabData();
@@ -3500,7 +3874,7 @@ function adminMixinWebSocketEvents() {
                 this.wsChannelReady = false;
                 this.wsEpoch++;
                 this._clearWsReadyTimer();
-                console.log('[WS] Socket open, ждём ws_ready…');
+                adminLogger.debug('[WS] Socket open, ждём ws_ready…');
             };
 
             this.ws.onclose = () => {
@@ -3508,7 +3882,7 @@ function adminMixinWebSocketEvents() {
                 this.wsChannelReady = false;
                 this.ws = null;
                 this.wsEpoch++;
-                console.log('[WS] Disconnected');
+                adminLogger.debug('[WS] Disconnected');
                 this.scheduleReconnect();
             };
 
@@ -3521,7 +3895,7 @@ function adminMixinWebSocketEvents() {
                 try {
                     const msg = JSON.parse(event.data);
                     this.handleWsEvent(msg);
-                } catch (e) { console.error('[WS] Parse error:', e); }
+                } catch (e) { adminLogger.error('[WS] Parse error:', e); }
             };
         },
 
@@ -3635,7 +4009,7 @@ function adminMixinWebSocketEvents() {
                 { method: 'POST' },
             );
             if (!ok) {
-                console.warn('resend', status, data);
+                adminLogger.warn('resend', status, data);
                 const detail = data && typeof data.detail === 'string' ? data.detail : '';
                 void this.showUiAlert(
                     detail || `Не удалось переотправить (${status}). Проверьте WhatsApp и права.`,
@@ -3855,6 +4229,24 @@ function adminMixinWebSocketEvents() {
             this.alertQueue.shift();
         },
 
+        /**
+         * Нижний тост (единые классы rm-toast-* в admin.css).
+         * @param {string} message
+         * @param {'success'|'warning'|'error'|'info'} [kind]
+         * @param {number} [ms]
+         */
+        flashToast(message, kind = 'info', ms = 3500) {
+            const k = ['success', 'warning', 'error', 'info'].includes(kind) ? kind : 'info';
+            this.demoToastMessage = message;
+            this.demoToastKind = k;
+            if (this._demoToastTimer) clearTimeout(this._demoToastTimer);
+            this._demoToastTimer = setTimeout(() => {
+                this.demoToastMessage = '';
+                this.demoToastKind = 'info';
+                this._demoToastTimer = null;
+            }, ms);
+        },
+
         async openAlertChat(phone) {
             if (!phone) return;
             this.currentTab = 'chats';
@@ -3891,7 +4283,7 @@ function adminMixinLiveChat() {
         },
 
         /** Допустимые под-вкладки «Настройки». */
-        _adminSettingsTabIds: new Set(['restaurant', 'connections', 'smart_sales', 'team', 'health', 'technical', 'bot_test']),
+        _adminSettingsTabIds: new Set(['restaurant', 'branding', 'connections', 'smart_sales', 'team', 'health', 'technical', 'bot_test']),
 
         _pushAdminHash() {
             if (!this.authenticated || this._applyingHashFromBrowser) return;
@@ -3947,6 +4339,22 @@ function adminMixinLiveChat() {
         /** Невыполненные шаги готовности (подсказки в шапке). */
         setupIncompleteSteps() {
             return (this.setupStatus.steps || []).filter((s) => s && !s.done);
+        },
+
+        setupDoneCount() {
+            return (this.setupStatus.steps || []).filter((s) => s && s.done).length;
+        },
+
+        setupTotalCount() {
+            return (this.setupStatus.steps || []).length || 0;
+        },
+
+        openSetupChecklist() {
+            this.setupChecklistOpen = true;
+        },
+
+        closeSetupChecklist() {
+            this.setupChecklistOpen = false;
         },
 
         /** Перейти к первому невыполненному шагу онбординга (вкладка настроек из API). */
@@ -4044,7 +4452,7 @@ function adminMixinLiveChat() {
                 }
                 const res = await this.apiFetch(url);
                 if (!res.ok) {
-                    console.warn('GET /api/admin/chats', res.status);
+                    adminLogger.warn('GET /api/admin/chats', res.status);
                     return;
                 }
                 const data = await res.json();
@@ -4081,7 +4489,7 @@ function adminMixinLiveChat() {
                 this.chatListCursorId = data.next_cursor?.cursor_id ?? null;
                 this.unreadChats = this.chatList.filter((c) => c.unread).length;
             } catch (e) {
-                console.warn('loadChatList', e);
+                adminLogger.warn('loadChatList', e);
             } finally {
                 this.chatListLoading = false;
             }
@@ -4251,7 +4659,7 @@ function adminMixinLiveChat() {
                     };
                 }
             } catch (e) {
-                console.error('loadCustomerSummary', e);
+                adminLogger.error('loadCustomerSummary', e);
             } finally {
                 if (this.activeChatPhone?.trim() === key) {
                     this.customerSummaryLoading = false;
@@ -4269,7 +4677,7 @@ function adminMixinLiveChat() {
                     body: JSON.stringify({ note: this.customerSummary.operator_note || '' }),
                 });
             } catch (e) {
-                console.error('saveCustomerNote', e);
+                adminLogger.error('saveCustomerNote', e);
             }
         },
 
@@ -4307,8 +4715,7 @@ function adminMixinLiveChat() {
                 const idx = this.chatList.findIndex(c => c.phone === phone);
                 if (idx >= 0) this.chatList[idx].state = targetState;
             } catch (_e) {
-                this.demoToastMessage = 'Не удалось изменить режим диалога. Проверьте соединение.';
-                setTimeout(() => { this.demoToastMessage = ''; }, 4500);
+                this.flashToast('Не удалось изменить режим диалога. Проверьте соединение.', 'error', 4500);
             }
         },
 
@@ -4346,8 +4753,7 @@ function adminMixinLiveChat() {
                 const idx = this.chatList.findIndex(c => c.phone === phone);
                 if (idx >= 0) this.chatList[idx].state = 'human_mode';
             } catch {
-                this.demoToastMessage = 'Не удалось перехватить диалог. Попробуйте ещё раз.';
-                setTimeout(() => { this.demoToastMessage = ''; }, 4500);
+                this.flashToast('Не удалось перехватить диалог. Попробуйте ещё раз.', 'error', 4500);
             }
         },
 
@@ -4361,8 +4767,7 @@ function adminMixinLiveChat() {
                 const idx = this.chatList.findIndex(c => c.phone === phone);
                 if (idx >= 0) this.chatList[idx].state = 'chatting';
             } catch {
-                this.demoToastMessage = 'Не удалось вернуть ИИ. Попробуйте ещё раз.';
-                setTimeout(() => { this.demoToastMessage = ''; }, 4500);
+                this.flashToast('Не удалось вернуть ИИ. Попробуйте ещё раз.', 'error', 4500);
             }
         },
 
@@ -4427,11 +4832,13 @@ function adminMixinDataChartsSettings() {
                     ]);
                 } else if (this.currentTab === 'analytics') {
                     await this.loadAnalytics();
+                } else if (this.currentTab === 'ai_value') {
+                    await this.loadAiValue();
                 } else if (this.currentTab === 'incidents') {
                     await this.loadIncidents();
                 } else if (this.currentTab === 'orders') {
                     await this.loadOrders();
-                } else if (this.currentTab === 'operator_queue') {
+                } else if (this.currentTab === 'operator_queue' || this.currentTab === 'errors') {
                     await Promise.all([this.loadFailedTasks(), this.loadDashStats()]);
                 } else if (this.currentTab === 'bookings') {
                     await this.loadBookings();
@@ -4456,6 +4863,8 @@ function adminMixinDataChartsSettings() {
                         }
                     } else if (this.settingsTab === 'bot_test') {
                         /* тест бота — без тяжёлых запросов */
+                    } else if (this.settingsTab === 'branding') {
+                        this.syncBrandingDraftFromUser();
                     } else {
                         // restaurant
                         await Promise.all([this.loadOrgProfile(), this.loadKnowledgeBase(), this.loadPackagingRules()]);
@@ -4464,7 +4873,7 @@ function adminMixinDataChartsSettings() {
                     await this.loadChatList();
                 }
             } catch (e) {
-                console.error(e);
+                adminLogger.error(e);
                 void this.showUiAlert('Не удалось загрузить данные вкладки. Проверьте сеть и обновите страницу.', 'Ошибка');
             }
             if (this.currentTab !== 'dashboard' && charts.dashboard) {
@@ -4503,10 +4912,10 @@ function adminMixinDataChartsSettings() {
         },
 
         setSettingsTab(tab) {
-            const allowed = new Set(['restaurant', 'connections', 'smart_sales', 'team', 'health', 'technical', 'bot_test']);
-            if (!allowed.has(String(tab || ''))) return;
+            const t = String(tab || '').trim();
+            if (!this._adminSettingsTabIds?.has(t)) return;
             this.currentTab = 'settings';
-            this.settingsTab = String(tab);
+            this.settingsTab = t;
             this.loadTabData();
             this._schedulePushAdminHash();
         },
@@ -4519,7 +4928,7 @@ function adminMixinDataChartsSettings() {
             try {
                 const { ok, status, data } = await this.apiJsonResponse('/api/admin/stats');
                 if (!ok) {
-                    console.warn('GET /api/admin/stats', status, data);
+                    adminLogger.warn('GET /api/admin/stats', status, data);
                     // Не затираем уже загруженные KPI/серию: второй параллельный или повторный запрос
                     // с 401/502 иначе уничтожает график (renderDashboardMiniChart: destroy → пустая серия).
                     const prev = this.dashStats;
@@ -4545,12 +4954,108 @@ function adminMixinDataChartsSettings() {
             }
         },
 
+        aiValuePeriodLabel() {
+            if (this.aiValueCustom) {
+                if (this.aiValueFrom && this.aiValueTo) {
+                    return `${this.aiValueFrom} — ${this.aiValueTo}`;
+                }
+                return 'Произвольный период';
+            }
+            const p = String(this.aiValuePeriod || '7d');
+            if (p === '30d') return '30 дней';
+            if (p === '90d') return '90 дней';
+            return '7 дней';
+        },
+
+        normalizeAiValuePayload(data, source) {
+            const root = data && typeof data === 'object' ? data : {};
+            const metrics = root.metrics && typeof root.metrics === 'object' ? root.metrics : root;
+            const totals = root.totals && typeof root.totals === 'object' ? root.totals : {};
+            const escalations = root.escalations && typeof root.escalations === 'object' ? root.escalations : {};
+            
+            const n = (v) => {
+                const x = Number(v);
+                return Number.isFinite(x) ? x : 0;
+            };
+            const nullable = (v) => {
+                const x = Number(v);
+                return Number.isFinite(x) ? x : null;
+            };
+
+            const orders = n(totals.orders);
+            const bot_orders = n(totals.bot_orders);
+            const automation_rate = orders > 0 ? Math.round((bot_orders / orders) * 100) : 0;
+
+            return {
+                source,
+                period: root.period || this.aiValuePeriod,
+                revenue: n(metrics.ai_revenue || metrics.ai_revenue_today || metrics.upsell_revenue || metrics.upsell_revenue_today),
+                revenue_share_pct: nullable(metrics.ai_revenue_share_pct || metrics.revenue_share_pct),
+                offered: n(metrics.upsell_offered || metrics.upsell_offered_today),
+                accepted: n(metrics.upsell_accepted || metrics.upsell_accepted_today),
+                conversion_pct: nullable(metrics.upsell_conversion_pct || metrics.conversion_pct),
+                messages: n(metrics.ai_messages || metrics.ai_messages_today),
+                time_saved_hours: n(metrics.ai_time_saved_hours || metrics.time_saved_hours),
+                time_saved_minutes: n(metrics.ai_time_saved_minutes || metrics.time_saved_minutes),
+                profit_per_saved_hour_kzt: nullable(metrics.ai_profit_per_saved_hour_kzt || metrics.profit_per_saved_hour_kzt),
+                avg_check_accepted: nullable(metrics.ai_avg_check_upsell_accepted || metrics.avg_check_upsell_accepted),
+                avg_check_no_offer: nullable(metrics.ai_avg_check_no_upsell_offer || metrics.avg_check_no_offer),
+                daily_series: Array.isArray(root.daily_series) ? root.daily_series : (Array.isArray(metrics.daily_series) ? metrics.daily_series : []),
+                
+                // Расширенные поля E3
+                top_upsell_items: Array.isArray(root.top_upsell_items) ? root.top_upsell_items : [],
+                escalation_count: n(escalations.count),
+                first_response_avg_sec: nullable(escalations.first_response_avg_sec),
+                total_orders: orders,
+                bot_orders: bot_orders,
+                automation_rate: automation_rate,
+                bot_revenue: n(totals.bot_revenue_kzt),
+            };
+        },
+
+        async loadAiValue() {
+            this.aiValueLoading = true;
+            try {
+                let url = `/api/admin/ai-value?period=${encodeURIComponent(this.aiValuePeriod || '7d')}`;
+                if (this.aiValuePeriod === 'custom' && this.aiValueFrom && this.aiValueTo) {
+                    url += `&date_from=${encodeURIComponent(this.aiValueFrom)}&date_to=${encodeURIComponent(this.aiValueTo)}`;
+                }
+                const r = await this.apiJsonResponse(url);
+                if (r.ok && r.data) {
+                    this.aiValueData = this.normalizeAiValuePayload(r.data, 'ai-value');
+                    this.aiValueSource = 'ai-value';
+                    return;
+                }
+                const st = await this.apiJsonResponse('/api/admin/stats');
+                if (st.ok && st.data) {
+                    this.aiValueData = this.normalizeAiValuePayload(st.data, 'stats');
+                    this.aiValueSource = 'stats';
+                }
+            } catch (e) {
+                adminLogger.error('[admin] loadAiValue', e);
+            } finally {
+                this.aiValueLoading = false;
+            }
+        },
+
+        async setAiValuePeriod(period) {
+            if (period === 'custom') {
+                this.aiValuePeriod = 'custom';
+                this.aiValueCustom = true;
+                // Не загружаем сразу, ждем "Применить" или установку дат
+                return;
+            }
+            this.aiValuePeriod = String(period || '7d');
+            this.aiValueCustom = false;
+            await this.loadAiValue();
+        },
+
         async loadDashActivity() {
             this.dashActivityLoading = true;
             try {
                 const { ok, status, data } = await this.apiJsonResponse('/api/admin/activity?limit=25');
                 if (!ok) {
-                    console.warn('GET /api/admin/activity', status, data);
+                    adminLogger.warn('GET /api/admin/activity', status, data);
                     return;
                 }
                 this.dashActivity = Array.isArray(data.items) ? data.items : [];
@@ -4579,7 +5084,7 @@ function adminMixinDataChartsSettings() {
                     if (typeof data.is_superadmin === 'boolean') this.isSuperadmin = data.is_superadmin;
                 }
             } catch (e) {
-                console.error('[admin] loadAttentionSummary', e);
+                adminLogger.error('[admin] loadAttentionSummary', e);
             } finally {
                 this.attentionSummaryLoading = false;
             }
@@ -4603,7 +5108,7 @@ function adminMixinDataChartsSettings() {
                 const { ok, data } = await this.apiJsonResponse('/api/admin/readiness');
                 if (ok && data) this.readinessPayload = data;
             } catch (e) {
-                console.error('[admin] loadReadiness', e);
+                adminLogger.error('[admin] loadReadiness', e);
             } finally {
                 this.readinessLoading = false;
             }
@@ -4618,7 +5123,7 @@ function adminMixinDataChartsSettings() {
                 const { ok, data } = await this.apiJsonResponse(`/api/admin/orders/${id}/timeline`);
                 if (ok && data && Array.isArray(data.events)) this.orderTimeline = data.events;
             } catch (e) {
-                console.error('[admin] loadOrderTimeline', e);
+                adminLogger.error('[admin] loadOrderTimeline', e);
             } finally {
                 this.orderTimelineLoading = false;
             }
@@ -4651,7 +5156,7 @@ function adminMixinDataChartsSettings() {
             try {
                 const { ok, status, data } = await this.apiJsonResponse('/api/admin/incidents?mode=full');
                 if (!ok) {
-                    console.warn('GET /api/admin/incidents', status, data);
+                    adminLogger.warn('GET /api/admin/incidents', status, data);
                     if (!this.incidentsLoadedOnce) {
                         this.incidents = {
                             groups: [],
@@ -4678,7 +5183,7 @@ function adminMixinDataChartsSettings() {
                 this.isSuperadmin = !!data.is_superadmin;
                 this.incidentsLoadedOnce = true;
             } catch (e) {
-                console.error('[admin] loadIncidents', e);
+                adminLogger.error('[admin] loadIncidents', e);
             } finally {
                 this.incidentsLoading = false;
             }
@@ -4708,7 +5213,7 @@ function adminMixinDataChartsSettings() {
             try {
                 const { ok, status, data } = await this.apiJsonResponse('/api/admin/roi/today');
                 if (!ok) {
-                    console.warn('GET /api/admin/roi/today', status, data);
+                    adminLogger.warn('GET /api/admin/roi/today', status, data);
                     this.dashRoiSummary = null;
                     return;
                 }
@@ -4762,7 +5267,7 @@ function adminMixinDataChartsSettings() {
                     await this.loadDashStats();
                     await this.syncDashboardChartIfVisible();
                 } catch (e) {
-                    console.error('[admin] scheduleDashStatsRefreshDebounced', e);
+                    adminLogger.error('[admin] scheduleDashStatsRefreshDebounced', e);
                 }
             }, 350);
         },
@@ -4875,7 +5380,7 @@ function adminMixinDataChartsSettings() {
                 if (ph) q.set('phone', ph);
                 const { ok, status, data } = await this.apiJsonResponse(`/api/admin/failed-tasks?${q.toString()}`);
                 if (!ok) {
-                    console.warn('[admin] loadFailedTasks', status, data);
+                    adminLogger.warn('[admin] loadFailedTasks', status, data);
                     return;
                 }
                 this.failedTasks = data.tasks || [];
@@ -4947,7 +5452,30 @@ function adminMixinDataChartsSettings() {
                     await this.loadDashStats();
                 }
             } catch (e) {
-                console.error(e);
+                adminLogger.error(e);
+            }
+        },
+
+        async retryFailedTask(task) {
+            const id = Number(task && task.id);
+            if (!id) return;
+            this.failedTaskRetryingId = id;
+            try {
+                const { ok, data } = await this.apiJsonResponse(`/api/admin/failed-tasks/${id}/retry`, {
+                    method: 'POST',
+                });
+                if (!ok) {
+                    void this.showUiAlert(this.formatApiError(data.detail || data) || 'Не удалось поставить задачу на повтор', 'Ошибка');
+                    return;
+                }
+                void this.showUiAlert('Повторная обработка поставлена в очередь.', 'Готово');
+                await this.loadFailedTasks();
+                await this.loadDashStats();
+            } catch (e) {
+                adminLogger.error(e);
+                void this.showUiAlert('Ошибка сети. Проверьте соединение.', 'Ошибка');
+            } finally {
+                this.failedTaskRetryingId = null;
             }
         },
 
@@ -5055,7 +5583,7 @@ function adminMixinDataChartsSettings() {
                 this.menuLoadError = typeof data.detail === 'string'
                     ? data.detail
                     : (status === 401 ? 'Сессия истекла — войдите снова' : 'Не удалось загрузить меню');
-                console.error('Меню: ошибка API', status, data);
+                adminLogger.error('Меню: ошибка API', status, data);
                 return;
             }
             this.menuItems = data.items || [];
@@ -5090,7 +5618,7 @@ function adminMixinDataChartsSettings() {
                 }
                 this.settingsOrdersList = Array.isArray(data.orders) ? data.orders : [];
             } catch (e) {
-                console.error('[admin] loadSettingsOrders', e);
+                adminLogger.error('[admin] loadSettingsOrders', e);
                 this.settingsOrdersList = [];
             } finally {
                 this.settingsOrdersLoading = false;
@@ -5103,7 +5631,7 @@ function adminMixinDataChartsSettings() {
                 const { ok, data } = await this.apiJsonResponse('/api/admin/settings/environment');
                 this.settingsEnv = ok && data ? data : null;
             } catch (e) {
-                console.error('[admin] loadSettingsEnvironment', e);
+                adminLogger.error('[admin] loadSettingsEnvironment', e);
                 this.settingsEnv = null;
             } finally {
                 this.settingsEnvLoading = false;
@@ -5130,10 +5658,9 @@ function adminMixinDataChartsSettings() {
                     void this.showUiAlert(typeof data.detail === 'string' ? data.detail : 'Ошибка', 'Ошибка');
                     return;
                 }
-                this.demoToastMessage = `Сессия сброшена: ${phone}`;
-                setTimeout(() => { this.demoToastMessage = ''; }, 3500);
+                this.flashToast(`Сессия сброшена: ${phone}`, 'info', 3500);
             } catch (e) {
-                console.error(e);
+                adminLogger.error(e);
                 void this.showUiAlert('Ошибка сети. Проверьте соединение.', 'Ошибка');
             } finally {
                 this.settingsRedisPurgeLoading = false;
@@ -5166,7 +5693,7 @@ function adminMixinDataChartsSettings() {
                 a.click();
                 URL.revokeObjectURL(u);
             } catch (e) {
-                console.error('[admin] export csv', e);
+                adminLogger.error('[admin] export csv', e);
                 void this.showUiAlert('Ошибка сети. Проверьте соединение.', 'Ошибка');
             } finally {
                 this.settingsExportLoading = false;
@@ -5203,12 +5730,15 @@ function adminMixinDataChartsSettings() {
                     return;
                 }
                 this.settingsSelectedOrderIds = [];
-                this.demoToastMessage = `Отменено заказов: ${data.cancelled ?? 0}; уже были отменены: ${data.skipped_already_cancelled ?? 0}`;
-                setTimeout(() => { this.demoToastMessage = ''; }, 4500);
+                this.flashToast(
+                    `Отменено заказов: ${data.cancelled ?? 0}; уже были отменены: ${data.skipped_already_cancelled ?? 0}`,
+                    'success',
+                    4500,
+                );
                 await Promise.all([this.loadSettingsOrders(), this.loadOrders(), this.loadDashStats(), this.loadSettingsEnvironment()]);
                 await this.syncDashboardChartIfVisible();
             } catch (e) {
-                console.error('[admin] settingsBulkCancelOrders', e);
+                adminLogger.error('[admin] settingsBulkCancelOrders', e);
                 void this.showUiAlert('Ошибка сети. Проверьте соединение.', 'Ошибка');
             } finally {
                 this.settingsBulkCancelLoading = false;
@@ -5235,11 +5765,10 @@ function adminMixinDataChartsSettings() {
                     void this.showUiAlert(typeof data.detail === 'string' ? data.detail : 'Ошибка', 'Ошибка');
                     return;
                 }
-                this.demoToastMessage = `Удалено записей чата: ${data.deleted ?? 0}`;
-                setTimeout(() => { this.demoToastMessage = ''; }, 4000);
+                this.flashToast(`Удалено записей чата: ${data.deleted ?? 0}`, 'success', 4000);
                 await this.loadSettingsEnvironment();
             } catch (e) {
-                console.error(e);
+                adminLogger.error(e);
                 void this.showUiAlert('Ошибка сети. Проверьте соединение.', 'Ошибка');
             } finally {
                 this.settingsRetentionRunLoading = false;
@@ -5278,12 +5807,15 @@ function adminMixinDataChartsSettings() {
                     void this.showUiAlert(typeof data.detail === 'string' ? data.detail : 'Не удалось очистить меню', 'Ошибка');
                     return;
                 }
-                this.demoToastMessage = data.deleted != null ? `Меню: удалено позиций ${data.deleted}` : 'Меню очищено';
-                setTimeout(() => { this.demoToastMessage = ''; }, 4000);
+                this.flashToast(
+                    data.deleted != null ? `Меню: удалено позиций ${data.deleted}` : 'Меню очищено',
+                    'warning',
+                    4000,
+                );
                 await Promise.all([this.loadMenu(), this.loadDashStats()]);
                 await this.syncDashboardChartIfVisible();
             } catch (e) {
-                console.error(e);
+                adminLogger.error(e);
                 void this.showUiAlert('Ошибка сети. Проверьте соединение.', 'Ошибка');
             } finally {
                 this.settingsMenuClearLoading = false;
@@ -5315,8 +5847,7 @@ function adminMixinDataChartsSettings() {
                     void this.showUiAlert(typeof data.detail === 'string' ? data.detail : 'Ошибка очистки', 'Ошибка');
                     return;
                 }
-                this.demoToastMessage = `Меню филиала очищено (${data.menu_items_deleted ?? 0} поз.)`;
-                setTimeout(() => { this.demoToastMessage = ''; }, 4500);
+                this.flashToast(`Меню филиала очищено (${data.menu_items_deleted ?? 0} поз.)`, 'warning', 4500);
                 await Promise.all([
                     this.loadMenu(),
                     this.loadDashStats(),
@@ -5325,7 +5856,7 @@ function adminMixinDataChartsSettings() {
                 ]);
                 await this.syncDashboardChartIfVisible();
             } catch (e) {
-                console.error(e);
+                adminLogger.error(e);
                 void this.showUiAlert('Ошибка сети. Проверьте соединение.', 'Ошибка');
             } finally {
                 this.settingsMenuStopClearLoading = false;
@@ -5354,8 +5885,11 @@ function adminMixinDataChartsSettings() {
                 this.settingsPurgeModalOpen = false;
                 this.settingsPurgePhrase = '';
                 this.settingsPurgeAck = false;
-                this.demoToastMessage = `Сброс: заказов ${data.orders_deleted ?? 0}, броней ${data.bookings_deleted ?? 0}, сообщений чата ${data.chat_logs_deleted ?? 0}`;
-                setTimeout(() => { this.demoToastMessage = ''; }, 5000);
+                this.flashToast(
+                    `Сброс: заказов ${data.orders_deleted ?? 0}, броней ${data.bookings_deleted ?? 0}, сообщений чата ${data.chat_logs_deleted ?? 0}`,
+                    'warning',
+                    5000,
+                );
                 await Promise.all([
                     this.loadSettingsOrders(),
                     this.loadOrders(),
@@ -5365,7 +5899,7 @@ function adminMixinDataChartsSettings() {
                 ]);
                 await this.syncDashboardChartIfVisible();
             } catch (e) {
-                console.error(e);
+                adminLogger.error(e);
                 this.settingsPurgeError = 'Ошибка сети';
             } finally {
                 this.settingsPurgeLoading = false;
@@ -5398,15 +5932,16 @@ function adminMixinDataChartsSettings() {
                     void this.showUiAlert(typeof data.detail === 'string' ? data.detail : 'Не удалось очистить меню', 'Ошибка');
                     return;
                 }
-                this.demoToastMessage = data.deleted != null
-                    ? `Удалено позиций: ${data.deleted}`
-                    : 'Меню очищено';
-                setTimeout(() => { this.demoToastMessage = ''; }, 3200);
+                this.flashToast(
+                    data.deleted != null ? `Удалено позиций: ${data.deleted}` : 'Меню очищено',
+                    'success',
+                    3200,
+                );
                 await this.loadMenu();
                 await this.loadDashStats();
                 await this.syncDashboardChartIfVisible();
             } catch (e) {
-                console.error('[admin] clearAllMenuFromDb', e);
+                adminLogger.error('[admin] clearAllMenuFromDb', e);
                 void this.showUiAlert('Ошибка сети. Проверьте соединение.', 'Ошибка');
             } finally {
                 this.menuClearLoading = false;
@@ -5504,8 +6039,7 @@ function adminMixinDataChartsSettings() {
                 if (ok) {
                     this.menuEditOpen = false;
                     await this.loadMenu();
-                    this.demoToastMessage = f.id == null ? 'Позиция добавлена' : 'Позиция сохранена';
-                    setTimeout(() => { this.demoToastMessage = ''; }, 3000);
+                    this.flashToast(f.id == null ? 'Позиция добавлена' : 'Позиция сохранена', 'success', 3000);
                 } else {
                     void this.showUiAlert(typeof data.detail === 'string' ? data.detail : 'Не удалось сохранить', 'Ошибка');
                 }
@@ -5530,8 +6064,7 @@ function adminMixinDataChartsSettings() {
                 if (ok) {
                     this.menuEditOpen = false;
                     await this.loadMenu();
-                    this.demoToastMessage = 'Позиция удалена';
-                    setTimeout(() => { this.demoToastMessage = ''; }, 3000);
+                    this.flashToast('Позиция удалена', 'success', 3000);
                 } else {
                     void this.showUiAlert(typeof data.detail === 'string' ? data.detail : 'Не удалось удалить', 'Ошибка');
                 }
@@ -5601,8 +6134,11 @@ function adminMixinDataChartsSettings() {
                 if (results.some((r) => !r)) {
                     void this.showUiAlert('Часть позиций не обновилась — проверьте сеть или обновите страницу', 'Ошибка');
                 } else {
-                    this.demoToastMessage = available ? 'Выбранные позиции в продаже' : 'Выбранные позиции в стопе';
-                    setTimeout(() => { this.demoToastMessage = ''; }, 2800);
+                    this.flashToast(
+                        available ? 'Выбранные позиции в продаже' : 'Выбранные позиции в стопе',
+                        'success',
+                        2800,
+                    );
                 }
             } catch {
                 void this.showUiAlert('Ошибка сети. Проверьте соединение.', 'Ошибка');
@@ -5647,7 +6183,7 @@ function adminMixinDataChartsSettings() {
                         top_items: [],
                         changes: {},
                     };
-                    console.warn('GET /api/admin/analytics', status, raw);
+                    adminLogger.warn('GET /api/admin/analytics', status, raw);
                     this.analyticsDailyDataRev = (this.analyticsDailyDataRev || 0) + 1;
                     return;
                 }
@@ -5668,7 +6204,7 @@ function adminMixinDataChartsSettings() {
                     this._attachChartLayoutFix(charts.analytics, parent);
                 }
             } catch (e) {
-                console.warn('analytics chart paint', e);
+                adminLogger.warn('analytics chart paint', e);
             }
         },
 
@@ -5834,7 +6370,7 @@ function adminMixinDataChartsSettings() {
                     plugins: [externalTooltipPlugin],
                 });
             } catch (e) {
-                console.error('Chart.js (аналитика):', e);
+                adminLogger.error('Chart.js (аналитика):', e);
             }
 
             // KPI sparklines render (tiny, no axes).
@@ -6030,7 +6566,7 @@ function adminMixinDataChartsSettings() {
                 },
             });
             } catch (e) {
-                console.error('Chart.js (дашборд):', e);
+                adminLogger.error('Chart.js (дашборд):', e);
             }
         },
 

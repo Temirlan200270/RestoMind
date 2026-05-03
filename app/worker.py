@@ -25,6 +25,7 @@ async def whatsapp_process_text(
     message_text: str,
     whatsapp_message_id: str = "",
     webhook_value: dict[str, Any] | None = None,
+    organization_id: int | None = None,
 ) -> None:
     # Импорт внутри, чтобы worker не тащил FastAPI на импорт‑тайме
     from app.api.webhooks import process_with_retry
@@ -34,6 +35,7 @@ async def whatsapp_process_text(
         message_text,
         whatsapp_message_id=whatsapp_message_id,
         webhook_value=webhook_value,
+        organization_id=organization_id,
     )
 
 

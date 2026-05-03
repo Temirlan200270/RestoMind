@@ -15,7 +15,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 </head>
-<body class="bg-gray-50 min-h-screen font-sans text-gray-800">
+<body class="admin-root bg-gray-50 min-h-screen font-sans text-gray-800">
 
 <!-- ========== ЭКРАН ВХОДА ========== -->
 <div x-show="!authenticated" x-cloak
@@ -105,7 +105,7 @@
                                 <span x-show="item.id === 'orders' && ordersIikoErrorCount() > 0"
                                     class="absolute right-3 top-2 min-w-[1.25rem] h-5 px-1 bg-rose-600 rounded-full text-[10px] font-bold flex items-center justify-center"
                                     x-text="ordersIikoErrorCount()"></span>
-                                <span x-show="item.id === 'operator_queue' && (dashStats.failed_tasks_open || 0) > 0"
+                                <span x-show="(item.id === 'operator_queue' || item.id === 'errors') && (dashStats.failed_tasks_open || 0) > 0"
                                     class="absolute right-3 top-2 min-w-[1.25rem] h-5 px-1 bg-red-500 rounded-full text-[10px] font-bold flex items-center justify-center"
                                     x-text="dashStats.failed_tasks_open"></span>
                                 <span x-show="item.id === 'settings' && integrationErrorBadge() > 0"
@@ -132,16 +132,43 @@
             <div class="flex flex-col gap-2 min-w-0 md:flex-row md:items-start md:justify-between md:gap-3">
                 <div class="flex items-center gap-2 md:gap-3 min-w-0 md:flex-1 md:min-w-0">
                     <button type="button" class="md:hidden min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 shrink-0" @click="sidebarOpen = true" aria-label="Открыть меню">
-                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
                     </button>
                     <div class="min-w-0 flex-1">
-                        <!-- Multi-tenant брендинг: всегда видно, какой ресторан сейчас открыт -->
+                        <!-- Multi-tenant брендинг: выбор филиала или просто имя -->
                         <div class="flex items-center gap-2 mb-1 min-w-0" x-show="authenticated" x-cloak>
-                            <div class="h-7 w-7 rounded-xl bg-brand-600 text-white flex items-center justify-center text-xs font-bold shrink-0 ring-1 ring-black/5">
-                                <span x-text="(orgProfile?.name || 'R').trim().slice(0, 1).toUpperCase()"></span>
+                            <div class="h-7 w-7 rounded-xl text-white flex items-center justify-center text-xs font-bold shrink-0 ring-1 ring-black/5 overflow-hidden"
+                                :style="headerBrandAvatarStyle()">
+                                <template x-if="userData?.branding?.brand_logo_url">
+                                    <img :src="userData.branding.brand_logo_url" class="h-full w-full object-cover">
+                                </template>
+                                <template x-if="!userData?.branding?.brand_logo_url">
+                                    <span x-text="headerBrandInitialLetter()"></span>
+                                </template>
                             </div>
                             <div class="min-w-0">
-                                <div class="text-xs font-semibold text-gray-700 truncate" x-text="orgProfile?.name || '—'"></div>
+                                <template x-if="(userData?.available_organizations || []).length > 1">
+                                    <div class="relative" x-data="{ open: false }" @click.away="open = false">
+                                        <button @click="open = !open" class="flex items-center gap-1.5 text-xs font-bold text-gray-900 hover:text-brand-700 transition min-w-0 group text-left">
+                                            <span class="truncate" x-text="orgProfile?.name || '—'"></span>
+                                            <svg class="w-3 h-3 text-gray-400 group-hover:text-brand-500 transition shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M19 9l-7 7-7-7"/></svg>
+                                        </button>
+                                        <div x-show="open" x-cloak class="absolute left-0 mt-2 w-56 rounded-xl bg-white shadow-2xl ring-1 ring-black/5 z-[60] py-1 border border-gray-100 overflow-hidden">
+                                            <template x-for="org in userData.available_organizations" :key="org.id">
+                                                <button @click="selectOrganization(org.id); open = false" 
+                                                    class="w-full px-4 py-2.5 text-left text-xs transition flex items-center justify-between"
+                                                    :class="org.id === orgProfile?.id ? 'bg-brand-50 text-brand-700 font-bold' : 'text-gray-700 hover:bg-gray-50'">
+                                                    <span x-text="org.name"></span>
+                                                    <svg x-show="org.id === orgProfile?.id" class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>
+                                                </button>
+                                            </template>
+                                        </div>
+                                    </div>
+                                </template>
+                                <template x-if="(userData?.available_organizations || []).length <= 1">
+                                    <div class="text-xs font-semibold text-gray-700 truncate" x-text="orgProfile?.name || '—'"></div>
+                                </template>
+                                <div class="text-[9px] text-gray-400 uppercase font-bold tracking-tight" x-show="userData?.tenant?.name" x-text="userData.tenant.name"></div>
                             </div>
                             <div class="text-[10px] text-gray-400 tabular-nums shrink-0" x-show="orgProfile?.organization_id" x-text="'ID ' + orgProfile.organization_id"></div>
                             <span x-show="isDemoSession" x-cloak class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-100 text-violet-800 border border-violet-200 shrink-0">Демо</span>
@@ -150,6 +177,7 @@
                             <h1 class="text-lg sm:text-xl md:text-2xl font-bold text-gray-900 truncate flex-1 min-w-0"
                                 x-text="currentTab === 'settings'
                                   ? (settingsTab === 'restaurant' ? 'Мой ресторан'
+                                    : settingsTab === 'branding' ? 'Брендинг'
                                     : settingsTab === 'connections' ? 'Подключения'
                                     : settingsTab === 'smart_sales' ? 'Умные продажи'
                                     : settingsTab === 'team' ? 'Команда'
@@ -161,12 +189,13 @@
                             <button type="button" @click="openGlobalSearch()"
                                 class="md:hidden shrink-0 min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 hover:bg-gray-50"
                                 title="Быстрый поиск (Ctrl+K)" aria-label="Поиск по заказам и чатам">
-                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
                             </button>
                         </div>
                         <p class="hidden sm:block text-sm text-gray-500 mt-0.5 line-clamp-2"
                             x-text="currentTab === 'settings'
                               ? (settingsTab === 'restaurant' ? 'Профиль, часовой пояс, упаковка и информация для бота'
+                                : settingsTab === 'branding' ? 'Название бренда, логотип и акцентный цвет в шапке'
                                 : settingsTab === 'connections' ? 'iiko, WhatsApp и синхронизация'
                                 : settingsTab === 'smart_sales' ? 'Допродажи и сценарии продаж'
                                 : settingsTab === 'team' ? 'Доступ сотрудников к панели управления'
@@ -175,7 +204,16 @@
                                 : settingsTab === 'bot_test' ? 'Песочница для промптов'
                                 : '')
                               : (navItems.find(i => i.id === currentTab)?.desc)"></p>
-                        <div x-show="authenticated && (setupStatus.score ?? 100) < 100" x-cloak class="w-full max-w-md mt-2">
+                        <button type="button"
+                            x-show="authenticated && (setupStatus.score ?? 100) < 100"
+                            x-cloak
+                            @click="openSetupChecklist()"
+                            class="mt-2 inline-flex max-w-full items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100">
+                            <span class="h-2 w-2 rounded-full bg-amber-500"></span>
+                            <span class="tabular-nums" x-text="'Готовность ' + (setupStatus.score ?? 0) + '%'"></span>
+                            <span class="text-amber-800/70 tabular-nums" x-text="setupDoneCount() + '/' + setupTotalCount()"></span>
+                        </button>
+                        <div x-show="false" x-cloak class="w-full max-w-md mt-2">
                             <div class="rounded-2xl p-3 border transition"
                                 :class="(setupStatus.score ?? 0) <= 30
                                   ? 'border-amber-200 bg-amber-50/70 shadow-sm'
@@ -238,8 +276,9 @@
                 <div class="flex items-center gap-1.5 sm:gap-2 overflow-x-auto max-w-full shrink-0 pb-0.5 md:pb-0 md:flex-wrap md:overflow-visible md:justify-end admin-header-actions-scroll">
                     <button type="button" @click="openGlobalSearch()"
                         class="hidden md:inline-flex items-center gap-2 min-h-[44px] shrink-0 px-3 sm:px-4 py-2 rounded-xl border border-gray-200 bg-white text-sm font-medium text-gray-600 hover:bg-gray-50 transition shadow-sm"
-                        title="Быстрый поиск (Ctrl+K)">
-                        <svg class="w-4 h-4 shrink-0 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                        title="Быстрый поиск (Ctrl+K)"
+                        aria-label="Быстрый поиск по заказам, чатам и бронированиям">
+                        <svg class="w-4 h-4 shrink-0 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
                         <span>Поиск…</span>
                         <kbd class="text-[10px] px-1.5 py-0.5 rounded-md bg-gray-100 text-gray-500 font-mono border border-gray-200/80">Ctrl K</kbd>
                     </button>
@@ -267,7 +306,7 @@
                         class="px-4 py-1.5 bg-white text-red-600 rounded-lg text-sm font-semibold hover:bg-red-50 transition">
                         Перехватить
                     </button>
-                    <button type="button" @click="dismissAlert()" class="text-white/80 hover:text-white text-2xl leading-none px-1" aria-label="Закрыть">&times;</button>
+                    <button type="button" @click="dismissAlert()" class="text-white/80 hover:text-white text-2xl leading-none px-1" aria-label="Закрыть уведомление о запросе помощи">&times;</button>
                 </div>
             </div>
         </div>
@@ -363,6 +402,45 @@
                                     <div class="text-sm text-slate-700 mt-1 leading-snug" x-text="a.body"></div>
                                 </div>
                             </template>
+                        </div>
+                    </div>
+                {% endcall %}
+
+                {% call ui_card('Ценность ИИ (сводка)') %}
+                    <p class="text-xs text-slate-500 -mt-1 mb-3 leading-relaxed">
+                        Эффективность советов бота за сегодня (UTC). Совпадает с KPI из <span class="font-mono text-[11px]">prompt.md</span> §2 (предложено / принято, конверсия, средний чек).
+                    </p>
+                    <div x-show="dashStatsLoading && !dashStatsLoadedOnce" class="h-24 rounded-xl bg-slate-100 animate-pulse"></div>
+                    <div x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                        <div class="rounded-2xl bg-slate-50/95 ring-1 ring-slate-900/5 px-4 py-3">
+                            <p class="text-[11px] font-bold uppercase tracking-wide text-slate-500">Советы: предложено</p>
+                            <p class="text-xl font-black text-slate-900 tabular-nums mt-1" x-text="dashStats.upsell_offered_today ?? 0"></p>
+                        </div>
+                        <div class="rounded-2xl bg-slate-50/95 ring-1 ring-slate-900/5 px-4 py-3">
+                            <p class="text-[11px] font-bold uppercase tracking-wide text-slate-500">Советы: принято</p>
+                            <p class="text-xl font-black text-slate-900 tabular-nums mt-1" x-text="dashStats.upsell_accepted_today ?? 0"></p>
+                        </div>
+                        <div class="rounded-2xl bg-indigo-50/95 ring-1 ring-indigo-200/70 px-4 py-3">
+                            <p class="text-[11px] font-bold uppercase tracking-wide text-indigo-900/75">Конверсия советов</p>
+                            <p class="text-xl font-black text-indigo-950 tabular-nums mt-1"
+                                x-text="(dashStats.upsell_conversion_pct ?? '—') + (dashStats.upsell_conversion_pct != null ? '%' : '')"></p>
+                        </div>
+                        <div class="rounded-2xl bg-white ring-1 ring-slate-900/5 px-4 py-3 sm:col-span-2 xl:col-span-1">
+                            <p class="text-[11px] font-bold uppercase tracking-wide text-slate-500">Доля выручки от ИИ</p>
+                            <p class="text-xl font-black text-slate-900 tabular-nums mt-1"
+                                x-text="(dashStats.ai_revenue_share_pct ?? '—') + (dashStats.ai_revenue_share_pct != null ? '%' : '')"></p>
+                        </div>
+                    </div>
+                    <div x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak class="mt-4 grid gap-3 md:grid-cols-2">
+                        <div class="rounded-xl bg-white ring-1 ring-slate-900/5 px-4 py-3">
+                            <p class="text-[11px] font-bold uppercase text-slate-500">Средний чек, если совет принят</p>
+                            <p class="text-lg font-extrabold text-slate-900 tabular-nums mt-0.5"
+                                x-text="dashStats.ai_avg_check_upsell_accepted != null ? fmt.money(dashStats.ai_avg_check_upsell_accepted) : '—'"></p>
+                        </div>
+                        <div class="rounded-xl bg-white ring-1 ring-slate-900/5 px-4 py-3">
+                            <p class="text-[11px] font-bold uppercase text-slate-500">Средний чек без предложения советов</p>
+                            <p class="text-lg font-extrabold text-slate-900 tabular-nums mt-0.5"
+                                x-text="dashStats.ai_avg_check_no_upsell_offer != null ? fmt.money(dashStats.ai_avg_check_no_upsell_offer) : '—'"></p>
                         </div>
                     </div>
                 {% endcall %}
@@ -595,9 +673,9 @@
                     </div>
                 </div>
 
-                <div x-show="incidentsLoading && !incidentsLoadedOnce" class="grid gap-3">
-                    <div class="h-24 rounded-2xl bg-slate-100 animate-pulse"></div>
-                    <div class="h-24 rounded-2xl bg-slate-100 animate-pulse"></div>
+                <div x-show="incidentsLoading && !incidentsLoadedOnce" x-cloak class="rm-loading-line border border-slate-100 rounded-xl px-3 bg-white">
+                    <svg class="animate-spin h-4 w-4 text-brand-600 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                    <span>Загружаем очередь инцидентов…</span>
                 </div>
 
                 <div x-show="!incidentsLoading && incidentsLoadedOnce && incidentsTotalOpen() === 0" x-cloak
@@ -658,6 +736,169 @@
                 </div>
             </div>
 
+            <!-- ========== ВКЛАД ИИ ========== -->
+            <div x-show="currentTab === 'ai_value'" x-cloak class="fade-in">
+                <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-6">
+                    <div>
+                        <div class="text-sm font-semibold text-brand-700 mb-1">AI Value</div>
+                        <h2 class="text-2xl font-extrabold text-slate-900 tracking-tight">Вклад ИИ</h2>
+                        <p class="text-sm text-slate-500 mt-1">Допродажи, экономия времени и качество подсказок за выбранный период.</p>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-3">
+                        <div class="inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm w-fit">
+                            <template x-for="p in [{id:'7d', label:'7д'}, {id:'30d', label:'30д'}, {id:'90d', label:'90д'}]" :key="p.id">
+                                <button type="button" @click="setAiValuePeriod(p.id)"
+                                    class="px-3 py-2 rounded-lg text-sm font-semibold transition"
+                                    :class="aiValuePeriod === p.id && !aiValueCustom ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'"
+                                    x-text="p.label"></button>
+                            </template>
+                            <button type="button" @click="setAiValuePeriod('custom')"
+                                class="px-3 py-2 rounded-lg text-sm font-semibold transition"
+                                :class="aiValueCustom ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'">
+                                Свой
+                            </button>
+                        </div>
+                        <div x-show="aiValueCustom" x-cloak class="flex items-center gap-2">
+                            <input type="date" x-model="aiValueFrom" class="border border-slate-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-brand-500">
+                            <span class="text-slate-400">—</span>
+                            <input type="date" x-model="aiValueTo" class="border border-slate-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-brand-500">
+                            <button type="button" @click="loadAiValue()" class="px-3 py-1.5 rounded-lg bg-brand-600 text-white text-xs font-semibold hover:bg-brand-700 transition">
+                                Применить
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div x-show="aiValueSource === 'stats'" x-cloak class="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                    Резервный режим: данные из /api/admin/stats (сводка за сегодня). Для периода выберите обновление страницы или проверьте доступность GET /api/admin/ai-value.
+                </div>
+
+                <!-- Основные KPI -->
+                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+                    <!-- 1. Выручка ИИ -->
+                    <div class="bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 p-5">
+                        <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Выручка ИИ</div>
+                        <div class="mt-2 text-3xl font-black tabular-nums text-slate-900" x-text="fmt.money(aiValueData?.revenue || 0)"></div>
+                        <div class="mt-1 text-xs text-slate-500">
+                            <span x-text="aiValueData?.revenue_share_pct == null ? 'Доля: —' : ('Доля в общей выручке: ' + aiValueData.revenue_share_pct + '%')"></span>
+                        </div>
+                    </div>
+                    <!-- 2. Автоматизация -->
+                    <div class="bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 p-5">
+                        <div class="flex items-center justify-between mb-2">
+                            <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Заказы через бота</div>
+                            <div class="text-xs font-bold text-brand-600" x-text="(aiValueData?.automation_rate || 0) + '%'"></div>
+                        </div>
+                        <div class="mt-1 h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                            <div class="h-full bg-brand-500 transition-all duration-500" :style="'width: ' + (aiValueData?.automation_rate || 0) + '%'"></div>
+                        </div>
+                        <div class="mt-2 text-[10px] text-slate-500 flex justify-between">
+                            <span>Бот: <b class="text-slate-900" x-text="aiValueData?.bot_orders || 0"></b></span>
+                            <span>Всего: <b class="text-slate-900" x-text="aiValueData?.total_orders || 0"></b></span>
+                        </div>
+                    </div>
+                    <!-- 3. Эффективность (Profit) -->
+                    <div class="bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 p-5">
+                        <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Прибыль от ИИ</div>
+                        <div class="mt-2 text-3xl font-black tabular-nums text-slate-900" x-text="aiValueData?.profit_per_saved_hour_kzt == null ? '—' : fmt.money(aiValueData.profit_per_saved_hour_kzt)"></div>
+                        <div class="mt-1 text-xs text-slate-500">Выручка допродаж на час работы</div>
+                    </div>
+                    <!-- 4. Помощь персонала -->
+                    <div class="bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 p-5">
+                        <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Помощь персонала</div>
+                        <div class="mt-2 text-3xl font-black tabular-nums text-slate-900" x-text="aiValueData?.escalation_count || 0"></div>
+                        <div class="mt-1 text-xs text-slate-500">Чатов передано человеку</div>
+                    </div>
+                </div>
+
+                <!-- Второстепенные метрики -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+                    <div class="bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 p-5 flex items-center gap-6">
+                        <div class="flex-1">
+                            <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Советы гостям</div>
+                            <div class="mt-2 flex items-baseline gap-2">
+                                <span class="text-2xl font-bold text-slate-900" x-text="aiValueData?.accepted || 0"></span>
+                                <span class="text-sm text-slate-400">принято из</span>
+                                <span class="text-sm font-bold text-slate-600" x-text="aiValueData?.offered || 0"></span>
+                            </div>
+                        </div>
+                        <div class="w-16 h-16 rounded-full border-4 border-brand-50 flex items-center justify-center">
+                            <div class="text-xs font-bold text-brand-600" x-text="(aiValueData?.conversion_pct || 0) + '%'"></div>
+                        </div>
+                    </div>
+                    <div class="bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 p-5 flex items-center gap-6">
+                        <div class="flex-1">
+                            <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Экономия времени</div>
+                            <div class="mt-2 text-2xl font-bold text-slate-900" x-text="(aiValueData?.time_saved_hours || 0) + ' ч'"></div>
+                            <div class="text-xs text-slate-500" x-text="(aiValueData?.messages || 0) + ' ответов бота без участия людей'"></div>
+                        </div>
+                        <div class="p-3 bg-blue-50 rounded-2xl text-blue-600">
+                            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 xl:grid-cols-2 gap-5">
+                    <div class="bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 p-5">
+                        <div class="flex items-center justify-between gap-3 mb-4">
+                            <h3 class="font-semibold text-slate-900">Средний чек</h3>
+                            <span class="text-xs text-slate-500" x-text="aiValuePeriodLabel()"></span>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div class="rounded-xl bg-slate-50 p-4">
+                                <div class="text-xs text-slate-500">С принятым советом</div>
+                                <div class="mt-1 text-xl font-bold tabular-nums" x-text="aiValueData?.avg_check_accepted == null ? '—' : fmt.money(aiValueData.avg_check_accepted)"></div>
+                            </div>
+                            <div class="rounded-xl bg-slate-50 p-4">
+                                <div class="text-xs text-slate-500">Без предложения ИИ</div>
+                                <div class="mt-1 text-xl font-bold tabular-nums" x-text="aiValueData?.avg_check_no_offer == null ? '—' : fmt.money(aiValueData.avg_check_no_offer)"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 p-5">
+                        <h3 class="font-semibold text-slate-900 mb-4">Прибыль от ИИ</h3>
+                        <div class="space-y-2">
+                            <template x-for="d in (aiValueData?.daily_series || [])" :key="d.date">
+                                <div class="flex items-center gap-3">
+                                    <div class="w-24 text-xs text-slate-500" x-text="fmt.date(d.date)"></div>
+                                    <div class="flex-1 h-2 rounded-full bg-slate-100 overflow-hidden">
+                                        <div class="h-2 rounded-full bg-brand-600" :style="'width:' + Math.min(100, ((Number(d.ai_profit || 0) / Math.max(1, Number(aiValueData?.revenue || 0))) * 100)) + '%'"></div>
+                                    </div>
+                                    <div class="w-24 text-right text-xs font-semibold tabular-nums" x-text="fmt.money(d.ai_profit || 0)"></div>
+                                </div>
+                            </template>
+                            <div x-show="!(aiValueData?.daily_series || []).length" class="text-sm text-slate-400 py-6 text-center">За этот период ИИ еще не приносил допродаж.</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-6 bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 p-5">
+                    <h3 class="font-semibold text-slate-900 mb-4">Популярные допродажи</h3>
+                    <div class="overflow-hidden">
+                        <table class="min-w-full divide-y divide-slate-200">
+                            <thead>
+                                <tr>
+                                    <th class="px-3 py-3 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">Блюдо</th>
+                                    <th class="px-3 py-3 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider">Купили</th>
+                                    <th class="px-3 py-3 text-right text-[10px] font-bold text-slate-500 uppercase tracking-wider">Выручка</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-100">
+                                <template x-for="item in (aiValueData?.top_upsell_items || [])" :key="item.iiko_id || item.name">
+                                    <tr class="hover:bg-slate-50 transition">
+                                        <td class="px-3 py-3 text-sm text-slate-900 font-medium" x-text="item.name"></td>
+                                        <td class="px-3 py-3 text-sm text-slate-600 text-center tabular-nums" x-text="item.accepted"></td>
+                                        <td class="px-3 py-3 text-sm text-slate-900 text-right font-semibold tabular-nums" x-text="fmt.money(item.revenue_kzt)"></td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                        <div x-show="!(aiValueData?.top_upsell_items || []).length" class="text-sm text-slate-400 py-8 text-center">ИИ еще не продал ни одного блюда за этот период.</div>
+                    </div>
+                </div>
+                <div x-show="aiValueLoading" x-cloak class="fixed inset-0 z-40 pointer-events-none bg-white/30"></div>
+            </div>
+
             <!-- ========== АНАЛИТИКА ========== -->
             <div x-show="currentTab === 'analytics'" x-cloak class="fade-in">
                 <div class="rounded-3xl bg-slate-50 ring-1 ring-slate-900/5 p-4 sm:p-6 mb-6">
@@ -666,8 +907,9 @@
                             <h2 class="text-lg sm:text-xl font-extrabold tracking-tight text-slate-900">Аналитика</h2>
                             <button type="button" @click="analyticsHelpOpen = true"
                                 class="inline-flex items-center justify-center h-9 w-9 rounded-xl bg-white ring-1 ring-slate-200/70 text-slate-600 hover:text-slate-900 hover:ring-slate-300 transition"
-                                title="Как считаются метрики">
-                                <span class="text-base font-black">?</span>
+                                title="Как считаются метрики"
+                                aria-label="Справка: как считаются метрики аналитики">
+                                <span class="text-base font-black" aria-hidden="true">?</span>
                             </button>
                         </div>
                         <div class="flex flex-wrap items-center gap-2 min-w-0">
@@ -1082,8 +1324,9 @@
                                 </div>
                                 <button type="button" @click="analyticsHelpOpen = false"
                                     class="h-9 w-9 rounded-xl bg-white ring-1 ring-slate-200/70 text-slate-600 hover:text-slate-900 hover:ring-slate-300 transition"
-                                    title="Закрыть">
-                                    ✕
+                                    title="Закрыть"
+                                    aria-label="Закрыть справку по аналитике">
+                                    <span aria-hidden="true">✕</span>
                                 </button>
                             </div>
                             <div class="p-5 overflow-y-auto text-sm text-slate-700 space-y-4">
@@ -1153,6 +1396,13 @@
                         </select>
                     </div>
                     </div>
+
+                <div x-show="!ordersKanbanHintDismissed" x-cloak
+                    class="mb-4 flex flex-wrap items-start justify-between gap-3 rounded-xl border border-sky-200 bg-sky-50/90 px-4 py-3 text-sm text-sky-950">
+                    <p class="flex-1 min-w-0 pr-2"><span class="font-semibold">Подсказка:</span> режим «По этапам» — канбан по статусам; «Список» — таблица с поиском и фильтром.</p>
+                    <button type="button" @click="dismissOrdersViewHint()"
+                        class="shrink-0 text-xs font-semibold text-sky-900 hover:underline min-h-[40px] px-2 rounded-lg rm-focusable">Скрыть навсегда</button>
+                </div>
 
                 <div x-show="ordersView === 'table'" class="flex flex-wrap items-end gap-3 mb-5">
                     <div class="flex-1 min-w-[220px] max-w-md">
@@ -1260,7 +1510,7 @@
                 </div>
 
                 <!-- Таблица заказов -->
-                <div x-show="ordersView === 'table'" class="bg-white rounded-2xl shadow-sm border border-gray-100">
+                <div x-show="ordersView === 'table'" class="rm-card-surface">
                     <div class="overflow-x-auto hidden md:block">
                         <table class="w-full text-sm">
                             <thead>
@@ -1367,7 +1617,7 @@
             </div>
 
             <!-- ========== ПОМОЩЬ КЛИЕНТАМ (Inbox Zero) ========== -->
-            <div x-show="currentTab === 'operator_queue'" x-cloak class="fade-in">
+            <div x-show="currentTab === 'operator_queue' || currentTab === 'errors'" x-cloak class="fade-in">
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
                     <div class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-900/5 flex items-center gap-4">
                         <div class="text-4xl font-black text-slate-900 tabular-nums shrink-0" x-text="dashStats.failed_tasks_open ?? 0"></div>
@@ -1407,7 +1657,7 @@
                     <button type="button" @click="loadFailedTasks()"
                         class="px-4 py-2 rounded-xl text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700">Обновить</button>
                 </div>
-                <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                <div class="rm-card-surface overflow-hidden">
                     <div x-show="failedTasksLoading" class="p-8 text-center text-gray-400 text-sm">Загрузка…</div>
                     <div x-show="!failedTasksLoading && failedTasks.length === 0" class="p-12 text-center text-gray-500">
                         <div class="text-5xl mb-3" aria-hidden="true">✅</div>
@@ -1442,6 +1692,12 @@
                                             <button type="button"
                                                 @click="openHelpChat(t.phone)"
                                                 class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-brand-50 text-brand-700 border border-brand-200 hover:bg-brand-100">Открыть диалог</button>
+                                            <button type="button" x-show="!t.resolved"
+                                                @click="retryFailedTask(t)"
+                                                :disabled="failedTaskRetryingId === t.id"
+                                                class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 disabled:opacity-50">
+                                                <span x-text="failedTaskRetryingId === t.id ? 'Ставим…' : 'Повторить'"></span>
+                                            </button>
                                             <button type="button" x-show="!t.resolved"
                                                 @click="setFailedTaskResolved(t, true)"
                                                 class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100">Закрыто</button>
@@ -1499,7 +1755,7 @@
 
             <!-- ========== ЖИВЫЕ ДИАЛОГИ: flex-1 min-h-0 внутри #admin-content-scroll — без calc, алерт сжимает область ========== -->
             <div x-show="currentTab === 'chats'" x-cloak class="fade-in flex flex-1 min-h-0 flex-col overflow-hidden">
-                <div class="flex flex-col md:flex-row flex-1 min-h-0 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                <div class="flex flex-col md:flex-row flex-1 min-h-0 rm-card-surface overflow-hidden">
                     <!-- ЛЕВАЯ ПАНЕЛЬ: список (на мобилке — полный экран, пока не выбран чат) -->
                     <div class="w-full max-w-none md:max-w-sm md:w-[340px] lg:w-[360px] flex-shrink-0 border-r border-gray-100 flex flex-col min-h-0 bg-white flex-1 md:flex-none"
                         :class="activeChatPhone ? 'hidden md:flex' : 'flex'">
@@ -1593,11 +1849,11 @@
                                     <div class="flex items-center gap-2 px-3 pt-2.5 pb-2 md:px-6 md:pt-3 md:pb-2 min-w-0">
                                         <button type="button" class="md:hidden min-h-[48px] min-w-[48px] shrink-0 inline-flex items-center justify-center rounded-xl border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 touch-manipulation"
                                             @click="backFromMobileChat()" aria-label="К списку диалогов">
-                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
                                         </button>
                                         <button type="button" class="lg:hidden min-h-[48px] min-w-[48px] shrink-0 inline-flex items-center justify-center rounded-xl border border-brand-200 bg-brand-50 text-brand-700 hover:bg-brand-100 touch-manipulation"
                                             @click="chatMobileInfoOpen = true" aria-label="О клиенте" title="О клиенте">
-                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                                         </button>
                                         <div class="w-10 h-10 rounded-full bg-brand-100 flex items-center justify-center text-brand-700 font-bold text-sm shrink-0"
                                             x-text="activeChatInitials()"></div>
@@ -1679,7 +1935,7 @@
                                                 <p class="text-sm whitespace-pre-line" x-text="msg.content"></p>
                                                 <div class="flex justify-end items-center gap-2 mt-1 flex-wrap">
                                                     <button type="button"
-                                                        x-show="String(msg.delivery_status || '').toLowerCase() === 'failed' && (msg.role === 'operator' || msg.role === 'assistant')"
+                                                        x-show="String(msg.delivery_status || '').toLowerCase() === 'failed' && (msg.role === 'operator' || msg.role === 'assistant' || msg.role === 'system')"
                                                         @click="resendFailedChatMessage(msg)"
                                                         class="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-md bg-white/20 hover:bg-white/30 border border-white/30">
                                                         Переотправить
@@ -1714,8 +1970,9 @@
                                             rows="2"></textarea>
                                         <button type="button" @click="sendOperatorMessage()"
                                             :disabled="chatIsBotActive() || !operatorInput.trim()"
-                                            class="absolute right-3 bottom-3 min-h-[44px] min-w-[44px] inline-flex items-center justify-center p-2.5 bg-brand-600 text-white rounded-xl hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-sm shadow-brand-600/20 touch-manipulation active:opacity-90">
-                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            class="absolute right-3 bottom-3 min-h-[44px] min-w-[44px] inline-flex items-center justify-center p-2.5 bg-brand-600 text-white rounded-xl hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-sm shadow-brand-600/20 touch-manipulation active:opacity-90"
+                                            aria-label="Отправить сообщение клиенту">
+                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path>
                                             </svg>
                                         </button>
@@ -1745,7 +2002,7 @@
                             <div class="sticky top-0 z-10 flex items-center justify-between gap-2 px-4 py-3 border-b border-gray-200 bg-white/95 backdrop-blur-sm shrink-0">
                                 <h3 id="chat-mobile-info-title" class="text-sm font-bold text-gray-800">О клиенте</h3>
                                 <button type="button" class="min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded-xl border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100"
-                                    @click="chatMobileInfoOpen = false" aria-label="Закрыть">&times;</button>
+                                    @click="chatMobileInfoOpen = false" aria-label="Закрыть панель информации о клиенте">&times;</button>
                             </div>
                             {% set is_mobile = true %}
                             {% include "admin/_customer_panel_inner.html" %}
@@ -1977,8 +2234,8 @@
             <div x-show="menuEditOpen" x-cloak x-transition.opacity class="fixed inset-0 z-[80] flex items-center justify-center p-4"
                 @keydown.escape.window="closeMenuEdit()">
                 <div class="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" @click="closeMenuEdit()"></div>
-                <div class="relative bg-white rounded-2xl shadow-xl border border-gray-100 w-full max-w-lg max-h-[90vh] overflow-y-auto p-6" @click.stop>
-                    <h3 class="text-lg font-bold text-gray-900 mb-1" x-text="menuEditForm.id != null ? 'Редактирование позиции' : 'Новая позиция'"></h3>
+                <div class="relative bg-white rounded-2xl shadow-xl border border-gray-100 w-full max-w-lg max-h-[90vh] overflow-y-auto p-6" @click.stop role="dialog" aria-modal="true" aria-labelledby="menu-edit-modal-title">
+                    <h3 id="menu-edit-modal-title" class="text-lg font-bold text-gray-900 mb-1" x-text="menuEditForm.id != null ? 'Редактирование позиции' : 'Новая позиция'"></h3>
                     <p class="text-xs text-gray-500 mb-4">Изменения сразу видны боту при следующем запросе меню.</p>
                     <div class="space-y-3">
                         <div>
@@ -2159,9 +2416,10 @@
             </div>
 
             <!-- ========== ПОДКЛЮЧЕНИЯ ========== -->
-            <div x-show="currentTab === 'settings' && settingsTab === 'connections'" x-cloak class="fade-in max-w-3xl">
+            <div x-show="currentTab === 'settings' && settingsTab === 'connections'" x-cloak class="fade-in w-full max-w-6xl mx-auto lg:flex lg:gap-8 lg:items-start">
                 {{ settings_tabs() }}
-                <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
+                <div class="flex-1 min-w-0 space-y-6">
+                <div class="rm-card-surface p-6 mb-6">
                     <h3 class="font-semibold text-lg text-gray-900 mb-1">Подключения</h3>
                     <p class="text-sm text-gray-500 mb-6">Подключите кассу и WhatsApp. Синхронизация меню и наличия выполняется автоматически.</p>
 
@@ -2237,7 +2495,7 @@
 
                     <div class="space-y-5">
                         <!-- iiko -->
-                        <div class="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm ring-1 ring-slate-900/5">
+                        <div class="rm-card-surface p-6">
                             <div class="flex items-start gap-3">
                                 <span class="mt-1.5 h-3 w-3 rounded-full shrink-0"
                                     :class="integrationStoplistDotClass()"></span>
@@ -2262,7 +2520,7 @@
                         </div>
 
                         <!-- WhatsApp -->
-                        <div class="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm ring-1 ring-slate-900/5 flex items-start gap-3">
+                        <div class="rm-card-surface p-6 flex items-start gap-3">
                             <span class="mt-1.5 h-3 w-3 rounded-full shrink-0"
                                 :class="integrationStatus.whatsapp_configured ? 'bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.25)]' : 'bg-gray-300'"></span>
                             <div>
@@ -2275,7 +2533,7 @@
                         </div>
 
                         <!-- Telegram (оповещения персоналу) -->
-                        <div class="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm ring-1 ring-slate-900/5 flex items-start gap-3">
+                        <div class="rm-card-surface p-6 flex items-start gap-3">
                             <span class="mt-1.5 h-3 w-3 rounded-full shrink-0"
                                 :class="integrationStatus.telegram_configured ? 'bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.25)]' : 'bg-gray-300'"></span>
                             <div>
@@ -2306,6 +2564,16 @@
                         </details>
                     </div>
 
+                    <div class="rm-card-nested p-4 mb-6">
+                        <h4 class="text-sm font-semibold text-gray-900 mb-1">Семантическое меню для ИИ</h4>
+                        <p class="text-xs text-gray-600 mb-3 leading-relaxed">Если на сервере включён <code class="text-[10px] bg-white px-1 rounded border border-gray-200">MENU_RAG_ENABLED</code>, после синхронизации каталога запустите индексацию эмбеддингов — иначе в промпте остаётся полный список позиций.</p>
+                        <button type="button" @click="reindexMenuEmbeddings()" :disabled="menuEmbeddingsReindexLoading"
+                            class="px-4 py-2.5 rounded-xl bg-slate-800 text-white text-sm font-semibold hover:bg-slate-900 disabled:opacity-40 min-h-[44px] rm-focusable">
+                            <span x-show="!menuEmbeddingsReindexLoading">Переиндексировать эмбеддинги меню</span>
+                            <span x-show="menuEmbeddingsReindexLoading" x-cloak>Индексация…</span>
+                        </button>
+                    </div>
+
                     <div class="rounded-xl border border-gray-200 bg-gray-50/50 p-4 mb-4">
                         <h4 class="text-sm font-semibold text-gray-900 mb-1">URL вебхука WhatsApp (Meta)</h4>
                         <p class="text-xs text-gray-500 mb-2">Укажите в кабинете Meta Callback URL и тот же verify token, что в <code class="bg-gray-100 px-1 rounded">WHATSAPP_VERIFY_TOKEN</code>.</p>
@@ -2330,12 +2598,99 @@
                         </div>
                     </div>
                 </div>
+                </div>
             </div>
 
-            <!-- ========== БАЗА ЗНАНИЙ ========== -->
-            <div x-show="currentTab === 'settings' && settingsTab === 'restaurant'" x-cloak class="fade-in max-w-4xl space-y-6 pb-16">
+            <!-- ========== БРЕНДИНГ (E2.2.F) ========== -->
+            <div x-show="currentTab === 'settings' && settingsTab === 'branding'" x-cloak class="fade-in w-full max-w-6xl mx-auto lg:flex lg:gap-8 lg:items-start pb-16">
                 {{ settings_tabs() }}
-                <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+                <div class="flex-1 min-w-0 space-y-6">
+                <div class="rounded-2xl border border-indigo-100 bg-indigo-50/80 px-4 py-3 text-sm text-indigo-950">
+                    <span class="font-semibold">Серверное сохранение</span> —
+                    <span x-show="brandingApiUnavailable" x-cloak>API <code class="text-xs bg-white/80 px-1 rounded border border-indigo-100">PATCH /api/admin/branding</code> пока не развёрнут (ожидается <strong>E2.2.B</strong>). Форма и предпросмотр работают локально; после обновления платформы нажмите «Сохранить» ещё раз.</span>
+                    <span x-show="!brandingApiUnavailable" x-cloak>Изменения отправляются на сервер; логотип — до 1 МБ, PNG или JPG.</span>
+                </div>
+                <div class="rm-card-surface p-6 space-y-6">
+                    <div class="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                            <h3 class="text-lg font-bold text-gray-900">Внешний вид в панели</h3>
+                            <p class="text-sm text-gray-500 mt-1">Название бренда, цвет акцента и логотип в шапке (контракт <code class="text-xs bg-gray-100 px-1 rounded">/api/admin/auth/me → branding</code>).</p>
+                        </div>
+                        <button type="button" @click="saveBranding()" :disabled="brandingSaving || isDemoSession"
+                            class="shrink-0 px-4 py-2.5 rounded-xl bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 disabled:opacity-40">
+                            <span x-show="!brandingSaving">Сохранить</span>
+                            <span x-show="brandingSaving" x-cloak>Сохраняем…</span>
+                        </button>
+                    </div>
+                    <p x-show="isDemoSession" x-cloak class="text-xs text-violet-700 font-medium">Демо-сессия: сохранение отключено.</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="md:col-span-2">
+                            <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Название бренда</label>
+                            <input type="text" x-model="brandingDraft.brand_name" placeholder="Как видят гости и команда"
+                                class="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm bg-white">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Акцентный цвет</label>
+                            <div class="flex items-center gap-3">
+                                <input type="color" class="h-11 w-14 rounded-lg border border-gray-200 cursor-pointer bg-white p-1"
+                                    :value="brandingDraft.brand_color_hex"
+                                    @input="brandingDraft.brand_color_hex = normalizeBrandingColorHex($event.target.value)">
+                                <input type="text" x-model="brandingDraft.brand_color_hex" dir="ltr"
+                                    class="flex-1 rounded-xl border border-gray-200 px-4 py-3 text-sm bg-white font-mono"
+                                    placeholder="#7B3F00" maxlength="7"
+                                    @blur="brandingDraft.brand_color_hex = normalizeBrandingColorHex(brandingDraft.brand_color_hex)">
+                            </div>
+                            <p class="text-xs text-gray-500 mt-1.5">Используется для обводки аватара и кнопок в превью ниже.</p>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Логотип</label>
+                            <input type="file" accept="image/png,image/jpeg" x-ref="brandingLogoInput"
+                                class="block w-full text-sm text-gray-600 file:mr-3 file:py-2 file:px-3 file:rounded-xl file:border-0 file:bg-brand-50 file:text-brand-800 file:font-semibold"
+                                @change="onBrandingLogoSelected($event)">
+                            <p class="text-xs text-gray-500 mt-1.5" x-show="brandingLogoPendingLabel" x-text="brandingLogoPendingLabel"></p>
+                        </div>
+                    </div>
+                    <div class="rounded-2xl border border-gray-100 bg-slate-50/80 p-5">
+                        <p class="text-xs font-semibold text-gray-500 uppercase mb-3">Предпросмотр шапки</p>
+                        <div class="flex items-center gap-3 rounded-xl bg-white border border-gray-100 px-4 py-3 shadow-sm"
+                            :style="brandingPreviewHeaderStyle()">
+                            <div class="h-9 w-9 rounded-xl overflow-hidden shrink-0 flex items-center justify-center text-white text-xs font-bold"
+                                :style="'background:' + (brandingDraft.brand_color_hex || '#2563eb')">
+                                <img x-show="brandingPreviewLogoSrc()" :src="brandingPreviewLogoSrc()" class="h-full w-full object-cover" alt="">
+                                <span x-show="!brandingPreviewLogoSrc()" x-text="brandingPreviewInitials()"></span>
+                            </div>
+                            <div class="min-w-0 flex-1">
+                                <div class="text-sm font-bold text-gray-900 truncate" x-text="brandingPreviewTitle()"></div>
+                                <div class="text-[10px] text-gray-400 truncate" x-show="userData?.tenant?.name" x-text="userData.tenant.name"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                </div>
+            </div>
+
+            <!-- ========== МОЙ РЕСТОРАН (профиль, база знаний, упаковка — один экран, липкая навигация) ========== -->
+            <div x-show="currentTab === 'settings' && settingsTab === 'restaurant'" x-cloak class="fade-in space-y-6 pb-16">
+                <div class="sticky top-0 z-20 -mx-4 sm:-mx-6 md:-mx-8 px-4 sm:px-6 md:px-8 py-3 bg-white/90 backdrop-blur-md border-b border-gray-200/90 shadow-sm space-y-3">
+                    {{ settings_tabs('mb-2', false) }}
+                    <nav class="flex flex-wrap gap-2" aria-label="Разделы страницы «Мой ресторан»">
+                        <a href="#settings-restaurant-profile"
+                            class="text-xs sm:text-sm font-semibold px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 min-h-[40px] inline-flex items-center transition-colors">
+                            Профиль
+                        </a>
+                        <a href="#settings-restaurant-knowledge"
+                            class="text-xs sm:text-sm font-semibold px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 min-h-[40px] inline-flex items-center transition-colors">
+                            База знаний
+                        </a>
+                        <a href="#settings-restaurant-packaging"
+                            class="text-xs sm:text-sm font-semibold px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 min-h-[40px] inline-flex items-center transition-colors">
+                            Упаковка
+                        </a>
+                    </nav>
+                </div>
+                <div class="max-w-4xl mx-auto w-full space-y-6">
+                <section id="settings-restaurant-profile" class="scroll-mt-40" aria-label="Профиль ресторана">
+                <div class="rm-card-surface p-6">
                     <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
                         <div>
                             <h3 class="text-lg font-bold text-gray-900">Профиль ресторана</h3>
@@ -2379,6 +2734,12 @@
                             <p class="text-xs text-gray-500 mt-1.5">SOS при эскалации и сбое AI уходит в этот чат. Пусто — используется <code class="bg-gray-100 px-1 rounded">TELEGRAM_ADMIN_CHAT_ID</code> из сервера. Нужен <code class="bg-gray-100 px-1 rounded">TELEGRAM_BOT_TOKEN</code> в окружении и чтобы бот был в группе.</p>
                         </div>
                         <div class="md:col-span-2">
+                            <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Текст при предоплате (юридический дисклеймер)</label>
+                            <textarea x-model="orgProfile.prepayment_legal_text" rows="4" placeholder="Например: 'Предоплата вносится в счёт заказа...'"
+                                class="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm bg-white whitespace-pre-wrap min-h-[6rem]"></textarea>
+                            <p class="text-xs text-gray-500 mt-1.5">Показывается в WhatsApp при запросе предоплаты. Если оставить пустым, будет использован юридически выверенный текст по умолчанию.</p>
+                        </div>
+                        <div class="md:col-span-2">
                             <div class="flex flex-wrap items-center justify-between gap-3">
                                 <div>
                                     <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">График работы</label>
@@ -2392,12 +2753,14 @@
                         </div>
                     </div>
                 </div>
+                </section>
                 <div class="rounded-2xl border border-sky-200 bg-sky-50/90 px-4 py-3 text-sm text-sky-950 mb-2">
                     <strong class="font-semibold">Онбординг:</strong> сначала заполните профиль выше, затем базу знаний.
                     Тип записи: <span class="font-mono text-xs">facility</span> — факты о заведении (парковка, часы);
                     <span class="font-mono text-xs">persona</span> — тон и правила поведения бота. Обе попадают в контекст ИИ в разных блоках.
                 </div>
-                <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+                <section id="settings-restaurant-knowledge" class="scroll-mt-40" aria-label="База знаний">
+                <div class="rm-card-surface p-6">
                     <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
                         <div>
                             <h3 class="text-lg font-bold text-gray-900">База знаний</h3>
@@ -2408,9 +2771,14 @@
                             Добавить запись
                         </button>
                     </div>
-                    <p x-show="knowledgeLoading" class="text-sm text-gray-400 py-6">Загрузка…</p>
-                    <div x-show="!knowledgeLoading && !knowledgeItems.length" x-cloak class="text-sm text-gray-500 py-8 text-center border border-dashed border-gray-200 rounded-xl">
-                        Пока пусто. Добавьте парковку, часы работы, банкеты — бот будет опираться на этот текст.
+                    <div x-show="knowledgeLoading" x-cloak class="rm-loading-line">
+                        <svg class="animate-spin h-4 w-4 text-brand-600 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                        <span>Загрузка базы знаний…</span>
+                    </div>
+                    <div x-show="!knowledgeLoading && !knowledgeItems.length" x-cloak class="rm-empty-panel">
+                        <p class="text-sm font-semibold text-gray-800 mb-1">Записей пока нет</p>
+                        <p class="text-xs text-gray-500 max-w-md mb-4">Добавьте парковку, часы работы, банкеты — бот будет опираться на этот текст.</p>
+                        <button type="button" @click="openKnowledgeCreate()" class="min-h-[44px] px-4 py-2.5 rounded-xl bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700">Добавить запись</button>
                     </div>
                     <div class="space-y-3" x-show="!knowledgeLoading && knowledgeItems.length">
                         <template x-for="k in knowledgeItems" :key="k.id">
@@ -2436,14 +2804,16 @@
                         </template>
                     </div>
                 </div>
+                </section>
+                </div>
 
                 <div x-show="scheduleEditorOpen" x-cloak x-transition.opacity
                     class="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
                     @click.self="closeScheduleEditor()">
-                    <div class="bg-white rounded-2xl shadow-2xl border border-gray-100 w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col" @click.stop role="dialog" aria-modal="true">
+                    <div class="bg-white rounded-2xl shadow-2xl border border-gray-100 w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col" @click.stop role="dialog" aria-modal="true" aria-labelledby="schedule-editor-modal-title">
                         <div class="p-5 border-b border-gray-100 flex items-center justify-between shrink-0">
                             <div>
-                                <h3 class="font-bold text-gray-900">График работы</h3>
+                                <h3 id="schedule-editor-modal-title" class="font-bold text-gray-900">График работы</h3>
                                 <p class="text-xs text-gray-500">Владелец не видит JSON — только понятные поля.</p>
                             </div>
                             <div class="flex items-center gap-2">
@@ -2451,7 +2821,7 @@
                                     class="px-3 py-2 rounded-lg border border-gray-200 bg-white text-xs font-semibold hover:bg-gray-50">
                                     Скопировать понедельник на всю неделю
                                 </button>
-                                <button type="button" @click="closeScheduleEditor()" class="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
+                                <button type="button" @click="closeScheduleEditor()" class="text-gray-400 hover:text-gray-600 text-xl leading-none" aria-label="Закрыть редактор графика работы">&times;</button>
                             </div>
                         </div>
                         <div class="p-5 overflow-y-auto flex-1">
@@ -2532,10 +2902,10 @@
                 <div x-show="knowledgeEditOpen" x-cloak x-transition.opacity
                     class="fixed inset-0 z-[85] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
                     @click.self="closeKnowledgeEdit()">
-                    <div class="bg-white rounded-2xl shadow-2xl border border-gray-100 w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col" @click.stop role="dialog" aria-modal="true">
+                    <div class="bg-white rounded-2xl shadow-2xl border border-gray-100 w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col" @click.stop role="dialog" aria-modal="true" aria-labelledby="knowledge-edit-modal-title">
                         <div class="p-5 border-b border-gray-100 flex items-center justify-between shrink-0">
-                            <h3 class="font-bold text-gray-900" x-text="knowledgeEditForm.id ? 'Редактировать запись' : 'Новая запись'"></h3>
-                            <button type="button" @click="closeKnowledgeEdit()" class="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
+                            <h3 id="knowledge-edit-modal-title" class="font-bold text-gray-900" x-text="knowledgeEditForm.id ? 'Редактировать запись' : 'Новая запись'"></h3>
+                            <button type="button" @click="closeKnowledgeEdit()" class="text-gray-400 hover:text-gray-600 text-xl leading-none" aria-label="Закрыть редактор базы знаний">&times;</button>
                         </div>
                         <div class="p-5 overflow-y-auto flex-1 space-y-4">
                             <p x-show="knowledgeEditError" x-cloak class="text-sm text-red-600" x-text="knowledgeEditError"></p>
@@ -2585,74 +2955,9 @@
                         </div>
                     </div>
                 </div>
-            </div>
 
-            <!-- ========== ДОПРОДАЖИ (Strategy Engine) ========== -->
-            <div x-show="currentTab === 'settings' && settingsTab === 'smart_sales'" x-cloak class="fade-in max-w-4xl space-y-6 pb-16">
-                {{ settings_tabs() }}
-                <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
-                    <h3 class="text-lg font-bold text-gray-900">Правила допродаж</h3>
-                    <p class="text-sm text-gray-500 mt-1">Режим «нет категории в корзине» → предложить позицию из другой категории. Работает после ответа AI.</p>
-                    <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <div>
-                            <label class="text-[11px] font-semibold text-gray-500 uppercase">Если нет категории (подстрока)</label>
-                            <input type="text" x-model="upsellNew.trigger_category" placeholder="напит"
-                                class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
-                        </div>
-                        <div>
-                            <label class="text-[11px] font-semibold text-gray-500 uppercase">Предложить из категории</label>
-                            <input type="text" x-model="upsellNew.suggest_category" placeholder="напит"
-                                class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
-                        </div>
-                        <div>
-                            <label class="text-[11px] font-semibold text-gray-500 uppercase">Мин. сумма заказа ₸</label>
-                            <input type="number" x-model.number="upsellNew.min_order_sum" min="0" step="100"
-                                class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
-                        </div>
-                        <div>
-                            <label class="text-[11px] font-semibold text-gray-500 uppercase">Макс. сумма (пусто = нет)</label>
-                            <input type="number" x-model="upsellNew.max_order_sum" min="0" step="100" placeholder="15000"
-                                class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
-                        </div>
-                        <div class="md:col-span-2">
-                            <label class="text-[11px] font-semibold text-gray-500 uppercase">Шаблон фразы ({item_name}, {price})</label>
-                            <input type="text" x-model="upsellNew.phrase_template" placeholder="по умолчанию из сервера"
-                                class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
-                        </div>
-                    </div>
-                    <button type="button" @click="upsellAddRule()" class="mt-4 px-5 py-2.5 rounded-xl bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700">
-                        Добавить правило
-                    </button>
-                </div>
-                <p x-show="upsellLoading" class="text-sm text-gray-400">Загрузка…</p>
-                <div x-show="!upsellLoading && upsellRules.length" x-cloak class="space-y-3">
-                    <template x-for="r in upsellRules" :key="r.id">
-                        <div class="bg-white rounded-xl border border-gray-100 p-4 flex flex-wrap items-center justify-between gap-3">
-                            <div class="min-w-0">
-                                <div class="text-sm font-semibold text-gray-900">
-                                    Нет «<span x-text="r.trigger_category"></span>» → из «<span x-text="r.suggest_category"></span>»
-                                </div>
-                                <div class="text-xs text-gray-500 mt-1">
-                                    сумма <span x-text="r.min_order_sum"></span>–<span x-text="r.max_order_sum != null ? r.max_order_sum : '∞'"></span> ₸
-                                    · порядок <span x-text="r.sort_order"></span>
-                                </div>
-                            </div>
-                            <div class="flex gap-2 shrink-0">
-                                <button type="button" @click="upsellToggle(r)" class="px-3 py-1.5 rounded-lg text-xs font-semibold border"
-                                    :class="r.is_active ? 'border-emerald-200 text-emerald-800 bg-emerald-50' : 'border-gray-200 text-gray-600'"
-                                    x-text="r.is_active ? 'Вкл' : 'Выкл'"></button>
-                                <button type="button" @click="upsellDeleteRule(r)" class="px-3 py-1.5 rounded-lg text-xs font-semibold border border-red-200 text-red-700 bg-red-50">Удалить</button>
-                            </div>
-                        </div>
-                    </template>
-                </div>
-                <p x-show="!upsellLoading && !upsellRules.length" x-cloak class="text-sm text-gray-500 text-center py-8 border border-dashed border-gray-200 rounded-xl">
-                    Правил пока нет — добавьте первое (например «напит» → «напит»).
-                </p>
-            </div>
-
-            <!-- ========== УПАКОВКА (карточки) ========== -->
-            <div x-show="currentTab === 'settings' && settingsTab === 'restaurant'" x-cloak class="fade-in max-w-7xl space-y-6 pb-16">
+            <!-- Упаковка (та же вкладка «Мой ресторан»; навигация — липкая панель выше) -->
+            <div id="settings-restaurant-packaging" class="max-w-7xl mx-auto w-full space-y-6 scroll-mt-40 border-t border-gray-200/80 pt-8 mt-2">
                 <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-2">
                     <div>
                         <h3 class="text-xl font-bold text-gray-900">Правила упаковки и логистики</h3>
@@ -2664,7 +2969,7 @@
                     </div>
                     <button type="button" @click="packagingAddNew()"
                         class="inline-flex items-center px-4 py-2.5 bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold rounded-xl shadow-sm shadow-brand-600/20 transition-all active:scale-95 shrink-0">
-                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
                         Добавить правило
                     </button>
                 </div>
@@ -2782,7 +3087,7 @@
 
                 <div x-show="!packagingLoading && packagingRules.length" x-cloak class="grid grid-cols-1 gap-4">
                     <template x-for="rule in packagingRules" :key="rule.id">
-                        <div class="bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition-all p-5"
+                        <div class="rm-card-surface hover:shadow-md transition-all p-5"
                             :class="!rule.is_active ? 'opacity-75 grayscale-[0.45]' : ''">
 
                             <div class="flex flex-wrap items-start justify-between gap-4 mb-6">
@@ -2850,8 +3155,9 @@
                                             class="w-24 px-4 py-2 bg-gray-50 border border-gray-100 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-brand-500 transition-all">
                                     </div>
                                     <button type="button" @click="packagingDelete(rule)" :disabled="rule._saving"
-                                        class="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors" title="Удалить правило">
-                                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                                        class="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors" title="Удалить правило"
+                                        aria-label="Удалить правило упаковки">
+                                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                                     </button>
                                 </div>
                             </div>
@@ -2868,16 +3174,83 @@
                     <p class="text-gray-500 max-w-sm mx-auto mt-2">Добавьте первое правило или перезагрузите вкладку — при первом запуске сиды могут создать правила автоматически.</p>
                 </div>
             </div>
+            </div>
+
+            <!-- ========== ДОПРОДАЖИ (Strategy Engine) ========== -->
+            <div x-show="currentTab === 'settings' && settingsTab === 'smart_sales'" x-cloak class="fade-in w-full max-w-6xl mx-auto lg:flex lg:gap-8 lg:items-start pb-16">
+                {{ settings_tabs() }}
+                <div class="flex-1 min-w-0 space-y-6">
+                <div class="rm-card-surface p-6">
+                    <h3 class="text-lg font-bold text-gray-900">Правила допродаж</h3>
+                    <p class="text-sm text-gray-500 mt-1">Режим «нет категории в корзине» → предложить позицию из другой категории. Работает после ответа AI.</p>
+                    <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label class="text-[11px] font-semibold text-gray-500 uppercase">Если нет категории (подстрока)</label>
+                            <input type="text" x-model="upsellNew.trigger_category" placeholder="напит"
+                                class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
+                        </div>
+                        <div>
+                            <label class="text-[11px] font-semibold text-gray-500 uppercase">Предложить из категории</label>
+                            <input type="text" x-model="upsellNew.suggest_category" placeholder="напит"
+                                class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
+                        </div>
+                        <div>
+                            <label class="text-[11px] font-semibold text-gray-500 uppercase">Мин. сумма заказа ₸</label>
+                            <input type="number" x-model.number="upsellNew.min_order_sum" min="0" step="100"
+                                class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
+                        </div>
+                        <div>
+                            <label class="text-[11px] font-semibold text-gray-500 uppercase">Макс. сумма (пусто = нет)</label>
+                            <input type="number" x-model="upsellNew.max_order_sum" min="0" step="100" placeholder="15000"
+                                class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
+                        </div>
+                        <div class="md:col-span-2">
+                            <label class="text-[11px] font-semibold text-gray-500 uppercase">Шаблон фразы ({item_name}, {price})</label>
+                            <input type="text" x-model="upsellNew.phrase_template" placeholder="по умолчанию из сервера"
+                                class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
+                        </div>
+                    </div>
+                    <button type="button" @click="upsellAddRule()" class="mt-4 px-5 py-2.5 rounded-xl bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700">
+                        Добавить правило
+                    </button>
+                </div>
+                <p x-show="upsellLoading" class="text-sm text-gray-400">Загрузка…</p>
+                <div x-show="!upsellLoading && upsellRules.length" x-cloak class="space-y-3">
+                    <template x-for="r in upsellRules" :key="r.id">
+                        <div class="bg-white rounded-xl border border-gray-100 p-4 flex flex-wrap items-center justify-between gap-3">
+                            <div class="min-w-0">
+                                <div class="text-sm font-semibold text-gray-900">
+                                    Нет «<span x-text="r.trigger_category"></span>» → из «<span x-text="r.suggest_category"></span>»
+                                </div>
+                                <div class="text-xs text-gray-500 mt-1">
+                                    сумма <span x-text="r.min_order_sum"></span>–<span x-text="r.max_order_sum != null ? r.max_order_sum : '∞'"></span> ₸
+                                    · порядок <span x-text="r.sort_order"></span>
+                                </div>
+                            </div>
+                            <div class="flex gap-2 shrink-0">
+                                <button type="button" @click="upsellToggle(r)" class="px-3 py-1.5 rounded-lg text-xs font-semibold border"
+                                    :class="r.is_active ? 'border-emerald-200 text-emerald-800 bg-emerald-50' : 'border-gray-200 text-gray-600'"
+                                    x-text="r.is_active ? 'Вкл' : 'Выкл'"></button>
+                                <button type="button" @click="upsellDeleteRule(r)" class="px-3 py-1.5 rounded-lg text-xs font-semibold border border-red-200 text-red-700 bg-red-50">Удалить</button>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+                <p x-show="!upsellLoading && !upsellRules.length" x-cloak class="text-sm text-gray-500 text-center py-8 border border-dashed border-gray-200 rounded-xl">
+                    Правил пока нет — добавьте первое (например «напит» → «напит»).
+                </p>
+                </div>
+            </div>
 
             <!-- Модалка: полное создание правила упаковки -->
             <div x-show="packagingCreateOpen" x-cloak class="fixed inset-0 z-[56] flex items-center justify-center p-4 bg-black/40" @click.self="closePackagingCreateModal()">
-                <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6 border border-gray-100" @click.stop role="dialog" aria-modal="true">
+                <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6 border border-gray-100" @click.stop role="dialog" aria-modal="true" aria-labelledby="packaging-create-modal-title">
                     <div class="flex items-start justify-between gap-3 mb-4">
                         <div>
-                            <h3 class="text-xl font-bold text-gray-900">Новое правило упаковки</h3>
+                            <h3 id="packaging-create-modal-title" class="text-xl font-bold text-gray-900">Новое правило упаковки</h3>
                             <p class="text-sm text-gray-500 mt-1">Заполните сразу все поля, чтобы не искать карточку после создания.</p>
                         </div>
-                        <button type="button" @click="closePackagingCreateModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none shrink-0" aria-label="Закрыть">&times;</button>
+                        <button type="button" @click="closePackagingCreateModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none shrink-0" aria-label="Закрыть окно нового правила упаковки">&times;</button>
                     </div>
 
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -2937,9 +3310,10 @@
             </div>
 
             <!-- ========== НАСТРОЙКИ: Состояние (readiness) ========== -->
-            <div x-show="currentTab === 'settings' && settingsTab === 'health'" x-cloak class="fade-in max-w-3xl space-y-6 pb-16">
+            <div x-show="currentTab === 'settings' && settingsTab === 'health'" x-cloak class="fade-in w-full max-w-6xl mx-auto lg:flex lg:gap-8 lg:items-start pb-16">
                 {{ settings_tabs() }}
-                <div class="rounded-2xl border border-slate-200 bg-white shadow-sm p-5 sm:p-6 space-y-4">
+                <div class="flex-1 min-w-0 space-y-6">
+                <div class="rm-card-surface p-5 sm:p-6 space-y-4">
                     <div class="flex flex-wrap items-center justify-between gap-3">
                         <div>
                             <h3 class="text-base font-bold text-slate-900">Проверки окружения</h3>
@@ -2985,6 +3359,7 @@
                     </div>
                     <p class="text-[11px] text-slate-400" x-show="readinessPayload?.generated_at" x-text="'Проверено: ' + (readinessPayload.generated_at || '')"></p>
                 </div>
+                </div>
             </div>
 
             <!-- ========== НАСТРОЙКИ ========== -->
@@ -3003,7 +3378,7 @@
                 </div>
 
                 <!-- Демо-данные (перенесено из шапки) -->
-                <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-3">
+                <div class="rm-card-surface p-5 space-y-3">
                     <h3 class="text-base font-bold text-gray-900">Демо-данные</h3>
                     <p class="text-sm text-gray-600">Заполните филиал примерами заказов и позиций меню для презентации. Удаление демо доступно, если данные уже созданы.</p>
                     <p x-show="isDemoSession" x-cloak class="text-xs text-violet-700 font-medium">Демо-сессия: мутации отключены на сервере — кнопки недоступны.</p>
@@ -3022,7 +3397,7 @@
                 </div>
 
                 <!-- Окружение (read-only) -->
-                <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-3">
+                <div class="rm-card-surface p-5 space-y-3">
                     <div class="flex flex-wrap items-center justify-between gap-2">
                         <h3 class="text-base font-bold text-gray-900">Окружение</h3>
                         <button type="button" @click="loadSettingsEnvironment()" :disabled="settingsEnvLoading"
@@ -3075,7 +3450,7 @@
                 </div>
 
                 <!-- Сброс Redis по телефону -->
-                <div x-show="isSuperadmin" x-cloak class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-3">
+                <div x-show="isSuperadmin" x-cloak class="rm-card-surface p-5 space-y-3">
                     <h3 class="text-base font-bold text-gray-900">Сброс памяти бота по номеру</h3>
                     <p class="text-sm text-gray-600">Очистить «память» диалога для клиента: бот снова не помнит черновик и контекст, как при первом сообщении. Записи в базе не меняются.</p>
                     <div class="flex flex-col sm:flex-row gap-2 sm:items-center">
@@ -3090,7 +3465,7 @@
                 </div>
 
                 <!-- Экспорт CSV -->
-                <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-3">
+                <div class="rm-card-surface p-5 space-y-3">
                     <h3 class="text-base font-bold text-gray-900">Экспорт CSV</h3>
                     <p class="text-sm text-gray-600">Период в <strong>UTC</strong> по дате создания. Пустые поля — последние 90 суток. Лимит 50 000 строк за выгрузку.</p>
                     <div class="flex flex-wrap gap-3 items-end">
@@ -3106,7 +3481,7 @@
                 </div>
 
                 <!-- Ретеншн chat_logs -->
-                <div x-show="isSuperadmin" x-cloak class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-3">
+                <div x-show="isSuperadmin" x-cloak class="rm-card-surface p-5 space-y-3">
                     <h3 class="text-base font-bold text-gray-900">Хранение истории переписки</h3>
                     <p class="text-sm text-gray-600">Фоновая задача удаляет старые сообщения из архива чата по заданным в сервере срокам. При сроке «0 дней» очистка выключена.</p>
                     <details class="text-xs text-gray-500">
@@ -3120,7 +3495,7 @@
                     </button>
                 </div>
 
-                <div x-show="isSuperadmin" x-cloak class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-4">
+                <div x-show="isSuperadmin" x-cloak class="rm-card-surface p-5 space-y-4">
                     <h3 class="text-base font-bold text-gray-900">Операционные данные</h3>
                     <p class="text-sm text-gray-600">Заказы, брони, история чатов в БД, эскалации и журнал синхронизаций. Меню и список клиентов сохраняются.</p>
                     <button type="button" @click="settingsPurgeModalOpen = true; settingsPurgePhrase = ''; settingsPurgeAck = false; settingsPurgeError = ''"
@@ -3129,7 +3504,7 @@
                     </button>
                 </div>
 
-                <div x-show="isSuperadmin" x-cloak class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-4">
+                <div x-show="isSuperadmin" x-cloak class="rm-card-surface p-5 space-y-4">
                     <h3 class="text-base font-bold text-gray-900">Меню и «нет в наличии»</h3>
                     <p class="text-sm text-gray-600">Стоп-лист из iiko отражается в галочке «в наличии» у каждой позиции в вашем каталоге.</p>
                     <div class="flex flex-col sm:flex-row flex-wrap gap-3">
@@ -3146,7 +3521,7 @@
                     </div>
                 </div>
 
-                <div x-show="isSuperadmin" x-cloak class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-4">
+                <div x-show="isSuperadmin" x-cloak class="rm-card-surface p-5 space-y-4">
                     <div class="flex flex-wrap items-center justify-between gap-3">
                         <h3 class="text-base font-bold text-gray-900">Удаление заказов</h3>
                         <button type="button" @click="loadSettingsOrders()" :disabled="settingsOrdersLoading"
@@ -3292,9 +3667,10 @@
             </div>
 
             <!-- ========== КОМАНДА ========== -->
-            <div x-show="currentTab === 'settings' && settingsTab === 'team'" x-cloak class="fade-in max-w-3xl">
+            <div x-show="currentTab === 'settings' && settingsTab === 'team'" x-cloak class="fade-in w-full max-w-6xl mx-auto lg:flex lg:gap-8 lg:items-start">
                 {{ settings_tabs() }}
-                <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
+                <div class="flex-1 min-w-0 space-y-6">
+                <div class="rm-card-surface p-6 mb-6">
                     <h3 class="font-semibold text-lg text-gray-900 mb-1">Команда</h3>
                     <p class="text-sm text-gray-500 mb-6">Добавляйте сотрудников и выдавайте доступ к панели управления.</p>
 
@@ -3343,7 +3719,7 @@
                     </div>
                 </div>
 
-                <div class="bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 p-6">
+                <div class="rm-card-surface p-6">
                     <div class="flex items-center justify-between gap-3 mb-4">
                         <h4 class="font-semibold text-gray-900">Сотрудники</h4>
                         <div class="text-xs text-gray-500" x-show="teamLoading" x-cloak>Загрузка…</div>
@@ -3369,9 +3745,11 @@
                         </template>
                     </div>
 
-                    <div x-show="!teamLoading && teamUsers.length === 0" x-cloak class="text-center py-10 text-gray-500">
-                        Пока нет сотрудников. Добавьте первого — и выдайте доступ к панели.
+                    <div x-show="!teamLoading && teamUsers.length === 0" x-cloak class="rm-empty-panel py-10">
+                        <p class="text-sm font-semibold text-gray-800 mb-1">Пока нет сотрудников</p>
+                        <p class="text-xs text-gray-500 mb-4 max-w-sm">Добавьте первого — и выдайте доступ к панели.</p>
                     </div>
+                </div>
                 </div>
             </div>
 
@@ -3383,9 +3761,9 @@
         <div x-show="globalSearchOpen" x-cloak x-transition.opacity
             class="fixed inset-0 z-[70] flex items-start justify-center pt-[8vh] px-4 bg-slate-900/50 backdrop-blur-sm"
             @click.self="globalSearchOpen = false">
-            <div class="bg-white rounded-2xl shadow-2xl border border-gray-100 w-full max-w-lg overflow-hidden fade-in" @click.stop role="dialog" aria-modal="true">
+            <div class="bg-white rounded-2xl shadow-2xl border border-gray-100 w-full max-w-lg overflow-hidden fade-in" @click.stop role="dialog" aria-modal="true" aria-label="Глобальный поиск по заказам, чатам и бронированиям">
                 <div class="p-4 border-b border-gray-100 flex items-center gap-2">
-                    <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                    <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
                     <input id="global-search-input" type="search" x-model="globalSearchQ" @input.debounce.300ms="runGlobalSearch()"
                         placeholder="Телефон, имя или № заказа…"
                         class="flex-1 text-sm border-0 focus:ring-0 focus:outline-none placeholder:text-gray-400">
@@ -3518,19 +3896,70 @@
         </div>
 
         <!-- Тост после удаления демо -->
+        <div x-show="setupChecklistOpen" x-cloak x-transition.opacity
+            class="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
+            @click.self="closeSetupChecklist()"
+            @keydown.escape.window="setupChecklistOpen && closeSetupChecklist()">
+            <div class="bg-white rounded-2xl shadow-2xl border border-gray-100 w-full max-w-lg overflow-hidden fade-in" @click.stop role="dialog" aria-modal="true" aria-labelledby="setup-checklist-title">
+                <div class="p-6">
+                    <div class="flex items-start justify-between gap-4">
+                        <div>
+                            <h2 id="setup-checklist-title" class="text-lg font-bold text-gray-900">Готовность филиала</h2>
+                            <p class="text-sm text-gray-500 mt-1">
+                                <span class="font-semibold tabular-nums text-gray-800" x-text="setupDoneCount() + '/' + setupTotalCount()"></span>
+                                <span> шагов закрыто</span>
+                            </p>
+                        </div>
+                        <button type="button" @click="closeSetupChecklist()" class="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-50" aria-label="Закрыть окно готовности филиала">Закрыть</button>
+                    </div>
+                    <div class="mt-5 h-2 rounded-full bg-gray-100 overflow-hidden">
+                        <div class="h-full bg-emerald-500 transition-all duration-700" :style="'width:' + (setupStatus.score || 0) + '%'"></div>
+                    </div>
+                    <div class="mt-5 space-y-2 max-h-[55vh] overflow-y-auto pr-1">
+                        <template x-for="s in (setupStatus.steps || [])" :key="'setup-modal-' + s.id">
+                            <div class="flex items-start gap-3 rounded-xl border px-3 py-3"
+                                :class="s.done ? 'border-emerald-100 bg-emerald-50/50' : 'border-amber-100 bg-amber-50/40'">
+                                <span class="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs font-bold"
+                                    :class="s.done ? 'bg-emerald-500 text-white' : 'bg-amber-400 text-white'"
+                                    x-text="s.done ? '✓' : '!'"></span>
+                                <div class="min-w-0 flex-1">
+                                    <div class="text-sm font-semibold text-gray-900" x-text="s.label"></div>
+                                    <p class="text-xs text-gray-500 leading-snug mt-1" x-text="s.hint || ''"></p>
+                                </div>
+                                <button type="button" x-show="!s.done" x-cloak
+                                    class="shrink-0 rounded-lg border border-brand-200 bg-brand-50 px-2.5 py-1.5 text-xs font-bold text-brand-700 hover:bg-brand-100"
+                                    @click="closeSetupChecklist(); navigateToTab('settings', { settingsTab: s.open_tab || 'connections' })">
+                                    Открыть
+                                </button>
+                            </div>
+                        </template>
+                    </div>
+                    <div class="mt-5 flex justify-end">
+                        <button type="button" x-show="setupIncompleteSteps().length" x-cloak
+                            @click="closeSetupChecklist(); openFirstIncompleteSetupStep()"
+                            class="rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700">
+                            Следующий шаг
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div x-show="demoToastMessage" x-cloak x-transition
-            class="fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] px-5 py-3 rounded-xl bg-slate-900 text-white text-sm font-medium shadow-xl shadow-slate-900/20 max-w-[90vw] text-center"
+            :class="demoToastKind === 'success' ? 'rm-toast-success' : demoToastKind === 'warning' ? 'rm-toast-warning' : demoToastKind === 'error' ? 'rm-toast-error' : 'rm-toast-info'"
             x-text="demoToastMessage"></div>
 
         <!-- Универсальное подтверждение / ввод (вместо нативных диалогов) -->
         <div x-show="uiConfirmOpen" x-cloak x-transition.opacity
             class="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
             @click.self="uiConfirmBackdrop()"
-            @keydown.escape.window="uiConfirmOpen && uiConfirmBackdrop()"
-            role="dialog" aria-modal="true" data-ui-confirm-panel>
-            <div class="bg-white rounded-2xl shadow-2xl w-full p-6 fade-in" :class="uiConfirmInputMultiline ? 'max-w-2xl' : 'max-w-md'" @click.stop>
-                <h3 class="text-lg font-bold text-gray-900" x-text="uiConfirmTitle"></h3>
-                <p class="mt-3 text-sm text-gray-600 whitespace-pre-wrap" x-show="uiConfirmMessage" x-text="uiConfirmMessage"></p>
+            @keydown.escape.window="uiConfirmOpen && uiConfirmBackdrop()">
+            <div class="bg-white rounded-2xl shadow-2xl w-full p-6 fade-in" :class="uiConfirmInputMultiline ? 'max-w-2xl' : 'max-w-md'" @click.stop
+                role="dialog" aria-modal="true" data-ui-confirm-panel
+                aria-labelledby="ui-confirm-title"
+                :aria-describedby="(uiConfirmMessage && String(uiConfirmMessage).trim()) ? 'ui-confirm-description' : null">
+                <h3 id="ui-confirm-title" class="text-lg font-bold text-gray-900" x-text="uiConfirmTitle"></h3>
+                <p id="ui-confirm-description" class="mt-3 text-sm text-gray-600 whitespace-pre-wrap" x-show="uiConfirmMessage" x-text="uiConfirmMessage"></p>
                 <div x-show="uiConfirmShowInput" class="mt-4">
                     <label x-show="uiConfirmInputLabel" class="block text-xs font-semibold text-gray-500 mb-1" x-text="uiConfirmInputLabel"></label>
                     <input type="text" x-show="!uiConfirmInputMultiline" x-model="uiConfirmInputValue"
@@ -3577,10 +4006,10 @@
 
         <div x-show="showOrderModal && selectedOrder" x-cloak class="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/40" @click.self="showOrderModal = false; orderCompositionOpen = false">
             <template x-if="selectedOrder">
-                <div class="bg-white shadow-2xl w-full max-w-lg h-[100dvh] sm:h-auto max-h-[100dvh] sm:max-h-[92vh] flex flex-col fade-in overflow-hidden rounded-t-3xl sm:rounded-2xl min-h-0" @click.stop role="dialog" aria-modal="true">
+                <div class="bg-white shadow-2xl w-full max-w-lg h-[100dvh] sm:h-auto max-h-[100dvh] sm:max-h-[92vh] flex flex-col fade-in overflow-hidden rounded-t-3xl sm:rounded-2xl min-h-0" @click.stop role="dialog" aria-modal="true" aria-labelledby="order-modal-title">
                     <div class="flex items-start justify-between gap-3 px-6 pt-6 pb-4 border-b border-gray-100 shrink-0">
                         <div class="min-w-0 flex-1">
-                            <h3 class="text-lg font-bold text-gray-900" x-text="'Заказ #' + selectedOrder.id"></h3>
+                            <h3 id="order-modal-title" class="text-lg font-bold text-gray-900" x-text="'Заказ #' + selectedOrder.id"></h3>
                             <div class="mt-2 flex flex-wrap items-center gap-1.5">
                                 <span x-show="selectedOrder.order_type"
                                     class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-semibold bg-indigo-50 text-indigo-800 border border-indigo-200/70"
@@ -3609,7 +4038,7 @@
                                 </div>
                             </template>
                         </div>
-                        <button type="button" @click="showOrderModal = false; orderCompositionOpen = false" class="text-gray-400 hover:text-gray-600 text-xl shrink-0 leading-none" aria-label="Закрыть">&times;</button>
+                        <button type="button" @click="showOrderModal = false; orderCompositionOpen = false" class="text-gray-400 hover:text-gray-600 text-xl shrink-0 leading-none" aria-label="Закрыть окно заказа">&times;</button>
                     </div>
                     <div class="flex-1 min-h-0 overflow-y-auto overscroll-contain px-6 py-5">
                     <div class="mb-4 rounded-xl border border-violet-200 bg-violet-50/60 px-4 py-3 text-sm" x-show="selectedOrder?.booking">
@@ -3826,7 +4255,7 @@
                                                         autocomplete="off" spellcheck="false"
                                                         class="w-full rounded-lg border border-gray-200 pl-2 pr-7 py-1.5 text-sm focus:ring-2 focus:ring-brand-500">
                                                     <button type="button" x-show="line.name" @click="line.name = ''; line.iiko_item_id = ''; pickQuery = ''; pickOpen = true"
-                                                        class="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-base leading-none" aria-label="Очистить">&times;</button>
+                                                        class="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-base leading-none" aria-label="Очистить поле названия блюда">&times;</button>
                                                 </div>
                                                 <div class="mt-1 flex items-center gap-1.5 text-[10px]"
                                                     x-show="line.iiko_item_id">
@@ -3966,13 +4395,13 @@
 
         <!-- Ручной черновик заказа (тест) -->
         <div x-show="showManualOrderModal" x-cloak class="fixed inset-0 z-[55] flex items-center justify-center p-4 bg-black/40" @click.self="closeManualOrderModal()">
-            <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 fade-in border border-gray-100" @click.stop role="dialog" aria-modal="true">
+            <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 fade-in border border-gray-100" @click.stop role="dialog" aria-modal="true" aria-labelledby="manual-order-modal-title">
                 <div class="flex items-start justify-between gap-3 mb-4">
                     <div>
-                        <h3 class="text-lg font-bold text-gray-900">Новый заказ (тест)</h3>
+                        <h3 id="manual-order-modal-title" class="text-lg font-bold text-gray-900">Новый заказ (тест)</h3>
                         <p class="text-xs text-gray-500 mt-1">Создаётся черновик с одной позицией из меню (если список позиций пуст). Номер не должен иметь открытого черновика.</p>
                     </div>
-                    <button type="button" @click="closeManualOrderModal()" class="text-gray-400 hover:text-gray-600 text-xl shrink-0 leading-none" aria-label="Закрыть">&times;</button>
+                    <button type="button" @click="closeManualOrderModal()" class="text-gray-400 hover:text-gray-600 text-xl shrink-0 leading-none" aria-label="Закрыть окно нового тестового заказа">&times;</button>
                 </div>
                 <div class="space-y-3 text-sm">
                     <div>
@@ -4040,13 +4469,13 @@
         <!-- Модалка деталей бронирования -->
         <div x-show="showBookingModal && selectedBooking" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" @click.self="closeBookingModal()">
             <template x-if="selectedBooking">
-                <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 fade-in border border-gray-100" @click.stop role="dialog" aria-modal="true">
+                <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 fade-in border border-gray-100" @click.stop role="dialog" aria-modal="true" aria-labelledby="booking-modal-title">
                     <div class="flex items-start justify-between gap-3 mb-5">
                         <div>
-                            <h3 class="text-lg font-bold text-gray-900" x-text="'Бронирование #' + (selectedBooking.id ?? '')"></h3>
+                            <h3 id="booking-modal-title" class="text-lg font-bold text-gray-900" x-text="'Бронирование #' + (selectedBooking.id ?? '')"></h3>
                             <p class="text-xs text-gray-400 mt-0.5">Столик · резервация</p>
                         </div>
-                        <button type="button" @click="closeBookingModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none shrink-0" aria-label="Закрыть">&times;</button>
+                        <button type="button" @click="closeBookingModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none shrink-0" aria-label="Закрыть окно бронирования">&times;</button>
                     </div>
 
                     <div class="mb-4">

@@ -111,6 +111,7 @@ async def dispatch_arq_or_background(
             whatsapp_message_id=kwargs.get("whatsapp_message_id", ""),
             voice_audio=kwargs.get("voice_audio"),
             webhook_value=kwargs.get("webhook_value"),
+            organization_id=kwargs.get("organization_id"),
         )
         logger.warning("ARQ недоступен: whatsapp_process_text → BackgroundTasks")
         return False

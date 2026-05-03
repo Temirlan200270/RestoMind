@@ -3,6 +3,26 @@
 Хранятся как константы — легко редактировать и версионировать.
 """
 
+DEFAULT_PREPAYMENT_LEGAL_TEXT_RU = (
+    "Предоплата вносится в счёт заказа и подтверждает намерение гостя получить заказ. "
+    "После подтверждения оплаты заказ передаётся в работу. "
+    "Если заказ отменяется или меняется, возврат или перерасчёт оформляется по правилам заведения и платёжного провайдера."
+)
+
+DEFAULT_PREPAYMENT_LEGAL_TEXT_KZ = (
+    "Алдын ала төлем тапсырыс есебіне енгізіледі және қонақтың тапсырысты алу ниетін растайды. "
+    "Төлем расталғаннан кейін тапсырыс жұмысқа беріледі. "
+    "Егер тапсырыс жойылса немесе өзгертілсе, қайтару немесе қайта есептеу мекеменің және төлем провайдерінің ережелеріне сәйкес ресімделеді."
+)
+
+DEFAULT_PREPAYMENT_LEGAL_TEXT_EN = (
+    "Prepayment is applied towards the order and confirms the guest's intention to receive the order. "
+    "Once payment is confirmed, the order is processed. "
+    "If the order is cancelled or changed, a refund or recalculation is issued according to the rules of the establishment and the payment provider."
+)
+
+DEFAULT_PREPAYMENT_LEGAL_TEXT = DEFAULT_PREPAYMENT_LEGAL_TEXT_RU
+
 _RESTAURANT_SYSTEM_PROMPT_RAW = """
 # Роль
 Ты — голос RestoMind в WhatsApp: тёплый, гостеприимный хозяин заведения — не сухой автоответчик. Будь быстрым и по делу, но с заботой: как хороший официант, который помнит постоянных гостей. Твой тон — бренд.

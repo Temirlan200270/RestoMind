@@ -20,6 +20,22 @@ logger = logging.getLogger(__name__)
 
 _STT_MAX_RETRIES = 2
 
+
+def _openai_http_error_is_transient(exc: Exception) -> bool:
+    """Ретраим только сетевые/перегрузку (429/5xx), не клиентские 4xx."""
+    if isinstance(exc, (RateLimitError, APIConnectionError, APITimeoutError)):
+        return True
+    if isinstance(exc, APIError):
+        code = getattr(exc, "status_code", None)
+        if code is None:
+            return True
+        try:
+            n = int(code)
+        except (TypeError, ValueError):
+            return False
+        return n == 429 or n >= 500
+    return False
+
 _AUDIO_EXT_BY_MIME: dict[str, str] = {
     "audio/ogg": ".ogg",
     "audio/opus": ".ogg",
@@ -127,15 +143,24 @@ class OpenAIProvider(BaseAIProvider):
         max_retries = 2
         last_error: Exception | None = None
         model = self._model
+        prompt_chars = sum(len(str(m.get("content", ""))) for m in messages)
+        max_out = int(settings.ai_openai_max_completion_tokens)
 
         for attempt in range(1, max_retries + 1):
             t0 = time.perf_counter()
             try:
+                logger.info(
+                    "[AI] provider=openai phase=chat_parse attempt=%d prompt_chars=%d max_out=%d",
+                    attempt,
+                    prompt_chars,
+                    max_out,
+                )
                 completion = await client.beta.chat.completions.parse(
                     model=model,
                     messages=messages,
                     response_format=AIBrainResponse,
                     temperature=0.3,
+                    max_completion_tokens=max_out,
                 )
                 msg = completion.choices[0].message
                 if getattr(msg, "refusal", None):
@@ -146,7 +171,7 @@ class OpenAIProvider(BaseAIProvider):
                         attempt,
                         int((time.perf_counter() - t0) * 1000),
                     )
-                    continue
+                    break
 
                 parsed = msg.parsed
                 if parsed is not None:
@@ -193,6 +218,7 @@ class OpenAIProvider(BaseAIProvider):
                     attempt,
                     int((time.perf_counter() - t0) * 1000),
                 )
+                break
 
             except ValidationError as exc:
                 last_error = exc
@@ -203,6 +229,7 @@ class OpenAIProvider(BaseAIProvider):
                     int((time.perf_counter() - t0) * 1000),
                     type(exc).__name__,
                 )
+                break
 
             except (APIError, RateLimitError, APIConnectionError, APITimeoutError) as exc:
                 last_error = exc
@@ -214,6 +241,9 @@ class OpenAIProvider(BaseAIProvider):
                     type(exc).__name__,
                     exc_info=True,
                 )
+                if attempt < max_retries and _openai_http_error_is_transient(exc):
+                    continue
+                break
 
             except Exception as exc:
                 last_error = exc
@@ -225,8 +255,12 @@ class OpenAIProvider(BaseAIProvider):
                     type(exc).__name__,
                     exc_info=True,
                 )
+                break
 
-        if isinstance(last_error, (APIError, RateLimitError, APIConnectionError, APITimeoutError)):
+        if isinstance(
+            last_error,
+            (APIError, RateLimitError, APIConnectionError, APITimeoutError),
+        ) and _openai_http_error_is_transient(last_error):
             raise TransientAiError(str(last_error)) from last_error
 
         logger.error(
