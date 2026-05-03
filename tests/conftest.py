@@ -2,6 +2,11 @@
 Общие фикстуры для тестов RestoMind.
 """
 
+import os
+
+# До импорта app.core.config: SessionMiddleware с https_only=True не отдаёт cookie в httpx по http:// (ASGITransport).
+os.environ.setdefault("APP_DEBUG", "true")
+
 import asyncio
 from collections.abc import AsyncGenerator
 
