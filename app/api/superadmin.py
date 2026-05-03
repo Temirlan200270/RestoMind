@@ -557,8 +557,6 @@ async def superadmin_payment_webhook_events(
                 "has_payload": bool(ev.payload_bytes or ev.payload_text),
             },
         )
-
-        )
     return {"items": items, "limit": lim, "offset": off}
 
 
