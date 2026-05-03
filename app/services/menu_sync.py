@@ -18,7 +18,72 @@ from app.integrations.iiko_client import IikoClient
 logger = logging.getLogger(__name__)
 
 # Типы номенклатуры iiko Cloud (часто используемые)
-_IIKO_TYPES_DISH_GOOD = frozenset({"Dish", "Good"})
+_IIKO_TYPES_DISH_GOOD = frozenset({"Dish", "Good", "Product"})
+
+
+def _iiko_uuid_ref(raw: Any) -> str:
+    """UUID из строки или из объекта-ссылки ``{ \"id\": \"...\" }`` (вариант ответа /nomenclature)."""
+    if raw is None:
+        return ""
+    if isinstance(raw, str):
+        return raw.strip()
+    if isinstance(raw, dict):
+        for kk in ("id", "Id", "ID"):
+            v = raw.get(kk)
+            if v is not None and str(v).strip():
+                return str(v).strip()
+    return ""
+
+
+def _merge_group_maps_from_nomenclature(nomenclature: dict[str, Any]) -> dict[str, str]:
+    """
+    id группы → отображаемое имя. Учитывает вложенные ``childGroups`` (верхний уровень ``groups``
+    без рекурсии часто даёт только корень — тогда позиции в подгруппах теряют категорию).
+    Также подмешивает ``productCategories`` / ``categories``, если они есть в ответе.
+    """
+
+    merged: dict[str, str] = {}
+
+    def take(node: dict[str, Any]) -> None:
+        gid = str(node.get("id") or "").strip()
+        gnm = str(node.get("name") or "").strip() or "Без категории"
+        if gid:
+            merged[gid] = gnm
+
+    def walk(node: dict[str, Any]) -> None:
+        take(node)
+        for key in ("childGroups", "childgroups"):
+            kids = node.get(key)
+            if not isinstance(kids, list):
+                continue
+            for ch in kids:
+                if isinstance(ch, dict):
+                    walk(ch)
+
+    for g in nomenclature.get("groups") or []:
+        if isinstance(g, dict):
+            walk(g)
+
+    for alt_key in ("productCategories", "categories"):
+        for c in nomenclature.get(alt_key) or []:
+            if isinstance(c, dict):
+                take(c)
+
+    return merged
+
+
+def _product_category_uuid(product: dict[str, Any]) -> str:
+    """Идентификатор родительской группы/категории продукта (несколько полей для совместимости API)."""
+    for key in ("parentGroup", "ParentGroup"):
+        if key in product:
+            u = _iiko_uuid_ref(product[key])
+            if u:
+                return u
+    for key in ("groupId", "productCategoryId"):
+        u = _iiko_uuid_ref(product.get(key))
+        if u:
+            return u
+    return ""
 
 
 def extract_price_from_iiko_product(product: dict[str, Any]) -> float:
@@ -53,7 +118,10 @@ def extract_price_from_iiko_product(product: dict[str, Any]) -> float:
 
 
 def _include_product_by_type(product: dict[str, Any], only_dish_good: bool) -> bool:
-    """Если only_dish_good — оставляем Dish/Good; если тип не указан, включаем (совместимость с API)."""
+    """
+    Если only_dish_good — оставляем Dish/Good/Product; если тип не указан, включаем (совместимость с API).
+    ``Product`` встречается в части аккаунтов iiko как продаваемая позиция.
+    """
     if not only_dish_good:
         return True
     t = product.get("type")
@@ -69,14 +137,15 @@ async def sync_menu_from_iiko(
     *,
     only_dish_and_good: bool | None = None,
     restomind_organization_id: int | None = None,
-) -> dict[str, int]:
+) -> dict[str, Any]:
     """
     Полный цикл синхронизации: iiko API → таблица ``menu_items``.
 
     Сопоставление по **UUID iiko** в поле ``iiko_id`` (не по ``MenuItem.id``).
 
     Returns:
-        Статистика: created, updated, skipped (опционально), total
+        Статистика: created, updated, skipped*, total …
+        * поля skip_no_id / skip_deleted / skip_type / skip_no_name — почему часть строк API не попала в БД.
     """
     filt = (
         settings.iiko_menu_sync_only_dish_good
@@ -87,20 +156,13 @@ async def sync_menu_from_iiko(
     async with IikoClient(api_login=api_login) as client:
         nomenclature = await client.fetch_menu(organization_id)
 
-    groups: dict[str, str] = {}
-    for group in nomenclature.get("groups", []):
-        group_id = group.get("id", "")
-        group_name = group.get("name", "Без категории")
-        if group_id:
-            groups[group_id] = group_name
-
-    products: list[dict[str, Any]] = nomenclature.get("products", [])
+    groups_map = _merge_group_maps_from_nomenclature(nomenclature)
+    products: list[dict[str, Any]] = [
+        p for p in (nomenclature.get("products") or []) if isinstance(p, dict)
+    ]
 
     q = select(MenuItem)
     if restomind_organization_id is not None:
-        # Legacy: в ранних версиях organization_id мог быть NULL.
-        # Для синка конкретного филиала подхватываем и такие строки, чтобы обновлять,
-        # а не пытаться вставлять заново и ловить UniqueViolation по iiko_id.
         q = q.where(
             or_(
                 MenuItem.organization_id == restomind_organization_id,
@@ -108,37 +170,48 @@ async def sync_menu_from_iiko(
             )
         )
     existing_result = await db.execute(q)
-    existing_by_iiko: dict[str, MenuItem] = {
-        mi.iiko_id: mi for mi in existing_result.scalars().all() if mi.iiko_id
-    }
+    existing_by_iiko: dict[str, MenuItem] = {}
+    for mi in existing_result.scalars().all():
+        if mi.iiko_id:
+            existing_by_iiko[str(mi.iiko_id).strip()] = mi
 
     created = 0
     updated = 0
-    skipped = 0
+    skip_no_id = 0
+    skip_deleted = 0
+    skip_type = 0
+    skip_no_name = 0
 
     for product in products:
-        iiko_id = product.get("id")
-        if not iiko_id:
+        sid_raw = product.get("id")
+        sid = str(sid_raw).strip() if sid_raw is not None else ""
+        if not sid:
+            skip_no_id += 1
+            continue
+
+        if bool(product.get("isDeleted")):
+            skip_deleted += 1
             continue
 
         if not _include_product_by_type(product, filt):
-            skipped += 1
+            skip_type += 1
             continue
 
         name = (product.get("name") or "").strip()
         if not name:
-            skipped += 1
+            skip_no_name += 1
             continue
 
         price = extract_price_from_iiko_product(product)
-        category_id = product.get("parentGroup", "")
-        category_name = groups.get(category_id, "")
+        cat_uuid = _product_category_uuid(product)
+        category_name = groups_map.get(cat_uuid, "")
+
         raw_desc = product.get("description")
         description = (raw_desc if isinstance(raw_desc, str) else str(raw_desc or "")) or ""
         image_links = product.get("imageLinks") or []
         image_url = image_links[0] if image_links else None
 
-        existing = existing_by_iiko.get(iiko_id)
+        existing = existing_by_iiko.get(sid)
 
         if existing:
             if restomind_organization_id is not None and existing.organization_id is None:
@@ -148,11 +221,12 @@ async def sync_menu_from_iiko(
             existing.description = description
             existing.price = price
             existing.image_url = image_url
+            existing.iiko_id = sid
             updated += 1
         else:
             item = MenuItem(
                 organization_id=restomind_organization_id,
-                iiko_id=iiko_id,
+                iiko_id=sid,
                 name=name,
                 category=category_name,
                 description=description,
@@ -161,25 +235,48 @@ async def sync_menu_from_iiko(
                 is_available=True,
             )
             db.add(item)
-            existing_by_iiko[iiko_id] = item
+            existing_by_iiko[sid] = item
             created += 1
 
     await db.flush()
 
+    skipped_total = skip_no_id + skip_deleted + skip_type + skip_no_name
     stats = {
         "created": created,
         "updated": updated,
-        "skipped": skipped,
+        "skipped": skipped_total,
+        "skip_no_id": skip_no_id,
+        "skip_deleted": skip_deleted,
+        "skip_type": skip_type,
+        "skip_no_name": skip_no_name,
         "total": created + updated,
+        "api_products": len(products),
+        "api_group_nodes": len(groups_map),
+        "filter_only_dish_good": bool(filt),
     }
     logger.info(
-        "Синхронизация меню завершена: создано %d, обновлено %d, пропущено %d, всего %d",
-        created, updated, skipped, stats["total"],
+        "Синхронизация меню: создано %d, обновлено %d, пропущено всего %d "
+        "(no_id=%d deleted=%d type=%d noname=%d), API products=%d, групп=%d",
+        created,
+        updated,
+        skipped_total,
+        skip_no_id,
+        skip_deleted,
+        skip_type,
+        skip_no_name,
+        len(products),
+        len(groups_map),
     )
+    if filt and skip_type > 0:
+        logger.warning(
+            "%d позиций отфильтровано по type (режим только Dish/Good/Product). "
+            "Если это заказываемые блюда — отключите IIKO_MENU_SYNC_ONLY_DISH_GOOD или проверьте тип номенклатуры в iiko.",
+            skip_type,
+        )
     return stats
 
 
-async def sync_iiko_menu_to_db(db: AsyncSession) -> dict[str, int]:
+async def sync_iiko_menu_to_db(db: AsyncSession) -> dict[str, Any]:
     """
     Синхронизация меню с учётными данными из ``settings`` (.env).
     Удобно для админки и скриптов.
@@ -283,8 +380,6 @@ async def sync_stop_lists(
 
     qm = select(MenuItem)
     if menu_organization_id is not None:
-        # Legacy: в ранних версиях organization_id мог быть NULL.
-        # UI и сервисы читают (org_id OR NULL), поэтому стоп-лист тоже должен применяться к legacy-строкам.
         qm = qm.where(
             or_(
                 MenuItem.organization_id == menu_organization_id,
@@ -298,7 +393,6 @@ async def sync_stop_lists(
     restored_count = 0
 
     for item in all_items:
-        # Мигрируем legacy-строки к текущему филиалу, чтобы в дальнейшем не разъезжались фильтры UI/синка.
         if menu_organization_id is not None and item.organization_id is None:
             item.organization_id = menu_organization_id
 

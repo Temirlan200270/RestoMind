@@ -338,7 +338,7 @@ class Settings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("IIKO_FORCE_HALL_FOR_AI_ORDERS", "iiko_force_hall_for_ai_orders"),
     )
-    # Синхронизация меню: только позиции с type Dish/Good (отсекает модификаторы и пр.; при False — все продукты)
+    # Синхронизация меню: только типы Dish / Good / Product (Modifier/Ingredient и т.д. не попадут; False — все типы из API)
     iiko_menu_sync_only_dish_good: bool = Field(
         default=False,
         validation_alias=AliasChoices("IIKO_MENU_SYNC_ONLY_DISH_GOOD", "iiko_menu_sync_only_dish_good"),

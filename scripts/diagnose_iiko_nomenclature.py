@@ -23,7 +23,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from app.integrations.iiko_client import IikoClient  # noqa: E402
-from app.services.menu_sync import _include_product_by_type  # noqa: E402
+from app.services.menu_sync import _include_product_by_type, _merge_group_maps_from_nomenclature  # noqa: E402
 
 
 async def _run(org_id: str, api_login: str, only_dish_good: bool) -> None:
@@ -32,10 +32,12 @@ async def _run(org_id: str, api_login: str, only_dish_good: bool) -> None:
 
     groups = data.get("groups") or []
     products = data.get("products") or []
+    flat_groups = _merge_group_maps_from_nomenclature(data)
 
     print("--- POST /api/1/nomenclature ---")
     print(f"organizationId: {org_id}")
-    print(f"категорий (groups): {len(groups)}")
+    print(f"категорий (groups, верхний уровень списка): {len(groups)}")
+    print(f"уникальных id групп после разворота childGroups / productCategories: {len(flat_groups)}")
     print(f"продуктов (products): {len(products)}\n")
 
     if not products:
