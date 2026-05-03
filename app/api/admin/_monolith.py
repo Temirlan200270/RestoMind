@@ -32,7 +32,6 @@ from app.db.models import (
     EscalationEvent,
     FailedTask,
     IntegrationEvent,
-    IntegrationHealth,
     KnowledgeItem,
     MenuItem,
     Order,
@@ -1764,6 +1763,7 @@ async def integrations_status(
     iiko_ok = await _iiko_effective_configured(db, org_id)
     base = await build_status_payload(
         db,
+        organization_id=int(org_id),
         iiko_configured=iiko_ok,
         whatsapp_configured=_whatsapp_env_configured(),
     )
@@ -2164,6 +2164,7 @@ async def admin_incidents(
     iiko_configured = await _iiko_effective_configured(db, org_id)
     integ = await build_status_payload(
         db,
+        organization_id=int(org_id),
         iiko_configured=iiko_configured,
         whatsapp_configured=_whatsapp_env_configured(),
     )
@@ -2836,6 +2837,7 @@ async def integrations_sync_now(
 
     snap = await build_status_payload(
         db,
+        organization_id=int(org_id),
         iiko_configured=await _iiko_effective_configured(db, org_id),
         whatsapp_configured=_whatsapp_env_configured(),
     )
@@ -3741,6 +3743,7 @@ async def sync_stop_lists_endpoint(
         )
         snap = await build_status_payload(
             db,
+            organization_id=int(org_id),
             iiko_configured=await _iiko_effective_configured(db, org_id),
             whatsapp_configured=_whatsapp_env_configured(),
         )
@@ -3786,6 +3789,7 @@ async def sync_stop_lists_from_env(
         )
         snap = await build_status_payload(
             db,
+            organization_id=int(org_id),
             iiko_configured=await _iiko_effective_configured(db, org_id),
             whatsapp_configured=_whatsapp_env_configured(),
         )
@@ -4111,13 +4115,13 @@ async def settings_environment(request: Request, db: AsyncSession = Depends(get_
     """
     Безопасный снимок окружения для админки (без секретов и полных токенов).
     """
-    elig = await count_chat_logs_eligible_for_purge(db)
+    org_id = admin_org_from_session(request)
     integ = await build_status_payload(
         db,
-        iiko_configured=_iiko_env_configured(),
+        organization_id=int(org_id),
+        iiko_configured=await _iiko_effective_configured(db, org_id),
         whatsapp_configured=_whatsapp_env_configured(),
     )
-    org_id = admin_org_from_session(request)
     org_row = await db.get(Organization, org_id)
     tg_token_ok = bool(str(settings.telegram_bot_token or "").strip())
     tg_global_chat_ok = bool(str(settings.telegram_admin_chat_id or "").strip())

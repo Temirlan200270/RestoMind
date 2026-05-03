@@ -834,13 +834,35 @@ class PaymentEvent(Base):
 
 class IntegrationHealth(Base):
     """
-    Одна строка (id=1): последние результаты фоновой/ручной синхронизации с iiko.
-    Для индикаторов в админке.
+    Одна строка (id=1): глобальный снимок (ошибки фона без org, legacy).
+    Статус по филиалу см. OrganizationIntegrationSync.
     """
 
     __tablename__ = "integration_health"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    last_stoplist_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    last_stoplist_ok: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_stoplist_error: Mapped[str] = mapped_column(Text, default="")
+    last_menu_sync_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    last_menu_sync_ok: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_menu_sync_error: Mapped[str] = mapped_column(Text, default="")
+
+
+class OrganizationIntegrationSync(Base):
+    """Последний результат синхронизации меню и стоп-листа iiko по филиалу (organizations.id)."""
+
+    __tablename__ = "organization_integration_sync"
+
+    organization_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
     last_stoplist_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True,
     )

@@ -6,9 +6,9 @@ from app.api.admin import admin_incidents
 from app.db.models import (
     ChatLog,
     FailedTask,
-    IntegrationHealth,
     Order,
     Organization,
+    OrganizationIntegrationSync,
     PaymentEvent,
     StaffRole,
     StaffUser,
@@ -89,8 +89,8 @@ async def test_admin_incidents_aggregates_visible_groups(db_session):
                 note="kaspi:pay-1:org_mismatch:expected=101:got=999",
                 created_at=now - timedelta(minutes=2),
             ),
-            IntegrationHealth(
-                id=1,
+            OrganizationIntegrationSync(
+                organization_id=101,
                 last_menu_sync_at=now - timedelta(minutes=20),
                 last_menu_sync_ok=False,
                 last_menu_sync_error="iiko timeout",

@@ -343,6 +343,16 @@ class Settings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("IIKO_MENU_SYNC_ONLY_DISH_GOOD", "iiko_menu_sync_only_dish_good"),
     )
+    # Авто-импорт номенклатуры из iiko в фоне (филиалы с сохранёнными кредами). 0 = выключено.
+    iiko_menu_auto_sync_interval_seconds: int = Field(
+        default=0,
+        ge=0,
+        validation_alias=AliasChoices(
+            "IIKO_MENU_AUTO_SYNC_INTERVAL_SECONDS",
+            "iiko_menu_auto_sync_interval_seconds",
+        ),
+        description="Интервал фонового sync_menu для всех филиалов с iiko (сек). Рекомендация prod: 3600–21600.",
+    )
 
     # --- Тарификация заказов (v2.0) — тенге ---
     pricing_container_hall: float = Field(

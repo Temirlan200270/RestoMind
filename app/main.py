@@ -7,6 +7,7 @@ import asyncio
 import logging
 import logging.handlers
 import os
+import time
 from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
 from pathlib import Path
@@ -119,6 +120,39 @@ logger = logging.getLogger(__name__)
 
 
 STOP_LIST_SYNC_INTERVAL = 900  # 15 минут
+
+# Монотонные часы последнего запуска авто-синка меню в фоновом цикле (при 0 в настройках не используется).
+_IIKO_MENU_AUTO_MONO_LAST: float | None = None
+
+
+async def _iiko_sync_targets(db) -> list[tuple[int, str, str, str]]:
+    """Филиалы с валидными кредами iiko + fallback на IIKO_* из .env."""
+    from app.services.org_iiko import list_organizations_with_iiko_db, resolve_org_iiko_credentials
+
+    targets: list[tuple[int, str, str, str]] = []
+    for org_row in await list_organizations_with_iiko_db(db):
+        c = await resolve_org_iiko_credentials(db, int(org_row.id))
+        if c is None:
+            continue
+        targets.append(
+            (
+                int(org_row.id),
+                c.api_login,
+                c.iiko_organization_id,
+                (c.terminal_group_id or "").strip(),
+            ),
+        )
+    if not targets and settings.iiko_api_login and settings.iiko_organization_id:
+        fallback_oid = await db.scalar(select(Organization.id).order_by(Organization.id.asc()).limit(1))
+        targets.append(
+            (
+                int(fallback_oid) if fallback_oid is not None else int(settings.default_organization_id),
+                settings.iiko_api_login.strip(),
+                settings.iiko_organization_id.strip(),
+                (settings.iiko_terminal_group_id or "").strip(),
+            ),
+        )
+    return targets
 
 
 def _is_expected_ddl_error(exc: Exception) -> bool:
@@ -314,11 +348,11 @@ async def _apply_sqlite_startup_schema_patches() -> None:
 
 
 async def _stop_list_sync_loop() -> None:
-    """Фоновая задача: синхронизирует стоп-листы из iiko каждые 15 минут."""
-    from app.services.integration_health import record_stoplist_sync
-    from app.services.menu_sync import sync_stop_lists
-    from app.services.org_iiko import list_organizations_with_iiko_db, resolve_org_iiko_credentials
+    """Фоново: стоп-листы iiko (каждые 15 мин) и опционально полный импорт меню (IIKO_MENU_AUTO_SYNC_INTERVAL_SECONDS)."""
+    from app.services.integration_health import record_menu_sync, record_stoplist_sync
+    from app.services.menu_sync import sync_menu_from_iiko, sync_stop_lists
 
+    global _IIKO_MENU_AUTO_MONO_LAST
     first_cycle = True
     while True:
         try:
@@ -329,33 +363,7 @@ async def _stop_list_sync_loop() -> None:
             break
         async with async_session_factory() as db:
             try:
-                targets: list[tuple[int, str, str, str]] = []
-                for org_row in await list_organizations_with_iiko_db(db):
-                    c = await resolve_org_iiko_credentials(db, int(org_row.id))
-                    if c is None:
-                        continue
-                    targets.append(
-                        (
-                            int(org_row.id),
-                            c.api_login,
-                            c.iiko_organization_id,
-                            c.terminal_group_id or "",
-                        ),
-                    )
-                if not targets and settings.iiko_api_login and settings.iiko_organization_id:
-                    # Не полагаемся на DEFAULT_ORGANIZATION_ID=1: на боевой БД id может отличаться,
-                    # а тогда запись integration_events начнёт падать по FK.
-                    fallback_oid = await db.scalar(
-                        text("SELECT id FROM organizations ORDER BY id ASC LIMIT 1"),
-                    )
-                    targets.append(
-                        (
-                            int(fallback_oid) if fallback_oid is not None else int(settings.default_organization_id),
-                            settings.iiko_api_login.strip(),
-                            settings.iiko_organization_id.strip(),
-                            (settings.iiko_terminal_group_id or "").strip(),
-                        ),
-                    )
+                targets = await _iiko_sync_targets(db)
                 if not targets:
                     continue
                 for oid, login, iorg, tg in targets:
@@ -372,6 +380,33 @@ async def _stop_list_sync_loop() -> None:
                     except Exception as exc:
                         logger.error("Стоп-листы org=%s: %s", oid, exc, exc_info=True)
                         await record_stoplist_sync(db, False, str(exc), organization_id=oid)
+
+                menu_iv = max(0, int(settings.iiko_menu_auto_sync_interval_seconds or 0))
+                if menu_iv > 0:
+                    now_m = time.monotonic()
+                    if _IIKO_MENU_AUTO_MONO_LAST is None:
+                        _IIKO_MENU_AUTO_MONO_LAST = now_m
+                    elif now_m - _IIKO_MENU_AUTO_MONO_LAST >= float(menu_iv):
+                        _IIKO_MENU_AUTO_MONO_LAST = now_m
+                        for oid, login, iorg, _tg in targets:
+                            try:
+                                stats = await sync_menu_from_iiko(
+                                    db, login, iorg, restomind_organization_id=oid,
+                                )
+                                sk = stats.get("skipped")
+                                detail_m = (
+                                    f"Авто-синхронизация меню: успешно "
+                                    f"(всего {stats.get('total', 0)}, новых {stats.get('created', 0)}, "
+                                    f"обновлено {stats.get('updated', 0)}"
+                                    + (f", пропущено {sk}" if sk else "")
+                                    + ")"
+                                )
+                                await record_menu_sync(db, True, None, detail=detail_m, organization_id=oid)
+                                logger.info("Авто-меню org=%s: %s", oid, stats)
+                            except Exception as exc:
+                                logger.error("Авто-меню org=%s: %s", oid, exc, exc_info=True)
+                                await record_menu_sync(db, False, str(exc), organization_id=oid)
+
                 await db.commit()
             except asyncio.CancelledError:
                 raise

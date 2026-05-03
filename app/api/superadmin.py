@@ -18,6 +18,7 @@ from app.core.config import settings
 from app.core.passwords import hash_password
 from app.db.models import Order, Organization, PaymentWebhookEvent, RegistrationRequest, StaffRole, StaffUser, Tenant
 from app.db.session import get_db
+from app.services.integration_health import record_menu_sync
 from app.services.menu_sync import sync_menu_from_iiko
 from app.services.org_iiko import resolve_org_iiko_credentials
 from app.services.secrets_crypto import encrypt_secret, fernet_or_none
@@ -366,14 +367,31 @@ async def superadmin_sync_org_menu(
     creds = await resolve_org_iiko_credentials(db, int(org.id))
     if creds is None:
         raise HTTPException(status_code=400, detail="Сначала заполните iiko_api_login и iiko_organization_id")
-    stats = await sync_menu_from_iiko(
-        db,
-        creds.api_login,
-        creds.iiko_organization_id,
-        restomind_organization_id=int(org.id),
-    )
-    await db.commit()
-    return {"ok": True, "stats": stats}
+    try:
+        stats = await sync_menu_from_iiko(
+            db,
+            creds.api_login,
+            creds.iiko_organization_id,
+            restomind_organization_id=int(org.id),
+        )
+        sk = stats.get("skipped")
+        detail_m = (
+            f"Синхронизация меню (superadmin): успешно "
+            f"(всего {stats.get('total', 0)}, новых {stats.get('created', 0)}, обновлено {stats.get('updated', 0)}"
+            + (f", пропущено {sk}" if sk else "")
+            + ")"
+        )
+        await record_menu_sync(db, True, None, detail=detail_m, organization_id=int(org.id))
+        await db.commit()
+        return {"ok": True, "stats": stats}
+    except Exception as exc:
+        err = str(exc)
+        await record_menu_sync(
+            db, False, err, detail=f"Синхронизация меню (superadmin): ошибка — {err[:400]}",
+            organization_id=int(org.id),
+        )
+        await db.commit()
+        raise HTTPException(status_code=502, detail=err[:500]) from exc
 
 
 @router.get("/registration-requests")

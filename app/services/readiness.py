@@ -85,6 +85,7 @@ async def build_admin_readiness_payload(db: AsyncSession, org_id: int) -> dict[s
     wa_ok = _whatsapp_env_configured()
     integ = await build_status_payload(
         db,
+        organization_id=int(org_id),
         iiko_configured=iiko_ok,
         whatsapp_configured=wa_ok,
     )

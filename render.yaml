@@ -59,3 +59,6 @@ services:
         sync: false
       - key: IIKO_ORGANIZATION_ID
         sync: false
+      # Опционально: авто-импорт меню из iiko (сек). 0 по умолчанию в коде; типично 3600–21600.
+      # - key: IIKO_MENU_AUTO_SYNC_INTERVAL_SECONDS
+      #   value: "10800"

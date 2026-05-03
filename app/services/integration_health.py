@@ -1,13 +1,16 @@
 """
 Состояние интеграций для админки: последние успехи/ошибки синхронизации с iiko.
+Глобальная строка (legacy) и отдельно по каждому филиалу (organization_integration_sync).
 """
+
+from __future__ import annotations
 
 from datetime import datetime, timezone
 
 from sqlalchemy import delete as sql_delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import IntegrationEvent, IntegrationHealth
+from app.db.models import IntegrationEvent, IntegrationHealth, OrganizationIntegrationSync
 
 ROW_ID = 1
 _MAX_EVENTS = 100
@@ -17,6 +20,15 @@ async def _get_or_create_row(db: AsyncSession) -> IntegrationHealth:
     row = await db.get(IntegrationHealth, ROW_ID)
     if row is None:
         row = IntegrationHealth(id=ROW_ID)
+        db.add(row)
+        await db.flush()
+    return row
+
+
+async def _get_or_create_org_row(db: AsyncSession, organization_id: int) -> OrganizationIntegrationSync:
+    row = await db.get(OrganizationIntegrationSync, int(organization_id))
+    if row is None:
+        row = OrganizationIntegrationSync(organization_id=int(organization_id))
         db.add(row)
         await db.flush()
     return row
@@ -48,7 +60,7 @@ async def _append_integration_event(
             .order_by(IntegrationEvent.created_at.asc())
             .limit(excess)
         )
-        ids = [row[0] for row in old_ids.all()]
+        ids = [row_t[0] for row_t in old_ids.all()]
         if ids:
             await db.execute(sql_delete(IntegrationEvent).where(IntegrationEvent.id.in_(ids)))
 
@@ -62,14 +74,20 @@ async def record_stoplist_sync(
     organization_id: int | None = None,
 ) -> None:
     """Зафиксировать результат синхронизации стоп-листов (фон или кнопка в админке)."""
-    row = await _get_or_create_row(db)
-    row.last_stoplist_at = datetime.now(timezone.utc)
-    row.last_stoplist_ok = ok
-    row.last_stoplist_error = (error or "")[:2000]
+    now = datetime.now(timezone.utc)
     msg = detail or (
         f"Стоп-листы: {'успех' if ok else 'ошибка'}"
         + (f" — {error[:300]}" if error and not ok else "")
     )
+    if organization_id is not None:
+        orow = await _get_or_create_org_row(db, int(organization_id))
+        orow.last_stoplist_at = now
+        orow.last_stoplist_ok = ok
+        orow.last_stoplist_error = (error or "")[:2000]
+    row = await _get_or_create_row(db)
+    row.last_stoplist_at = now
+    row.last_stoplist_ok = ok
+    row.last_stoplist_error = (error or "")[:2000]
     await _append_integration_event(db, "stoplist_sync", ok, msg, organization_id=organization_id)
 
 
@@ -82,14 +100,20 @@ async def record_menu_sync(
     organization_id: int | None = None,
 ) -> None:
     """Зафиксировать результат синхронизации номенклатуры."""
-    row = await _get_or_create_row(db)
-    row.last_menu_sync_at = datetime.now(timezone.utc)
-    row.last_menu_sync_ok = ok
-    row.last_menu_sync_error = (error or "")[:2000]
+    now = datetime.now(timezone.utc)
     msg = detail or (
         f"Меню: {'успех' if ok else 'ошибка'}"
         + (f" — {error[:300]}" if error and not ok else "")
     )
+    if organization_id is not None:
+        orow = await _get_or_create_org_row(db, int(organization_id))
+        orow.last_menu_sync_at = now
+        orow.last_menu_sync_ok = ok
+        orow.last_menu_sync_error = (error or "")[:2000]
+    row = await _get_or_create_row(db)
+    row.last_menu_sync_at = now
+    row.last_menu_sync_ok = ok
+    row.last_menu_sync_error = (error or "")[:2000]
     await _append_integration_event(db, "menu_sync", ok, msg, organization_id=organization_id)
 
 
@@ -127,11 +151,21 @@ def _iso(dt: datetime | None) -> str | None:
     return dt.isoformat() if dt else None
 
 
-async def build_status_payload(db: AsyncSession, *, iiko_configured: bool, whatsapp_configured: bool) -> dict:
-    """JSON для GET /api/admin/integrations/status."""
-    row = await db.get(IntegrationHealth, ROW_ID)
-    if row is None:
-        slot = {"at": None, "ok": False, "error": None}
+def _neutral_slot() -> dict:
+    return {"at": None, "ok": False, "error": None}
+
+
+async def build_status_payload(
+    db: AsyncSession,
+    *,
+    organization_id: int,
+    iiko_configured: bool,
+    whatsapp_configured: bool,
+) -> dict:
+    """JSON для GET /api/admin/integrations/status — слоты last_* по активному филиалу."""
+    org_row = await db.get(OrganizationIntegrationSync, int(organization_id))
+    if org_row is None:
+        slot = _neutral_slot()
         return {
             "iiko_configured": iiko_configured,
             "whatsapp_configured": whatsapp_configured,
@@ -142,13 +176,13 @@ async def build_status_payload(db: AsyncSession, *, iiko_configured: bool, whats
         "iiko_configured": iiko_configured,
         "whatsapp_configured": whatsapp_configured,
         "last_stoplist": {
-            "at": _iso(row.last_stoplist_at),
-            "ok": bool(row.last_stoplist_ok),
-            "error": row.last_stoplist_error or None,
+            "at": _iso(org_row.last_stoplist_at),
+            "ok": bool(org_row.last_stoplist_ok),
+            "error": org_row.last_stoplist_error or None,
         },
         "last_menu_sync": {
-            "at": _iso(row.last_menu_sync_at),
-            "ok": bool(row.last_menu_sync_ok),
-            "error": row.last_menu_sync_error or None,
+            "at": _iso(org_row.last_menu_sync_at),
+            "ok": bool(org_row.last_menu_sync_ok),
+            "error": org_row.last_menu_sync_error or None,
         },
     }
