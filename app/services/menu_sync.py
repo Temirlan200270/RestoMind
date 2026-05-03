@@ -86,6 +86,51 @@ def _product_category_uuid(product: dict[str, Any]) -> str:
     return ""
 
 
+def _category_display_name(product: dict[str, Any], groups_map: dict[str, str]) -> str:
+    """
+    Человекочитаемое имя раздела для UI (вкладка «Меню» группирует по ``MenuItem.category``).
+
+    iiko может отдавать только UUID группы без попадания id в дерево ``groups``,
+    но при этом вложить название прямо в объект ``parentGroup`` (поля ``id`` и ``name``).
+    """
+    cid = _product_category_uuid(product)
+    if cid:
+        g = (groups_map.get(cid) or "").strip()
+        if g:
+            return g
+    for key in ("parentGroup", "ParentGroup"):
+        pg = product.get(key)
+        if isinstance(pg, dict):
+            nm = pg.get("name")
+            if nm and str(nm).strip():
+                return str(nm).strip()
+    for alt in ("groupName", "productCategoryName", "categoryName"):
+        v = product.get(alt)
+        if v and str(v).strip():
+            return str(v).strip()
+    return ""
+
+
+def _dedupe_nomenclature_products(raw: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
+    """
+    На один ``id`` может приходиться несколько записей в ``products``.
+    Последний по порядку в массиве выигрывает — иначе завышается счётчик «обновлено» при том же числе строк в БД.
+    """
+    by_id: dict[str, dict[str, Any]] = {}
+    ordered_ids: list[str] = []
+    for p in raw:
+        sid = str(p.get("id") or "").strip()
+        if not sid:
+            continue
+        if sid not in by_id:
+            ordered_ids.append(sid)
+        by_id[sid] = p
+    unique_list = [by_id[i] for i in ordered_ids]
+    rows_with_id = sum(1 for p in raw if str(p.get("id") or "").strip())
+    merged_dup = max(0, rows_with_id - len(unique_list))
+    return unique_list, merged_dup
+
+
 def extract_price_from_iiko_product(product: dict[str, Any]) -> float:
     """
     Извлекает цену из ответа ``/nomenclature`` (разные версии API: sizePrices, priceCategories).
@@ -157,9 +202,10 @@ async def sync_menu_from_iiko(
         nomenclature = await client.fetch_menu(organization_id)
 
     groups_map = _merge_group_maps_from_nomenclature(nomenclature)
-    products: list[dict[str, Any]] = [
+    raw_products: list[dict[str, Any]] = [
         p for p in (nomenclature.get("products") or []) if isinstance(p, dict)
     ]
+    products, api_products_dup_merged = _dedupe_nomenclature_products(raw_products)
 
     q = select(MenuItem)
     if restomind_organization_id is not None:
@@ -203,8 +249,7 @@ async def sync_menu_from_iiko(
             continue
 
         price = extract_price_from_iiko_product(product)
-        cat_uuid = _product_category_uuid(product)
-        category_name = groups_map.get(cat_uuid, "")
+        category_name = _category_display_name(product, groups_map)
 
         raw_desc = product.get("description")
         description = (raw_desc if isinstance(raw_desc, str) else str(raw_desc or "")) or ""
@@ -250,13 +295,15 @@ async def sync_menu_from_iiko(
         "skip_type": skip_type,
         "skip_no_name": skip_no_name,
         "total": created + updated,
+        "api_products_raw": len(raw_products),
         "api_products": len(products),
+        "api_products_dup_merged": api_products_dup_merged,
         "api_group_nodes": len(groups_map),
         "filter_only_dish_good": bool(filt),
     }
     logger.info(
         "Синхронизация меню: создано %d, обновлено %d, пропущено всего %d "
-        "(no_id=%d deleted=%d type=%d noname=%d), API products=%d, групп=%d",
+        "(no_id=%d deleted=%d type=%d noname=%d), API products raw=%d unique=%d dup_merged=%d, групп=%d",
         created,
         updated,
         skipped_total,
@@ -264,7 +311,9 @@ async def sync_menu_from_iiko(
         skip_deleted,
         skip_type,
         skip_no_name,
+        len(raw_products),
         len(products),
+        api_products_dup_merged,
         len(groups_map),
     )
     if filt and skip_type > 0:

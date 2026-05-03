@@ -1,6 +1,8 @@
 """Разбор цены и фильтра типов из ответа номенклатуры iiko."""
 
 from app.services.menu_sync import (
+    _category_display_name,
+    _dedupe_nomenclature_products,
     _include_product_by_type,
     _merge_group_maps_from_nomenclature,
     _product_category_uuid,
@@ -48,3 +50,26 @@ def test_merge_nested_child_groups() -> None:
 
 def test_product_category_uuid_from_object_parent_group() -> None:
     assert _product_category_uuid({"parentGroup": {"id": "g-1"}}) == "g-1"
+
+
+def test_category_display_name_from_parent_group_when_map_missing() -> None:
+    """Если id группы нет в дереве groups, имя всё равно берётся из объекта parentGroup."""
+    product = {"parentGroup": {"id": "orphan-uuid", "name": "Суши"}}
+    assert _category_display_name(product, {}) == "Суши"
+
+
+def test_category_display_name_prefers_groups_map_over_parent_name() -> None:
+    product = {"parentGroup": {"id": "g-1", "name": "Суши"}}
+    assert _category_display_name(product, {"g-1": "Из карты групп"}) == "Из карты групп"
+
+
+def test_dedupe_nomenclature_products_last_wins_order() -> None:
+    raw = [
+        {"id": "a", "name": "First"},
+        {"id": "a", "name": "Second"},
+        {"id": "b", "name": "B"},
+    ]
+    unique, dup = _dedupe_nomenclature_products(raw)
+    assert dup == 1
+    assert len(unique) == 2
+    assert unique[0]["name"] == "Second"

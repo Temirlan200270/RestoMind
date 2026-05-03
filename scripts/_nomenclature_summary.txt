@@ -1,0 +1,48 @@
+=== nomenclature.json ===
+correlationId: c92963cc-3206-4e8b-a497-48a37eb259b7
+top-level groups (array): 70
+flattened group ids (nested walk): 70
+products (array length): 683
+unique product ids: 381
+duplicate rows (683 - unique): 302
+
+product.type:
+  Dish: 596
+  (none): 52
+  Good: 27
+  Service: 8
+
+Groups with name containing суши/ролл/саши/нигир:
+  - Для Суши
+
+Product counts by resolved category (same keywords in category name):
+    17  Для Суши
+
+
+Top 25 categories by product row count:
+    58  Десерты
+    54  Не действующие
+    52  Горячие напитки
+    51  Посуда
+    40  Торты
+    34  Напитки
+    32  Лимонады
+    28  Салаты
+    24  доп ингредиенты
+    22  Мангал
+    20  Блюдо на компанию
+    20  Лагманы
+    18  Первое блюдо
+    17  Соусы
+    17  Для Суши
+    16  Выпечка-1
+    16  Детское меню
+    16  Комбо
+    13  ПФ Фарш
+    12  Кофе
+    12  Горячее блюдо
+    12  Пицца
+    12  Традиционное меню
+    10  Гарнир
+    10  рп
+

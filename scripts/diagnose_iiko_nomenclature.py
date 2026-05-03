@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 Диагностика ответа POST /api/1/nomenclature (то, что реально идёт в sync меню).
+Сырые запросы (токен + nomenclature) без Python-хелперов — ``scripts/post_nomenclature.ps1`` или ``scripts/post_nomenclature.sh``.
 
 Скрипт list_iiko_organizations.py проверяет только /organizations — меню может быть пустым в ответе iiko.
 
