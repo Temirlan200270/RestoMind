@@ -846,9 +846,9 @@ async def process_message(
     Полный цикл обработки входящего сообщения с учётом State Machine.
     """
     try:
+        state = await get_user_state(redis_client, phone, organization_id=organization_id)
         if message_text and _is_plain_greeting(message_text):
-            state_quick = await get_user_state(redis_client, phone, organization_id=organization_id)
-            if state_quick == UserState.CHATTING and voice_audio is None:
+            if state == UserState.CHATTING and voice_audio is None:
                 quick_reply = _greeting_reply()
                 outbound_id_quick: int | None = None
                 async with async_session_factory() as db_quick:
@@ -883,8 +883,6 @@ async def process_message(
         voice_mime = ""
         if voice_audio:
             voice_bytes, voice_mime = voice_audio
-
-        state = await get_user_state(redis_client, phone, organization_id=organization_id)
 
         async with async_session_factory() as db_u:
             u_row = await db_u.scalar(

@@ -40,7 +40,8 @@ async def setup_organization_iiko(
 ) -> dict[str, int]:
     """
     Сохраняет учётные данные и импортирует меню для ``organization_id`` RestoMind.
-    При ``encrypt_login=True`` и настроенном Fernet — очищает plaintext-поле.
+    Credentials коммитятся отдельной транзакцией ДО синхронизации меню — чтобы
+    ошибка меню (недоступный iiko, таймаут) не откатила сохранённые ключи.
     """
     org = await db.get(Organization, organization_id)
     if org is None:
@@ -58,7 +59,8 @@ async def setup_organization_iiko(
         org.iiko_api_login_enc = None
         org.iiko_api_login = login
     org.iiko_organization_id = iid
-    await db.flush()
+    # Commit credentials first so they survive a menu-sync failure.
+    await db.commit()
 
     stats = await sync_menu_from_iiko(
         db, login, iid, restomind_organization_id=organization_id,

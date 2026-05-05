@@ -496,6 +496,7 @@ function adminMixinState() {
         ordersTotal: 0,
         ordersHasMore: false,
         bookings: [],
+        bookingStatusFilter: 'all',
         menuItems: [],
 
         // Заказы
@@ -2361,6 +2362,15 @@ function adminMixinSearchBookings() {
         bookingHallLabel(h) {
             const m = { hall_1: 'Зал 1', hall_2: 'Зал 2', vip: 'VIP зал' };
             return m[h] || (h ? String(h) : 'Зал 1');
+        },
+
+        get filteredBookings() {
+            if (this.bookingStatusFilter === 'all') return this.bookings;
+            return this.bookings.filter(b => b.status === this.bookingStatusFilter);
+        },
+
+        bookingStatsFor(status) {
+            return this.bookings.filter(b => b.status === status).length;
         },
 
         /** Отложенное сохранение зала/статуса брони (debounce — порядок PATCH на сервере стабильнее). */
@@ -4437,6 +4447,23 @@ function adminMixinWebSocketEvents() {
             }
         },
 
+        _startChatPolling() {
+            this._stopChatPolling();
+            // Fallback-refresh каждые 20 с, пока WS не готов или после долгого обрыва.
+            this._chatPollTimer = setInterval(() => {
+                if (!this.wsChannelReady && this.currentTab === 'chats') {
+                    void this.loadChatList(false);
+                }
+            }, 20000);
+        },
+
+        _stopChatPolling() {
+            if (this._chatPollTimer) {
+                clearInterval(this._chatPollTimer);
+                this._chatPollTimer = null;
+            }
+        },
+
         // ─── Alerts ──────────────────────────────────
         _playTone(type, freq, duration = 0.2, volume = 0.12) {
             try {
@@ -5141,6 +5168,7 @@ function adminMixinDataChartsSettings() {
             if (this.currentTab !== 'chats') {
                 this.chatMobileInfoOpen = false;
                 this.activeChatPhone = '';
+                this._stopChatPolling();
             }
             if (this.currentTab !== 'menu') {
                 this.menuBulkMode = false;
@@ -5200,6 +5228,7 @@ function adminMixinDataChartsSettings() {
                     }
                 } else if (this.currentTab === 'chats') {
                     await this.loadChatList();
+                    this._startChatPolling();
                 }
             } catch (e) {
                 adminLogger.error(e);

@@ -98,6 +98,7 @@ from app.services.order_logic import (
     classify_packaging_kind,
     finalize_order_draft,
     format_draft_order_context_for_prompt,
+    invalidate_menu_context_cache,
     load_available_menu,
     load_packaging_rules,
     validate_mixed_payment_total,
@@ -2823,6 +2824,7 @@ async def integrations_sync_now(
             creds.iiko_organization_id,
             restomind_organization_id=org_id,
         )
+        invalidate_menu_context_cache(org_id)
         menu_block = {"ok": True, "stats": stats_m, "error": None}
         sk = stats_m.get("skipped")
         detail_m = (
@@ -3573,6 +3575,7 @@ async def patch_menu_item(
             item.serves_max = int(item.serves_min or 1)
 
     await db.flush()
+    invalidate_menu_context_cache(org_id)
     return {"ok": True, "item": _menu_item_dict(item)}
 
 
@@ -3798,6 +3801,7 @@ async def sync_menu(
         stats = await sync_menu_from_iiko(
             db, login, org, restomind_organization_id=org_id,
         )
+        invalidate_menu_context_cache(org_id)
         sk = stats.get("skipped")
         detail_m = (
             f"Синхронизация меню: успешно "
