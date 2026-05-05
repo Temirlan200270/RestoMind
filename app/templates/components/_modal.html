@@ -1,0 +1,8 @@
+{# static_demo: без fixed/backdrop — для витрины в storybook #}
+{% macro modal(id, title='', size='', extra_class='', static_demo=false) -%}
+{% if not static_demo %}<div class="ds-modal-backdrop {{ extra_class }}" id="{{ id }}-backdrop" role="presentation" aria-hidden="true"></div>{% endif %}
+<div class="ds-modal-panel {% if size == 'lg' %}ds-modal-wide{% elif size == 'xl' %}ds-modal-xl{% endif %} {% if static_demo %}ds-modal-panel-static{% endif %} {% if not static_demo %}{{ extra_class }}{% endif %}" id="{{ id }}-panel" role="dialog" aria-modal="true" {% if title %}aria-labelledby="{{ id }}-title"{% endif %}>
+  {% if title %}<h2 id="{{ id }}-title" class="text-lg font-bold border-b ds-border" style="padding: var(--space-4); color: var(--color-text);">{{ title }}</h2>{% endif %}
+  {{ caller() }}
+</div>
+{%- endmacro %}

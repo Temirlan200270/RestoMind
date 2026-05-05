@@ -1,4 +1,4 @@
-{# desktop_nav: на вкладке «Мой ресторан» липкая полоска уже содержит чипы — вторую колонку не показываем. #}
+{# desktop_nav: на вкладке «Профиль и логистика» липкая полоска уже содержит чипы — вторую колонку не показываем. #}
 {% macro settings_tabs(margin_class='mb-6', desktop_nav=true) -%}
 <div class="{{ margin_class }}">
   <div class="inline-flex flex-wrap gap-2 rounded-2xl bg-white border border-gray-100 shadow-sm p-2 {% if desktop_nav %}lg:hidden{% endif %}">
@@ -6,25 +6,31 @@
       @click="setSettingsTab('restaurant')"
       :class="settingsTab === 'restaurant' ? 'bg-brand-600 text-white shadow-sm' : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'"
       class="px-4 py-2 rounded-xl text-sm font-semibold transition min-h-[44px]">
-      Мой ресторан
+      Профиль и логистика
     </button>
     <button type="button"
       @click="setSettingsTab('branding')"
       :class="settingsTab === 'branding' ? 'bg-brand-600 text-white shadow-sm' : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'"
       class="px-4 py-2 rounded-xl text-sm font-semibold transition min-h-[44px]">
-      Брендинг
+      Бренд
     </button>
     <button type="button"
       @click="setSettingsTab('connections')"
       :class="settingsTab === 'connections' ? 'bg-brand-600 text-white shadow-sm' : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'"
       class="px-4 py-2 rounded-xl text-sm font-semibold transition min-h-[44px]">
-      Подключения
+      Интеграции
     </button>
     <button type="button"
       @click="setSettingsTab('smart_sales')"
       :class="settingsTab === 'smart_sales' ? 'bg-brand-600 text-white shadow-sm' : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'"
       class="px-4 py-2 rounded-xl text-sm font-semibold transition min-h-[44px]">
-      Умные продажи
+      Допродажи
+    </button>
+    <button type="button"
+      @click="setSettingsTab('bot_test')"
+      :class="settingsTab === 'bot_test' ? 'bg-emerald-700 text-white shadow-sm' : 'bg-white text-emerald-800 hover:bg-emerald-50 border border-emerald-200'"
+      class="px-4 py-2 rounded-xl text-sm font-semibold transition min-h-[44px]">
+      Бот / ИИ
     </button>
     <button type="button"
       @click="setSettingsTab('team')"
@@ -42,13 +48,7 @@
       @click="setSettingsTab('technical')"
       :class="settingsTab === 'technical' ? 'bg-slate-900 text-white shadow-sm' : 'bg-white text-slate-700 hover:bg-slate-50 border border-slate-200'"
       class="px-4 py-2 rounded-xl text-sm font-semibold transition min-h-[44px]">
-      Технический доступ
-    </button>
-    <button type="button"
-      @click="setSettingsTab('bot_test')"
-      :class="settingsTab === 'bot_test' ? 'bg-emerald-700 text-white shadow-sm' : 'bg-white text-emerald-800 hover:bg-emerald-50 border border-emerald-200'"
-      class="px-4 py-2 rounded-xl text-sm font-semibold transition min-h-[44px]">
-      Тест бота
+      Данные и безопасность
     </button>
   </div>
   {% if desktop_nav %}
@@ -56,22 +56,27 @@
     <button type="button" @click="setSettingsTab('restaurant')"
       :class="settingsTab === 'restaurant' ? 'bg-brand-600 text-white shadow-sm' : 'text-gray-700 hover:bg-gray-50 border border-transparent hover:border-gray-200'"
       class="w-full text-left px-4 py-2.5 rounded-xl text-sm font-semibold transition min-h-[44px]">
-      Мой ресторан
+      Профиль и логистика
     </button>
     <button type="button" @click="setSettingsTab('branding')"
       :class="settingsTab === 'branding' ? 'bg-brand-600 text-white shadow-sm' : 'text-gray-700 hover:bg-gray-50 border border-transparent hover:border-gray-200'"
       class="w-full text-left px-4 py-2.5 rounded-xl text-sm font-semibold transition min-h-[44px]">
-      Брендинг
+      Бренд
     </button>
     <button type="button" @click="setSettingsTab('connections')"
       :class="settingsTab === 'connections' ? 'bg-brand-600 text-white shadow-sm' : 'text-gray-700 hover:bg-gray-50 border border-transparent hover:border-gray-200'"
       class="w-full text-left px-4 py-2.5 rounded-xl text-sm font-semibold transition min-h-[44px]">
-      Подключения
+      Интеграции
     </button>
     <button type="button" @click="setSettingsTab('smart_sales')"
       :class="settingsTab === 'smart_sales' ? 'bg-brand-600 text-white shadow-sm' : 'text-gray-700 hover:bg-gray-50 border border-transparent hover:border-gray-200'"
       class="w-full text-left px-4 py-2.5 rounded-xl text-sm font-semibold transition min-h-[44px]">
-      Умные продажи
+      Допродажи
+    </button>
+    <button type="button" @click="setSettingsTab('bot_test')"
+      :class="settingsTab === 'bot_test' ? 'bg-emerald-700 text-white shadow-sm' : 'text-emerald-800 hover:bg-emerald-50 border border-transparent hover:border-emerald-200'"
+      class="w-full text-left px-4 py-2.5 rounded-xl text-sm font-semibold transition min-h-[44px]">
+      Бот / ИИ
     </button>
     <button type="button" @click="setSettingsTab('team')"
       :class="settingsTab === 'team' ? 'bg-brand-600 text-white shadow-sm' : 'text-gray-700 hover:bg-gray-50 border border-transparent hover:border-gray-200'"
@@ -86,12 +91,7 @@
     <button type="button" @click="setSettingsTab('technical')"
       :class="settingsTab === 'technical' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-700 hover:bg-slate-50 border border-transparent hover:border-slate-200'"
       class="w-full text-left px-4 py-2.5 rounded-xl text-sm font-semibold transition min-h-[44px]">
-      Технический доступ
-    </button>
-    <button type="button" @click="setSettingsTab('bot_test')"
-      :class="settingsTab === 'bot_test' ? 'bg-emerald-700 text-white shadow-sm' : 'text-emerald-800 hover:bg-emerald-50 border border-transparent hover:border-emerald-200'"
-      class="w-full text-left px-4 py-2.5 rounded-xl text-sm font-semibold transition min-h-[44px]">
-      Тест бота
+      Данные и безопасность
     </button>
   </nav>
   {% endif %}

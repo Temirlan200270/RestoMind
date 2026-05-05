@@ -8,12 +8,16 @@
     "dev:stagewise": "stagewise -- python -m uvicorn app.main:app --reload",
     "build:admin-css": "tailwindcss -i ./src/css/admin-input.css -o ./app/static/css/admin.css --minify",
     "check:admin-js": "node --check ./app/static/js/admin-app.js",
-    "lint:js": "eslint \"app/static/js/**/*.js\""
+    "lint:js": "eslint \"app/static/js/**/*.js\"",
+    "lh:admin": "node scripts/run_admin_lighthouse.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
+    "chrome-launcher": "^1.2.0",
     "eslint": "^9.39.4",
     "globals": "^17.5.0",
+    "lighthouse": "^12.8.1",
+    "playwright": "^1.50.1",
     "stagewise": "0.11.1",
     "tailwindcss": "^3.4.17"
   }

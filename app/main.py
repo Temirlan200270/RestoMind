@@ -293,6 +293,16 @@ async def _apply_sqlite_startup_schema_patches() -> None:
             _ddl_warn(sql_sqlite, exc)
 
     for sql_sqlite in (
+        "ALTER TABLE packaging_rules ADD COLUMN scope VARCHAR(20) DEFAULT 'item'",
+        "ALTER TABLE packaging_rules ADD COLUMN category_match VARCHAR(120) DEFAULT ''",
+    ):
+        try:
+            async with async_engine.begin() as conn:
+                await conn.execute(text(sql_sqlite))
+        except Exception as exc:
+            _ddl_warn(sql_sqlite, exc)
+
+    for sql_sqlite in (
         "ALTER TABLE organizations ADD COLUMN tenant_id INTEGER",
         "ALTER TABLE organizations ADD COLUMN slug VARCHAR(120) DEFAULT ''",
         "ALTER TABLE organizations ADD COLUMN timezone VARCHAR(64) DEFAULT 'Asia/Almaty'",
@@ -651,6 +661,30 @@ async def admin_page(request: Request) -> HTMLResponse:
         {"asset_ver": asset_ver},
     )
     # Чтобы браузер не держал устаревший HTML (Alpine/шаблон после деплоя).
+    response.headers["Cache-Control"] = "no-store, max-age=0, must-revalidate"
+    return response
+
+
+@app.get("/admin/_/components", response_class=HTMLResponse, include_in_schema=False)
+async def admin_components_storybook(request: Request) -> HTMLResponse:
+    """
+    Витрина UI-компонентов (Jinja2 макросы + токены).
+    Доступ: только в debug-режиме (в проде роут скрыт).
+    """
+    if not settings.app_debug:
+        # Не раскрываем наличие страницы (security through obscurity).
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=404, detail="Not Found")
+
+    git_sha = (os.environ.get("RENDER_GIT_COMMIT") or os.environ.get("GIT_COMMIT") or "").strip()
+    sha7 = git_sha[:7] if git_sha else ""
+    asset_ver = settings.app_version + (f"-{sha7}" if sha7 else "")
+    response = templates.TemplateResponse(
+        request,
+        "_components_storybook.html",
+        {"asset_ver": asset_ver},
+    )
     response.headers["Cache-Control"] = "no-store, max-age=0, must-revalidate"
     return response
 

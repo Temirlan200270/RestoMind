@@ -1,0 +1,6 @@
+{% macro textarea_field(label, name='', value='', placeholder='', rows=4, extra_class='', attrs='') -%}
+<label class="block {{ extra_class }}" style="margin-bottom: var(--space-4);">
+  {% if label %}<span class="text-xs font-semibold uppercase tracking-wide ds-text-muted" style="display:block; margin-bottom: var(--space-2);">{{ label }}</span>{% endif %}
+  <textarea class="ds-input" style="min-height: 6rem; resize: vertical;" {% if name %}name="{{ name }}"{% endif %} rows="{{ rows }}" {% if placeholder %}placeholder="{{ placeholder }}"{% endif %} {{ attrs|safe }}>{{ value }}</textarea>
+</label>
+{%- endmacro %}

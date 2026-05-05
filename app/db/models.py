@@ -202,6 +202,8 @@ class OrderStatus(StrEnum):
     CONFIRMED = "confirmed"
     SENDING_TO_IIKO = "sending_to_iiko"
     SENT_TO_IIKO = "sent_to_iiko"
+    IN_TRANSIT = "in_transit"
+    WAITING_PICKUP = "waiting_pickup"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
 
@@ -654,6 +656,8 @@ class PackagingRule(Base):
         String(60), default="", server_default="",
         comment="Для блюд с выбором упаковки: tabak / foil_kazan. Пусто — без выбора.",
     )
+    scope: Mapped[str] = mapped_column(String(20), default="item", server_default="item")
+    category_match: Mapped[str] = mapped_column(String(120), default="", server_default="")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, comment="Активно ли правило")
     sort_order: Mapped[int] = mapped_column(
         Integer, default=0, comment="Приоритет: больше = проверяется раньше",

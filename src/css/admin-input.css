@@ -2,6 +2,19 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+    --color-text: #0f172a;
+    --color-text-muted: #64748b;
+    --color-surface: #ffffff;
+    --color-surface-muted: #f8fafc;
+    --color-border: #e5e7eb;
+    --space-2: 0.5rem;
+    --space-3: 0.75rem;
+    --space-4: 1rem;
+    --radius-lg: 0.75rem;
+    --radius-xl: 1rem;
+}
+
 /* Фокус клавиатуры для админки (не перекрывает мышиный :focus) */
 @layer base {
     .admin-root :where(button, [role='button'], a[href]):focus-visible {
@@ -18,6 +31,145 @@
 @layer components {
     .rm-card-surface {
         @apply bg-white rounded-2xl border border-gray-100 shadow-sm;
+    }
+    .ds-card {
+        @apply bg-white rounded-2xl border border-gray-100 shadow-sm ring-1 ring-slate-900/5;
+    }
+    .ds-kpi {
+        @apply rounded-2xl bg-white p-5 sm:p-6 shadow-sm ring-1 ring-slate-900/5;
+    }
+    .ds-kpi-label {
+        @apply text-[11px] font-bold uppercase tracking-wider text-slate-500;
+    }
+    .ds-kpi-value {
+        @apply mt-3 text-2xl sm:text-3xl font-extrabold text-slate-900 tabular-nums;
+    }
+    .ds-text-muted {
+        @apply text-slate-500;
+    }
+    .ds-border {
+        @apply border-gray-200;
+    }
+    .ds-rounded-lg {
+        @apply rounded-lg;
+    }
+    .ds-rounded-xl {
+        @apply rounded-xl;
+    }
+    .ds-empty {
+        @apply flex flex-col items-center justify-center px-4 py-12 text-center text-sm text-slate-500;
+    }
+    /* Segmented control (табы-пилюли) */
+    .ds-segmented {
+        @apply inline-flex flex-wrap gap-1 rounded-xl bg-slate-100 p-1 ring-1 ring-slate-900/5;
+    }
+    /* U6: touch target ≥ 44×44px (WCAG 2.5.5) */
+    .ds-segmented > button {
+        @apply min-h-[44px] px-3 py-2 rounded-lg text-xs sm:text-sm font-semibold transition text-slate-600 hover:text-slate-900;
+    }
+    .ds-segmented > button.ds-segmented-active {
+        @apply bg-white text-slate-900 shadow-sm ring-1 ring-slate-900/10;
+    }
+    /* Модалки (совместимо с components/_modal.html) */
+    .ds-modal-backdrop {
+        @apply fixed inset-0 z-50 bg-black/40;
+    }
+    .ds-modal-panel {
+        @apply fixed left-1/2 top-1/2 z-[51] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-white shadow-2xl ring-1 ring-slate-900/10 max-h-[92vh] overflow-hidden flex flex-col;
+    }
+    .ds-modal-panel.ds-modal-wide {
+        @apply max-w-2xl;
+    }
+    .ds-modal-panel.ds-modal-xl {
+        @apply max-w-4xl;
+    }
+    .ds-modal-panel-static {
+        @apply relative left-auto top-auto z-auto w-full max-w-lg translate-x-0 translate-y-0 shadow-lg;
+    }
+    /* Мобильный bottom-sheet (эквивалент _drawer без дублирования разметки) */
+    @media (max-width: 639px) {
+        .ds-modal-panel:not(.ds-modal-panel-static) {
+            @apply left-0 right-0 top-auto bottom-0 max-h-[100dvh] w-full max-w-none translate-x-0 translate-y-0 rounded-t-3xl rounded-b-none;
+        }
+    }
+    /* Кнопки (_button.html) */
+    .ds-btn {
+        @apply inline-flex items-center justify-center font-semibold rounded-xl transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none;
+    }
+    .ds-btn-sm {
+        @apply px-3 py-1.5 text-xs min-h-[44px];
+    }
+    .ds-btn-md {
+        @apply px-4 py-2 text-sm min-h-[44px];
+    }
+    .ds-btn-lg {
+        @apply px-5 py-2.5 text-base;
+    }
+    .ds-btn-primary {
+        @apply bg-brand-600 text-white hover:bg-brand-700 shadow-sm shadow-brand-600/20;
+    }
+    .ds-btn-secondary {
+        @apply bg-white text-slate-800 ring-1 ring-slate-900/10 hover:bg-slate-50;
+    }
+    .ds-btn-ghost {
+        @apply bg-transparent text-slate-700 hover:bg-slate-100;
+    }
+    .ds-btn-danger {
+        @apply bg-red-600 text-white hover:bg-red-700;
+    }
+    .ds-btn-success {
+        @apply bg-emerald-600 text-white hover:bg-emerald-700;
+    }
+    .ds-input {
+        @apply w-full rounded-xl border border-gray-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500;
+    }
+    /* Табы underline (storybook) */
+    .ds-tabs-underline {
+        @apply flex flex-wrap gap-1 border-b border-gray-200;
+    }
+    .ds-tabs-underline > button {
+        @apply px-3 py-2 text-sm font-medium text-slate-500 border-b-2 border-transparent -mb-px transition hover:text-slate-800;
+    }
+    .ds-tabs-underline > button.ds-tab-active {
+        @apply text-brand-600 border-brand-600;
+    }
+    /* Трёхпанельный чат */
+    .ds-chat-shell {
+        @apply flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden bg-white rounded-2xl border border-gray-100 shadow-sm ring-1 ring-slate-900/5;
+    }
+    .ds-chat-shell-list {
+        @apply w-full md:max-w-sm md:w-[340px] lg:w-[360px] flex-shrink-0 border-r border-gray-100 flex flex-col min-h-0 bg-white flex-1 md:flex-none;
+    }
+    .ds-chat-shell-thread {
+        @apply flex-1 min-h-0 min-w-0 flex flex-col bg-white border-r border-gray-100;
+    }
+    .ds-chat-shell-detail {
+        @apply hidden xl:flex w-[320px] flex-shrink-0 flex-col min-h-0 bg-slate-50/80 border-l border-gray-100;
+    }
+    /* Drawer */
+    .ds-drawer-backdrop {
+        @apply fixed inset-0 z-[60] bg-black/40;
+    }
+    .ds-drawer-panel {
+        @apply fixed bottom-0 left-0 right-0 z-[61] max-h-[85vh] rounded-t-2xl bg-white shadow-2xl ring-1 ring-slate-900/10 overflow-hidden flex flex-col;
+    }
+    .ds-drawer-panel-static {
+        @apply relative z-auto max-h-none rounded-2xl shadow-lg;
+    }
+    .ds-table-wrap {
+        @apply overflow-x-auto;
+    }
+    .ds-table-wrap table {
+        @apply w-full text-sm;
+    }
+    .ds-table-wrap :where(thead tr) {
+        @apply border-b border-gray-100 text-left text-gray-500;
+    }
+    .ds-table-wrap :where(th) {
+        @apply px-5 pb-3 pt-4 font-medium;
+    }
+    .ds-table-wrap :where(td) {
+        @apply px-5 py-4;
     }
     .rm-card-spotlight {
         @apply bg-white rounded-3xl border border-gray-100 shadow-sm;
@@ -51,6 +203,29 @@
     }
     .rm-focusable {
         @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2;
+    }
+}
+
+/* U6: safe-area inset + визуальная «ручка» у нижних модалок (bottom-sheet) */
+@media (max-width: 639px) {
+    .ds-modal-panel:not(.ds-modal-panel-static) {
+        padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px));
+    }
+    .ds-modal-panel:not(.ds-modal-panel-static)::before {
+        content: '';
+        display: block;
+        width: 2.5rem;
+        height: 0.25rem;
+        border-radius: 9999px;
+        background: var(--color-border);
+        margin: 0.5rem auto 0.25rem;
+        flex-shrink: 0;
+    }
+    .ds-drawer-panel:not(.ds-drawer-panel-static) {
+        padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px));
+    }
+    .admin-root .kanban-card {
+        min-height: 44px;
     }
 }
 

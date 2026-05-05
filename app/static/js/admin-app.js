@@ -13,6 +13,27 @@ const charts = {
     analyticsSparks: {},
 };
 
+/** Общие настройки Chart.js (Phase U5): шрифты, сетка. */
+function adminChartJsCommonFont() {
+    return { family: 'Inter, system-ui, sans-serif', size: 11 };
+}
+
+function adminDestroyDashboardChart() {
+    if (!charts.dashboard) return;
+    try {
+        charts.dashboard.destroy();
+    } catch (_e) { /* ignore */ }
+    charts.dashboard = null;
+}
+
+function adminDestroyAnalyticsMainChart() {
+    if (!charts.analytics) return;
+    try {
+        charts.analytics.destroy();
+    } catch (_e) { /* ignore */ }
+    charts.analytics = null;
+}
+
 /** Ссылка на нативный console — не переопределять через adminLogger (избегаем рекурсии). */
 const _adminConsole = typeof console !== 'undefined' ? console : { debug() {}, info() {}, warn() {}, error() {} };
 
@@ -130,24 +151,27 @@ const adminFormat = {
  */
 function adminParseLocationHash() {
     const raw = String(window.location.hash || '').replace(/^#/, '').trim();
-    if (!raw) return { tab: null, settingsTab: null, phone: null };
+    if (!raw) return { tab: null, settingsTab: null, phone: null, menuView: null };
     const q = raw.indexOf('?');
     const path = (q >= 0 ? raw.slice(0, q) : raw).trim();
     const qs = q >= 0 ? raw.slice(q + 1) : '';
     let phone = null;
+    let menuView = null;
     try {
         const sp = new URLSearchParams(qs);
         const p = (sp.get('phone') || '').trim();
         phone = p || null;
+        const mv = (sp.get('view') || '').trim().toLowerCase();
+        if (mv === 'stoplist' || mv === 'catalog') menuView = mv;
     } catch (_e) {
         phone = null;
     }
     if (path.startsWith('settings/')) {
         const st = path.slice('settings/'.length).trim();
-        return { tab: 'settings', settingsTab: st || 'restaurant', phone: null };
+        return { tab: 'settings', settingsTab: st || 'restaurant', phone: null, menuView: null };
     }
     if (path === 'settings') {
-        return { tab: 'settings', settingsTab: null, phone: null };
+        return { tab: 'settings', settingsTab: null, phone: null, menuView: null };
     }
     const legacyToSettings = {
         integrations: 'connections',
@@ -158,14 +182,26 @@ function adminParseLocationHash() {
         test: 'bot_test',
     };
     if (legacyToSettings[path]) {
-        return { tab: 'settings', settingsTab: legacyToSettings[path], phone: null };
+        return { tab: 'settings', settingsTab: legacyToSettings[path], phone: null, menuView: null };
     }
-    return { tab: path || null, settingsTab: null, phone };
+    /** Legacy #stoplist → меню, вкладка стоп-листа */
+    if (path === 'stoplist') {
+        return { tab: 'menu', settingsTab: null, phone: null, menuView: 'stoplist' };
+    }
+    if (path === 'menu') {
+        return {
+            tab: 'menu',
+            settingsTab: null,
+            phone: null,
+            menuView: menuView || 'catalog',
+        };
+    }
+    return { tab: path || null, settingsTab: null, phone, menuView };
 }
 
 /** Допустимые верхнеуровневые вкладки (id из navItems). */
 const ADMIN_TOP_TAB_IDS = new Set([
-    'dashboard', 'analytics', 'ai_value', 'incidents', 'orders', 'operator_queue', 'errors', 'bookings', 'chats', 'menu', 'stoplist', 'settings',
+    'dashboard', 'analytics', 'ai_value', 'incidents', 'orders', 'operator_queue', 'errors', 'bookings', 'chats', 'menu', 'settings',
 ]);
 
 /** Начальное состояние GET /integrations/status — чтобы Alpine не падал на undefined до первой загрузки. */
@@ -209,6 +245,8 @@ function defaultPackagingRuleForm() {
         price: 0,
         keywords: '',
         option_key: '',
+        scope: 'item',
+        category_match: '',
         iiko_product_id: '',
         sort_order: 0,
         is_active: true,
@@ -334,6 +372,8 @@ function adminMixinState() {
         },
 
         currentTab: 'dashboard',
+        /** Каталог vs стоп-лист внутри вкладки «Меню» (Phase U5). */
+        menuView: 'catalog',
         /** Загрузка данных при смене вкладки (избегаем общего имени `loading` — конфликт миксинов). */
         tabDataLoading: false,
         /** Кэш сортировки таблицы «по дням» на аналитике (геттер не пересортировывает на каждый тик Alpine). */
@@ -364,10 +404,8 @@ function adminMixinState() {
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/></svg>' },
             { id: 'chats', section: 'operations', label: 'Диалоги', desc: 'Сообщения и ответы клиентам',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 01-.825-.242m9.345-8.334a21.05 21.05 0 00-1.889-2.403 19.7 19.7 0 00-1.6-1.562c-.642-.522-1.397-.957-2.23-1.25C16.247 1.872 14.747 1.5 12 1.5c-2.747 0-4.247.372-5.63.99-.833.293-1.588.728-2.23 1.25-.563.459-1.082 1-1.6 1.562A21.05 21.05 0 003.75 8.511"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5.25 8.511c-.884.284-1.5 1.128-1.5 2.097v4.286c0 1.136.847 2.1 1.98 2.193.34.027.68.052 1.02.072v3.091l3-3a11.63 11.63 0 014.02-.163 2.115 2.115 0 001.825-.242M9.378 5.378A21.05 21.05 0 0018.72 3.728"/></svg>' },
-            { id: 'menu', section: 'operations', label: 'Меню', desc: 'Позиции меню ресторана',
+            { id: 'menu', section: 'operations', label: 'Меню', desc: 'Каталог и стоп-лист',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8.25v-1.5m0 1.5c-1.355 0-2.697.056-4.024.166C6.845 8.51 6 9.473 6 10.608v2.513m6-4.871c1.355 0 2.697.055 4.024.165C17.155 8.51 18 9.473 18 10.608v2.513m-3 4.73v-1.59c0-.532-.21-1.042-.586-1.418L12 13.5m-3 4.73c.55.47 1.27.73 2 .73h6c.73 0 1.45-.26 2-.73m-8-4.73V10.6c0-1.12.856-2.08 2.09-2.19.64-.09 1.29-.14 1.91-.14m5 6.37v1.59c0 1.632-.875 3.11-2.25 3.89"/></svg>' },
-            { id: 'stoplist', section: 'operations', label: 'Стоп-лист', desc: 'Нет в наличии и синхронизация с iiko',
-              icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>' },
             { id: 'settings', section: 'settings', label: 'Настройки', desc: 'Ресторан, подключения, продажи, команда',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>' },
         ],
@@ -450,6 +488,7 @@ function adminMixinState() {
         orgProfileSaving: false,
         orders: [],
         _ordersLoadSeq: 0,
+        ordersLoading: false,
         ordersLoadError: '',
         ordersPage: 1,
         ordersSize: 50,
@@ -553,6 +592,7 @@ function adminMixinState() {
         // Живые чаты
         chatList: [],
         chatSearch: '',
+        chatTriageMode: 'active',
         chatPhone: '',
         activeChatPhone: '',
         chatListLoading: false,
@@ -568,6 +608,8 @@ function adminMixinState() {
         chatMessagesLoadingOlder: false,
         operatorInput: '',
         unreadChats: 0,
+        kanbanVisible: { draft: 20, confirmed: 20, sent_to_iiko: 20, in_transit: 20, waiting_pickup: 20, completed: 20 },
+        upsellFeedbackLoading: false,
         /** Кабина оператора: сводка по клиенту */
         customerSummaryLoading: false,
         customerSummary: {
@@ -651,6 +693,8 @@ function adminMixinState() {
             confirmed: { label: 'Подтверждён', class: 'bg-blue-50 text-blue-600' },
             sending_to_iiko: { label: 'Отправляется на кухню', class: 'bg-amber-50 text-amber-700' },
             sent_to_iiko: { label: 'На кухне', class: 'bg-emerald-50 text-emerald-600' },
+            in_transit: { label: 'В пути', class: 'bg-sky-50 text-sky-700' },
+            waiting_pickup: { label: 'Ожидает выдачи', class: 'bg-amber-50 text-amber-700' },
             completed: { label: 'Завершён', class: 'bg-emerald-50 text-emerald-600' },
             cancelled: { label: 'Отменён', class: 'bg-red-50 text-red-500' },
             pending: { label: 'Ожидает', class: 'bg-amber-50 text-amber-600' },
@@ -804,14 +848,49 @@ function adminMixinMenuOrdersUi() {
             return this.chatList.filter(c => c.phone.toLowerCase().includes(q));
         },
 
+        _kanbanVisible(list, key) {
+            const n = Number(this.kanbanVisible?.[key] || 20);
+            return list.slice(0, Math.max(1, n));
+        },
+        kanbanShowMore(key) {
+            if (!this.kanbanVisible) this.kanbanVisible = {};
+            this.kanbanVisible[key] = Number(this.kanbanVisible[key] || 20) + 20;
+        },
         get kanbanDraft() {
             return this.orders.filter(o => o.status === 'draft');
+        },
+        get kanbanDraftVisible() {
+            return this._kanbanVisible(this.kanbanDraft, 'draft');
         },
         get kanbanConfirmed() {
             return this.orders.filter(o => o.status === 'confirmed');
         },
+        get kanbanConfirmedVisible() {
+            return this._kanbanVisible(this.kanbanConfirmed, 'confirmed');
+        },
         get kanbanSent() {
             return this.orders.filter(o => o.status === 'sent_to_iiko');
+        },
+        get kanbanSentVisible() {
+            return this._kanbanVisible(this.kanbanSent, 'sent_to_iiko');
+        },
+        get kanbanInTransit() {
+            return this.orders.filter(o => o.status === 'in_transit');
+        },
+        get kanbanInTransitVisible() {
+            return this._kanbanVisible(this.kanbanInTransit, 'in_transit');
+        },
+        get kanbanWaitingPickup() {
+            return this.orders.filter(o => o.status === 'waiting_pickup');
+        },
+        get kanbanWaitingPickupVisible() {
+            return this._kanbanVisible(this.kanbanWaitingPickup, 'waiting_pickup');
+        },
+        get kanbanCompleted() {
+            return this.orders.filter(o => o.status === 'completed');
+        },
+        get kanbanCompletedVisible() {
+            return this._kanbanVisible(this.kanbanCompleted, 'completed');
         },
 
         /** Разбивка по дням на вкладке Аналитика (не трогает порядок точек на графике). */
@@ -969,6 +1048,7 @@ function adminMixinMenuOrdersUi() {
         openMenuFromStopItem(item) {
             if (!item) return;
             this.currentTab = 'menu';
+            this.menuView = 'catalog';
             this.menuSearchQuery = item.name || '';
             this.menuCategoryFilter = '';
             this.menuStockFilter = 'out';
@@ -1667,6 +1747,8 @@ function adminMixinMenuOrdersUi() {
                 quantity: 1,
                 iiko_item_id: '',
                 packaging_plov_1kg: '',
+                modifiers_ids: [],
+                modifiers_text: '',
                 exclude_ingredients: [],
             };
         },
@@ -1682,6 +1764,10 @@ function adminMixinMenuOrdersUi() {
                 quantity: Number(it.quantity) || 1,
                 iiko_item_id: it.iiko_id || '',
                 packaging_plov_1kg: it.packaging_plov_1kg || '',
+                modifiers_ids: Array.isArray(it.modifiers_ids) ? [...it.modifiers_ids] : [],
+                modifiers_text: Array.isArray(it.modifiers)
+                    ? it.modifiers.map((m) => [m.name || '', m.iiko_id || m.id || ''].filter(Boolean).join(':')).filter(Boolean).join(', ')
+                    : (Array.isArray(it.modifiers_ids) ? it.modifiers_ids.join(', ') : ''),
                 exclude_ingredients: Array.isArray(it.exclude_ingredients) ? [...it.exclude_ingredients] : [],
             }));
         },
@@ -1702,6 +1788,19 @@ function adminMixinMenuOrdersUi() {
         removeOrderEditLine(idx) {
             if (this.orderEditLines.length <= 1) return;
             this.orderEditLines.splice(idx, 1);
+        },
+
+        parseOrderLineModifiers(line) {
+            const raw = String(line?.modifiers_text || '').trim();
+            if (!raw) return [];
+            return raw.split(',')
+                .map((part) => part.trim())
+                .filter(Boolean)
+                .map((part) => {
+                    const pieces = part.split(':').map((x) => x.trim()).filter(Boolean);
+                    if (pieces.length >= 2) return { name: pieces[0], iiko_id: pieces.slice(1).join(':') };
+                    return { name: pieces[0], iiko_id: pieces[0] };
+                });
         },
 
         async openOrderCompositionJsonModal() {
@@ -1736,6 +1835,8 @@ function adminMixinMenuOrdersUi() {
                         quantity: Math.min(99, Math.max(1, Number(it.quantity) || 1)),
                         iiko_item_id: String(it.iiko_item_id || it.iiko_id || '').trim(),
                         packaging_plov_1kg: String(it.packaging_plov_1kg || '').trim(),
+                        modifiers_ids: Array.isArray(it.modifiers_ids) ? it.modifiers_ids : [],
+                        modifiers_text: Array.isArray(it.modifiers_ids) ? it.modifiers_ids.join(', ') : '',
                         exclude_ingredients: Array.isArray(it.exclude_ingredients) ? it.exclude_ingredients : [],
                     });
                 }
@@ -1767,6 +1868,8 @@ function adminMixinMenuOrdersUi() {
                     quantity: Math.min(99, Math.max(1, Number(line.quantity) || 1)),
                     iiko_item_id: (line.iiko_item_id || '').trim(),
                     packaging_plov_1kg: (line.packaging_plov_1kg || '').trim(),
+                    modifiers_ids: this.parseOrderLineModifiers(line).map((m) => m.iiko_id || m.id || m.name).filter(Boolean),
+                    modifiers: this.parseOrderLineModifiers(line),
                     exclude_ingredients: Array.isArray(line.exclude_ingredients) ? line.exclude_ingredients : [],
                 });
             }
@@ -1788,6 +1891,10 @@ function adminMixinMenuOrdersUi() {
             if (targetCol === 'confirmed' && cur === 'draft') newStatus = 'confirmed';
             else if (targetCol === 'draft' && cur === 'confirmed') newStatus = 'draft';
             else if (targetCol === 'sent_to_iiko' && cur === 'confirmed') newStatus = 'sent_to_iiko';
+            else if (targetCol === 'in_transit' && (cur === 'sent_to_iiko' || cur === 'waiting_pickup')) newStatus = 'in_transit';
+            else if (targetCol === 'waiting_pickup' && (cur === 'sent_to_iiko' || cur === 'in_transit')) newStatus = 'waiting_pickup';
+            else if (targetCol === 'completed' && (cur === 'sent_to_iiko' || cur === 'in_transit' || cur === 'waiting_pickup')) newStatus = 'completed';
+            else if (targetCol === 'sent_to_iiko' && (cur === 'in_transit' || cur === 'waiting_pickup')) newStatus = 'sent_to_iiko';
             if (!newStatus) return;
             await this.patchOrderStatus(id, newStatus);
         },
@@ -1842,6 +1949,38 @@ function adminMixinMenuOrdersUi() {
         },
 
         /** Передача в iiko из канбана/списка без открытия модалки. */
+        async createUpsellFeedback(mode = 'forbid') {
+            const order = this.selectedOrder;
+            if (!order || this.upsellFeedbackLoading) return;
+            const trace = this.orderSalesInsightSteps(order)[0] || {};
+            const payload = {
+                mode,
+                item_iiko_id: trace.item_iiko_id || trace.iiko_id || '',
+                item_name: trace.item_name || trace.name || '',
+                suggest_category: trace.category || trace.suggest_category || '',
+                trigger_category: order.items?.items?.[0]?.category || '',
+            };
+            this.upsellFeedbackLoading = true;
+            try {
+                const { ok, data } = await this.apiJsonResponse(`/api/admin/orders/${order.id}/feedback/upsell-rule`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                if (!ok) {
+                    void this.showUiAlert(this.formatApiError(data), 'Ошибка');
+                    return;
+                }
+                await this.loadUpsellRules();
+                this.flashToast(mode === 'suggest' ? 'Правило допродажи создано' : 'Анти-правило сохранено', 'success', 3500);
+            } catch (e) {
+                adminLogger.error('createUpsellFeedback', e);
+                void this.showUiAlert('Ошибка сети. Проверьте соединение.', 'Ошибка');
+            } finally {
+                this.upsellFeedbackLoading = false;
+            }
+        },
+
         async confirmSendToIikoForOrder(order) {
             if (!order || order.id == null) return;
             if (this.orderAwaitingOrderPrepay(order)) {
@@ -1959,6 +2098,35 @@ function adminMixinMenuOrdersUi() {
             }
         },
 
+        /**
+         * A11y: на канбане стрелки влево/вправо смещают фокус между колонками
+         * (колонки с [data-kanban-col] и tabindex="0").
+         */
+        handleKanbanKeydown(e) {
+            if (this.currentTab !== 'orders' || this.ordersView !== 'kanban') return;
+            if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+            const root = e.currentTarget;
+            if (!root?.querySelectorAll) return;
+            const cols = root.querySelectorAll('[data-kanban-col]');
+            if (!cols.length) return;
+            let idx = -1;
+            for (let i = 0; i < cols.length; i++) {
+                if (cols[i] === document.activeElement || cols[i].contains(document.activeElement)) {
+                    idx = i;
+                    break;
+                }
+            }
+            e.preventDefault();
+            const delta = e.key === 'ArrowRight' ? 1 : -1;
+            if (idx < 0) {
+                const t = delta > 0 ? 0 : cols.length - 1;
+                cols[t].focus();
+                return;
+            }
+            const next = Math.min(cols.length - 1, Math.max(0, idx + delta));
+            cols[next].focus();
+        },
+
     };
 }
 
@@ -1969,10 +2137,90 @@ function adminMixinSearchBookings() {
             if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
                 e.preventDefault();
                 this.openGlobalSearch();
+                return;
             }
-            if (e.key === 'Escape') {
+            if (e.key !== 'Escape') return;
+            /** Закрытие оверлеев сверху вниз (одна Esc — один слой). */
+            if (this.uiConfirmOpen) {
+                e.preventDefault();
+                this.uiConfirmCancel();
+                return;
+            }
+            if (this.settingsPurgeModalOpen && !this.settingsPurgeLoading) {
+                e.preventDefault();
+                this.settingsPurgeModalOpen = false;
+                return;
+            }
+            if (this.orderCompositionOpen && this.showOrderModal) {
+                e.preventDefault();
+                this.closeOrderCompositionEditor();
+                return;
+            }
+            if (this.showOrderModal) {
+                e.preventDefault();
+                this.showOrderModal = false;
+                this.orderCompositionOpen = false;
+                return;
+            }
+            if (this.showManualOrderModal) {
+                e.preventDefault();
+                this.closeManualOrderModal();
+                return;
+            }
+            if (this.showBookingModal) {
+                e.preventDefault();
+                this.closeBookingModal();
+                return;
+            }
+            if (this.menuEditOpen) {
+                e.preventDefault();
+                this.closeMenuEdit();
+                return;
+            }
+            if (this.setupChecklistOpen) {
+                e.preventDefault();
+                this.closeSetupChecklist();
+                return;
+            }
+            if (this.scheduleEditorOpen) {
+                e.preventDefault();
+                this.closeScheduleEditor();
+                return;
+            }
+            if (this.packagingCreateOpen) {
+                e.preventDefault();
+                this.closePackagingCreateModal();
+                return;
+            }
+            if (this.showDemoDeleteModal) {
+                e.preventDefault();
+                this.closeDemoDeleteModal();
+                return;
+            }
+            if (this.analyticsHelpOpen) {
+                e.preventDefault();
+                this.analyticsHelpOpen = false;
+                return;
+            }
+            if (this.globalSearchOpen) {
+                e.preventDefault();
                 this.globalSearchOpen = false;
-                if (this.knowledgeEditOpen) this.closeKnowledgeEdit();
+                return;
+            }
+            if (this.knowledgeEditOpen) {
+                e.preventDefault();
+                this.closeKnowledgeEdit();
+                return;
+            }
+            if (this.chatMobileInfoOpen) {
+                e.preventDefault();
+                this.chatMobileInfoOpen = false;
+                return;
+            }
+            if (this.sidebarOpen) {
+                e.preventDefault();
+                this.sidebarOpen = false;
+                return;
             }
         },
 
@@ -3338,6 +3586,7 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                         kind: rule.kind, name: rule.name, price: rule.price,
                         iiko_product_id: rule.iiko_product_id || '',
                         keywords: rule.keywords || '', option_key: rule.option_key || '',
+                        scope: rule.scope || 'item', category_match: rule.category_match || '',
                         is_active: rule.is_active, sort_order: rule.sort_order,
                     }),
                 });
@@ -3395,6 +3644,8 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                         price: Number(f.price) || 0,
                         keywords: String(f.keywords || '').trim(),
                         option_key: String(f.option_key || '').trim(),
+                        scope: String(f.scope || 'item').trim(),
+                        category_match: String(f.category_match || '').trim(),
                         iiko_product_id: String(f.iiko_product_id || '').trim(),
                         is_active: !!f.is_active,
                         sort_order: Number(f.sort_order) || 0,
@@ -3627,7 +3878,7 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                 }
                 this.menuViewRevision += 1;
                 await this.loadMenu();
-                if (this.currentTab === 'stoplist') await this.loadStopList();
+                if (this.currentTab === 'menu' && this.menuView === 'stoplist') await this.loadStopList();
                 await this.loadSetupStatus();
             } catch (e) {
                 adminLogger.error('[admin] integrations/sync', e);
@@ -3664,7 +3915,7 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                 this.flashToast(`Стоп-лист iiko: в стоп ${st}, восстановлено ${rs}`, 'success', 5000);
                 this.menuViewRevision += 1;
                 await this.loadMenu();
-                if (this.currentTab === 'stoplist') await this.loadStopList();
+                if (this.currentTab === 'menu' && this.menuView === 'stoplist') await this.loadStopList();
             } catch (e) {
                 adminLogger.error('[admin] stop-lists/sync', e);
                 void this.showUiAlert('Ошибка сети. Проверьте соединение.', 'Ошибка');
@@ -4295,6 +4546,8 @@ function adminMixinLiveChat() {
             } else if (this.currentTab === 'chats') {
                 const ph = (this.activeChatPhone || '').trim();
                 frag = ph ? `chats?phone=${encodeURIComponent(ph)}` : 'chats';
+            } else if (this.currentTab === 'menu') {
+                frag = this.menuView === 'stoplist' ? 'menu?view=stoplist' : 'menu';
             } else if (ADMIN_TOP_TAB_IDS.has(this.currentTab)) {
                 frag = this.currentTab;
             }
@@ -4327,6 +4580,9 @@ function adminMixinLiveChat() {
                 });
                 this.$watch('activeChatPhone', () => {
                     if (this.currentTab === 'chats') this._schedulePushAdminHash();
+                });
+                this.$watch('menuView', () => {
+                    if (this.currentTab === 'menu') this._schedulePushAdminHash();
                 });
             } catch (_e) { /* ignore */ }
         },
@@ -4375,9 +4631,21 @@ function adminMixinLiveChat() {
                 const st = o.settingsTab.trim();
                 if (this._adminSettingsTabIds.has(st)) this.settingsTab = st;
             }
+            if (tabId === 'menu' && (o.menuView === 'stoplist' || o.menuView === 'catalog')) {
+                this.menuView = o.menuView;
+            }
             this.sidebarOpen = false;
             void this.loadTabData();
             this._schedulePushAdminHash();
+        },
+
+        setMenuView(view) {
+            const v = view === 'stoplist' ? 'stoplist' : 'catalog';
+            this.menuView = v;
+            if (this.currentTab === 'menu') {
+                void this.loadTabData();
+                this._schedulePushAdminHash();
+            }
         },
 
         _applyParsedHash(parsed) {
@@ -4398,6 +4666,12 @@ function adminMixinLiveChat() {
                 return;
             }
             this.currentTab = tab;
+            if (tab === 'menu') {
+                const mv = parsed?.menuView;
+                this.menuView = mv === 'stoplist' || mv === 'catalog' ? mv : 'catalog';
+            } else if (tab !== 'menu') {
+                this.menuView = 'catalog';
+            }
             if (tab === 'chats' && phone) this._pendingHashChatPhone = phone;
         },
 
@@ -4445,7 +4719,7 @@ function adminMixinLiveChat() {
             this.chatListLoading = true;
             try {
                 const limit = 60;
-                let url = `/api/admin/chats?limit=${limit}`;
+                let url = `/api/admin/chats?limit=${limit}&mode=${encodeURIComponent(this.chatTriageMode || 'active')}`;
                 if (!reset) {
                     if (this.chatListCursorAt) url += `&cursor_at=${encodeURIComponent(String(this.chatListCursorAt))}`;
                     if (this.chatListCursorId) url += `&cursor_id=${encodeURIComponent(String(this.chatListCursorId))}`;
@@ -4470,6 +4744,10 @@ function adminMixinLiveChat() {
                         state: c.state || 'chatting',
                         unread: prev ? prev.unread : !!c.unread,
                         userName: c.userName ?? prev?.userName,
+                        triage: c.triage || {},
+                        triageState: c.triageState || c.triage?.state || 'active',
+                        assignee: c.assignee || c.triage?.assignee || '',
+                        snoozedUntil: c.snoozedUntil || c.triage?.snoozed_until || null,
                     };
                 });
 
@@ -4497,6 +4775,54 @@ function adminMixinLiveChat() {
 
         async loadMoreChats() {
             await this.loadChatList(false);
+        },
+
+        async setChatTriageMode(mode) {
+            this.chatTriageMode = mode || 'active';
+            this.chatList = [];
+            this.chatListHasMore = true;
+            this.chatListCursorAt = null;
+            this.chatListCursorId = null;
+            await this.loadChatList(true);
+        },
+
+        _mergeChatTriage(phone, triage) {
+            const idx = this.chatList.findIndex((c) => c.phone === phone);
+            if (idx < 0) return;
+            this.chatList[idx].triage = triage || {};
+            this.chatList[idx].triageState = triage?.state || 'active';
+            this.chatList[idx].assignee = triage?.assignee || '';
+            this.chatList[idx].snoozedUntil = triage?.snoozed_until || null;
+        },
+
+        async postChatTriageAction(action, payload = {}) {
+            const phone = this.activeChatPhone;
+            if (!phone) return;
+            try {
+                const res = await this.apiFetch(`/api/admin/chats/${encodeURIComponent(phone)}/${action}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                if (!res.ok) throw new Error(`chat triage ${res.status}`);
+                const data = await res.json();
+                this._mergeChatTriage(phone, data.triage);
+                if (action === 'close' && this.chatTriageMode !== 'closed') {
+                    this.chatList = this.chatList.filter((c) => c.phone !== phone);
+                    this.activeChatPhone = '';
+                }
+            } catch (e) {
+                adminLogger.warn('postChatTriageAction', e);
+                this.flashToast('Не удалось обновить диалог', 'error', 3500);
+            }
+        },
+
+        async snoozeActiveChat(minutes) {
+            await this.postChatTriageAction('snooze', { minutes: Number(minutes) || 30 });
+            if (this.chatTriageMode === 'active') {
+                this.chatList = this.chatList.filter((c) => c.phone !== this.activeChatPhone);
+                this.activeChatPhone = '';
+            }
         },
 
         onChatListScroll(e) {
@@ -4819,6 +5145,7 @@ function adminMixinDataChartsSettings() {
             if (this.currentTab !== 'menu') {
                 this.menuBulkMode = false;
                 this.menuBulkSelectedIds = [];
+                this.menuView = 'catalog';
             }
             this.tabDataLoading = true;
             try {
@@ -4843,9 +5170,11 @@ function adminMixinDataChartsSettings() {
                 } else if (this.currentTab === 'bookings') {
                     await this.loadBookings();
                 } else if (this.currentTab === 'menu') {
-                    await this.loadMenu();
-                } else if (this.currentTab === 'stoplist') {
-                    await Promise.all([this.loadStopList(), this.loadIntegrationStatus()]);
+                    if (this.menuView === 'stoplist') {
+                        await Promise.all([this.loadMenu(), this.loadStopList(), this.loadIntegrationStatus()]);
+                    } else {
+                        await this.loadMenu();
+                    }
                 } else if (this.currentTab === 'settings') {
                     if (this.settingsTab === 'connections') {
                         await this.loadIntegrationStatus();
@@ -4862,7 +5191,7 @@ function adminMixinDataChartsSettings() {
                             await this.loadSettingsEnvironment();
                         }
                     } else if (this.settingsTab === 'bot_test') {
-                        /* тест бота — без тяжёлых запросов */
+                        await this.loadSetupStatus();
                     } else if (this.settingsTab === 'branding') {
                         this.syncBrandingDraftFromUser();
                     } else {
@@ -4876,18 +5205,8 @@ function adminMixinDataChartsSettings() {
                 adminLogger.error(e);
                 void this.showUiAlert('Не удалось загрузить данные вкладки. Проверьте сеть и обновите страницу.', 'Ошибка');
             }
-            if (this.currentTab !== 'dashboard' && charts.dashboard) {
-                try {
-                    charts.dashboard.destroy();
-                } catch (_e) { /* ignore */ }
-                charts.dashboard = null;
-            }
-            if (this.currentTab !== 'analytics' && charts.analytics) {
-                try {
-                    charts.analytics.destroy();
-                } catch (_e) { /* ignore */ }
-                charts.analytics = null;
-            }
+            if (this.currentTab !== 'dashboard') adminDestroyDashboardChart();
+            if (this.currentTab !== 'analytics') adminDestroyAnalyticsMainChart();
             if (this.currentTab !== 'analytics') {
                 this._destroyAnalyticsSparklines();
             }
@@ -5309,6 +5628,7 @@ function adminMixinDataChartsSettings() {
 
         async loadOrders() {
             const reqId = ++this._ordersLoadSeq;
+            this.ordersLoading = true;
             this.ordersLoadError = '';
             const p = new URLSearchParams();
             const tableMode = this.ordersView === 'table';
@@ -5327,28 +5647,37 @@ function adminMixinDataChartsSettings() {
             if (smax !== '' && smax != null && !Number.isNaN(Number(smax))) {
                 p.set('sum_max', String(Number(smax)));
             }
-            const { ok, status, data } = await this.apiJsonResponse(`/api/admin/orders?${p.toString()}`);
-            if (reqId !== this._ordersLoadSeq) return;
-            if (!ok) {
-                this.ordersLoadError = this.formatApiError(data?.detail) || `Не удалось загрузить заказы (${status})`;
-                void this.showUiAlert(this.ordersLoadError, 'Ошибка');
-                return;
-            }
-            const incoming = Array.isArray(data.items) ? data.items : (Array.isArray(data.orders) ? data.orders : []);
-            this.ordersTotal = Number(data.total ?? incoming.length) || 0;
-            this.ordersPages = Number(data.pages ?? 1) || 1;
-            this.ordersPage = Number(data.page ?? this.ordersPage) || 1;
-            this.ordersHasMore = !!data.has_more;
-            const merged = new Map((this.orders || []).map((o) => [Number(o.id), o]));
-            for (const next of incoming) {
-                const id = Number(next?.id);
-                if (!Number.isFinite(id)) continue;
-                const prev = merged.get(id);
-                if (!prev || Number(next?.row_version || 0) >= Number(prev?.row_version || 0)) {
-                    merged.set(id, next);
+            try {
+                const { ok, status, data } = await this.apiJsonResponse(`/api/admin/orders?${p.toString()}`);
+                if (reqId !== this._ordersLoadSeq) return;
+                if (!ok) {
+                    this.ordersLoadError = this.formatApiError(data?.detail) || `Не удалось загрузить заказы (${status})`;
+                    void this.showUiAlert(this.ordersLoadError, 'Ошибка');
+                    return;
                 }
+                const incoming = Array.isArray(data.items) ? data.items : (Array.isArray(data.orders) ? data.orders : []);
+                this.ordersTotal = Number(data.total ?? incoming.length) || 0;
+                this.ordersPages = Number(data.pages ?? 1) || 1;
+                this.ordersPage = Number(data.page ?? this.ordersPage) || 1;
+                this.ordersHasMore = !!data.has_more;
+                const merged = new Map((this.orders || []).map((o) => [Number(o.id), o]));
+                for (const next of incoming) {
+                    const id = Number(next?.id);
+                    if (!Number.isFinite(id)) continue;
+                    const prev = merged.get(id);
+                    if (!prev || Number(next?.row_version || 0) >= Number(prev?.row_version || 0)) {
+                        merged.set(id, next);
+                    }
+                }
+                this.orders = Array.from(merged.values());
+            } catch (e) {
+                if (reqId !== this._ordersLoadSeq) return;
+                adminLogger.error('[admin] loadOrders', e);
+                this.ordersLoadError = 'Ошибка сети при загрузке заказов';
+                void this.showUiAlert(this.ordersLoadError, 'Ошибка');
+            } finally {
+                if (reqId === this._ordersLoadSeq) this.ordersLoading = false;
             }
-            this.orders = Array.from(merged.values());
         },
 
         ordersPrevPage() {
@@ -6223,23 +6552,13 @@ function adminMixinDataChartsSettings() {
             if (!canvas) return;
             const daily = this.analyticsData.daily || [];
             if (daily.length === 0) {
-                if (charts.analytics) {
-                    try {
-                        charts.analytics.destroy();
-                    } catch (_e) { /* ignore */ }
-                    charts.analytics = null;
-                }
+                adminDestroyAnalyticsMainChart();
                 this._destroyAnalyticsSparklines();
                 return;
             }
 
             const ctx = canvas.getContext('2d');
-            if (charts.analytics) {
-                try {
-                    charts.analytics.destroy();
-                } catch (_e) { /* ignore */ }
-                charts.analytics = null;
-            }
+            adminDestroyAnalyticsMainChart();
 
             const labels = daily.map((d) => {
                 const dd = adminFormat._parseDateInput(d.date);
@@ -6443,12 +6762,7 @@ function adminMixinDataChartsSettings() {
             if (series.length === 0) return;
 
             const ctx = canvas.getContext('2d');
-            if (charts.dashboard) {
-                try {
-                    charts.dashboard.destroy();
-                } catch (_e) { /* ignore */ }
-                charts.dashboard = null;
-            }
+            adminDestroyDashboardChart();
 
             const labels = series.map((d) => {
                 const dt = new Date(d.date + 'T12:00:00Z');

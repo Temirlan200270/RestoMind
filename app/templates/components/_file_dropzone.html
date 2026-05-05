@@ -1,0 +1,6 @@
+{% macro file_dropzone(label='Перетащите файл или нажмите для выбора', extra_class='', attrs='') -%}
+<div class="ds-file-drop {{ extra_class }}" {{ attrs|safe }}>
+  <p class="text-sm font-medium" style="color: var(--color-text);">{{ label }}</p>
+  <p class="text-xs mt-2 ds-text-muted">Демо: без привязки к форме</p>
+</div>
+{%- endmacro %}

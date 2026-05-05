@@ -39,6 +39,7 @@ class OrderItem(BaseModel):
         default_factory=list,
         description="UUID модификаторов из iiko (дополнительные опции: соус, размер и т.д.)",
     )
+    modifiers: list[dict[str, Any]] = Field(default_factory=list)
     exclude_ingredients: list[str] = Field(
         default_factory=list,
         description="Ингредиенты, которые клиент просит убрать (например: 'без лука', 'без сыра')",

@@ -1,0 +1,56 @@
+---
+description: Правила UI-редизайна RestoMind. Подключаются автоматически при работе с шаблонами и фронтом.
+globs: app/templates/**/*.html, app/static/**/*, docs/UI_*.md
+alwaysApply: false
+---
+
+# UI Redesign — обязательные правила
+
+Полный план — [docs/UI_REDESIGN_PLAN.md](mdc:docs/UI_REDESIGN_PLAN.md). Этот файл — короткие правила для агента, чтобы не перечитывать план каждый раз.
+
+## Стек и философия
+
+- Стек: **Jinja2 + Alpine.js + Tailwind CSS + Chart.js**. Vite/Vue/React сейчас не вводим. См. [docs/VITE_DECISION.md](mdc:docs/VITE_DECISION.md).
+- Light-тема через **CSS-переменные** в `app/static/css/admin.css` с заделом на dark.
+- Поэтапный совместимый редизайн — каждый PR мерджится без слома прода. Никакого big-bang.
+
+## Жёсткие запреты
+
+1. **Не использовать Tailwind-цветовые классы** типа `bg-brand-600`, `text-emerald-700`, `border-slate-200` в новых блоках. Только CSS-переменные `var(--color-*)` через классы дизайн-системы.
+2. **Не писать новые модалки руками.** Использовать макрос `app/templates/components/_modal.html` (создаётся в Phase U1). Свои `z-index` запрещены — стек живёт в `:root { --z-* }`.
+3. **Не дублировать таблицы / кнопки / бейджи.** Использовать `_table.html`, `_button.html`, `_badge.html`. Если макроса не хватает — расширяем макрос, а не пишем inline.
+4. **Не трогать backend** в зоне ИИ 1: `app/api/payment_webhook.py`, `app/services/payment_*`, миграции Alembic, `app/integrations/iiko_client.py`, `app/api/webhooks.py` core. UI-задачи — только шаблоны, CSS, JS, иногда тонкие read-only роуты в админке.
+5. **Не вводить новый JS-фреймворк** в `admin-app.js`. Резать на модули — можно, но в рамках текущей Alpine.js архитектуры.
+
+## Что обязательно делать
+
+- Каждый новый блок UI начинается с проверки: «есть ли подходящий компонент в `app/templates/components/`?». Нет — добавь сначала макрос, потом используй.
+- AI Value Visibility — на каждом разделе должна быть видна ценность бота владельцу (бейдж в шапке, mini-metric, banner). Подробности — Phase U2 в плане.
+- Mobile-first — touch-targets ≥ 44px, модалки на `<sm` через `_drawer` (bottom-sheet).
+- Accessibility WCAG AA — контраст, ARIA, keyboard navigation. Проверяется через Chrome DevTools MCP.
+
+## Workflow для UI-агента
+
+1. Перед работой — прочитать [docs/UI_REDESIGN_PLAN.md](mdc:docs/UI_REDESIGN_PLAN.md) (актуальная фаза).
+2. Сделать baseline-скрин текущего экрана через Chrome DevTools MCP (`takeScreenshot`).
+3. Внести изменения в шаблон / CSS / JS — **только** через компоненты.
+4. Сделать post-change скрин, сравнить визуально.
+5. `pytest -q` (Python почти не трогается, но Storybook-роут проверяем).
+6. Записать в `## [Unreleased]` секцию [CHANGELOG.md](mdc:CHANGELOG.md).
+7. Обновить статус фазы в [IMPLEMENTATION_PLAN.md](mdc:IMPLEMENTATION_PLAN.md) и [PARALLEL_AI_PLAN.md](mdc:PARALLEL_AI_PLAN.md).
+
+## Зоны двух агентов
+
+- **ИИ 1 (backend):** `app/api/`, `app/services/`, `app/db/`, `app/integrations/`, `alembic/`. В UI-плане его роль — `/admin/_/components` route (тонкий) + расширение `/api/admin/stats` для AI Value.
+- **ИИ 2 (frontend):** `app/templates/`, `app/static/`. Полный редизайн UI — его зона.
+- **Общие файлы:** `CHANGELOG.md`, `IMPLEMENTATION_PLAN.md`, `PARALLEL_AI_PLAN.md`, `docs/UI_*.md` — дописывают оба, не переписывают.
+
+Полные правила параллельной работы — [PARALLEL_AI_PLAN.md](mdc:PARALLEL_AI_PLAN.md).
+
+## Anti-patterns (что не должно появиться в diff)
+
+- `class="rounded-2xl bg-white shadow-sm"` в новых блоках → используй `_card.html`.
+- `style="z-index: 50;"` где угодно → `var(--z-modal)` или один из стандартных z-классов.
+- Inline `<dialog>` или `<div x-show="...Modal..." class="fixed inset-0...">` → макрос `_modal.html`.
+- `Intl.NumberFormat(..., 'RUB')` → используем `formatKzt` / общий `fmt.money` (рубли в этом продукте не используем).
+- Дублирование `flashToast` логики — вызываем существующую функцию в `admin-app.js`.

@@ -1,0 +1,212 @@
+{% from "components/_button.html" import btn %}
+{% from "components/_card.html" import card %}
+{% from "components/_modal.html" import modal %}
+{% from "components/_drawer.html" import drawer %}
+{% from "components/_tabs.html" import tabs_underline, tabs_pills %}
+{% from "components/_section_header.html" import section_header %}
+{% from "components/_kpi_card.html" import kpi_card %}
+{% from "components/_table.html" import data_table %}
+{% from "components/_badge.html" import badge %}
+{% from "components/_status_badge.html" import status_badge %}
+{% from "components/_input.html" import input_field %}
+{% from "components/_select.html" import select_field %}
+{% from "components/_textarea.html" import textarea_field %}
+{% from "components/_toggle.html" import toggle_switch %}
+{% from "components/_color_picker.html" import color_picker %}
+{% from "components/_file_dropzone.html" import file_dropzone %}
+{% from "components/_empty_state.html" import empty_state %}
+{% from "components/_skeleton.html" import skeleton %}
+{% from "components/_segmented.html" import segmented %}
+{% from "components/_app_shell.html" import app_shell_demo %}
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Компоненты — RestoMindComponentsStorybook</title>
+    <link rel="stylesheet" href="/static/css/admin.css?v={{ asset_ver }}">
+    <script src="/static/js/admin-brand-tokens.js?v={{ asset_ver }}"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>[x-cloak]{display:none!important}</style>
+</head>
+<body class="min-h-screen" style="background: var(--color-surface-muted); color: var(--color-text); font-family: var(--font-sans, Inter, system-ui, sans-serif); padding: var(--space-6);">
+<p class="sr-only" id="rm-storybook-marker">RestoMindComponentsStorybook</p>
+
+<div class="mx-auto max-w-5xl space-y-10">
+    {{ section_header('Дизайн-система U1', 'Макросы Jinja2 и классы ds-* (без правок admin.html)', actions_html=btn(variant='ghost', size='sm', label='На главную', attrs='onclick="location.href=\'/admin\'" type="button"')) }}
+
+    <section class="ds-card p-6" aria-labelledby="sec-tokens">
+        <h2 id="sec-tokens" class="text-lg font-bold" style="color: var(--color-text); margin-bottom: var(--space-4);">Токены</h2>
+        <p class="text-sm ds-text-muted" style="margin-bottom: var(--space-4);">CSS-переменные <code class="ds-text-muted">:root</code>; акцент ниже меняется через <code class="ds-text-muted">restoMindApplyBrandTokens(hex)</code>.</p>
+        <div class="flex flex-wrap gap-3" style="margin-bottom: var(--space-4);">
+            {{ btn(variant='secondary', size='sm', label='Акцент #c026d3', attrs='type="button" onclick="window.restoMindApplyBrandTokens(\'#c026d3\')"') }}
+            {{ btn(variant='ghost', size='sm', label='Сброс к дефолту', attrs='type="button" onclick="window.restoMindApplyBrandTokens(window.restoMindDefaultBrandHex)"') }}
+        </div>
+        <div class="flex flex-wrap gap-2">
+            {% for step in [50, 100, 200, 400, 500, 600, 700, 800, 900] %}
+            <span class="ds-rounded-lg ds-border inline-block text-xs font-medium" style="padding: var(--space-2) var(--space-3); background: var(--color-brand-{{ step }}); color: var(--color-text); min-width: 3rem; text-align: center;">{{ step }}</span>
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="ds-card p-6" aria-labelledby="sec-type">
+        <h2 id="sec-type" class="text-lg font-bold" style="color: var(--color-text); margin-bottom: var(--space-4);">Типографика</h2>
+        <h1 class="text-3xl font-bold" style="color: var(--color-text);">Заголовок H1</h1>
+        <h2 class="text-xl font-semibold mt-2" style="color: var(--color-text);">Подзаголовок H2</h2>
+        <p class="text-base mt-3" style="color: var(--color-text);">Основной текст абзаца с нормальной читаемостью.</p>
+        <p class="text-sm mt-2 ds-text-muted">Вторичный текст (muted).</p>
+    </section>
+
+    <section class="ds-card p-6" aria-labelledby="sec-btn">
+        <h2 id="sec-btn" class="text-lg font-bold" style="color: var(--color-text); margin-bottom: var(--space-4);">Кнопки</h2>
+        <div class="flex flex-wrap gap-2 items-center">
+            {{ btn(variant='primary', label='Primary') }}
+            {{ btn(variant='secondary', label='Secondary') }}
+            {{ btn(variant='ghost', label='Ghost') }}
+            {{ btn(variant='danger', label='Danger') }}
+            {{ btn(variant='success', label='Success') }}
+            {{ btn(variant='primary', size='sm', label='Small') }}
+            {{ btn(variant='primary', size='lg', label='Large') }}
+            {{ btn(variant='primary', label='Disabled', disabled=true) }}
+        </div>
+    </section>
+
+    <section class="ds-card p-6" aria-labelledby="sec-card">
+        <h2 id="sec-card" class="text-lg font-bold" style="color: var(--color-text); margin-bottom: var(--space-4);">Карточки</h2>
+        {% call card('Заголовок карточки', 'Краткое описание') %}
+        <p class="text-sm ds-text-muted">Тело через caller().</p>
+        {% endcall %}
+    </section>
+
+    <section class="ds-card p-6" aria-labelledby="sec-modal">
+        <h2 id="sec-modal" class="text-lg font-bold" style="color: var(--color-text); margin-bottom: var(--space-4);">Модалка</h2>
+        <p class="text-sm ds-text-muted" style="margin-bottom: var(--space-4);">Статичная панель в потоке и пример с Alpine.</p>
+        <div style="margin-bottom: var(--space-6);">
+            {% call modal('demo-modal-static', title='Статичная панель', static_demo=true) %}
+            <div style="padding: var(--space-4);">
+                <p class="text-sm ds-text-muted">Без backdrop/fixed — для витрины.</p>
+            </div>
+            {% endcall %}
+        </div>
+        <div x-data="{ open: false }">
+            {{ btn(variant='primary', label='Открыть модалку', attrs='type="button" @click="open = true"') }}
+            <div x-show="open" x-cloak>
+                <div class="ds-modal-backdrop" @click="open = false" role="presentation"></div>
+                <div class="ds-modal-panel ds-modal-wide" role="dialog" aria-modal="true" aria-labelledby="demo-modal-live-title">
+                    <h2 id="demo-modal-live-title" class="text-lg font-bold border-b ds-border" style="padding: var(--space-4); color: var(--color-text);">Живая модалка</h2>
+                    <div style="padding: var(--space-4);">
+                        <p class="text-sm ds-text-muted" style="margin-bottom: var(--space-4);">Закрытие по фону или кнопке.</p>
+                        {{ btn(variant='secondary', label='Закрыть', attrs='type="button" @click="open = false"') }}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="ds-card p-6" aria-labelledby="sec-drawer">
+        <h2 id="sec-drawer" class="text-lg font-bold" style="color: var(--color-text); margin-bottom: var(--space-4);">Drawer</h2>
+        {% call drawer('demo-drawer', title='Нижняя панель (демо)', static_demo=true) %}
+        <p class="text-sm ds-text-muted">Содержимое drawer в статичном режиме.</p>
+        {% endcall %}
+    </section>
+
+    <section class="ds-card p-6" aria-labelledby="sec-tabs">
+        <h2 id="sec-tabs" class="text-lg font-bold" style="color: var(--color-text); margin-bottom: var(--space-4);">Табы</h2>
+        <div x-data="{ tab: 'orders' }" style="margin-bottom: var(--space-6);">
+            <p class="text-xs ds-text-muted" style="margin-bottom: var(--space-2);">Underline</p>
+            {% call tabs_underline() %}
+            <button type="button" :class="tab === 'orders' ? 'ds-tab-active' : ''" @click="tab = 'orders'">Заказы</button>
+            <button type="button" :class="tab === 'menu' ? 'ds-tab-active' : ''" @click="tab = 'menu'">Меню</button>
+            <button type="button" :class="tab === 'stats' ? 'ds-tab-active' : ''" @click="tab = 'stats'">Статистика</button>
+            {% endcall %}
+            <p class="text-sm mt-3 ds-text-muted">Активная вкладка: <span x-text="tab"></span></p>
+        </div>
+        <p class="text-xs ds-text-muted" style="margin-bottom: var(--space-2);">Pills (контейнер segmented)</p>
+        {% call tabs_pills() %}
+        <button type="button" class="ds-segmented-active">День</button>
+        <button type="button">Неделя</button>
+        <button type="button">Месяц</button>
+        {% endcall %}
+    </section>
+
+    <section class="ds-card p-6" aria-labelledby="sec-kpi">
+        <h2 id="sec-kpi" class="text-lg font-bold" style="color: var(--color-text); margin-bottom: var(--space-4);">KPI</h2>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {{ kpi_card('Выручка', '128 400 ₸', trend_html='+12% к прошлой неделе') }}
+            {{ kpi_card('Заказы', '84') }}
+            {{ kpi_card('Средний чек', '1 529 ₸') }}
+        </div>
+    </section>
+
+    <section class="ds-card p-6" aria-labelledby="sec-table">
+        <h2 id="sec-table" class="text-lg font-bold" style="color: var(--color-text); margin-bottom: var(--space-4);">Таблица</h2>
+        {% set demo_rows %}
+        <tr><td>Заказ #101</td><td>Подтверждён</td><td>4 200 ₸</td></tr>
+        <tr><td>Заказ #102</td><td>Новый</td><td>1 100 ₸</td></tr>
+        {% endset %}
+        {{ data_table(['Номер', 'Статус', 'Сумма'], rows_html=demo_rows) }}
+        <p class="text-xs ds-text-muted" style="margin-top: var(--space-4);">Пустое состояние:</p>
+        {{ data_table(['A', 'B'], rows_html='', empty_text='Нет строк для демо') }}
+    </section>
+
+    <section class="ds-card p-6" aria-labelledby="sec-badges">
+        <h2 id="sec-badges" class="text-lg font-bold" style="color: var(--color-text); margin-bottom: var(--space-4);">Бейджи</h2>
+        <div class="flex flex-wrap gap-2 items-center">
+            {{ badge('Нейтральный') }}
+            {{ badge('Успех', variant='success') }}
+            {{ badge('Внимание', variant='warning') }}
+            {{ badge('Ошибка', variant='danger') }}
+            {{ status_badge('OK', kind='ok') }}
+            {{ status_badge('Предупреждение', kind='warn') }}
+            {{ status_badge('Сбой', kind='err') }}
+        </div>
+    </section>
+
+    <section class="ds-card p-6" aria-labelledby="sec-forms">
+        <h2 id="sec-forms" class="text-lg font-bold" style="color: var(--color-text); margin-bottom: var(--space-4);">Поля ввода</h2>
+        <div class="max-w-md space-y-2">
+            {{ input_field('Текст', name='demo_text', placeholder='Введите значение') }}
+            {% set opts %}<option value="a">Вариант A</option><option value="b">Вариант B</option>{% endset %}
+            {{ select_field('Селект', name='demo_sel', options_html=opts) }}
+            {{ textarea_field('Многострочное', name='demo_ta', placeholder='Комментарий…') }}
+            {{ toggle_switch('Включить уведомления', name='demo_toggle') }}
+            {{ color_picker('Цвет', name='demo_color', value='#2563eb') }}
+            {{ file_dropzone() }}
+        </div>
+    </section>
+
+    <section class="ds-card p-6" aria-labelledby="sec-empty">
+        <h2 id="sec-empty" class="text-lg font-bold" style="color: var(--color-text); margin-bottom: var(--space-4);">Empty state</h2>
+        {{ empty_state('Пока нет данных', 'Создайте первую запись или импортируйте меню.', actions_html=btn(variant='primary', label='Действие', attrs='type="button"')) }}
+    </section>
+
+    <section class="ds-card p-6" aria-labelledby="sec-skel">
+        <h2 id="sec-skel" class="text-lg font-bold" style="color: var(--color-text); margin-bottom: var(--space-4);">Скелетоны</h2>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="ds-card p-0 overflow-hidden">{{ skeleton(kind='line', rows=4) }}</div>
+            <div class="ds-card p-0 overflow-hidden">{{ skeleton(kind='card') }}</div>
+            <div class="ds-card p-0 overflow-hidden">{{ skeleton(kind='table', rows=5) }}</div>
+        </div>
+    </section>
+
+    <section class="ds-card p-6" aria-labelledby="sec-seg">
+        <h2 id="sec-seg" class="text-lg font-bold" style="color: var(--color-text); margin-bottom: var(--space-4);">Сегментированный переключатель</h2>
+        <div x-data="{ period: 'day' }">
+            {% call segmented() %}
+            <button type="button" role="tab" :class="period === 'day' ? 'ds-segmented-active' : ''" @click="period = 'day'">День</button>
+            <button type="button" role="tab" :class="period === 'week' ? 'ds-segmented-active' : ''" @click="period = 'week'">Неделя</button>
+            <button type="button" role="tab" :class="period === 'month' ? 'ds-segmented-active' : ''" @click="period = 'month'">Месяц</button>
+            {% endcall %}
+            <p class="text-sm mt-3 ds-text-muted">Выбрано: <span x-text="period"></span></p>
+        </div>
+    </section>
+
+    <section class="ds-card p-6" aria-labelledby="sec-shell">
+        <h2 id="sec-shell" class="text-lg font-bold" style="color: var(--color-text); margin-bottom: var(--space-4);">App shell (демо)</h2>
+        {{ app_shell_demo(aside_label='Навигация', main_html='<p class="text-sm ds-text-muted" style="padding:var(--space-4);">Область контента.</p>') }}
+    </section>
+</div>
+</body>
+</html>

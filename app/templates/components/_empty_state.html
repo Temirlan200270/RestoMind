@@ -1,0 +1,8 @@
+{% macro empty_state(title, description='', icon_html='', actions_html='', extra_class='') -%}
+<div class="ds-empty ds-border ds-rounded-xl {{ extra_class }}" style="background: var(--color-surface-muted);">
+  {% if icon_html %}<div class="mb-3" style="color: var(--color-text-muted);">{{ icon_html|safe }}</div>{% endif %}
+  <p class="text-base font-semibold" style="color: var(--color-text);">{{ title }}</p>
+  {% if description %}<p class="text-sm mt-2 ds-text-muted">{{ description }}</p>{% endif %}
+  {% if actions_html %}<div class="mt-4 flex flex-wrap gap-2 justify-center">{{ actions_html|safe }}</div>{% endif %}
+</div>
+{%- endmacro %}

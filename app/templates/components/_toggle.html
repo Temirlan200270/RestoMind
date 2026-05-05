@@ -1,0 +1,9 @@
+{% macro toggle_switch(label, name='', checked=false, extra_class='', attrs='') -%}
+<label class="inline-flex items-center gap-3 {{ extra_class }}" style="cursor: pointer;">
+  <span class="ds-toggle">
+    <input type="checkbox" {% if name %}name="{{ name }}"{% endif %} {% if checked %}checked{% endif %} {{ attrs|safe }} />
+    <span class="ds-toggle-track"><span class="ds-toggle-thumb"></span></span>
+  </span>
+  {% if label %}<span class="text-sm font-medium" style="color: var(--color-text);">{{ label }}</span>{% endif %}
+</label>
+{%- endmacro %}

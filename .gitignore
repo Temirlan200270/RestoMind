@@ -24,3 +24,6 @@ logs/
 !.vscode/extensions.json
 .DS_Store
 Thumbs.db
+
+# Полные отчёты Lighthouse (тяжёлые JSON); в репозитории — summary.json + README
+docs/ui/lighthouse/reports/

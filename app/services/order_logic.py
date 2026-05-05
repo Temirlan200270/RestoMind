@@ -285,6 +285,8 @@ async def validate_order(
                 "iiko_id": entry.iiko_id,
                 "category": entry.category,
                 "packaging_plov_1kg": (item.packaging_plov_1kg or "").strip(),
+                "modifiers_ids": list(item.modifiers_ids or []),
+                "modifiers": list(item.modifiers or []),
                 "exclude_ingredients": item.exclude_ingredients,
             })
         else:
@@ -899,6 +901,7 @@ def match_packaging_rule(
     item_category: str,
     rules: list[PackagingRule],
     packaging_choice: str = "",
+    scope: str = "item",
 ) -> PackagingRule | None:
     """
     Находит подходящее правило упаковки для позиции.
@@ -909,9 +912,17 @@ def match_packaging_rule(
     default_rule: PackagingRule | None = None
 
     for rule in rules:
+        rule_scope = (getattr(rule, "scope", None) or "item").strip().lower()
+        if rule_scope != scope:
+            continue
+        cat_match = (getattr(rule, "category_match", None) or "").strip()
+        if scope == "category" and cat_match and cat_match.lower() not in item_category.lower():
+            continue
         kw = (rule.keywords or "").strip()
         if not kw:
-            if rule.kind == "standard" and default_rule is None:
+            if scope == "item" and rule.kind == "standard" and default_rule is None:
+                default_rule = rule
+            elif scope == "category" and default_rule is None:
                 default_rule = rule
             continue
         if not _keywords_match(kw, nl, cl):
@@ -1003,6 +1014,15 @@ def _compute_fee_lines_from_rules(
                 rules,
                 packaging_choice=choice,
             )
+            category_rule = match_packaging_rule(
+                str(line.get("name", "")),
+                str(line.get("category", "")),
+                rules,
+                packaging_choice=choice,
+                scope="category",
+            )
+            if category_rule is not None and float(category_rule.price) > 0:
+                rule = category_rule
             if rule is None or float(rule.price) <= 0:
                 continue
             unit = float(rule.price)
@@ -1016,6 +1036,21 @@ def _compute_fee_lines_from_rules(
                 "iiko_id": (rule.iiko_product_id or "").strip() or None,
             })
             extras_total += total
+
+    for rule in rules:
+        if (getattr(rule, "scope", None) or "item").strip().lower() != "order":
+            continue
+        if float(rule.price) <= 0:
+            continue
+        fee_lines.append({
+            "kind": f"packaging_{rule.kind}",
+            "name": rule.name,
+            "quantity": 1,
+            "unit_price": float(rule.price),
+            "item_total": float(rule.price),
+            "iiko_id": (rule.iiko_product_id or "").strip() or None,
+        })
+        extras_total += float(rule.price)
 
     if order_type == "delivery" and foods_subtotal < float(settings.pricing_delivery_free_threshold):
         dr = rules_by_kind.get("delivery")

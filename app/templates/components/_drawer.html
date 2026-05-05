@@ -1,0 +1,7 @@
+{% macro drawer(id, title='', extra_class='', static_demo=false) -%}
+{% if not static_demo %}<div class="ds-drawer-backdrop {{ extra_class }}" id="{{ id }}-backdrop" role="presentation" aria-hidden="true"></div>{% endif %}
+<div class="ds-drawer-panel {% if static_demo %}ds-drawer-panel-static{% endif %}" id="{{ id }}-panel" role="dialog" aria-modal="true" {% if title %}aria-labelledby="{{ id }}-title"{% endif %}>
+  {% if title %}<h2 id="{{ id }}-title" class="text-base font-bold ds-border" style="padding: var(--space-4); border-bottom-width: 1px; color: var(--color-text); margin: 0;">{{ title }}</h2>{% endif %}
+  <div style="padding: var(--space-4);">{{ caller() }}</div>
+</div>
+{%- endmacro %}

@@ -1,0 +1,17 @@
+{
+  "_comment": "MCP-серверы для Cursor (Composer / Background Agent). Подробнее — docs/AI_TOOLS_SETUP.md. Команды требуют локальный Node.js (npx). Активны для всех агентов в этом репозитории.",
+  "mcpServers": {
+    "chrome-devtools": {
+      "command": "npx",
+      "args": ["-y", "chrome-devtools-mcp@latest"]
+    },
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@latest"]
+    },
+    "context7": {
+      "command": "npx",
+      "args": ["-y", "@upstash/context7-mcp@latest"]
+    }
+  }
+}

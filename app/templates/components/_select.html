@@ -1,0 +1,6 @@
+{% macro select_field(label, name='', options_html='', extra_class='', attrs='') -%}
+<label class="block {{ extra_class }}" style="margin-bottom: var(--space-4);">
+  {% if label %}<span class="text-xs font-semibold uppercase tracking-wide ds-text-muted" style="display:block; margin-bottom: var(--space-2);">{{ label }}</span>{% endif %}
+  <select class="ds-input" {% if name %}name="{{ name }}"{% endif %} {{ attrs|safe }}>{{ options_html|safe }}</select>
+</label>
+{%- endmacro %}

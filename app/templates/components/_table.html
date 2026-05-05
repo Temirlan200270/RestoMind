@@ -1,0 +1,25 @@
+{# columns: список заголовков; rows_html — готовые <tr> как безопасная разметка из шаблона-родителя #}
+{% macro data_table(columns, rows_html='', empty_text='Нет данных', extra_class='') -%}
+<div class="ds-table-wrap {{ extra_class }}">
+  {% if rows_html %}
+  <table>
+    <thead><tr>{% for c in columns %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+    <tbody>{{ rows_html|safe }}</tbody>
+  </table>
+  {% else %}
+  <div class="ds-empty">{{ empty_text }}</div>
+  {% endif %}
+</div>
+{%- endmacro %}
+
+{# Alpine-friendly table wrapper: body is provided through caller(). #}
+{% macro table_frame(columns=[], header_html='', extra_class='', table_class='w-full text-sm') -%}
+<div class="ds-table-wrap {{ extra_class }}">
+  <table class="{{ table_class }}">
+    <thead>
+      {% if header_html %}{{ header_html|safe }}{% else %}<tr>{% for c in columns %}<th>{{ c }}</th>{% endfor %}</tr>{% endif %}
+    </thead>
+    <tbody>{{ caller() }}</tbody>
+  </table>
+</div>
+{%- endmacro %}

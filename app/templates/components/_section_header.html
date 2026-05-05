@@ -1,0 +1,9 @@
+{% macro section_header(title, subtitle='', actions_html='', extra_class='') -%}
+<div class="flex flex-wrap items-start justify-between gap-4 {{ extra_class }}" style="margin-bottom: var(--space-4);">
+  <div>
+    <h2 class="text-lg font-bold" style="color: var(--color-text);">{{ title }}</h2>
+    {% if subtitle %}<p class="text-sm mt-1 ds-text-muted">{{ subtitle }}</p>{% endif %}
+  </div>
+  {% if actions_html %}<div class="flex flex-wrap gap-2 items-center">{{ actions_html|safe }}</div>{% endif %}
+</div>
+{%- endmacro %}

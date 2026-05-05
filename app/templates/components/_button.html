@@ -1,0 +1,4 @@
+{# Кнопка дизайн-системы (U1). variant: primary|secondary|ghost|danger|success; size: sm|md|lg #}
+{% macro btn(variant='primary', size='md', label='', type='button', extra_class='', disabled=false, attrs='') -%}
+<button type="{{ type }}" class="ds-btn ds-btn-{{ variant }} ds-btn-{{ size }} {{ extra_class }}" {% if disabled %}disabled aria-disabled="true"{% endif %} {{ attrs|safe }}>{{ label }}</button>
+{%- endmacro %}

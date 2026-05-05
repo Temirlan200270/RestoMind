@@ -1,0 +1,7 @@
+{% macro kpi_card(label, value='', value_html='', trend_html='', extra_class='', label_class='', value_class='') -%}
+<div class="ds-kpi {{ extra_class }}">
+  <div class="ds-kpi-label {{ label_class }}">{{ label }}</div>
+  <div class="ds-kpi-value {{ value_class }}">{% if value_html %}{{ value_html|safe }}{% else %}{{ value }}{% endif %}</div>
+  {% if trend_html %}<div class="text-sm mt-2 ds-text-muted">{{ trend_html|safe }}</div>{% endif %}
+</div>
+{%- endmacro %}

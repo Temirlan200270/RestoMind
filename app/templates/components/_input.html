@@ -1,0 +1,6 @@
+{% macro input_field(label, name='', input_type='text', value='', placeholder='', extra_class='', attrs='') -%}
+<label class="block {{ extra_class }}" style="margin-bottom: var(--space-4);">
+  {% if label %}<span class="text-xs font-semibold uppercase tracking-wide ds-text-muted" style="display:block; margin-bottom: var(--space-2);">{{ label }}</span>{% endif %}
+  <input class="ds-input" type="{{ input_type }}" {% if name %}name="{{ name }}"{% endif %} {% if value %}value="{{ value }}"{% endif %} {% if placeholder %}placeholder="{{ placeholder }}"{% endif %} {{ attrs|safe }} />
+</label>
+{%- endmacro %}

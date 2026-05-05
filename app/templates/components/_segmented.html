@@ -1,0 +1,3 @@
+{% macro segmented(extra_class='') -%}
+<div class="ds-segmented {{ extra_class }}" role="tablist">{{ caller() }}</div>
+{%- endmacro %}

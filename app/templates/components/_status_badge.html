@@ -1,0 +1,4 @@
+{# TODO(U5+): свести к order_status_badge / statusConfig из admin-app.js #}
+{% macro status_badge(text, kind='neutral', extra_class='') -%}
+<span class="ds-badge {% if kind == 'ok' or kind == 'success' %}ds-badge-success{% elif kind == 'warn' %}ds-badge-warning{% elif kind == 'err' or kind == 'danger' %}ds-badge-danger{% else %}ds-badge-neutral{% endif %} {{ extra_class }}">{{ text }}</span>
+{%- endmacro %}

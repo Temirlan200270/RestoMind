@@ -1,7 +1,15 @@
 {% from "_order_iiko_error.html" import iiko_error %}
 {% from "components/_order_card.html" import order_card_row, order_card_mobile, order_card_kanban, order_status_badge %}
 {% from "components/_settings_tabs.html" import settings_tabs %}
-{% from "components/_ui_card.html" import ui_card %}
+{% from "components/_card.html" import card %}
+{% from "components/_kpi_card.html" import kpi_card %}
+{% from "components/_table.html" import table_frame %}
+{% from "components/_section_header.html" import section_header %}
+{% from "components/_empty_state.html" import empty_state %}
+{% from "components/_button.html" import btn %}
+{% from "components/_segmented.html" import segmented %}
+{% from "components/_tabs.html" import tabs_pills %}
+{% from "components/_app_shell.html" import chat_shell_layout %}
 <!DOCTYPE html>
 <html lang="ru" x-data="adminApp()" x-init="init()" @keydown.window="handleGlobalKeydown($event)">
 <head>
@@ -176,14 +184,14 @@
                         <div class="flex items-center gap-2 min-w-0">
                             <h1 class="text-lg sm:text-xl md:text-2xl font-bold text-gray-900 truncate flex-1 min-w-0"
                                 x-text="currentTab === 'settings'
-                                  ? (settingsTab === 'restaurant' ? 'Мой ресторан'
-                                    : settingsTab === 'branding' ? 'Брендинг'
-                                    : settingsTab === 'connections' ? 'Подключения'
-                                    : settingsTab === 'smart_sales' ? 'Умные продажи'
+                                  ? (settingsTab === 'restaurant' ? 'Профиль и логистика'
+                                    : settingsTab === 'branding' ? 'Бренд'
+                                    : settingsTab === 'connections' ? 'Интеграции'
+                                    : settingsTab === 'smart_sales' ? 'Допродажи'
                                     : settingsTab === 'team' ? 'Команда'
                                     : settingsTab === 'health' ? 'Состояние'
-                                    : settingsTab === 'technical' ? 'Технический доступ'
-                                    : settingsTab === 'bot_test' ? 'Тест бота'
+                                    : settingsTab === 'technical' ? 'Данные и безопасность'
+                                    : settingsTab === 'bot_test' ? 'Бот / ИИ'
                                     : 'Настройки')
                                   : (navItems.find(i => i.id === currentTab)?.label)"></h1>
                             <button type="button" @click="openGlobalSearch()"
@@ -194,14 +202,14 @@
                         </div>
                         <p class="hidden sm:block text-sm text-gray-500 mt-0.5 line-clamp-2"
                             x-text="currentTab === 'settings'
-                              ? (settingsTab === 'restaurant' ? 'Профиль, часовой пояс, упаковка и информация для бота'
-                                : settingsTab === 'branding' ? 'Название бренда, логотип и акцентный цвет в шапке'
-                                : settingsTab === 'connections' ? 'iiko, WhatsApp и синхронизация'
-                                : settingsTab === 'smart_sales' ? 'Допродажи и сценарии продаж'
-                                : settingsTab === 'team' ? 'Доступ сотрудников к панели управления'
-                                : settingsTab === 'health' ? 'БД, Redis, миграции и ключевые интеграции'
-                                : settingsTab === 'technical' ? 'Экспорт, сбросы и диагностика'
-                                : settingsTab === 'bot_test' ? 'Песочница для промптов'
+                              ? (settingsTab === 'restaurant' ? 'Профиль заведения, график, упаковка, предоплата и база знаний'
+                                : settingsTab === 'branding' ? 'Логотип, цвет и имя бренда в шапке и на чеке'
+                                : settingsTab === 'connections' ? 'iiko, WhatsApp, Telegram и статусы синхронизации'
+                                : settingsTab === 'smart_sales' ? 'Правила допродаж и сценарии бота'
+                                : settingsTab === 'team' ? 'Роли staff и доступ к панели'
+                                : settingsTab === 'health' ? 'Диагностика интеграций и готовность сервиса'
+                                : settingsTab === 'technical' ? 'Экспорт, ретеншн и опасная зона'
+                                : settingsTab === 'bot_test' ? 'Проверка ответов ИИ без влияния на гостей'
                                 : '')
                               : (navItems.find(i => i.id === currentTab)?.desc)"></p>
                         <button type="button"
@@ -319,44 +327,35 @@
             <!-- ========== ДАШБОРД ========== -->
             <div x-show="currentTab === 'dashboard'" x-cloak class="fade-in space-y-6">
                 <div class="flex flex-wrap items-end justify-between gap-4">
-                    <div class="min-w-0">
-                        <div class="flex flex-wrap items-center gap-2">
-                            <h2 class="text-xl sm:text-2xl font-extrabold tracking-tight text-slate-900">Главная</h2>
+                    <div class="min-w-0 flex-1">
+                        {{ section_header('Главная', subtitle='Выручка, допродажи ИИ и сэкономленное время (UTC).', extra_class='!mb-0') }}
+                        <div class="flex flex-wrap items-center gap-2 mt-1">
                             <span x-show="orgProfile && orgProfile.operational_label" x-cloak
                                 class="text-[11px] font-semibold px-2 py-1 rounded-full border"
                                 :class="(orgProfile.is_kitchen_open ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : (orgProfile.is_business_open ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-slate-50 border-slate-200 text-slate-700'))"
                                 x-text="(orgProfile.is_kitchen_open ? '🟢 ' : (orgProfile.is_business_open ? '🟡 ' : '⚫️ ')) + (orgProfile.operational_label || '')"></span>
                         </div>
-                        <p class="text-sm text-slate-500 mt-0.5">Выручка, допродажи ИИ и сэкономленное время — за пару секунд (UTC).</p>
                     </div>
                     <div class="flex flex-wrap items-center gap-2">
-                        <button type="button" class="min-h-[40px] px-3.5 py-2 rounded-xl text-sm font-semibold bg-white text-slate-800 ring-1 ring-slate-900/10 hover:bg-slate-50 transition"
-                            @click="navigateToTab('analytics')">
-                            Подробная аналитика
-                        </button>
+                        <button type="button" class="ds-btn ds-btn-secondary ds-btn-md"
+                            @click="navigateToTab('analytics')">Подробная аналитика</button>
                     </div>
                 </div>
 
                 <!-- Блок «Сейчас»: быстрые переходы по инцидентам (GET /incidents?mode=summary) -->
-                <div class="rounded-2xl border border-slate-200/90 bg-white p-4 sm:p-5 shadow-sm ring-1 ring-slate-900/5">
-                    <div class="flex flex-wrap items-center justify-between gap-2">
-                        <div>
-                            <h3 class="text-sm font-bold text-slate-900">Сейчас</h3>
-                            <p class="text-xs text-slate-500 mt-0.5">Что требует внимания — переходите в раздел одним нажатием.</p>
-                        </div>
-                        <div class="flex items-center gap-2 text-xs">
+                {% call card(title='Сейчас', subtitle='Быстрые переходы по мониторингу.', padding_class='p-4 sm:p-5') %}
+                    <div class="flex flex-wrap items-center justify-end gap-2 text-xs -mt-2 mb-2">
                             <span x-show="attentionSummaryLoading" class="text-slate-400">Обновляем…</span>
                             <span x-show="!attentionSummaryLoading && attentionSummary" x-cloak class="font-semibold tabular-nums text-slate-700">
                                 Открыто: <span x-text="attentionSummary.total_open ?? 0"></span>
                             </span>
-                        </div>
                     </div>
                     <div x-show="attentionSummaryLoading && !attentionSummary" class="mt-4 h-14 rounded-xl bg-slate-100 animate-pulse"></div>
                     <div class="mt-4 flex flex-wrap gap-2" x-show="Array.isArray(attentionSummary?.hero_actions) && attentionSummary.hero_actions.length" x-cloak>
                         <template x-for="a in (attentionSummary.hero_actions || [])" :key="a.id || a.label">
                             <button type="button"
                                 @click="heroAttentionGo(a.target)"
-                                class="min-h-[40px] px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold border transition shadow-sm"
+                                class="min-h-[44px] px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold border transition shadow-sm"
                                 :class="heroActionButtonClass(a.severity)">
                                 <span x-text="a.label"></span>
                             </button>
@@ -366,10 +365,10 @@
                         x-cloak class="mt-4 text-sm text-slate-600">
                         Нет открытых задач по мониторингу — можно продолжать работу.
                     </p>
-                </div>
+                {% endcall %}
 
-                <!-- ROI hero + достижения недели (компонент ui_card — единый стиль с «Упаковкой») -->
-                {% call ui_card('Как сегодня поработал бот') %}
+                <!-- ROI hero + достижения недели -->
+                {% call card(title='Как сегодня поработал бот', padding_class='p-5 sm:p-6') %}
                     <div class="flex items-center justify-end gap-3 -mt-2 mb-2">
                         <span x-show="dashRoiLoading" class="text-xs text-slate-400">Обновляем…</span>
                     </div>
@@ -406,121 +405,120 @@
                     </div>
                 {% endcall %}
 
-                {% call ui_card('Ценность ИИ (сводка)') %}
-                    <p class="text-xs text-slate-500 -mt-1 mb-3 leading-relaxed">
-                        Эффективность советов бота за сегодня (UTC). Совпадает с KPI из <span class="font-mono text-[11px]">prompt.md</span> §2 (предложено / принято, конверсия, средний чек).
-                    </p>
+                {% call card(title='Ценность ИИ (сводка)', subtitle='Эффективность советов бота за сегодня (UTC). KPI совпадают с prompt.md §2.', padding_class='p-5 sm:p-6') %}
                     <div x-show="dashStatsLoading && !dashStatsLoadedOnce" class="h-24 rounded-xl bg-slate-100 animate-pulse"></div>
                     <div x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                        <div class="rounded-2xl bg-slate-50/95 ring-1 ring-slate-900/5 px-4 py-3">
-                            <p class="text-[11px] font-bold uppercase tracking-wide text-slate-500">Советы: предложено</p>
-                            <p class="text-xl font-black text-slate-900 tabular-nums mt-1" x-text="dashStats.upsell_offered_today ?? 0"></p>
-                        </div>
-                        <div class="rounded-2xl bg-slate-50/95 ring-1 ring-slate-900/5 px-4 py-3">
-                            <p class="text-[11px] font-bold uppercase tracking-wide text-slate-500">Советы: принято</p>
-                            <p class="text-xl font-black text-slate-900 tabular-nums mt-1" x-text="dashStats.upsell_accepted_today ?? 0"></p>
-                        </div>
-                        <div class="rounded-2xl bg-indigo-50/95 ring-1 ring-indigo-200/70 px-4 py-3">
-                            <p class="text-[11px] font-bold uppercase tracking-wide text-indigo-900/75">Конверсия советов</p>
-                            <p class="text-xl font-black text-indigo-950 tabular-nums mt-1"
-                                x-text="(dashStats.upsell_conversion_pct ?? '—') + (dashStats.upsell_conversion_pct != null ? '%' : '')"></p>
-                        </div>
-                        <div class="rounded-2xl bg-white ring-1 ring-slate-900/5 px-4 py-3 sm:col-span-2 xl:col-span-1">
-                            <p class="text-[11px] font-bold uppercase tracking-wide text-slate-500">Доля выручки от ИИ</p>
-                            <p class="text-xl font-black text-slate-900 tabular-nums mt-1"
-                                x-text="(dashStats.ai_revenue_share_pct ?? '—') + (dashStats.ai_revenue_share_pct != null ? '%' : '')"></p>
-                        </div>
+                        {% set dash_kpi_offered %}
+                            <span class="text-xl font-black tabular-nums" style="color: var(--color-text);" x-text="dashStats.upsell_offered_today ?? 0"></span>
+                        {% endset %}
+                        {% set dash_kpi_accepted %}
+                            <span class="text-xl font-black tabular-nums" style="color: var(--color-text);" x-text="dashStats.upsell_accepted_today ?? 0"></span>
+                        {% endset %}
+                        {% set dash_kpi_conv %}
+                            <span class="text-xl font-black tabular-nums" style="color: var(--color-text);"
+                                x-text="(dashStats.upsell_conversion_pct ?? '—') + (dashStats.upsell_conversion_pct != null ? '%' : '')"></span>
+                        {% endset %}
+                        {% set dash_kpi_share %}
+                            <span class="text-xl font-black tabular-nums" style="color: var(--color-text);"
+                                x-text="(dashStats.ai_revenue_share_pct ?? '—') + (dashStats.ai_revenue_share_pct != null ? '%' : '')"></span>
+                        {% endset %}
+                        {{ kpi_card('Советы: предложено', value_html=dash_kpi_offered, extra_class='!p-4 !shadow-none !bg-slate-50/95 sm:!p-4') }}
+                        {{ kpi_card('Советы: принято', value_html=dash_kpi_accepted, extra_class='!p-4 !shadow-none !bg-slate-50/95 sm:!p-4') }}
+                        {{ kpi_card('Конверсия советов', value_html=dash_kpi_conv, extra_class='!p-4 !shadow-none !bg-indigo-50/95 !ring-indigo-200/70 sm:!p-4', label_class='!text-indigo-900/75') }}
+                        {{ kpi_card('Доля выручки от ИИ', value_html=dash_kpi_share, extra_class='!p-4 sm:col-span-2 xl:col-span-1 sm:!p-4') }}
                     </div>
                     <div x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak class="mt-4 grid gap-3 md:grid-cols-2">
-                        <div class="rounded-xl bg-white ring-1 ring-slate-900/5 px-4 py-3">
-                            <p class="text-[11px] font-bold uppercase text-slate-500">Средний чек, если совет принят</p>
-                            <p class="text-lg font-extrabold text-slate-900 tabular-nums mt-0.5"
+                        {% set dash_kpi_avg_yes %}
+                            <p class="text-lg font-extrabold tabular-nums mt-0.5" style="color: var(--color-text);"
                                 x-text="dashStats.ai_avg_check_upsell_accepted != null ? fmt.money(dashStats.ai_avg_check_upsell_accepted) : '—'"></p>
-                        </div>
-                        <div class="rounded-xl bg-white ring-1 ring-slate-900/5 px-4 py-3">
-                            <p class="text-[11px] font-bold uppercase text-slate-500">Средний чек без предложения советов</p>
-                            <p class="text-lg font-extrabold text-slate-900 tabular-nums mt-0.5"
+                        {% endset %}
+                        {% set dash_kpi_avg_no %}
+                            <p class="text-lg font-extrabold tabular-nums mt-0.5" style="color: var(--color-text);"
                                 x-text="dashStats.ai_avg_check_no_upsell_offer != null ? fmt.money(dashStats.ai_avg_check_no_upsell_offer) : '—'"></p>
-                        </div>
+                        {% endset %}
+                        {{ kpi_card('Средний чек, если совет принят', value_html=dash_kpi_avg_yes, extra_class='!p-4 !shadow-none sm:!p-4', label_class='!normal-case !text-xs !font-bold !tracking-normal') }}
+                        {{ kpi_card('Средний чек без предложения советов', value_html=dash_kpi_avg_no, extra_class='!p-4 !shadow-none sm:!p-4', label_class='!normal-case !text-xs !font-bold !tracking-normal') }}
                     </div>
                 {% endcall %}
 
                 <!-- KPI: выручка · прибыль ИИ · время ИИ -->
+                {% set dashboard_revenue_kpi %}
+                    <div x-show="dashStatsLoading && !dashStatsLoadedOnce" class="mt-3 h-10 w-36 rounded-xl bg-slate-100 animate-pulse"></div>
+                    <div x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak class="mt-3 text-2xl sm:text-3xl font-extrabold text-slate-900 tabular-nums" x-text="fmt.money(dashStats.today_revenue || 0)"></div>
+                    <div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500" x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak>
+                        <span class="tabular-nums font-semibold text-slate-700" x-text="dashStats.today_orders || 0"></span> заказов
+                        <span class="text-slate-300">·</span>
+                        <span class="tabular-nums" x-text="dashStats.revenue_change_pct != null ? formatTrendPct(dashStats.revenue_change_pct) : '—'"></span> к вчера
+                    </div>
+                {% endset %}
+                {% set dashboard_ai_revenue_kpi %}
+                    <p class="mt-1 text-xs text-slate-600 leading-snug">Допродажи, которые гость принял в чеке. Подробнее по дням — вкладка «Аналитика».</p>
+                    <div x-show="dashStatsLoading && !dashStatsLoadedOnce" class="mt-3 h-10 w-40 rounded-xl bg-violet-100 animate-pulse"></div>
+                    <div x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak class="mt-3 flex items-center gap-2">
+                        <span class="text-2xl sm:text-3xl leading-none shrink-0" aria-hidden="true">📈</span>
+                        <span class="text-2xl sm:text-3xl font-extrabold tabular-nums text-violet-950" x-text="fmt.money(dashStats.ai_revenue_today ?? dashStats.upsell_revenue_today ?? 0)"></span>
+                    </div>
+                    <div class="mt-2 flex flex-wrap gap-2 text-[11px] sm:text-xs text-slate-700" x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak>
+                        <span class="inline-flex items-center rounded-lg bg-violet-100 px-2 py-0.5 font-semibold text-violet-950 ring-1 ring-violet-200/80">доля <span class="ml-1 tabular-nums" x-text="(dashStats.ai_revenue_share_pct ?? '—') + (dashStats.ai_revenue_share_pct != null ? '%' : '')"></span></span>
+                        <span class="inline-flex items-center rounded-lg bg-white px-2 py-0.5 text-slate-800 ring-1 ring-slate-200/80">конв. <span class="ml-1 tabular-nums" x-text="(dashStats.upsell_conversion_pct ?? '—') + (dashStats.upsell_conversion_pct != null ? '%' : '')"></span></span>
+                        <span class="inline-flex items-center rounded-lg bg-white px-2 py-0.5 tabular-nums text-slate-800 ring-1 ring-slate-200/80" x-text="'принято ' + (dashStats.upsell_accepted_today ?? 0) + '/' + (dashStats.upsell_offered_today ?? 0)"></span>
+                    </div>
+                {% endset %}
+                {% set dashboard_time_kpi %}
+                    <div x-show="dashStatsLoading && !dashStatsLoadedOnce" class="mt-3 h-10 w-28 rounded-xl bg-slate-100 animate-pulse"></div>
+                    <div x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak class="mt-3 flex items-center gap-2">
+                        <span class="text-2xl sm:text-3xl leading-none shrink-0" aria-hidden="true">⚡️</span>
+                        <span class="text-2xl sm:text-3xl font-extrabold text-slate-900 tabular-nums" x-text="(dashStats.ai_time_saved_hours ?? 0) + ' ч'"></span>
+                    </div>
+                    <div class="mt-2 text-xs text-slate-500" x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak>
+                        ≈ <span class="font-semibold tabular-nums text-slate-700" x-text="dashStats.ai_time_saved_minutes ?? 0"></span> мин
+                        · <span class="font-semibold tabular-nums text-slate-700" x-text="dashStats.ai_messages_today ?? 0"></span> сообщений ИИ
+                    </div>
+                    <div class="mt-3 text-xs text-emerald-700 font-medium" x-show="!(dashStatsLoading && !dashStatsLoadedOnce) && dashStats.ai_profit_per_saved_hour_kzt != null" x-cloak>
+                        ≈ <span class="tabular-nums" x-text="fmt.money(dashStats.ai_profit_per_saved_hour_kzt)"></span> доп. выручки ИИ на каждый «час сэкономленного» времени
+                    </div>
+                {% endset %}
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div class="rounded-2xl bg-white p-5 sm:p-6 shadow-sm ring-1 ring-slate-900/5">
-                        <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Выручка сегодня</div>
-                        <div x-show="dashStatsLoading && !dashStatsLoadedOnce" class="mt-3 h-10 w-36 rounded-xl bg-slate-100 animate-pulse"></div>
-                        <div x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak class="mt-3 text-2xl sm:text-3xl font-extrabold text-slate-900 tabular-nums" x-text="fmt.money(dashStats.today_revenue || 0)"></div>
-                        <div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500" x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak>
-                            <span class="tabular-nums font-semibold text-slate-700" x-text="dashStats.today_orders || 0"></span> заказов
-                            <span class="text-slate-300">·</span>
-                            <span class="tabular-nums" x-text="dashStats.revenue_change_pct != null ? formatTrendPct(dashStats.revenue_change_pct) : '—'"></span> к вчера
-                        </div>
-                    </div>
-                    <div class="rounded-2xl p-5 sm:p-6 shadow-sm ring-1 ring-violet-200/80 bg-violet-50/95 text-slate-900">
-                        <div class="text-[11px] font-bold uppercase tracking-wider text-violet-900/80">Сколько заработал ИИ</div>
-                        <p class="mt-1 text-xs text-slate-600 leading-snug">Допродажи, которые гость принял в чеке. Подробнее по дням — вкладка «Аналитика».</p>
-                        <div x-show="dashStatsLoading && !dashStatsLoadedOnce" class="mt-3 h-10 w-40 rounded-xl bg-violet-100 animate-pulse"></div>
-                        <div x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak class="mt-3 flex items-center gap-2">
-                            <span class="text-2xl sm:text-3xl leading-none shrink-0" aria-hidden="true">📈</span>
-                            <span class="text-2xl sm:text-3xl font-extrabold tabular-nums text-violet-950" x-text="fmt.money(dashStats.ai_revenue_today ?? dashStats.upsell_revenue_today ?? 0)"></span>
-                        </div>
-                        <div class="mt-2 flex flex-wrap gap-2 text-[11px] sm:text-xs text-slate-700" x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak>
-                            <span class="inline-flex items-center rounded-lg bg-violet-100 px-2 py-0.5 font-semibold text-violet-950 ring-1 ring-violet-200/80">доля <span class="ml-1 tabular-nums" x-text="(dashStats.ai_revenue_share_pct ?? '—') + (dashStats.ai_revenue_share_pct != null ? '%' : '')"></span></span>
-                            <span class="inline-flex items-center rounded-lg bg-white px-2 py-0.5 text-slate-800 ring-1 ring-slate-200/80">конв. <span class="ml-1 tabular-nums" x-text="(dashStats.upsell_conversion_pct ?? '—') + (dashStats.upsell_conversion_pct != null ? '%' : '')"></span></span>
-                            <span class="inline-flex items-center rounded-lg bg-white px-2 py-0.5 tabular-nums text-slate-800 ring-1 ring-slate-200/80" x-text="'принято ' + (dashStats.upsell_accepted_today ?? 0) + '/' + (dashStats.upsell_offered_today ?? 0)"></span>
-                        </div>
-                    </div>
-                    <div class="rounded-2xl bg-white p-5 sm:p-6 shadow-sm ring-1 ring-slate-900/5">
-                        <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Сколько часов сэкономил ИИ</div>
-                        <div x-show="dashStatsLoading && !dashStatsLoadedOnce" class="mt-3 h-10 w-28 rounded-xl bg-slate-100 animate-pulse"></div>
-                        <div x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak class="mt-3 flex items-center gap-2">
-                            <span class="text-2xl sm:text-3xl leading-none shrink-0" aria-hidden="true">⚡️</span>
-                            <span class="text-2xl sm:text-3xl font-extrabold text-slate-900 tabular-nums" x-text="(dashStats.ai_time_saved_hours ?? 0) + ' ч'"></span>
-                        </div>
-                        <div class="mt-2 text-xs text-slate-500" x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak>
-                            ≈ <span class="font-semibold tabular-nums text-slate-700" x-text="dashStats.ai_time_saved_minutes ?? 0"></span> мин
-                            · <span class="font-semibold tabular-nums text-slate-700" x-text="dashStats.ai_messages_today ?? 0"></span> сообщений ИИ
-                        </div>
-                        <div class="mt-3 text-xs text-emerald-700 font-medium" x-show="!(dashStatsLoading && !dashStatsLoadedOnce) && dashStats.ai_profit_per_saved_hour_kzt != null" x-cloak>
-                            ≈ <span class="tabular-nums" x-text="fmt.money(dashStats.ai_profit_per_saved_hour_kzt)"></span> доп. выручки ИИ на каждый «час сэкономленного» времени
-                        </div>
-                    </div>
+                    {{ kpi_card('Выручка сегодня', value_html=dashboard_revenue_kpi) }}
+                    {{ kpi_card('Сколько заработал ИИ', value_html=dashboard_ai_revenue_kpi, extra_class='!bg-violet-50/95 !ring-violet-200/80 text-slate-900', label_class='!text-violet-900/80') }}
+                    {{ kpi_card('Сколько часов сэкономил ИИ', value_html=dashboard_time_kpi) }}
                 </div>
 
                 <!-- Hero chart -->
-                <div class="bg-white rounded-2xl p-5 sm:p-6 shadow-sm ring-1 ring-slate-900/5">
+                {% call card(extra_class='', padding_class='p-5 sm:p-6') %}
                     <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
                         <div>
                             <h3 class="text-sm font-bold text-slate-900">Динамика за 7 дней</h3>
                             <p class="text-xs text-slate-500 mt-0.5">UTC · переключите метрику</p>
                         </div>
-                        <div class="inline-flex rounded-xl bg-slate-100 p-1 ring-1 ring-slate-900/5" role="group" aria-label="Метрика графика">
-                            <button type="button" class="min-h-[40px] px-3 sm:px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold transition"
-                                :class="dashMiniMetric === 'revenue' ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-900/10' : 'text-slate-600 hover:text-slate-900'"
+                        {% call segmented(extra_class='shrink-0') %}
+                        <div role="group" aria-label="Метрика графика" class="contents">
+                            <button type="button" class="min-h-[44px] px-3 sm:px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold transition"
+                                :class="dashMiniMetric === 'revenue' ? 'ds-segmented-active' : ''"
                                 @click="dashMiniMetric = 'revenue'; scheduleDashboardChartRender()">Выручка</button>
-                            <button type="button" class="min-h-[40px] px-3 sm:px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold transition"
-                                :class="dashMiniMetric === 'orders' ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-900/10' : 'text-slate-600 hover:text-slate-900'"
+                            <button type="button" class="min-h-[44px] px-3 sm:px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold transition"
+                                :class="dashMiniMetric === 'orders' ? 'ds-segmented-active' : ''"
                                 @click="dashMiniMetric = 'orders'; scheduleDashboardChartRender()">Заказы</button>
-                            <button type="button" class="min-h-[40px] px-3 sm:px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold transition"
-                                :class="dashMiniMetric === 'ai_profit' ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-900/10' : 'text-slate-600 hover:text-slate-900'"
+                            <button type="button" class="min-h-[44px] px-3 sm:px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold transition"
+                                :class="dashMiniMetric === 'ai_profit' ? 'ds-segmented-active' : ''"
                                 @click="dashMiniMetric = 'ai_profit'; scheduleDashboardChartRender()">Прибыль ИИ</button>
                         </div>
+                        {% endcall %}
                     </div>
                     <div class="h-64 sm:h-72 md:h-80 w-full relative">
-                        <canvas id="dashboardHeroChart"></canvas>
+                        <canvas id="dashboardHeroChart" x-ignore></canvas>
                     </div>
-                </div>
+                {% endcall %}
 
                 <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
                     <!-- Activity Feed -->
-                    <div class="lg:col-span-8 bg-white rounded-2xl p-6 shadow-sm ring-1 ring-slate-900/5">
+                    {% call card(extra_class='lg:col-span-8', padding_class='p-6') %}
                         <div class="flex items-center justify-between gap-3 mb-4">
                             <div>
                                 <h3 class="text-sm font-bold text-slate-900">Лента событий</h3>
                                 <p class="text-xs text-slate-500 mt-0.5">Заказы, помощь, доставка — что требует внимания.</p>
                             </div>
-                            <button type="button" class="min-h-[40px] px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-50 text-slate-700 ring-1 ring-slate-900/5 hover:bg-slate-100 transition"
+                            <button type="button" class="min-h-[44px] px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-50 text-slate-700 ring-1 ring-slate-900/5 hover:bg-slate-100 transition"
                                 @click="loadDashActivity()">
                                 Обновить
                             </button>
@@ -549,27 +547,26 @@
                         <div x-show="!dashActivityLoading && (!dashActivity || !dashActivity.length)" x-cloak class="py-8 px-4 text-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/60">
                             <p class="text-sm text-slate-600 font-medium">Здесь появятся заказы, эскалации и доставки.</p>
                             <p class="text-xs text-slate-500 mt-2 max-w-md mx-auto">Напишите боту в WhatsApp от имени гостя — и события начнут приходить в ленту.</p>
-                            <button type="button" class="mt-4 min-h-[40px] px-4 py-2 rounded-xl text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700 shadow-sm shadow-brand-600/20"
+                            <button type="button" class="mt-4 min-h-[44px] px-4 py-2 rounded-xl text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700 shadow-sm shadow-brand-600/20"
                                 @click="navigateToTab('chats')">Открыть диалоги</button>
                         </div>
-                    </div>
+                    {% endcall %}
 
                     <div class="lg:col-span-4 space-y-4">
+                        {% set dashboard_help_kpi %}
+                            <div class="mt-2 text-2xl font-extrabold tabular-nums" :class="(dashStats.failed_tasks_open || 0) > 0 ? 'text-rose-600' : 'text-slate-900'" x-text="dashStats.failed_tasks_open ?? 0"></div>
+                            <div class="mt-2 text-xs text-slate-500">Открыто</div>
+                        {% endset %}
+                        {% set dashboard_iiko_kpi %}
+                            <div class="mt-2 text-2xl font-extrabold tabular-nums" :class="(dashStats.iiko_errors_today || 0) > 0 ? 'text-rose-600' : 'text-slate-900'" x-text="dashStats.iiko_errors_today ?? 0"></div>
+                            <div class="mt-2 text-xs text-slate-500">Ошибки сегодня</div>
+                        {% endset %}
                         <div class="grid grid-cols-2 gap-4">
-                            <div class="bg-white rounded-2xl p-5 shadow-sm ring-1 ring-slate-900/5">
-                                <div class="text-xs font-bold uppercase tracking-wider text-slate-500">Помощь</div>
-                                <div class="mt-2 text-2xl font-extrabold tabular-nums" :class="(dashStats.failed_tasks_open || 0) > 0 ? 'text-rose-600' : 'text-slate-900'" x-text="dashStats.failed_tasks_open ?? 0"></div>
-                                <div class="mt-2 text-xs text-slate-500">Открыто</div>
-                            </div>
-                            <div class="bg-white rounded-2xl p-5 shadow-sm ring-1 ring-slate-900/5">
-                                <div class="text-xs font-bold uppercase tracking-wider text-slate-500">iiko</div>
-                                <div class="mt-2 text-2xl font-extrabold tabular-nums" :class="(dashStats.iiko_errors_today || 0) > 0 ? 'text-rose-600' : 'text-slate-900'" x-text="dashStats.iiko_errors_today ?? 0"></div>
-                                <div class="mt-2 text-xs text-slate-500">Ошибки сегодня</div>
-                            </div>
+                            {{ kpi_card('Помощь', value_html=dashboard_help_kpi, extra_class='!p-5', label_class='!text-xs') }}
+                            {{ kpi_card('iiko', value_html=dashboard_iiko_kpi, extra_class='!p-5', label_class='!text-xs') }}
                         </div>
-                        <div class="bg-slate-50 rounded-2xl p-5 ring-1 ring-slate-900/5">
-                            <div class="text-xs font-bold uppercase tracking-wider text-slate-500">Быстрые действия</div>
-                            <div class="mt-3 grid grid-cols-1 gap-2">
+                        {% call card(title='Быстрые действия', padding_class='p-5', extra_class='!bg-slate-50 !ring-slate-900/5') %}
+                            <div class="mt-1 grid grid-cols-1 gap-2">
                                 <button type="button" class="min-h-[44px] w-full rounded-xl px-4 py-2 text-sm font-semibold bg-white text-slate-900 ring-1 ring-slate-900/10 hover:bg-slate-50 transition text-left"
                                     @click="navigateToTab('operator_queue')">
                                     Помощь клиентам <span class="tabular-nums text-slate-500" x-text="'(' + (dashStats.failed_tasks_open ?? 0) + ')'"></span>
@@ -577,12 +574,12 @@
                                 <button type="button" class="min-h-[44px] w-full rounded-xl px-4 py-2 text-sm font-semibold bg-white text-slate-900 ring-1 ring-slate-900/10 hover:bg-slate-50 transition text-left"
                                     @click="navigateToTab('orders')">Заказы</button>
                             </div>
-                        </div>
+                        {% endcall %}
                     </div>
                 </div>
 
-                <div class="mb-8 bg-amber-50/80 border border-amber-100 rounded-2xl p-5" x-show="(dashStats.failed_tasks_open || 0) > 0 || (dashStats.iiko_errors_today || 0) > 0">
-                    <h3 class="text-sm font-semibold text-amber-900 mb-2">Требуют внимания</h3>
+                <div x-show="(dashStats.failed_tasks_open || 0) > 0 || (dashStats.iiko_errors_today || 0) > 0" x-cloak>
+                {% call card(title='Требуют внимания', padding_class='p-5', extra_class='!bg-amber-50/80 !border !border-amber-100 !ring-amber-200/40') %}
                     <ul class="text-sm text-amber-900/90 space-y-1.5 list-disc list-inside">
                         <li x-show="(dashStats.failed_tasks_open || 0) > 0">
                             Помощь клиентам: <button type="button" class="underline font-medium" @click="navigateToTab('operator_queue')">открыть</button>
@@ -593,10 +590,11 @@
                             (<span x-text="dashStats.iiko_errors_today"></span>)
                         </li>
                     </ul>
+                {% endcall %}
                 </div>
 
                 <!-- Последние заказы на дашборде -->
-                <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                {% call card(extra_class='', padding_class='p-6') %}
                     <h3 class="font-semibold text-lg mb-4">Последние заказы</h3>
                     <div class="overflow-x-auto" x-show="orders.length > 0" x-cloak>
                         <table class="w-full text-sm">
@@ -632,7 +630,7 @@
                             </button>
                         </div>
                     </div>
-                </div>
+                {% endcall %}
             </div>
 
             <!-- ========== ТРЕБУЕТ ВНИМАНИЯ ========== -->
@@ -647,7 +645,7 @@
                             <span>Обновлено </span><span x-text="fmt.time(incidents.generated_at)"></span>
                         </span>
                         <button type="button" @click="loadIncidents()" :disabled="incidentsLoading"
-                            class="min-h-[40px] px-3.5 py-2 rounded-xl text-sm font-semibold bg-white text-slate-800 ring-1 ring-slate-900/10 hover:bg-slate-50 disabled:opacity-50 transition">
+                            class="min-h-[44px] px-3.5 py-2 rounded-xl text-sm font-semibold bg-white text-slate-800 ring-1 ring-slate-900/10 hover:bg-slate-50 disabled:opacity-50 transition">
                             <span x-show="!incidentsLoading">Обновить</span>
                             <span x-show="incidentsLoading" x-cloak>Обновляем…</span>
                         </button>
@@ -708,7 +706,7 @@
                                     </div>
                                     <button type="button" x-show="group.action && group.action.tab" x-cloak
                                         @click="incidentGo(group.action)"
-                                        class="min-h-[40px] px-3.5 py-2 rounded-xl text-sm font-semibold bg-slate-900 text-white hover:bg-slate-800 transition"
+                                        class="min-h-[44px] px-3.5 py-2 rounded-xl text-sm font-semibold bg-slate-900 text-white hover:bg-slate-800 transition"
                                         x-text="group.action.label || 'Открыть'"></button>
                                 </div>
                             </div>
@@ -738,33 +736,30 @@
 
             <!-- ========== ВКЛАД ИИ ========== -->
             <div x-show="currentTab === 'ai_value'" x-cloak class="fade-in">
-                <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-6">
-                    <div>
-                        <div class="text-sm font-semibold text-brand-700 mb-1">AI Value</div>
-                        <h2 class="text-2xl font-extrabold text-slate-900 tracking-tight">Вклад ИИ</h2>
-                        <p class="text-sm text-slate-500 mt-1">Допродажи, экономия времени и качество подсказок за выбранный период.</p>
-                    </div>
+                <div class="flex flex-col gap-4 mb-6">
+                    {{ section_header('Вклад ИИ', subtitle='Допродажи, экономия времени и качество подсказок за выбранный период.', extra_class='!mb-0') }}
+                    <p class="text-sm font-semibold text-brand-700 -mt-2">AI Value</p>
                     <div class="flex flex-wrap items-center gap-3">
-                        <div class="inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm w-fit">
+                        {% call segmented(extra_class='border border-slate-200 bg-white shrink-0') %}
+                        <div class="contents" role="tablist" aria-label="Период вклад ИИ">
                             <template x-for="p in [{id:'7d', label:'7д'}, {id:'30d', label:'30д'}, {id:'90d', label:'90д'}]" :key="p.id">
                                 <button type="button" @click="setAiValuePeriod(p.id)"
+                                    :class="aiValuePeriod === p.id && !aiValueCustom ? 'ds-segmented-active' : ''"
                                     class="px-3 py-2 rounded-lg text-sm font-semibold transition"
-                                    :class="aiValuePeriod === p.id && !aiValueCustom ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'"
                                     x-text="p.label"></button>
                             </template>
                             <button type="button" @click="setAiValuePeriod('custom')"
-                                class="px-3 py-2 rounded-lg text-sm font-semibold transition"
-                                :class="aiValueCustom ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'">
+                                :class="aiValueCustom ? 'ds-segmented-active' : ''"
+                                class="px-3 py-2 rounded-lg text-sm font-semibold transition">
                                 Свой
                             </button>
                         </div>
-                        <div x-show="aiValueCustom" x-cloak class="flex items-center gap-2">
-                            <input type="date" x-model="aiValueFrom" class="border border-slate-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-brand-500">
+                        {% endcall %}
+                        <div x-show="aiValueCustom" x-cloak class="flex flex-wrap items-center gap-2">
+                            <input type="date" x-model="aiValueFrom" class="ds-input text-xs min-h-[36px]">
                             <span class="text-slate-400">—</span>
-                            <input type="date" x-model="aiValueTo" class="border border-slate-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-brand-500">
-                            <button type="button" @click="loadAiValue()" class="px-3 py-1.5 rounded-lg bg-brand-600 text-white text-xs font-semibold hover:bg-brand-700 transition">
-                                Применить
-                            </button>
+                            <input type="date" x-model="aiValueTo" class="ds-input text-xs min-h-[36px]">
+                            <button type="button" @click="loadAiValue()" class="ds-btn ds-btn-primary ds-btn-sm">Применить</button>
                         </div>
                     </div>
                 </div>
@@ -775,19 +770,16 @@
 
                 <!-- Основные KPI -->
                 <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
-                    <!-- 1. Выручка ИИ -->
-                    <div class="bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 p-5">
-                        <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Выручка ИИ</div>
-                        <div class="mt-2 text-3xl font-black tabular-nums text-slate-900" x-text="fmt.money(aiValueData?.revenue || 0)"></div>
-                        <div class="mt-1 text-xs text-slate-500">
+                    {% set ai_kpi_rev %}
+                        <div class="mt-2 text-3xl font-black tabular-nums" style="color: var(--color-text);" x-text="fmt.money(aiValueData?.revenue || 0)"></div>
+                        <div class="mt-1 text-xs ds-text-muted">
                             <span x-text="aiValueData?.revenue_share_pct == null ? 'Доля: —' : ('Доля в общей выручке: ' + aiValueData.revenue_share_pct + '%')"></span>
                         </div>
-                    </div>
-                    <!-- 2. Автоматизация -->
-                    <div class="bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 p-5">
-                        <div class="flex items-center justify-between mb-2">
-                            <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Заказы через бота</div>
-                            <div class="text-xs font-bold text-brand-600" x-text="(aiValueData?.automation_rate || 0) + '%'"></div>
+                    {% endset %}
+                    {{ kpi_card('Выручка ИИ', value_html=ai_kpi_rev, extra_class='!p-5') }}
+                    {% call card(title='Заказы через бота', padding_class='p-5') %}
+                        <div class="flex items-center justify-end mb-2 -mt-1">
+                            <span class="text-xs font-bold text-brand-600" x-text="(aiValueData?.automation_rate || 0) + '%'"></span>
                         </div>
                         <div class="mt-1 h-2 w-full bg-slate-100 rounded-full overflow-hidden">
                             <div class="h-full bg-brand-500 transition-all duration-500" :style="'width: ' + (aiValueData?.automation_rate || 0) + '%'"></div>
@@ -796,52 +788,51 @@
                             <span>Бот: <b class="text-slate-900" x-text="aiValueData?.bot_orders || 0"></b></span>
                             <span>Всего: <b class="text-slate-900" x-text="aiValueData?.total_orders || 0"></b></span>
                         </div>
-                    </div>
-                    <!-- 3. Эффективность (Profit) -->
-                    <div class="bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 p-5">
-                        <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Прибыль от ИИ</div>
-                        <div class="mt-2 text-3xl font-black tabular-nums text-slate-900" x-text="aiValueData?.profit_per_saved_hour_kzt == null ? '—' : fmt.money(aiValueData.profit_per_saved_hour_kzt)"></div>
-                        <div class="mt-1 text-xs text-slate-500">Выручка допродаж на час работы</div>
-                    </div>
-                    <!-- 4. Помощь персонала -->
-                    <div class="bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 p-5">
-                        <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Помощь персонала</div>
-                        <div class="mt-2 text-3xl font-black tabular-nums text-slate-900" x-text="aiValueData?.escalation_count || 0"></div>
-                        <div class="mt-1 text-xs text-slate-500">Чатов передано человеку</div>
-                    </div>
+                    {% endcall %}
+                    {% set ai_kpi_profit_ph %}
+                        <div class="mt-2 text-3xl font-black tabular-nums" style="color: var(--color-text);"
+                            x-text="aiValueData?.profit_per_saved_hour_kzt == null ? '—' : fmt.money(aiValueData.profit_per_saved_hour_kzt)"></div>
+                        <p class="mt-1 text-xs ds-text-muted">Выручка допродаж на час работы</p>
+                    {% endset %}
+                    {{ kpi_card('Прибыль от ИИ', value_html=ai_kpi_profit_ph, extra_class='!p-5') }}
+                    {% set ai_kpi_esc %}
+                        <div class="mt-2 text-3xl font-black tabular-nums" style="color: var(--color-text);" x-text="aiValueData?.escalation_count || 0"></div>
+                        <p class="mt-1 text-xs ds-text-muted">Чатов передано человеку</p>
+                    {% endset %}
+                    {{ kpi_card('Помощь персонала', value_html=ai_kpi_esc, extra_class='!p-5') }}
                 </div>
 
                 <!-- Второстепенные метрики -->
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-                    <div class="bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 p-5 flex items-center gap-6">
-                        <div class="flex-1">
+                    {% call card(padding_class='p-5', extra_class='flex flex-col sm:flex-row items-stretch sm:items-center gap-6') %}
+                        <div class="flex-1 min-w-0">
                             <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Советы гостям</div>
-                            <div class="mt-2 flex items-baseline gap-2">
+                            <div class="mt-2 flex items-baseline gap-2 flex-wrap">
                                 <span class="text-2xl font-bold text-slate-900" x-text="aiValueData?.accepted || 0"></span>
                                 <span class="text-sm text-slate-400">принято из</span>
                                 <span class="text-sm font-bold text-slate-600" x-text="aiValueData?.offered || 0"></span>
                             </div>
                         </div>
-                        <div class="w-16 h-16 rounded-full border-4 border-brand-50 flex items-center justify-center">
+                        <div class="w-16 h-16 rounded-full border-4 border-brand-50 flex items-center justify-center shrink-0 mx-auto sm:mx-0">
                             <div class="text-xs font-bold text-brand-600" x-text="(aiValueData?.conversion_pct || 0) + '%'"></div>
                         </div>
-                    </div>
-                    <div class="bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 p-5 flex items-center gap-6">
-                        <div class="flex-1">
+                    {% endcall %}
+                    {% call card(padding_class='p-5', extra_class='flex flex-col sm:flex-row items-stretch sm:items-center gap-6') %}
+                        <div class="flex-1 min-w-0">
                             <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Экономия времени</div>
                             <div class="mt-2 text-2xl font-bold text-slate-900" x-text="(aiValueData?.time_saved_hours || 0) + ' ч'"></div>
                             <div class="text-xs text-slate-500" x-text="(aiValueData?.messages || 0) + ' ответов бота без участия людей'"></div>
                         </div>
-                        <div class="p-3 bg-blue-50 rounded-2xl text-blue-600">
+                        <div class="p-3 bg-blue-50 rounded-2xl text-blue-600 shrink-0 mx-auto sm:mx-0">
                             <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                         </div>
-                    </div>
+                    {% endcall %}
                 </div>
 
                 <div class="grid grid-cols-1 xl:grid-cols-2 gap-5">
-                    <div class="bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 p-5">
-                        <div class="flex items-center justify-between gap-3 mb-4">
-                            <h3 class="font-semibold text-slate-900">Средний чек</h3>
+                    {% call card(padding_class='p-5') %}
+                        <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+                            <h3 class="font-semibold text-slate-900 text-base">Средний чек</h3>
                             <span class="text-xs text-slate-500" x-text="aiValuePeriodLabel()"></span>
                         </div>
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -854,9 +845,8 @@
                                 <div class="mt-1 text-xl font-bold tabular-nums" x-text="aiValueData?.avg_check_no_offer == null ? '—' : fmt.money(aiValueData.avg_check_no_offer)"></div>
                             </div>
                         </div>
-                    </div>
-                    <div class="bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 p-5">
-                        <h3 class="font-semibold text-slate-900 mb-4">Прибыль от ИИ</h3>
+                    {% endcall %}
+                    {% call card(title='Прибыль от ИИ', padding_class='p-5') %}
                         <div class="space-y-2">
                             <template x-for="d in (aiValueData?.daily_series || [])" :key="d.date">
                                 <div class="flex items-center gap-3">
@@ -869,11 +859,10 @@
                             </template>
                             <div x-show="!(aiValueData?.daily_series || []).length" class="text-sm text-slate-400 py-6 text-center">За этот период ИИ еще не приносил допродаж.</div>
                         </div>
-                    </div>
+                    {% endcall %}
                 </div>
 
-                <div class="mt-6 bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 p-5">
-                    <h3 class="font-semibold text-slate-900 mb-4">Популярные допродажи</h3>
+                {% call card(title='Популярные допродажи', padding_class='p-5', extra_class='mt-6') %}
                     <div class="overflow-hidden">
                         <table class="min-w-full divide-y divide-slate-200">
                             <thead>
@@ -895,58 +884,59 @@
                         </table>
                         <div x-show="!(aiValueData?.top_upsell_items || []).length" class="text-sm text-slate-400 py-8 text-center">ИИ еще не продал ни одного блюда за этот период.</div>
                     </div>
-                </div>
+                {% endcall %}
                 <div x-show="aiValueLoading" x-cloak class="fixed inset-0 z-40 pointer-events-none bg-white/30"></div>
             </div>
 
             <!-- ========== АНАЛИТИКА ========== -->
             <div x-show="currentTab === 'analytics'" x-cloak class="fade-in">
-                <div class="rounded-3xl bg-slate-50 ring-1 ring-slate-900/5 p-4 sm:p-6 mb-6">
-                    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
-                        <div class="flex items-center gap-2">
-                            <h2 class="text-lg sm:text-xl font-extrabold tracking-tight text-slate-900">Аналитика</h2>
-                            <button type="button" @click="analyticsHelpOpen = true"
-                                class="inline-flex items-center justify-center h-9 w-9 rounded-xl bg-white ring-1 ring-slate-200/70 text-slate-600 hover:text-slate-900 hover:ring-slate-300 transition"
-                                title="Как считаются метрики"
-                                aria-label="Справка: как считаются метрики аналитики">
-                                <span class="text-base font-black" aria-hidden="true">?</span>
+                {% set analytics_header_actions %}
+                <button type="button" @click="analyticsHelpOpen = true"
+                    class="ds-btn ds-btn-secondary ds-btn-sm min-h-9 min-w-9 p-0"
+                    title="Как считаются метрики"
+                    aria-label="Справка: как считаются метрики аналитики">
+                    <span class="text-base font-black" aria-hidden="true">?</span>
+                </button>
+                {% endset %}
+                {% call card(padding_class='p-4 sm:p-6', extra_class='mb-6 !bg-slate-50/90') %}
+                    <div class="flex flex-wrap items-start justify-between gap-4 mb-4">
+                        {{ section_header('Аналитика', subtitle='Период в UTC, как на дашборде.', actions_html=analytics_header_actions, extra_class='!mb-0 flex-1 min-w-0') }}
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2 min-w-0">
+                        {% call segmented() %}
+                        <div class="contents" role="tablist" aria-label="Период аналитики">
+                            <template x-for="p in [{id:'day', label:'Сегодня'}, {id:'week', label:'Неделя'}, {id:'month', label:'Месяц'}, {id:'year', label:'Год'}]" :key="p.id">
+                                <button type="button"
+                                    @click="analyticsPeriod = p.id; analyticsCustom = false; reloadAnalyticsForUi()"
+                                    :class="analyticsPeriod === p.id && !analyticsCustom ? 'ds-segmented-active' : ''"
+                                    class="px-3 py-2 rounded-xl text-sm font-semibold transition min-h-[44px] touch-manipulation"
+                                    x-text="p.label"></button>
+                            </template>
+                        </div>
+                        {% endcall %}
+                        <div class="flex flex-wrap items-center gap-2 min-w-0">
+                            <span class="hidden sm:inline text-xs font-semibold text-slate-500 shrink-0">Диапазон</span>
+                            <input id="analytics-from" type="date" x-model="analyticsFrom"
+                                class="ds-input w-[10.5rem] text-sm min-h-[44px]">
+                            <input id="analytics-to" type="date" x-model="analyticsTo"
+                                class="ds-input w-[10.5rem] text-sm min-h-[44px]">
+                            <button type="button"
+                                @click="analyticsPeriod = 'custom'; analyticsCustom = true; reloadAnalyticsForUi()"
+                                class="ds-btn ds-btn-primary ds-btn-md min-h-[44px] touch-manipulation">
+                                Применить
                             </button>
                         </div>
-                        <div class="flex flex-wrap items-center gap-2 min-w-0">
-                            <!-- Segmented control -->
-                            <div class="inline-flex flex-wrap gap-1 rounded-2xl bg-white ring-1 ring-slate-200/70 p-1">
-                                <template x-for="p in [{id:'day', label:'Сегодня'}, {id:'week', label:'Неделя'}, {id:'month', label:'Месяц'}, {id:'year', label:'Год'}]" :key="p.id">
-                                    <button type="button"
-                                        @click="analyticsPeriod = p.id; analyticsCustom = false; reloadAnalyticsForUi()"
-                                        :class="analyticsPeriod === p.id && !analyticsCustom ? 'bg-slate-900 text-white shadow-sm' : 'bg-white text-slate-700 hover:bg-slate-50'"
-                                        class="px-3 py-2 rounded-xl text-sm font-semibold transition min-h-[40px] touch-manipulation"
-                                        x-text="p.label"></button>
-                                </template>
-                            </div>
-                            <div class="flex items-center gap-2 min-w-0">
-                                <div class="hidden sm:block text-xs font-semibold text-slate-500 shrink-0">Диапазон</div>
-                                <input id="analytics-from" type="date" x-model="analyticsFrom"
-                                    class="w-[10.5rem] border border-slate-200 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
-                                <input id="analytics-to" type="date" x-model="analyticsTo"
-                                    class="w-[10.5rem] border border-slate-200 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
-                                <button type="button"
-                                    @click="analyticsPeriod = 'custom'; analyticsCustom = true; reloadAnalyticsForUi()"
-                                    class="px-4 py-2 rounded-xl bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 transition min-h-[40px] touch-manipulation">
-                                    Применить
-                                </button>
-                            </div>
-                        </div>
                     </div>
-                    <div x-show="analyticsData.date_from && analyticsData.date_to" x-cloak class="text-xs text-slate-500">
+                    <div x-show="analyticsData.date_from && analyticsData.date_to" x-cloak class="text-xs text-slate-500 mt-3">
                         <span class="font-semibold text-slate-700" x-text="analyticsIntervalTitle()"></span>
                         <span class="ml-2" x-text="analyticsIntervalSubtitle()"></span>
                     </div>
-                </div>
+                {% endcall %}
 
                 <!-- KPI Power Row -->
                 <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
                     <!-- Revenue -->
-                    <div class="bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 p-5">
+                    {% call card(padding_class='p-5') %}
                         <div class="flex items-start justify-between gap-3">
                             <div class="min-w-0">
                                 <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Заработано</div>
@@ -967,11 +957,11 @@
                             </div>
                         </div>
                         <div class="mt-4 h-10">
-                            <canvas id="sparkRevenue" class="w-full h-full"></canvas>
+                            <canvas id="sparkRevenue" class="w-full h-full" x-ignore></canvas>
                         </div>
-                    </div>
+                    {% endcall %}
                     <!-- Orders -->
-                    <div class="bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 p-5">
+                    {% call card(padding_class='p-5') %}
                         <div class="flex items-start justify-between gap-3">
                             <div class="min-w-0">
                                 <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Заказы</div>
@@ -992,11 +982,11 @@
                             </div>
                         </div>
                         <div class="mt-4 h-10">
-                            <canvas id="sparkOrders" class="w-full h-full"></canvas>
+                            <canvas id="sparkOrders" class="w-full h-full" x-ignore></canvas>
                         </div>
-                    </div>
+                    {% endcall %}
                     <!-- Avg check -->
-                    <div class="bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 p-5">
+                    {% call card(padding_class='p-5') %}
                         <div class="flex items-start justify-between gap-3">
                             <div class="min-w-0">
                                 <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Средний чек</div>
@@ -1017,11 +1007,11 @@
                             </div>
                         </div>
                         <div class="mt-4 h-10">
-                            <canvas id="sparkAvg" class="w-full h-full"></canvas>
+                            <canvas id="sparkAvg" class="w-full h-full" x-ignore></canvas>
                         </div>
-                    </div>
+                    {% endcall %}
                     <!-- AI Profit -->
-                    <div class="bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 p-5">
+                    {% call card(padding_class='p-5') %}
                         <div class="flex items-start justify-between gap-3">
                             <div class="min-w-0">
                                 <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">AI Profit</div>
@@ -1042,15 +1032,13 @@
                             </div>
                         </div>
                         <div class="mt-4 h-10">
-                            <canvas id="sparkAi" class="w-full h-full"></canvas>
+                            <canvas id="sparkAi" class="w-full h-full" x-ignore></canvas>
                         </div>
-                    </div>
+                    {% endcall %}
                 </div>
 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-5 mb-6">
-                    <div class="bg-white rounded-2xl p-5 shadow-sm ring-1 ring-slate-900/5">
-                        <h3 class="font-semibold text-gray-900 mb-1">Уровень автоматизации</h3>
-                        <p class="text-xs text-gray-500 mb-3">Доля заказов <strong>без сообщений оператора</strong> в чате до момента последнего обновления заказа (оценка ROI бота).</p>
+                    {% call card(title='Уровень автоматизации', subtitle='Доля заказов без сообщений оператора в чате до последнего обновления заказа (оценка ROI бота).', padding_class='p-5') %}
                         <div class="space-y-3">
                             <div>
                                 <p class="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Все заказы в периоде</p>
@@ -1069,9 +1057,8 @@
                                 </p>
                             </div>
                         </div>
-                    </div>
-                    <div class="bg-white rounded-2xl p-5 shadow-sm ring-1 ring-slate-900/5">
-                        <h3 class="font-semibold text-gray-900 mb-3">Воронка (за период)</h3>
+                    {% endcall %}
+                    {% call card(title='Воронка (за период)', padding_class='p-5') %}
                         <div class="space-y-2 text-sm">
                             <div class="flex justify-between gap-2"><span class="text-gray-500">Клиенты с активностью в чате</span><span class="font-bold tabular-nums" x-text="analyticsData.funnel?.dialogs ?? 0"></span></div>
                             <div class="flex justify-between gap-2"><span class="text-gray-500">Новые черновики заказов</span><span class="font-bold tabular-nums" x-text="analyticsData.funnel?.draft_orders ?? 0"></span></div>
@@ -1084,12 +1071,10 @@
                                     x-text="analyticsData.escalations?.change_pct != null ? ((analyticsData.escalations.change_pct >= 0 ? '+' : '') + analyticsData.escalations.change_pct + '%') : ''"></span>
                             </p>
                         </div>
-                    </div>
+                    {% endcall %}
                 </div>
 
-                <div class="bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 p-5 mb-6 overflow-x-auto">
-                    <h3 class="font-semibold text-gray-900 mb-1">Заказы по часу суток (UTC)</h3>
-                    <p class="text-xs text-gray-500 mb-3">Сводка по времени создания заказа в RestoMind. Сопоставляйте с пиками кухни и логистикой iiko; календарная теплокарта — ниже.</p>
+                {% call card(title='Заказы по часу суток (UTC)', subtitle='Сводка по времени создания заказа в RestoMind. Сопоставляйте с пиками кухни и логистикой iiko; календарная теплокарта — ниже.', padding_class='p-5', extra_class='mb-6 overflow-x-auto') %}
                     <table class="w-full text-sm min-w-[360px]">
                         <thead>
                             <tr class="text-left text-gray-500 border-b border-gray-100">
@@ -1109,7 +1094,7 @@
                         </tbody>
                     </table>
                     <p x-show="!(analyticsData.sales_by_hour_utc || []).some(x => x.orders > 0)" class="text-center py-6 text-gray-400 text-sm">Нет заказов с ненулевой меткой часа в выбранном периоде</p>
-                </div>
+                {% endcall %}
 
                 <div class="grid grid-cols-1 xl:grid-cols-2 gap-5 mb-6">
                     <div class="bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 p-5 overflow-x-auto">
@@ -1221,7 +1206,7 @@
                                 <div class="h-56 rounded-2xl bg-slate-100 animate-pulse"></div>
                             </div>
                         </div>
-                        <canvas id="revenueChart" class="w-full h-full"></canvas>
+                        <canvas id="revenueChart" class="w-full h-full" x-ignore></canvas>
                     </div>
                 </div>
 
@@ -1364,24 +1349,28 @@
             <!-- ========== ЗАКАЗЫ (по этапам + таблица) ========== -->
             <div x-show="currentTab === 'orders'" x-cloak class="fade-in">
                 <!-- Переключатель вида -->
-                <div class="flex items-center justify-between mb-5">
-                    <div class="flex items-center gap-2 bg-white border border-gray-200 rounded-xl p-1">
-                        <button @click="ordersView = 'kanban'"
-                            :class="ordersView === 'kanban' ? 'bg-brand-600 text-white shadow' : 'text-gray-600 hover:bg-gray-100'"
-                            class="px-4 py-2 rounded-lg text-sm font-medium transition"
-                            title="Черновик → Подтверждён → На кухне">
+                <div class="flex flex-wrap items-center justify-between gap-3 mb-5">
+                    {% call segmented(extra_class='border border-gray-200 bg-white') %}
+                    <div class="contents" role="tablist" aria-label="Вид заказов">
+                        <button type="button" @click="ordersView = 'kanban'"
+                            :class="ordersView === 'kanban' ? 'ds-segmented-active' : ''"
+                            class="min-h-[44px] px-4 py-2 rounded-lg text-sm font-medium transition"
+                            title="Черновик → Подтверждён → На кухне"
+                            :aria-selected="ordersView === 'kanban' ? 'true' : 'false'" role="tab">
                             &#x1F4E6; По этапам
                         </button>
-                        <button @click="ordersView = 'table'"
-                            :class="ordersView === 'table' ? 'bg-brand-600 text-white shadow' : 'text-gray-600 hover:bg-gray-100'"
-                            class="px-4 py-2 rounded-lg text-sm font-medium transition"
-                            title="Все заказы списком с фильтром по статусу">
+                        <button type="button" @click="ordersView = 'table'"
+                            :class="ordersView === 'table' ? 'ds-segmented-active' : ''"
+                            class="min-h-[44px] px-4 py-2 rounded-lg text-sm font-medium transition"
+                            title="Все заказы списком с фильтром по статусу"
+                            :aria-selected="ordersView === 'table' ? 'true' : 'false'" role="tab">
                             &#x1F4CA; Список
                         </button>
                     </div>
+                    {% endcall %}
                     <div class="flex items-center gap-2 flex-wrap justify-end">
                         <button type="button" @click="openManualOrderModal()"
-                            class="text-sm font-semibold px-3 py-2 rounded-xl border border-brand-200 text-brand-800 bg-brand-50 hover:bg-brand-100 transition whitespace-nowrap">
+                            class="min-h-[44px] text-sm font-semibold px-3 py-2 rounded-xl border border-brand-200 text-brand-800 bg-brand-50 hover:bg-brand-100 transition whitespace-nowrap">
                             + Новый заказ (тест)
                         </button>
                         <select x-show="ordersView === 'table'" x-model="orderFilter" @change="ordersPage = 1; loadOrders()"
@@ -1401,10 +1390,12 @@
                     class="mb-4 flex flex-wrap items-start justify-between gap-3 rounded-xl border border-sky-200 bg-sky-50/90 px-4 py-3 text-sm text-sky-950">
                     <p class="flex-1 min-w-0 pr-2"><span class="font-semibold">Подсказка:</span> режим «По этапам» — канбан по статусам; «Список» — таблица с поиском и фильтром.</p>
                     <button type="button" @click="dismissOrdersViewHint()"
-                        class="shrink-0 text-xs font-semibold text-sky-900 hover:underline min-h-[40px] px-2 rounded-lg rm-focusable">Скрыть навсегда</button>
+                        class="shrink-0 text-xs font-semibold text-sky-900 hover:underline min-h-[44px] px-2 rounded-lg rm-focusable">Скрыть навсегда</button>
                 </div>
 
-                <div x-show="ordersView === 'table'" class="flex flex-wrap items-end gap-3 mb-5">
+                <div x-show="ordersView === 'table'" x-cloak>
+                {% call card(extra_class='mb-5', padding_class='p-4 sm:p-5') %}
+                <div class="flex flex-wrap items-end gap-3">
                     <div class="flex-1 min-w-[220px] max-w-md">
                         <label class="block text-xs font-medium text-gray-500 mb-1">Поиск</label>
                         <input type="search" x-model="orderSearchQ" @input.debounce.400ms="ordersPage = 1; loadOrders()"
@@ -1424,6 +1415,8 @@
                             class="w-32 text-sm border border-gray-200 rounded-xl px-3 py-2 bg-gray-50">
                     </div>
                 </div>
+                {% endcall %}
+                </div>
 
                 <div x-show="ordersLoadError" x-cloak
                     class="mb-4 rounded-xl border border-red-200 bg-red-50 text-red-800 px-4 py-3 text-sm">
@@ -1437,10 +1430,10 @@
                     </div>
                 </div>
 
-                <!-- Доска по этапам: на узких экранах — горизонтальный snap-скролл колонок -->
-                <div x-show="ordersView === 'kanban'" class="flex lg:grid lg:grid-cols-3 gap-4 lg:gap-5 overflow-x-auto snap-x snap-mandatory lg:overflow-visible lg:snap-none pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 touch-pan-x">
+                <!-- Доска по этапам: на узких экранах — горизонтальный snap-скролл колонок; стрелки ←/→ — между колонками (handleKanbanKeydown) -->
+                <div x-show="ordersView === 'kanban'" @keydown="handleKanbanKeydown($event)" class="flex lg:grid lg:grid-cols-6 gap-4 lg:gap-5 overflow-x-auto snap-x snap-mandatory lg:overflow-visible lg:snap-none pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 touch-pan-x outline-none" tabindex="-1">
                     <!-- DRAFT -->
-                    <div class="bg-gray-100/50 rounded-2xl p-4 shrink-0 w-[min(85vw,22rem)] lg:w-auto snap-center">
+                    <div data-kanban-col tabindex="0" role="region" aria-label="Колонка: черновики заказов" class="bg-gray-100/50 rounded-2xl p-4 shrink-0 w-[min(85vw,22rem)] lg:w-auto snap-center outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2">
                         <div class="flex items-center gap-2 mb-4">
                             <div class="w-3 h-3 rounded-full bg-gray-400"></div>
                             <h3 class="font-semibold text-gray-700 text-sm">Черновики</h3>
@@ -1450,20 +1443,23 @@
                         <div class="space-y-3 min-h-[100px]"
                             @dragover.prevent="$event.dataTransfer.dropEffect='move'"
                             @drop.prevent="kanbanDrop($event, 'draft')">
-                            <template x-for="order in kanbanDraft" :key="order.id">
+                            <template x-for="order in kanbanDraftVisible" :key="order.id">
                                 {{ order_card_kanban('draft', 'bg-white shadow-sm border border-gray-100') }}
                                 {{ iiko_error('order', 'mt-3') }}
                             </template>
-                            <div x-show="kanbanDraft.length === 0" class="text-center py-8 px-2 text-gray-500 text-xs space-y-3">
+                            <div x-show="ordersLoading && kanbanDraft.length === 0" x-cloak class="text-center py-8 px-2 text-gray-400 text-xs">Загрузка…</div>
+                            <div x-show="kanbanDraft.length === 0 && !ordersLoading" class="text-center py-8 px-2 text-gray-500 text-xs space-y-3">
                                 <p>Черновики появятся, когда гость начнёт заказ в чате.</p>
                                 <button type="button" @click="navigateToTab('chats')"
-                                    class="min-h-[40px] px-3 py-2 rounded-xl bg-white text-brand-700 text-xs font-bold ring-1 ring-brand-200 hover:bg-brand-50">Написать боту в WhatsApp</button>
+                                    class="min-h-[44px] px-3 py-2 rounded-xl bg-white text-brand-700 text-xs font-bold ring-1 ring-brand-200 hover:bg-brand-50">Написать боту в WhatsApp</button>
                             </div>
+                            <button type="button" x-show="kanbanDraftVisible.length < kanbanDraft.length" @click="kanbanShowMore('draft')"
+                                class="w-full min-h-[44px] rounded-xl bg-white text-xs font-semibold text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50">Показать ещё 20</button>
                         </div>
                     </div>
 
                     <!-- CONFIRMED -->
-                    <div class="bg-blue-50/50 rounded-2xl p-4 shrink-0 w-[min(85vw,22rem)] lg:w-auto snap-center">
+                    <div data-kanban-col tabindex="0" role="region" aria-label="Колонка: подтверждённые заказы" class="bg-blue-50/50 rounded-2xl p-4 shrink-0 w-[min(85vw,22rem)] lg:w-auto snap-center outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2">
                         <div class="flex items-center gap-2 mb-4">
                             <div class="w-3 h-3 rounded-full bg-blue-500"></div>
                             <h3 class="font-semibold text-blue-700 text-sm">Подтверждены</h3>
@@ -1473,20 +1469,23 @@
                         <div class="space-y-3 min-h-[100px]"
                             @dragover.prevent="$event.dataTransfer.dropEffect='move'"
                             @drop.prevent="kanbanDrop($event, 'confirmed')">
-                            <template x-for="order in kanbanConfirmed" :key="order.id">
+                            <template x-for="order in kanbanConfirmedVisible" :key="order.id">
                                 {{ order_card_kanban('confirmed', 'bg-white shadow-sm border border-blue-100') }}
                                 {{ iiko_error('order', 'mt-3') }}
                             </template>
-                            <div x-show="kanbanConfirmed.length === 0" class="text-center py-8 px-2 text-gray-500 text-xs space-y-3">
+                            <div x-show="ordersLoading && kanbanConfirmed.length === 0" x-cloak class="text-center py-8 px-2 text-gray-400 text-xs">Загрузка…</div>
+                            <div x-show="kanbanConfirmed.length === 0 && !ordersLoading" class="text-center py-8 px-2 text-gray-500 text-xs space-y-3">
                                 <p>После оплаты/подтверждения в WhatsApp заказ попадёт сюда.</p>
                                 <button type="button" @click="navigateToTab('chats')"
-                                    class="min-h-[40px] px-3 py-2 rounded-xl bg-white text-brand-700 text-xs font-bold ring-1 ring-brand-200 hover:bg-brand-50">Открыть диалоги</button>
+                                    class="min-h-[44px] px-3 py-2 rounded-xl bg-white text-brand-700 text-xs font-bold ring-1 ring-brand-200 hover:bg-brand-50">Открыть диалоги</button>
                             </div>
+                            <button type="button" x-show="kanbanConfirmedVisible.length < kanbanConfirmed.length" @click="kanbanShowMore('confirmed')"
+                                class="w-full min-h-[44px] rounded-xl bg-white text-xs font-semibold text-blue-700 ring-1 ring-blue-200 hover:bg-blue-50">Показать ещё 20</button>
                         </div>
                     </div>
 
                     <!-- SENT_TO_IIKO -->
-                    <div class="bg-emerald-50/50 rounded-2xl p-4 shrink-0 w-[min(85vw,22rem)] lg:w-auto snap-center">
+                    <div data-kanban-col tabindex="0" role="region" aria-label="Колонка: на кухне" class="bg-emerald-50/50 rounded-2xl p-4 shrink-0 w-[min(85vw,22rem)] lg:w-auto snap-center outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2">
                         <div class="flex items-center gap-2 mb-4">
                             <div class="w-3 h-3 rounded-full bg-emerald-500"></div>
                             <h3 class="font-semibold text-emerald-700 text-sm">На кухне</h3>
@@ -1496,49 +1495,119 @@
                         <div class="space-y-3 min-h-[100px]"
                             @dragover.prevent="$event.dataTransfer.dropEffect='move'"
                             @drop.prevent="kanbanDrop($event, 'sent_to_iiko')">
-                            <template x-for="order in kanbanSent" :key="order.id">
+                            <template x-for="order in kanbanSentVisible" :key="order.id">
                                 {{ order_card_kanban('sent', 'bg-white shadow-sm border border-emerald-100') }}
                                 {{ iiko_error('order', 'mt-3') }}
                             </template>
-                            <div x-show="kanbanSent.length === 0" class="text-center py-8 px-2 text-gray-500 text-xs space-y-3">
+                            <div x-show="ordersLoading && kanbanSent.length === 0" x-cloak class="text-center py-8 px-2 text-gray-400 text-xs">Загрузка…</div>
+                            <div x-show="kanbanSent.length === 0 && !ordersLoading" class="text-center py-8 px-2 text-gray-500 text-xs space-y-3">
                                 <p>Сюда попадают заказы, уже отправленные на кухню (iiko).</p>
                                 <button type="button" @click="navigateToTab('chats')"
-                                    class="min-h-[40px] px-3 py-2 rounded-xl bg-white text-emerald-800 text-xs font-bold ring-1 ring-emerald-200 hover:bg-emerald-50">Проверить в чате</button>
+                                    class="min-h-[44px] px-3 py-2 rounded-xl bg-white text-emerald-800 text-xs font-bold ring-1 ring-emerald-200 hover:bg-emerald-50">Проверить в чате</button>
                             </div>
+                            <button type="button" x-show="kanbanSentVisible.length < kanbanSent.length" @click="kanbanShowMore('sent_to_iiko')"
+                                class="w-full min-h-[44px] rounded-xl bg-white text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200 hover:bg-emerald-50">Показать ещё 20</button>
+                        </div>
+                    </div>
+
+                    <!-- IN_TRANSIT -->
+                    <div data-kanban-col tabindex="0" role="region" aria-label="Колонка: в пути" class="bg-sky-50/50 rounded-2xl p-4 shrink-0 w-[min(85vw,22rem)] lg:w-auto snap-center outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2">
+                        <div class="flex items-center gap-2 mb-4">
+                            <div class="w-3 h-3 rounded-full bg-sky-500"></div>
+                            <h3 class="font-semibold text-sky-700 text-sm">В пути</h3>
+                            <span class="ml-auto text-xs bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full font-medium"
+                                x-text="kanbanInTransit.length"></span>
+                        </div>
+                        <div class="space-y-3 min-h-[100px]"
+                            @dragover.prevent="$event.dataTransfer.dropEffect='move'"
+                            @drop.prevent="kanbanDrop($event, 'in_transit')">
+                            <template x-for="order in kanbanInTransitVisible" :key="order.id">
+                                {{ order_card_kanban('in-transit', 'bg-white shadow-sm border border-sky-100') }}
+                                {{ iiko_error('order', 'mt-3') }}
+                            </template>
+                            <div x-show="ordersLoading && kanbanInTransit.length === 0" x-cloak class="text-center py-8 px-2 text-gray-400 text-xs">Загрузка…</div>
+                            <div x-show="kanbanInTransit.length === 0 && !ordersLoading" class="text-center py-8 px-2 text-gray-500 text-xs">Заказы появятся после ручного переноса из кухни.</div>
+                            <button type="button" x-show="kanbanInTransitVisible.length < kanbanInTransit.length" @click="kanbanShowMore('in_transit')"
+                                class="w-full min-h-[44px] rounded-xl bg-white text-xs font-semibold text-sky-700 ring-1 ring-sky-200 hover:bg-sky-50">Показать ещё 20</button>
+                        </div>
+                    </div>
+
+                    <!-- WAITING_PICKUP -->
+                    <div data-kanban-col tabindex="0" role="region" aria-label="Колонка: ожидает выдачи" class="bg-amber-50/50 rounded-2xl p-4 shrink-0 w-[min(85vw,22rem)] lg:w-auto snap-center outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2">
+                        <div class="flex items-center gap-2 mb-4">
+                            <div class="w-3 h-3 rounded-full bg-amber-500"></div>
+                            <h3 class="font-semibold text-amber-700 text-sm">Ожидает выдачи</h3>
+                            <span class="ml-auto text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium"
+                                x-text="kanbanWaitingPickup.length"></span>
+                        </div>
+                        <div class="space-y-3 min-h-[100px]"
+                            @dragover.prevent="$event.dataTransfer.dropEffect='move'"
+                            @drop.prevent="kanbanDrop($event, 'waiting_pickup')">
+                            <template x-for="order in kanbanWaitingPickupVisible" :key="order.id">
+                                {{ order_card_kanban('waiting-pickup', 'bg-white shadow-sm border border-amber-100') }}
+                                {{ iiko_error('order', 'mt-3') }}
+                            </template>
+                            <div x-show="ordersLoading && kanbanWaitingPickup.length === 0" x-cloak class="text-center py-8 px-2 text-gray-400 text-xs">Загрузка…</div>
+                            <div x-show="kanbanWaitingPickup.length === 0 && !ordersLoading" class="text-center py-8 px-2 text-gray-500 text-xs">Готовые к выдаче заказы будут здесь.</div>
+                            <button type="button" x-show="kanbanWaitingPickupVisible.length < kanbanWaitingPickup.length" @click="kanbanShowMore('waiting_pickup')"
+                                class="w-full min-h-[44px] rounded-xl bg-white text-xs font-semibold text-amber-700 ring-1 ring-amber-200 hover:bg-amber-50">Показать ещё 20</button>
+                        </div>
+                    </div>
+
+                    <!-- COMPLETED -->
+                    <div data-kanban-col tabindex="0" role="region" aria-label="Колонка: завершённые заказы" class="bg-emerald-50/40 rounded-2xl p-4 shrink-0 w-[min(85vw,22rem)] lg:w-auto snap-center outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2">
+                        <div class="flex items-center gap-2 mb-4">
+                            <div class="w-3 h-3 rounded-full bg-emerald-700"></div>
+                            <h3 class="font-semibold text-emerald-800 text-sm">Завершён</h3>
+                            <span class="ml-auto text-xs bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-medium"
+                                x-text="kanbanCompleted.length"></span>
+                        </div>
+                        <div class="space-y-3 min-h-[100px]"
+                            @dragover.prevent="$event.dataTransfer.dropEffect='move'"
+                            @drop.prevent="kanbanDrop($event, 'completed')">
+                            <template x-for="order in kanbanCompletedVisible" :key="order.id">
+                                {{ order_card_kanban('completed', 'bg-white shadow-sm border border-emerald-100') }}
+                                {{ iiko_error('order', 'mt-3') }}
+                            </template>
+                            <div x-show="ordersLoading && kanbanCompleted.length === 0" x-cloak class="text-center py-8 px-2 text-gray-400 text-xs">Загрузка…</div>
+                            <div x-show="kanbanCompleted.length === 0 && !ordersLoading" class="text-center py-8 px-2 text-gray-500 text-xs">Закрытые заказы появятся после финального переноса.</div>
+                            <button type="button" x-show="kanbanCompletedVisible.length < kanbanCompleted.length" @click="kanbanShowMore('completed')"
+                                class="w-full min-h-[44px] rounded-xl bg-white text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200 hover:bg-emerald-50">Показать ещё 20</button>
                         </div>
                     </div>
                 </div>
 
                 <!-- Таблица заказов -->
-                <div x-show="ordersView === 'table'" class="rm-card-surface">
-                    <div class="overflow-x-auto hidden md:block">
-                        <table class="w-full text-sm">
-                            <thead>
-                                <tr class="text-left text-gray-500 border-b border-gray-100">
-                                    <th class="px-5 pb-3 pt-4 font-medium">
-                                        <button type="button" @click.stop="toggleOrdersSort('id')" class="inline-flex items-center gap-1 hover:text-brand-600">ID <span class="text-brand-600" x-text="sortArrow(ordersSort.column, 'id', ordersSort.dir)"></span></button>
-                                    </th>
-                                    <th class="px-5 pb-3 pt-4 font-medium min-w-[10rem]">
-                                        <button type="button" @click.stop="toggleOrdersSort('client')" class="inline-flex items-center gap-1 hover:text-brand-600">Клиент <span class="text-brand-600" x-text="sortArrow(ordersSort.column, 'client', ordersSort.dir)"></span></button>
-                                    </th>
-                                    <th class="px-5 pb-3 pt-4 font-medium">
-                                        <button type="button" @click.stop="toggleOrdersSort('order_type')" class="inline-flex items-center gap-1 hover:text-brand-600">Тип <span class="text-brand-600" x-text="sortArrow(ordersSort.column, 'order_type', ordersSort.dir)"></span></button>
-                                    </th>
-                                    <th class="px-5 pb-3 pt-4 font-medium">
-                                        <button type="button" @click.stop="toggleOrdersSort('items')" class="inline-flex items-center gap-1 hover:text-brand-600">Позиции <span class="text-brand-600" x-text="sortArrow(ordersSort.column, 'items', ordersSort.dir)"></span></button>
-                                    </th>
-                                    <th class="px-5 pb-3 pt-4 font-medium">
-                                        <button type="button" @click.stop="toggleOrdersSort('total')" class="inline-flex items-center gap-1 hover:text-brand-600">Сумма <span class="text-brand-600" x-text="sortArrow(ordersSort.column, 'total', ordersSort.dir)"></span></button>
-                                    </th>
-                                    <th class="px-5 pb-3 pt-4 font-medium">
-                                        <button type="button" @click.stop="toggleOrdersSort('status')" class="inline-flex items-center gap-1 hover:text-brand-600">Статус <span class="text-brand-600" x-text="sortArrow(ordersSort.column, 'status', ordersSort.dir)"></span></button>
-                                    </th>
-                                    <th class="px-5 pb-3 pt-4 font-medium">
-                                        <button type="button" @click.stop="toggleOrdersSort('date')" class="inline-flex items-center gap-1 hover:text-brand-600">Дата <span class="text-brand-600" x-text="sortArrow(ordersSort.column, 'date', ordersSort.dir)"></span></button>
-                                    </th>
-                                </tr>
-                            </thead>
-                            <tbody>
+                <div x-show="ordersView === 'table'" x-cloak>
+                {% call card(extra_class='', padding_class='p-0') %}
+                <div>
+                    <div class="hidden md:block">
+                        {% set orders_table_header %}
+                                    <tr class="text-left text-gray-500 border-b border-gray-100">
+                                        <th class="px-5 pb-3 pt-4 font-medium">
+                                            <button type="button" @click.stop="toggleOrdersSort('id')" class="inline-flex items-center gap-1 hover:text-brand-600">ID <span class="text-brand-600" x-text="sortArrow(ordersSort.column, 'id', ordersSort.dir)"></span></button>
+                                        </th>
+                                        <th class="px-5 pb-3 pt-4 font-medium min-w-[10rem]">
+                                            <button type="button" @click.stop="toggleOrdersSort('client')" class="inline-flex items-center gap-1 hover:text-brand-600">Клиент <span class="text-brand-600" x-text="sortArrow(ordersSort.column, 'client', ordersSort.dir)"></span></button>
+                                        </th>
+                                        <th class="px-5 pb-3 pt-4 font-medium">
+                                            <button type="button" @click.stop="toggleOrdersSort('order_type')" class="inline-flex items-center gap-1 hover:text-brand-600">Тип <span class="text-brand-600" x-text="sortArrow(ordersSort.column, 'order_type', ordersSort.dir)"></span></button>
+                                        </th>
+                                        <th class="px-5 pb-3 pt-4 font-medium">
+                                            <button type="button" @click.stop="toggleOrdersSort('items')" class="inline-flex items-center gap-1 hover:text-brand-600">Позиции <span class="text-brand-600" x-text="sortArrow(ordersSort.column, 'items', ordersSort.dir)"></span></button>
+                                        </th>
+                                        <th class="px-5 pb-3 pt-4 font-medium">
+                                            <button type="button" @click.stop="toggleOrdersSort('total')" class="inline-flex items-center gap-1 hover:text-brand-600">Сумма <span class="text-brand-600" x-text="sortArrow(ordersSort.column, 'total', ordersSort.dir)"></span></button>
+                                        </th>
+                                        <th class="px-5 pb-3 pt-4 font-medium">
+                                            <button type="button" @click.stop="toggleOrdersSort('status')" class="inline-flex items-center gap-1 hover:text-brand-600">Статус <span class="text-brand-600" x-text="sortArrow(ordersSort.column, 'status', ordersSort.dir)"></span></button>
+                                        </th>
+                                        <th class="px-5 pb-3 pt-4 font-medium">
+                                            <button type="button" @click.stop="toggleOrdersSort('date')" class="inline-flex items-center gap-1 hover:text-brand-600">Дата <span class="text-brand-600" x-text="sortArrow(ordersSort.column, 'date', ordersSort.dir)"></span></button>
+                                        </th>
+                                    </tr>
+                        {% endset %}
+                        {% call table_frame(header_html=orders_table_header) %}
                                 <template x-for="order in ordersTableSorted" :key="order.id">
                                     <tr class="border-b border-gray-50 hover:bg-blue-50/30 cursor-pointer transition"
                                         :class="order.iiko_last_error ? 'bg-rose-50/70 hover:bg-rose-50' : ''"
@@ -1567,24 +1636,31 @@
                                         <td class="px-5 py-4 text-gray-500" x-text="fmt.date(order.created_at)"></td>
                                     </tr>
                                 </template>
-                                <tr x-show="orders.length === 0">
+                                <tr x-show="ordersLoading && orders.length === 0" x-cloak>
+                                    <td colspan="7" class="py-12 px-4 text-center text-gray-400">
+                                        Загрузка заказов…
+                                    </td>
+                                </tr>
+                                <tr x-show="orders.length === 0 && !ordersLoading">
                                     <td colspan="7" class="py-12 px-4 text-center text-gray-500">
                                         <div class="text-4xl mb-2" aria-hidden="true">&#x1F4E6;</div>
                                         <p class="text-sm font-semibold text-gray-800">Тут будут ваши заказы</p>
                                         <p class="text-xs mt-2 max-w-md mx-auto">Напишите боту в WhatsApp как клиент — оформите заказ, и он появится в этом списке.</p>
                                         <button type="button" @click="navigateToTab('chats')"
-                                            class="mt-4 min-h-[40px] px-4 py-2 rounded-xl text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700">Открыть диалоги</button>
+                                            class="mt-4 min-h-[44px] px-4 py-2 rounded-xl text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700">Открыть диалоги</button>
                                     </td>
                                 </tr>
-                            </tbody>
-                        </table>
+                        {% endcall %}
                     </div>
                     <div class="md:hidden divide-y divide-gray-100">
                         <template x-for="order in ordersTableSorted" :key="'mob-' + order.id">
                             {{ order_card_mobile("order") }}
                         </template>
                     </div>
-                    <div class="md:hidden px-4 py-12 text-center border-t border-gray-100 bg-gray-50/40" x-show="orders.length === 0" x-cloak>
+                    <div class="md:hidden px-4 py-12 text-center border-t border-gray-100 bg-gray-50/40" x-show="ordersLoading && orders.length === 0" x-cloak>
+                        <p class="text-sm text-gray-400">Загрузка заказов…</p>
+                    </div>
+                    <div class="md:hidden px-4 py-12 text-center border-t border-gray-100 bg-gray-50/40" x-show="orders.length === 0 && !ordersLoading" x-cloak>
                         <div class="text-4xl mb-2" aria-hidden="true">&#x1F4E6;</div>
                         <p class="text-sm font-semibold text-gray-800">Тут будут ваши заказы</p>
                         <p class="text-xs text-gray-500 mt-2 max-w-xs mx-auto">Напишите боту в WhatsApp — проверьте сценарий заказа с телефона.</p>
@@ -1603,36 +1679,38 @@
                         <div class="flex items-center gap-2">
                             <button type="button" @click="ordersPrevPage()"
                                 :disabled="ordersPage <= 1"
-                                class="min-h-[40px] px-4 rounded-xl bg-white border border-gray-200 text-gray-700 text-sm font-semibold hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition">
+                                class="min-h-[44px] px-4 rounded-xl bg-white border border-gray-200 text-gray-700 text-sm font-semibold hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition">
                                 Назад
                             </button>
                             <button type="button" @click="ordersNextPage()"
                                 :disabled="ordersPage >= ordersPages"
-                                class="min-h-[40px] px-4 rounded-xl bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed transition shadow-sm shadow-brand-600/20">
+                                class="min-h-[44px] px-4 rounded-xl bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed transition shadow-sm shadow-brand-600/20">
                                 Вперёд
                             </button>
                         </div>
                     </div>
                 </div>
+                {% endcall %}
+                </div>
             </div>
 
             <!-- ========== ПОМОЩЬ КЛИЕНТАМ (Inbox Zero) ========== -->
             <div x-show="currentTab === 'operator_queue' || currentTab === 'errors'" x-cloak class="fade-in">
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-                    <div class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-900/5 flex items-center gap-4">
-                        <div class="text-4xl font-black text-slate-900 tabular-nums shrink-0" x-text="dashStats.failed_tasks_open ?? 0"></div>
-                        <div>
-                            <div class="text-xs font-bold uppercase tracking-wide text-slate-500">Открытых обращений</div>
-                            <p class="text-sm text-slate-600 mt-1">Считаем неразрешённые задачи «нужен человек». Идеально — <span class="font-semibold text-emerald-700">0</span>.</p>
-                        </div>
+                {% set op_q_open %}
+                    <div class="flex items-center gap-4">
+                        <div class="text-4xl font-black tabular-nums shrink-0" style="color: var(--color-text);" x-text="dashStats.failed_tasks_open ?? 0"></div>
+                        <p class="text-sm ds-text-muted mt-0">Считаем неразрешённые задачи «нужен человек». Идеально — <span class="font-semibold text-emerald-700">0</span>.</p>
                     </div>
-                    <div class="rounded-2xl border-2 border-dashed border-emerald-200 bg-emerald-50/40 p-5 flex items-center gap-3">
+                {% endset %}
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+                    {{ kpi_card('Открытых обращений', value_html=op_q_open, extra_class='!p-5 flex flex-col justify-center') }}
+                    {% call card(padding_class='p-5', extra_class='!border-2 !border-dashed !border-emerald-200 !bg-emerald-50/40 flex items-center gap-3') %}
                         <div class="text-4xl shrink-0" aria-hidden="true">📭</div>
                         <div>
                             <div class="font-semibold text-emerald-900">Inbox Zero</div>
                             <p class="text-sm text-emerald-900/80 mt-0.5">Когда список ниже пуст — команда свободна, бот справляется сам.</p>
                         </div>
-                    </div>
+                    {% endcall %}
                 </div>
                 <p class="text-sm text-gray-600 mb-4 max-w-3xl leading-relaxed">
                     Здесь — обращения, где системе нужен человек: что-то пошло не так или нужен ручной ответ.
@@ -1642,7 +1720,7 @@
                     <div>
                         <label class="block text-xs font-medium text-gray-500 mb-1">Статус</label>
                         <select x-model="failedTasksFilter" @change="loadFailedTasks()"
-                            class="text-sm border border-gray-200 rounded-xl px-3 py-2 bg-white min-w-[11rem]">
+                            class="ds-input text-sm min-w-[11rem] min-h-[44px]">
                             <option value="open">Неразрешённые</option>
                             <option value="resolved">Разрешённые</option>
                             <option value="all">Все</option>
@@ -1652,12 +1730,12 @@
                         <label class="block text-xs font-medium text-gray-500 mb-1">Телефон</label>
                         <input type="search" x-model="failedTasksPhone" @input.debounce.400ms="loadFailedTasks()"
                             placeholder="Фильтр по номеру"
-                            class="w-full text-sm border border-gray-200 rounded-xl px-3 py-2 bg-white">
+                            class="ds-input w-full text-sm min-h-[44px]">
                     </div>
                     <button type="button" @click="loadFailedTasks()"
-                        class="px-4 py-2 rounded-xl text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700">Обновить</button>
+                        class="ds-btn ds-btn-primary ds-btn-md">Обновить</button>
                 </div>
-                <div class="rm-card-surface overflow-hidden">
+                {% call card(padding_class='p-0', extra_class='overflow-hidden') %}
                     <div x-show="failedTasksLoading" class="p-8 text-center text-gray-400 text-sm">Загрузка…</div>
                     <div x-show="!failedTasksLoading && failedTasks.length === 0" class="p-12 text-center text-gray-500">
                         <div class="text-5xl mb-3" aria-hidden="true">✅</div>
@@ -1713,7 +1791,7 @@
                     <p class="px-4 py-3 text-xs text-gray-400 border-t border-gray-100" x-show="failedTasksTotal > 0">
                         Показано <span x-text="failedTasks.length"></span> из <span x-text="failedTasksTotal"></span>
                     </p>
-                </div>
+                {% endcall %}
             </div>
 
             <!-- ========== БРОНИРОВАНИЯ ========== -->
@@ -1721,7 +1799,7 @@
                 <div class="grid gap-4">
                     <template x-for="b in bookings" :key="b.id">
                         <button type="button" @click="openBookingModal(b)"
-                            class="w-full text-left bg-white rounded-2xl shadow-sm border border-gray-100 p-5 hover:shadow-md hover:border-emerald-200/80 transition cursor-pointer group">
+                            class="w-full text-left ds-card p-5 hover:shadow-md hover:border-emerald-200/80 transition cursor-pointer group">
                             <div class="flex items-start justify-between gap-3">
                                 <div class="flex items-center gap-4 min-w-0">
                                     <div class="w-12 h-12 rounded-xl bg-emerald-50 flex items-center justify-center text-2xl shrink-0 group-hover:bg-emerald-100/90 transition-colors">&#x1F37D;</div>
@@ -1755,12 +1833,12 @@
 
             <!-- ========== ЖИВЫЕ ДИАЛОГИ: flex-1 min-h-0 внутри #admin-content-scroll — без calc, алерт сжимает область ========== -->
             <div x-show="currentTab === 'chats'" x-cloak class="fade-in flex flex-1 min-h-0 flex-col overflow-hidden">
-                <div class="flex flex-col md:flex-row flex-1 min-h-0 rm-card-surface overflow-hidden">
+                {% call chat_shell_layout() %}
                     <!-- ЛЕВАЯ ПАНЕЛЬ: список (на мобилке — полный экран, пока не выбран чат) -->
-                    <div class="w-full max-w-none md:max-w-sm md:w-[340px] lg:w-[360px] flex-shrink-0 border-r border-gray-100 flex flex-col min-h-0 bg-white flex-1 md:flex-none"
+                    <div class="ds-chat-shell-list w-full max-w-none md:max-w-sm md:w-[340px] lg:w-[360px] flex-shrink-0 border-r border-gray-100 flex flex-col min-h-0 bg-white flex-1 md:flex-none"
                         :class="activeChatPhone ? 'hidden md:flex' : 'flex'">
-                        <div class="p-4 border-b border-gray-50 shrink-0">
-                            <h2 class="text-lg font-semibold text-gray-900 mb-3">Диалоги</h2>
+                        <div class="p-4 border-b border-gray-50 shrink-0 space-y-3">
+                            <h2 class="text-lg font-semibold text-gray-900">Диалоги</h2>
                             <div class="relative">
                                 <input type="text" x-model="chatSearch" placeholder="Поиск по номеру..." inputmode="tel" autocomplete="tel"
                                     class="w-full bg-gray-50 border border-gray-200 text-sm rounded-lg pl-10 pr-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
@@ -1768,6 +1846,17 @@
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
                                 </svg>
                             </div>
+                            {% call tabs_pills('w-full') %}
+                                <button type="button" @click="setChatTriageMode('active')"
+                                    class="min-h-[36px] rounded-lg text-[11px] font-semibold flex-1"
+                                    :class="chatTriageMode === 'active' ? 'ds-segmented-active' : ''">Активные</button>
+                                <button type="button" @click="setChatTriageMode('mine')"
+                                    class="min-h-[36px] rounded-lg text-[11px] font-semibold flex-1"
+                                    :class="chatTriageMode === 'mine' ? 'ds-segmented-active' : ''">На мне</button>
+                                <button type="button" @click="setChatTriageMode('closed')"
+                                    class="min-h-[36px] rounded-lg text-[11px] font-semibold flex-1"
+                                    :class="chatTriageMode === 'closed' ? 'ds-segmented-active' : ''">Закрытые</button>
+                            {% endcall %}
                         </div>
                         <div class="flex-1 min-h-0 overflow-y-auto" @scroll.passive="onChatListScroll($event)">
                             <template x-for="chat in filteredChatList" :key="chat.phone">
@@ -1823,7 +1912,7 @@
                 </div>
 
                     <!-- Центр: переписка + кабина оператора (на мобилке — полный экран поверх списка) -->
-                    <div class="flex-1 flex flex-row min-h-0 min-w-0 bg-slate-50/40 relative"
+                    <div class="ds-chat-shell-main flex-1 flex flex-row min-h-0 min-w-0 bg-slate-50/40 relative"
                         :class="activeChatPhone ? 'flex flex-1 min-h-0' : 'hidden md:flex md:flex-1'">
                     <div class="flex-1 flex flex-col min-h-0 min-w-0">
                         <div x-show="!activeChatPhone" class="flex-1 flex flex-col items-center justify-center text-gray-400 p-6 md:p-8 min-h-0 hidden md:flex">
@@ -1833,7 +1922,7 @@
                             <p class="text-sm font-medium text-gray-600">Выберите диалог слева</p>
                             <p class="text-xs text-gray-500 mt-1 text-center max-w-sm">Нет переписок? Напишите боту в WhatsApp с телефона клиента — и откройте чат по номеру внизу списка.</p>
                             <button type="button" @click="navigateToTab('orders')"
-                                class="mt-4 min-h-[40px] px-4 py-2 rounded-xl text-xs font-semibold bg-white text-brand-700 ring-1 ring-brand-200 hover:bg-brand-50">Посмотреть заказы</button>
+                                class="mt-4 min-h-[44px] px-4 py-2 rounded-xl text-xs font-semibold bg-white text-brand-700 ring-1 ring-brand-200 hover:bg-brand-50">Посмотреть заказы</button>
                             <p class="text-xs text-gray-400 mt-3 text-center max-w-sm"><strong class="text-gray-500">Ctrl+K</strong> — быстрый поиск по заказам и чатам.</p>
                             <ul class="mt-4 text-left text-xs text-gray-500 space-y-1 max-w-sm border border-dashed border-gray-200 rounded-xl px-4 py-3 bg-gray-50/80">
                                 <li><kbd class="font-mono bg-white px-1 rounded border">Enter</kbd> — отправить сообщение</li>
@@ -1895,6 +1984,14 @@
                                                         ? 'border-amber-200 text-amber-800 hover:bg-amber-50/90'
                                                         : 'border-emerald-200 text-emerald-800 hover:bg-emerald-50/90'"
                                                     x-text="chatIsBotActive() ? 'Перехватить' : 'Вернуть ИИ'"></button>
+                                                <button type="button" @click="postChatTriageAction('assign-me')"
+                                                    class="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-sky-200 text-sky-800 bg-white hover:bg-sky-50 transition">На мне</button>
+                                                <button type="button" @click="snoozeActiveChat(30)"
+                                                    class="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-violet-200 text-violet-800 bg-white hover:bg-violet-50 transition">Snooze 30</button>
+                                                <button type="button" x-show="chatTriageMode !== 'closed'" @click="postChatTriageAction('close')"
+                                                    class="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-slate-200 text-slate-800 bg-white hover:bg-slate-50 transition">Закрыть</button>
+                                                <button type="button" x-show="chatTriageMode === 'closed'" @click="postChatTriageAction('reopen')"
+                                                    class="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-emerald-200 text-emerald-800 bg-white hover:bg-emerald-50 transition">Вернуть</button>
                                             </div>
                                         </div>
                                         <p class="mt-1.5 text-[10px] text-gray-400 leading-tight min-[520px]:text-right"
@@ -1910,7 +2007,7 @@
                                     </div>
                                     <div x-show="!chatMessagesLoadingOlder && chatMessagesHasMore" x-cloak class="flex justify-center pb-2">
                                         <button type="button" @click="loadOlderChatMessages()"
-                                            class="min-h-[40px] px-4 rounded-full bg-white ring-1 ring-slate-200/70 hover:ring-slate-300 text-slate-700 text-xs font-bold uppercase tracking-wide transition">
+                                            class="min-h-[44px] px-4 rounded-full bg-white ring-1 ring-slate-200/70 hover:ring-slate-300 text-slate-700 text-xs font-bold uppercase tracking-wide transition">
                                             Загрузить выше
                                         </button>
                                     </div>
@@ -1956,7 +2053,7 @@
                                         <p class="text-sm font-semibold text-gray-800">Сообщений пока нет</p>
                                         <p class="text-xs mt-2 max-w-sm">Попросите гостя написать в WhatsApp ещё раз или отправьте первое сообщение сами — история появится здесь.</p>
                                         <button type="button" x-show="activeChatPhone" @click="navigateToTab('orders')"
-                                            class="mt-4 min-h-[40px] px-4 py-2 rounded-xl text-xs font-semibold bg-brand-600 text-white hover:bg-brand-700">Открыть заказы</button>
+                                            class="mt-4 min-h-[44px] px-4 py-2 rounded-xl text-xs font-semibold bg-brand-600 text-white hover:bg-brand-700">Открыть заказы</button>
                                     </div>
                                 </div>
 
@@ -1984,7 +2081,7 @@
 
                     <!-- Кабина оператора: контекст клиента, быстрые ответы, заметка -->
                     <div x-show="activeChatPhone" x-cloak
-                        class="hidden lg:flex w-72 xl:w-80 shrink-0 border-l border-gray-200 bg-gradient-to-b from-gray-50/95 to-slate-50/90 flex-col min-h-0 overflow-y-auto">
+                        class="ds-chat-shell-detail hidden lg:flex w-72 xl:w-80 shrink-0 border-l border-gray-200 bg-gradient-to-b from-gray-50/95 to-slate-50/90 flex-col min-h-0 overflow-y-auto">
                         <div class="p-4 border-b border-gray-100/80 shrink-0">
                             <h3 class="text-[11px] font-bold text-gray-400 uppercase tracking-wider">О клиенте</h3>
                         </div>
@@ -2009,15 +2106,24 @@
                         </div>
                     </div>
                     </div>
-                </div>
+                {% endcall %}
             </div>
 
-            <!-- ========== МЕНЮ ========== -->
+            <!-- ========== МЕНЮ (каталог + стоп-лист) ========== -->
             <div x-show="currentTab === 'menu'" x-cloak class="fade-in pb-24 min-w-0 max-w-full">
                 <div x-show="menuLoadError" x-cloak class="mb-4 text-sm text-red-800 bg-red-50 border border-red-100 rounded-xl px-4 py-3 flex items-start gap-2">
                     <span class="shrink-0 mt-0.5" aria-hidden="true">&#x26A0;&#xFE0F;</span>
                     <span x-text="menuLoadError"></span>
                 </div>
+                <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+                    {{ section_header('Меню', subtitle='Каталог позиций и стоп-лист iiko') }}
+                    {% call tabs_pills() %}
+                    <button type="button" :class="menuView === 'catalog' ? 'ds-segmented-active' : ''" @click="setMenuView('catalog')">Каталог</button>
+                    <button type="button" :class="menuView === 'stoplist' ? 'ds-segmented-active' : ''" @click="setMenuView('stoplist')">Стоп-лист</button>
+                    {% endcall %}
+                </div>
+
+                <div x-show="menuView === 'catalog'" x-cloak>
                 <!-- На узком экране: только поиск + кнопка «Фильтры»; остальное открывается по нажатию -->
                 <div class="sticky top-0 z-10 -mx-4 sm:-mx-6 md:-mx-8 px-4 sm:px-6 md:px-8 pt-2 pb-3 mb-4 md:pb-4 md:mb-6 bg-gray-50/90 backdrop-blur-md border-b border-gray-200/80 shadow-sm min-w-0 max-w-full overflow-x-clip">
                     <div class="flex flex-col gap-3 min-w-0">
@@ -2228,6 +2334,86 @@
                             class="px-4 py-2 rounded-xl text-xs font-semibold bg-white/10 hover:bg-white/20 disabled:opacity-50">Снять выбор</button>
                     </div>
                 </div>
+                </div>
+
+                <div x-show="menuView === 'stoplist'" x-cloak class="pb-8">
+                <div class="sticky top-0 z-10 -mx-4 sm:-mx-6 md:-mx-8 px-4 sm:px-6 md:px-8 pt-2 pb-4 mb-6 bg-gray-50/95 backdrop-blur-md border-b border-gray-200/80 shadow-sm">
+                    <div class="flex flex-col sm:flex-row gap-4 sm:items-center sm:justify-between">
+                        <div class="relative flex-1 max-w-xl">
+                            <span class="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">&#x1F50D;</span>
+                            <input type="search" x-model.debounce.300ms="stopListSearchQuery" placeholder="Поиск по названию или разделу…"
+                                class="w-full pl-11 pr-4 py-3 rounded-2xl border border-gray-200 bg-white text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-orange-500">
+                        </div>
+                        <div class="shrink-0 flex items-center gap-2 text-xs font-bold text-gray-600 bg-white border border-gray-200 rounded-2xl px-4 py-3 shadow-sm">
+                            <span class="text-gray-400">В стопе:</span>
+                            <span class="tabular-nums" x-text="stopListFilteredItems.length"></span>
+                        </div>
+                        <button type="button" @click="syncStopListOnly()"
+                            :disabled="stopListSyncLoading || integrationSyncLoading || !integrationStatus.iiko_configured"
+                            class="min-h-[48px] shrink-0 px-6 py-3 rounded-2xl font-bold text-sm bg-orange-600 text-white hover:bg-orange-700 shadow-md shadow-orange-600/25 transition disabled:opacity-45 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+                            <span :class="stopListSyncLoading ? 'animate-spin' : ''">&#x21bb;</span>
+                            Синхронизировать с iiko
+                        </button>
+                    </div>
+                    <details class="hint-details mt-3 rounded-xl border border-gray-200/80 bg-gray-50/50 px-3 py-2">
+                        <summary class="cursor-pointer flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-orange-800 select-none py-1">
+                            <svg class="w-4 h-4 text-gray-400 shrink-0 transition-transform duration-200 hint-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                            Что показывает эта вкладка и кнопка синхронизации
+                        </summary>
+                        <div class="pb-2 pt-1 pl-6 border-l-2 border-orange-200 ml-1 text-xs text-gray-600 leading-relaxed">
+                            Список позиций с флагом «нет в наличии». Кнопка подтягивает актуальный стоп из iiko Cloud (учётные данные берутся из настроек текущего филиала; для legacy — fallback на переменные окружения).
+                            <span x-show="!integrationStatus.iiko_configured" class="text-amber-700 font-medium"> Подключите iiko в этом разделе, чтобы включить синхронизацию.</span>
+                        </div>
+                    </details>
+                </div>
+
+                <div x-show="stopListLoadError" x-cloak class="mb-4 text-sm text-red-800 bg-red-50 border border-red-100 rounded-xl px-4 py-3" x-text="stopListLoadError"></div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+                    <div class="lg:col-span-1 rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+                        <div class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Последняя синхронизация</div>
+                        <div class="flex items-center gap-2 text-sm text-gray-800">
+                            <span class="h-2.5 w-2.5 rounded-full shrink-0" :class="integrationStatus.last_stoplist?.ok ? 'bg-emerald-500' : 'bg-red-500'"></span>
+                            <span x-text="integrationStatus.last_stoplist?.at ? fmt.date(integrationStatus.last_stoplist?.at) : '—'"></span>
+                        </div>
+                        <p class="text-xs text-red-600 mt-2 font-medium" x-show="integrationStatus.last_stoplist?.error && !integrationStatus.last_stoplist?.ok"
+                            x-text="integrationStatus.last_stoplist?.error"></p>
+                    </div>
+                    <details class="hint-details lg:col-span-2 rounded-2xl border border-orange-100 bg-orange-50/40 p-5">
+                        <summary class="cursor-pointer flex items-center gap-2 text-sm font-semibold text-orange-950 select-none list-none">
+                            <svg class="w-4 h-4 text-orange-700 shrink-0 transition-transform duration-200 hint-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                            Если в iiko стоп-лист очищен…
+                        </summary>
+                        <div class="mt-3 text-sm text-orange-950 leading-relaxed pl-6 border-l-2 border-orange-200">
+                            Если в iiko стоп-лист <strong>очищен</strong>, локальные позиции снова станут доступны после синхронизации (исправлено на сервере: пустой ответ iiko больше не блокирует возврат в продажу).
+                        </div>
+                    </details>
+                </div>
+
+                <div x-show="!tabDataLoading && stopListFilteredItems.length === 0 && !stopListLoadError" class="text-center py-16 text-gray-500">
+                    <div class="text-5xl mb-3">&#x2705;</div>
+                    <p class="text-lg font-medium text-gray-700">В стопе никого</p>
+                    <p class="text-sm mt-2 max-w-md mx-auto">Все позиции в наличии или ещё не загружено меню. Нажмите «Синхронизировать с iiko», если ожидаете стоп из облака.</p>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                    <template x-for="item in stopListFilteredItems" :key="'sl-' + item.id">
+                        <div class="bg-white rounded-2xl border border-red-100 p-4 shadow-sm hover:shadow-md transition flex flex-col">
+                            <div class="flex justify-between items-start gap-2 mb-2">
+                                <span class="text-[10px] uppercase font-bold text-red-700 bg-red-50 px-2 py-0.5 rounded-md">Стоп</span>
+                                <span class="text-lg font-extrabold text-brand-700 tabular-nums shrink-0" x-text="fmt.money(item.price)"></span>
+                            </div>
+                            <div class="font-semibold text-gray-900 text-sm leading-snug flex-1" x-text="item.name"></div>
+                            <div class="text-[11px] text-gray-500 mt-1" x-text="item.category"></div>
+                            <div class="mt-3 pt-3 border-t border-gray-100 flex gap-2">
+                                <button type="button" @click="openMenuFromStopItem(item)"
+                                    class="text-xs font-semibold text-brand-600 hover:text-brand-800">Открыть в меню</button>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+                </div>
+
             </div>
 
             <!-- Модальное окно: редактирование / новая позиция меню -->
@@ -2336,85 +2522,6 @@
                 </div>
             </div>
 
-            <!-- ========== СТОП-ЛИСТ ========== -->
-            <div x-show="currentTab === 'stoplist'" x-cloak class="fade-in pb-8">
-                <div class="sticky top-0 z-10 -mx-4 sm:-mx-6 md:-mx-8 px-4 sm:px-6 md:px-8 pt-2 pb-4 mb-6 bg-gray-50/95 backdrop-blur-md border-b border-gray-200/80 shadow-sm">
-                    <div class="flex flex-col sm:flex-row gap-4 sm:items-center sm:justify-between">
-                        <div class="relative flex-1 max-w-xl">
-                            <span class="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">&#x1F50D;</span>
-                            <input type="search" x-model.debounce.300ms="stopListSearchQuery" placeholder="Поиск по названию или разделу…"
-                                class="w-full pl-11 pr-4 py-3 rounded-2xl border border-gray-200 bg-white text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-orange-500">
-                        </div>
-                        <div class="shrink-0 flex items-center gap-2 text-xs font-bold text-gray-600 bg-white border border-gray-200 rounded-2xl px-4 py-3 shadow-sm">
-                            <span class="text-gray-400">В стопе:</span>
-                            <span class="tabular-nums" x-text="stopListFilteredItems.length"></span>
-                        </div>
-                        <button type="button" @click="syncStopListOnly()"
-                            :disabled="stopListSyncLoading || integrationSyncLoading || !integrationStatus.iiko_configured"
-                            class="min-h-[48px] shrink-0 px-6 py-3 rounded-2xl font-bold text-sm bg-orange-600 text-white hover:bg-orange-700 shadow-md shadow-orange-600/25 transition disabled:opacity-45 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-                            <span :class="stopListSyncLoading ? 'animate-spin' : ''">&#x21bb;</span>
-                            Синхронизировать с iiko
-                        </button>
-                    </div>
-                    <details class="hint-details mt-3 rounded-xl border border-gray-200/80 bg-gray-50/50 px-3 py-2">
-                        <summary class="cursor-pointer flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-orange-800 select-none py-1">
-                            <svg class="w-4 h-4 text-gray-400 shrink-0 transition-transform duration-200 hint-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-                            Что показывает эта вкладка и кнопка синхронизации
-                        </summary>
-                        <div class="pb-2 pt-1 pl-6 border-l-2 border-orange-200 ml-1 text-xs text-gray-600 leading-relaxed">
-                            Список позиций с флагом «нет в наличии». Кнопка подтягивает актуальный стоп из iiko Cloud (учётные данные берутся из настроек текущего филиала; для legacy — fallback на переменные окружения).
-                            <span x-show="!integrationStatus.iiko_configured" class="text-amber-700 font-medium"> Подключите iiko в этом разделе, чтобы включить синхронизацию.</span>
-                        </div>
-                    </details>
-                </div>
-
-                <div x-show="stopListLoadError" x-cloak class="mb-4 text-sm text-red-800 bg-red-50 border border-red-100 rounded-xl px-4 py-3" x-text="stopListLoadError"></div>
-
-                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-                    <div class="lg:col-span-1 rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
-                        <div class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Последняя синхронизация</div>
-                        <div class="flex items-center gap-2 text-sm text-gray-800">
-                            <span class="h-2.5 w-2.5 rounded-full shrink-0" :class="integrationStatus.last_stoplist?.ok ? 'bg-emerald-500' : 'bg-red-500'"></span>
-                            <span x-text="integrationStatus.last_stoplist?.at ? fmt.date(integrationStatus.last_stoplist?.at) : '—'"></span>
-                        </div>
-                        <p class="text-xs text-red-600 mt-2 font-medium" x-show="integrationStatus.last_stoplist?.error && !integrationStatus.last_stoplist?.ok"
-                            x-text="integrationStatus.last_stoplist?.error"></p>
-                    </div>
-                    <details class="hint-details lg:col-span-2 rounded-2xl border border-orange-100 bg-orange-50/40 p-5">
-                        <summary class="cursor-pointer flex items-center gap-2 text-sm font-semibold text-orange-950 select-none list-none">
-                            <svg class="w-4 h-4 text-orange-700 shrink-0 transition-transform duration-200 hint-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-                            Если в iiko стоп-лист очищен…
-                        </summary>
-                        <div class="mt-3 text-sm text-orange-950 leading-relaxed pl-6 border-l-2 border-orange-200">
-                            Если в iiko стоп-лист <strong>очищен</strong>, локальные позиции снова станут доступны после синхронизации (исправлено на сервере: пустой ответ iiko больше не блокирует возврат в продажу).
-                        </div>
-                    </details>
-                </div>
-
-                <div x-show="!tabDataLoading && stopListFilteredItems.length === 0 && !stopListLoadError" class="text-center py-16 text-gray-500">
-                    <div class="text-5xl mb-3">&#x2705;</div>
-                    <p class="text-lg font-medium text-gray-700">В стопе никого</p>
-                    <p class="text-sm mt-2 max-w-md mx-auto">Все позиции в наличии или ещё не загружено меню. Нажмите «Синхронизировать с iiko», если ожидаете стоп из облака.</p>
-                </div>
-
-                <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-                    <template x-for="item in stopListFilteredItems" :key="'sl-' + item.id">
-                        <div class="bg-white rounded-2xl border border-red-100 p-4 shadow-sm hover:shadow-md transition flex flex-col">
-                            <div class="flex justify-between items-start gap-2 mb-2">
-                                <span class="text-[10px] uppercase font-bold text-red-700 bg-red-50 px-2 py-0.5 rounded-md">Стоп</span>
-                                <span class="text-lg font-extrabold text-brand-700 tabular-nums shrink-0" x-text="fmt.money(item.price)"></span>
-                            </div>
-                            <div class="font-semibold text-gray-900 text-sm leading-snug flex-1" x-text="item.name"></div>
-                            <div class="text-[11px] text-gray-500 mt-1" x-text="item.category"></div>
-                            <div class="mt-3 pt-3 border-t border-gray-100 flex gap-2">
-                                <button type="button" @click="openMenuFromStopItem(item)"
-                                    class="text-xs font-semibold text-brand-600 hover:text-brand-800">Открыть в меню</button>
-                            </div>
-                        </div>
-                    </template>
-                </div>
-            </div>
-
             <!-- ========== ПОДКЛЮЧЕНИЯ ========== -->
             <div x-show="currentTab === 'settings' && settingsTab === 'connections'" x-cloak class="fade-in w-full max-w-6xl mx-auto lg:flex lg:gap-8 lg:items-start">
                 {{ settings_tabs() }}
@@ -2452,8 +2559,17 @@
                         </label>
                     </div>
 
-                    <div class="rounded-xl border border-brand-100 bg-brand-50/40 p-4 mb-6">
-                        <h4 class="text-sm font-bold text-gray-900 mb-2">Подключить кассу (iiko)</h4>
+                    <details class="hint-details rounded-xl border border-brand-100 bg-brand-50/40 p-4 mb-6" :open="!integrationStatus.iiko_configured">
+                        <summary class="cursor-pointer select-none list-none flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                                <h4 class="text-sm font-bold text-gray-900">iiko Cloud</h4>
+                                <p class="text-xs text-gray-600 mt-1" x-text="integrationStatus.iiko_configured ? 'Подключено. Откройте настройку, если меняете ключ или филиал.' : 'Подключите кассу, затем импортируйте меню.'"></p>
+                            </div>
+                            <span class="inline-flex min-h-[44px] items-center rounded-xl border border-brand-200 bg-white px-3 py-2 text-xs font-bold text-brand-800">
+                                Настроить
+                            </span>
+                        </summary>
+                        <div class="mt-4 border-t border-brand-100 pt-4">
                         <p class="text-xs text-gray-600 mb-3">
                             <strong class="text-gray-800">Два шага:</strong> сначала «Проверить» — ключ уходит на сервер только для проверки и
                             <span class="font-semibold text-gray-800">не записывается в базу</span>.
@@ -2491,7 +2607,8 @@
                                 iiko уже привязан к этому филиалу. Поле выше нужно только если меняете ключ или переподключаете другую организацию.
                             </p>
                         </div>
-                    </div>
+                        </div>
+                    </details>
 
                     <div class="space-y-5">
                         <!-- iiko -->
@@ -2520,27 +2637,48 @@
                         </div>
 
                         <!-- WhatsApp -->
-                        <div class="rm-card-surface p-6 flex items-start gap-3">
-                            <span class="mt-1.5 h-3 w-3 rounded-full shrink-0"
-                                :class="integrationStatus.whatsapp_configured ? 'bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.25)]' : 'bg-gray-300'"></span>
-                            <div>
-                                <div class="font-medium text-gray-900">WhatsApp (Meta)</div>
-                                <p class="text-sm text-gray-600 mt-1" x-text="integrationStatus.whatsapp_configured ? 'Токен и Phone Number ID заданы — исходящие сообщения включены.' : 'Задайте WHATSAPP_API_TOKEN и WHATSAPP_PHONE_NUMBER_ID для реальной отправки.'"></p>
-                                <p class="text-xs text-gray-500 mt-2">
-                                    <span class="font-medium text-gray-700">Голосовые в чате:</span>
-                                </p>
+                        <details class="hint-details rm-card-surface p-6">
+                            <summary class="cursor-pointer select-none list-none flex items-start gap-3">
+                                <span class="mt-1.5 h-3 w-3 rounded-full shrink-0"
+                                    :class="integrationStatus.whatsapp_configured ? 'bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.25)]' : 'bg-gray-300'"></span>
+                                <div class="min-w-0 flex-1">
+                                    <div class="flex flex-wrap items-center justify-between gap-2">
+                                        <div class="font-medium text-gray-900">WhatsApp (Meta)</div>
+                                        <span class="text-xs font-bold text-brand-700">Настроить</span>
+                                    </div>
+                                    <p class="text-sm text-gray-600 mt-1" x-text="integrationStatus.whatsapp_configured ? 'Токен и Phone Number ID заданы — исходящие сообщения включены.' : 'Задайте WHATSAPP_API_TOKEN и WHATSAPP_PHONE_NUMBER_ID для реальной отправки.'"></p>
+                                </div>
+                            </summary>
+                            <div class="mt-4 ml-6 rounded-xl border border-gray-200 bg-gray-50/50 p-4 text-sm text-gray-600">
+                                <p>Секреты WhatsApp задаются на сервере. Здесь проверьте callback URL и скопируйте его в кабинет Meta вместе с verify token.</p>
+                                <div class="mt-3 flex flex-wrap items-center gap-2">
+                                    <code class="flex-1 min-w-0 text-xs bg-white border border-gray-200 rounded-lg px-3 py-2 break-all" x-text="integrationStatus.webhook_url || 'URL появится после настройки публичного адреса сервера'"></code>
+                                    <button type="button" @click="copyWebhookUrl()" class="shrink-0 px-3 py-2 rounded-xl bg-brand-600 text-white text-xs font-semibold hover:bg-brand-700 min-h-[44px]">Копировать</button>
+                                </div>
+                                <p class="text-[10px] text-gray-400 mt-2" x-show="integrationStatus.whatsapp_verify_token_hint">Подсказка verify: <span class="font-mono" x-text="integrationStatus.whatsapp_verify_token_hint"></span></p>
                             </div>
-                        </div>
+                        </details>
 
                         <!-- Telegram (оповещения персоналу) -->
-                        <div class="rm-card-surface p-6 flex items-start gap-3">
-                            <span class="mt-1.5 h-3 w-3 rounded-full shrink-0"
-                                :class="integrationStatus.telegram_configured ? 'bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.25)]' : 'bg-gray-300'"></span>
-                            <div>
-                                <div class="font-medium text-gray-900">Telegram для команды</div>
-                                <p class="text-sm text-gray-600 mt-1" x-text="integrationStatus.telegram_configured ? 'Бот и чат для эскалаций настроены — SOS уходит персоналу.' : 'Укажите токен бота и чат в разделе «Мой ресторан», чтобы получать эскалации.'"></p>
+                        <details class="hint-details rm-card-surface p-6">
+                            <summary class="cursor-pointer select-none list-none flex items-start gap-3">
+                                <span class="mt-1.5 h-3 w-3 rounded-full shrink-0"
+                                    :class="integrationStatus.telegram_configured ? 'bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.25)]' : 'bg-gray-300'"></span>
+                                <div class="min-w-0 flex-1">
+                                    <div class="flex flex-wrap items-center justify-between gap-2">
+                                        <div class="font-medium text-gray-900">Telegram для команды</div>
+                                        <span class="text-xs font-bold text-brand-700">Настроить</span>
+                                    </div>
+                                    <p class="text-sm text-gray-600 mt-1" x-text="integrationStatus.telegram_configured ? 'Бот и чат для эскалаций настроены — SOS уходит персоналу.' : 'Укажите токен бота и чат в разделе «Профиль и логистика», чтобы получать эскалации.'"></p>
+                                </div>
+                            </summary>
+                            <div class="mt-4 ml-6 rounded-xl border border-gray-200 bg-gray-50/50 p-4 text-sm text-gray-600">
+                                <p>Токен бота и chat id хранятся в профиле ресторана. Откройте профиль, если нужно обновить канал уведомлений для команды.</p>
+                                <button type="button" @click="setSettingsTab('restaurant')" class="mt-3 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-800 hover:bg-gray-50 min-h-[44px]">
+                                    Открыть профиль
+                                </button>
                             </div>
-                        </div>
+                        </details>
                     </div>
 
                     <div class="mt-6 pt-6 border-t border-gray-100 flex flex-wrap gap-3 items-center">
@@ -2572,16 +2710,6 @@
                             <span x-show="!menuEmbeddingsReindexLoading">Переиндексировать эмбеддинги меню</span>
                             <span x-show="menuEmbeddingsReindexLoading" x-cloak>Индексация…</span>
                         </button>
-                    </div>
-
-                    <div class="rounded-xl border border-gray-200 bg-gray-50/50 p-4 mb-4">
-                        <h4 class="text-sm font-semibold text-gray-900 mb-1">URL вебхука WhatsApp (Meta)</h4>
-                        <p class="text-xs text-gray-500 mb-2">Укажите в кабинете Meta Callback URL и тот же verify token, что в <code class="bg-gray-100 px-1 rounded">WHATSAPP_VERIFY_TOKEN</code>.</p>
-                        <div class="flex flex-wrap items-center gap-2">
-                            <code class="flex-1 min-w-0 text-xs bg-white border border-gray-200 rounded-lg px-3 py-2 break-all" x-text="integrationStatus.webhook_url || 'URL появится после настройки публичного адреса сервера'"></code>
-                            <button type="button" @click="copyWebhookUrl()" class="shrink-0 px-3 py-2 rounded-xl bg-brand-600 text-white text-xs font-semibold hover:bg-brand-700">Копировать</button>
-                        </div>
-                        <p class="text-[10px] text-gray-400 mt-2" x-show="integrationStatus.whatsapp_verify_token_hint">Подсказка verify: <span class="font-mono" x-text="integrationStatus.whatsapp_verify_token_hint"></span></p>
                     </div>
 
                     <div>
@@ -2675,15 +2803,15 @@
                     {{ settings_tabs('mb-2', false) }}
                     <nav class="flex flex-wrap gap-2" aria-label="Разделы страницы «Мой ресторан»">
                         <a href="#settings-restaurant-profile"
-                            class="text-xs sm:text-sm font-semibold px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 min-h-[40px] inline-flex items-center transition-colors">
+                            class="text-xs sm:text-sm font-semibold px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 min-h-[44px] inline-flex items-center transition-colors">
                             Профиль
                         </a>
                         <a href="#settings-restaurant-knowledge"
-                            class="text-xs sm:text-sm font-semibold px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 min-h-[40px] inline-flex items-center transition-colors">
+                            class="text-xs sm:text-sm font-semibold px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 min-h-[44px] inline-flex items-center transition-colors">
                             База знаний
                         </a>
                         <a href="#settings-restaurant-packaging"
-                            class="text-xs sm:text-sm font-semibold px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 min-h-[40px] inline-flex items-center transition-colors">
+                            class="text-xs sm:text-sm font-semibold px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 min-h-[44px] inline-flex items-center transition-colors">
                             Упаковка
                         </a>
                     </nav>
@@ -3143,6 +3271,21 @@
                                         placeholder="tabak, foil_kazan…">
                                 </div>
                                 <div>
+                                    <label class="block text-[11px] font-bold text-gray-400 uppercase mb-2 ml-1">Уровень правила</label>
+                                    <select x-model="rule.scope" @change="packagingSave(rule)" :disabled="rule._saving"
+                                        class="w-full px-4 py-2 bg-gray-50 border border-gray-100 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-brand-500 transition-all">
+                                        <option value="item">Позиция</option>
+                                        <option value="category">Категория</option>
+                                        <option value="order">Заказ</option>
+                                    </select>
+                                </div>
+                                <div x-show="rule.scope === 'category'">
+                                    <label class="block text-[11px] font-bold text-gray-400 uppercase mb-2 ml-1">Категория</label>
+                                    <input type="text" x-model="rule.category_match" @change="packagingSave(rule)" :disabled="rule._saving"
+                                        class="w-full px-4 py-2 bg-gray-50 border border-gray-100 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-brand-500 transition-all"
+                                        placeholder="Напитки, Горячее...">
+                                </div>
+                                <div>
                                     <label class="block text-[11px] font-bold text-gray-400 uppercase mb-2 ml-1">ID товара в iiko (если нужен точный маппинг)</label>
                                     <input type="text" x-model="rule.iiko_product_id" @change="packagingSave(rule)" :disabled="rule._saving"
                                         class="w-full px-4 py-2 bg-gray-50 border border-gray-100 rounded-xl text-sm font-mono focus:bg-white focus:ring-2 focus:ring-brand-500 transition-all"
@@ -3285,6 +3428,20 @@
                                 class="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm font-mono focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
                         </div>
                         <div>
+                            <label class="block text-[11px] font-bold text-gray-500 uppercase mb-1">Уровень</label>
+                            <select x-model="packagingCreateForm.scope"
+                                class="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                                <option value="item">Позиция</option>
+                                <option value="category">Категория</option>
+                                <option value="order">Заказ</option>
+                            </select>
+                        </div>
+                        <div x-show="packagingCreateForm.scope === 'category'">
+                            <label class="block text-[11px] font-bold text-gray-500 uppercase mb-1">Категория</label>
+                            <input type="text" x-model="packagingCreateForm.category_match" placeholder="Напитки"
+                                class="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                        </div>
+                        <div>
                             <label class="block text-[11px] font-bold text-gray-500 uppercase mb-1">ID товара в iiko (опц.)</label>
                             <input type="text" x-model="packagingCreateForm.iiko_product_id" placeholder="UUID"
                                 class="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm font-mono focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
@@ -3320,7 +3477,7 @@
                             <p class="text-xs text-slate-500 mt-0.5">БД, Redis, миграции и ключевые интеграции — без отображения секретов.</p>
                         </div>
                         <button type="button" @click="loadReadiness()" :disabled="readinessLoading"
-                            class="text-xs font-semibold px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 min-h-[40px] shrink-0">
+                            class="text-xs font-semibold px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 min-h-[44px] shrink-0">
                             <span x-show="!readinessLoading">Проверить снова</span>
                             <span x-show="readinessLoading" x-cloak>Запрос…</span>
                         </button>
@@ -3342,15 +3499,15 @@
                         <div class="text-xs font-bold uppercase tracking-wide text-slate-500">Ссылки для интеграций</div>
                         <div class="flex flex-wrap gap-2">
                             <button type="button" @click="copyReadinessLink('payment_webhook')"
-                                class="text-xs font-semibold px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 min-h-[40px]">
+                                class="text-xs font-semibold px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 min-h-[44px]">
                                 Копировать URL webhook оплаты
                             </button>
                             <button type="button" @click="copyReadinessLink('whatsapp')"
-                                class="text-xs font-semibold px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 min-h-[40px]">
+                                class="text-xs font-semibold px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 min-h-[44px]">
                                 Копировать URL WhatsApp
                             </button>
                             <button type="button" @click="copyReadinessLink('public_base')"
-                                class="text-xs font-semibold px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 min-h-[40px]">
+                                class="text-xs font-semibold px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 min-h-[44px]">
                                 Копировать PUBLIC_BASE_URL
                             </button>
                         </div>
@@ -3465,9 +3622,16 @@
                 </div>
 
                 <!-- Экспорт CSV -->
-                <div class="rm-card-surface p-5 space-y-3">
-                    <h3 class="text-base font-bold text-gray-900">Экспорт CSV</h3>
-                    <p class="text-sm text-gray-600">Период в <strong>UTC</strong> по дате создания. Пустые поля — последние 90 суток. Лимит 50 000 строк за выгрузку.</p>
+                <details open class="hint-details rm-card-surface p-5 space-y-3">
+                    <summary class="cursor-pointer select-none list-none flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                            <h3 class="text-base font-bold text-gray-900">Экспорт CSV</h3>
+                            <p class="text-sm text-gray-600 mt-1">Период в <strong>UTC</strong> по дате создания. Пустые поля — последние 90 суток.</p>
+                        </div>
+                        <span class="text-xs font-bold text-slate-500">Развернуть</span>
+                    </summary>
+                    <div class="pt-3 space-y-3">
+                    <p class="text-sm text-gray-600">Лимит 50 000 строк за выгрузку.</p>
                     <div class="flex flex-wrap gap-3 items-end">
                         <label class="text-xs text-gray-500">С <input type="date" x-model="settingsExportDateFrom" class="ml-1 rounded-lg border border-gray-200 px-2 py-1.5 text-sm"></label>
                         <label class="text-xs text-gray-500">По <input type="date" x-model="settingsExportDateTo" class="ml-1 rounded-lg border border-gray-200 px-2 py-1.5 text-sm"></label>
@@ -3478,12 +3642,20 @@
                         <button type="button" @click="settingsDownloadChatsCsv()" :disabled="settingsExportLoading"
                             class="text-sm font-semibold px-4 py-2.5 rounded-xl border border-brand-200 bg-brand-50 text-brand-800 hover:bg-brand-100 disabled:opacity-50">Скачать чаты (логи)</button>
                     </div>
-                </div>
+                    </div>
+                </details>
 
                 <!-- Ретеншн chat_logs -->
-                <div x-show="isSuperadmin" x-cloak class="rm-card-surface p-5 space-y-3">
-                    <h3 class="text-base font-bold text-gray-900">Хранение истории переписки</h3>
-                    <p class="text-sm text-gray-600">Фоновая задача удаляет старые сообщения из архива чата по заданным в сервере срокам. При сроке «0 дней» очистка выключена.</p>
+                <details x-show="isSuperadmin" x-cloak class="hint-details rm-card-surface p-5 space-y-3">
+                    <summary class="cursor-pointer select-none list-none flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                            <h3 class="text-base font-bold text-gray-900">Хранение истории переписки</h3>
+                            <p class="text-sm text-gray-600 mt-1">Фоновая задача удаляет старые сообщения из архива чата по заданным срокам.</p>
+                        </div>
+                        <span class="text-xs font-bold text-slate-500">Развернуть</span>
+                    </summary>
+                    <div class="pt-3 space-y-3">
+                    <p class="text-sm text-gray-600">При сроке «0 дней» очистка выключена.</p>
                     <details class="text-xs text-gray-500">
                         <summary class="cursor-pointer font-semibold text-gray-600">Технические имена переменных</summary>
                         <span class="font-mono">chat_logs</span>, <span class="font-mono">CHAT_LOG_RETENTION_DAYS</span>, <span class="font-mono">CHAT_LOG_RETENTION_INTERVAL_SECONDS</span>
@@ -3493,20 +3665,35 @@
                         <span x-show="!settingsRetentionRunLoading">Запустить очистку сейчас</span>
                         <span x-show="settingsRetentionRunLoading" x-cloak>Выполняется…</span>
                     </button>
-                </div>
+                    </div>
+                </details>
 
-                <div x-show="isSuperadmin" x-cloak class="rm-card-surface p-5 space-y-4">
-                    <h3 class="text-base font-bold text-gray-900">Операционные данные</h3>
-                    <p class="text-sm text-gray-600">Заказы, брони, история чатов в БД, эскалации и журнал синхронизаций. Меню и список клиентов сохраняются.</p>
+                <details x-show="isSuperadmin" x-cloak class="hint-details rm-card-surface p-5 space-y-4">
+                    <summary class="cursor-pointer select-none list-none flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                            <h3 class="text-base font-bold text-red-900">Опасная зона: операционные данные</h3>
+                            <p class="text-sm text-gray-600 mt-1">Заказы, брони, история чатов, эскалации и журнал синхронизаций.</p>
+                        </div>
+                        <span class="text-xs font-bold text-red-700">Открыть действия</span>
+                    </summary>
+                    <div class="pt-3 space-y-4">
+                    <p class="text-sm text-gray-600">Меню и список клиентов сохраняются.</p>
                     <button type="button" @click="settingsPurgeModalOpen = true; settingsPurgePhrase = ''; settingsPurgeAck = false; settingsPurgeError = ''"
                         class="text-sm font-semibold px-4 py-2.5 rounded-xl border border-red-200 bg-red-50 text-red-800 hover:bg-red-100 transition">
                         Удалить все операционные данные…
                     </button>
-                </div>
+                    </div>
+                </details>
 
-                <div x-show="isSuperadmin" x-cloak class="rm-card-surface p-5 space-y-4">
-                    <h3 class="text-base font-bold text-gray-900">Меню и «нет в наличии»</h3>
-                    <p class="text-sm text-gray-600">Стоп-лист из iiko отражается в галочке «в наличии» у каждой позиции в вашем каталоге.</p>
+                <details x-show="isSuperadmin" x-cloak class="hint-details rm-card-surface p-5 space-y-4">
+                    <summary class="cursor-pointer select-none list-none flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                            <h3 class="text-base font-bold text-orange-950">Опасная зона: меню и «нет в наличии»</h3>
+                            <p class="text-sm text-gray-600 mt-1">Стоп-лист из iiko отражается в галочке «в наличии» у каждой позиции.</p>
+                        </div>
+                        <span class="text-xs font-bold text-orange-800">Открыть действия</span>
+                    </summary>
+                    <div class="pt-3 space-y-4">
                     <div class="flex flex-col sm:flex-row flex-wrap gap-3">
                         <button type="button" @click="settingsClearMenuOnly()" :disabled="settingsMenuClearLoading"
                             class="text-sm font-semibold px-4 py-2.5 rounded-xl border border-orange-200 bg-orange-50 text-orange-900 hover:bg-orange-100 transition disabled:opacity-50">
@@ -3519,11 +3706,19 @@
                             <span x-show="settingsMenuStopClearLoading" x-cloak>Удаление…</span>
                         </button>
                     </div>
-                </div>
+                    </div>
+                </details>
 
-                <div x-show="isSuperadmin" x-cloak class="rm-card-surface p-5 space-y-4">
+                <details x-show="isSuperadmin" x-cloak class="hint-details rm-card-surface p-5 space-y-4">
+                    <summary class="cursor-pointer select-none list-none flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                            <h3 class="text-base font-bold text-red-900">Опасная зона: удаление заказов</h3>
+                            <p class="text-sm text-gray-600 mt-1">Точечная чистка заказов из базы.</p>
+                        </div>
+                        <span class="text-xs font-bold text-red-700">Открыть список</span>
+                    </summary>
+                    <div class="pt-3 space-y-4">
                     <div class="flex flex-wrap items-center justify-between gap-3">
-                        <h3 class="text-base font-bold text-gray-900">Удаление заказов</h3>
                         <button type="button" @click="loadSettingsOrders()" :disabled="settingsOrdersLoading"
                             class="text-sm font-semibold px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50">
                             Обновить список
@@ -3583,7 +3778,8 @@
                         <button type="button" @click="settingsSelectedOrderIds = []" x-show="settingsSelectedOrderIds.length > 0" x-cloak
                             class="text-sm text-gray-600 hover:text-gray-900 underline">Снять выделение</button>
                     </div>
-                </div>
+                    </div>
+                </details>
 
                 <details x-show="isSuperadmin" x-cloak class="hint-details rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
                     <summary class="cursor-pointer text-sm font-semibold text-gray-800 select-none flex items-center gap-2">
@@ -3597,72 +3793,117 @@
                 </details>
             </div>
 
-            <!-- ========== ТЕСТ БОТА ========== -->
-            <div x-show="currentTab === 'settings' && settingsTab === 'bot_test'" x-cloak class="fade-in">
+            <!-- ========== ЛАБОРАТОРИЯ БОТ / ИИ ========== -->
+            <div x-show="currentTab === 'settings' && settingsTab === 'bot_test'" x-cloak class="fade-in w-full max-w-6xl mx-auto lg:flex lg:gap-8 lg:items-start pb-16">
                 {{ settings_tabs() }}
-                <div class="max-w-2xl mx-auto">
-                    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                        <div class="bg-emerald-600 px-5 py-3 flex items-center gap-3">
-                            <div class="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-white font-bold text-sm">R</div>
-                            <div class="text-white">
-                                <div class="font-medium text-sm">RestoMind Bot</div>
-                                <div class="text-xs text-emerald-200">Тестовый режим</div>
+                <div class="flex-1 min-w-0 space-y-6">
+                    <div class="rm-card-surface p-5 sm:p-6">
+                        <div class="flex flex-wrap items-start justify-between gap-4">
+                            <div>
+                                <h3 class="text-lg font-bold text-slate-900">Лаборатория Бот / ИИ</h3>
+                                <p class="text-sm text-slate-600 mt-1">Знания, правила допродаж, промпт и тестовый чат собраны в один рабочий контур.</p>
                             </div>
-                        </div>
-
-                        <div class="p-5 max-h-[400px] overflow-y-auto space-y-3" id="testChatArea">
-                            <template x-for="(msg, idx) in testMessages" :key="idx">
-                                <div :class="msg.role === 'user' ? 'justify-end' : 'justify-start'" class="flex">
-                                    <div :class="msg.role === 'user'
-                                        ? 'bg-emerald-500 text-white rounded-2xl rounded-br-md'
-                                        : 'bg-gray-100 text-gray-800 rounded-2xl rounded-bl-md'"
-                                        class="max-w-[75%] px-4 py-2.5 text-sm whitespace-pre-line"
-                                    >
-                                        <p x-show="msg.role === 'assistant' && msg.intent" class="text-[10px] text-gray-500 mb-1 font-mono" x-text="'intent: ' + msg.intent"></p>
-                                        <div x-text="msg.text"></div>
-                                    </div>
+                            <div class="min-w-[9rem]">
+                                <div class="flex items-center justify-between text-xs font-semibold text-slate-500">
+                                    <span>Готовность</span>
+                                    <span class="tabular-nums" x-text="(setupStatus.score ?? 0) + '%'"></span>
                                 </div>
-                            </template>
-                            <div x-show="testLoading" class="flex justify-start">
-                                <div class="bg-gray-100 rounded-2xl rounded-bl-md px-4 py-3">
-                                    <div class="flex gap-1">
-                                        <span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></span>
-                                        <span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0.1s"></span>
-                                        <span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0.2s"></span>
-                                    </div>
+                                <div class="mt-2 h-2 rounded-full bg-slate-100 overflow-hidden">
+                                    <div class="h-full rounded-full bg-emerald-500 transition-all duration-700" :style="'width:' + (setupStatus.score || 0) + '%'"></div>
                                 </div>
                             </div>
                         </div>
-
-                        <div class="border-t border-gray-100 px-4 py-3 flex gap-3">
-                            <input
-                                x-model="testInput"
-                                type="text"
-                                placeholder="Напишите сообщение..."
-                                class="flex-1 border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                                @keydown.enter="sendTestMessage()"
-                                :disabled="testLoading"
-                            >
-                            <button
-                                @click="sendTestMessage()"
-                                :disabled="testLoading || !testInput.trim()"
-                                class="px-5 py-2.5 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 transition font-medium text-sm disabled:opacity-50"
-                            >
-                                &#x27A4;
+                        <div class="mt-5 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            <button type="button" @click="setSettingsTab('restaurant'); setTimeout(() => document.getElementById('settings-restaurant-knowledge')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)"
+                                class="text-left rounded-xl border border-slate-200 bg-white px-4 py-3 hover:bg-slate-50 min-h-[68px]">
+                                <span class="block text-xs font-bold uppercase text-slate-400">Сборка знаний</span>
+                                <span class="mt-1 block text-sm font-semibold text-slate-900"><span x-text="setupStatus.knowledge_items || 0"></span> записей</span>
+                            </button>
+                            <button type="button" @click="setSettingsTab('smart_sales')"
+                                class="text-left rounded-xl border border-slate-200 bg-white px-4 py-3 hover:bg-slate-50 min-h-[68px]">
+                                <span class="block text-xs font-bold uppercase text-slate-400">Допродажи</span>
+                                <span class="mt-1 block text-sm font-semibold text-slate-900"><span x-text="setupStatus.upsell_rules || 0"></span> правил</span>
+                            </button>
+                            <button type="button" @click="setSettingsTab('restaurant'); setTimeout(() => document.getElementById('settings-restaurant-packaging')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)"
+                                class="text-left rounded-xl border border-slate-200 bg-white px-4 py-3 hover:bg-slate-50 min-h-[68px]">
+                                <span class="block text-xs font-bold uppercase text-slate-400">Упаковка</span>
+                                <span class="mt-1 block text-sm font-semibold text-slate-900"><span x-text="setupStatus.packaging_rules || 0"></span> правил</span>
                             </button>
                         </div>
                     </div>
 
-                    <details class="hint-details mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
-                        <summary class="cursor-pointer text-sm font-semibold text-amber-900 select-none flex items-center gap-2">
-                            <svg class="w-4 h-4 text-amber-700 shrink-0 transition-transform duration-200 hint-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-                            Как работает тест
-                        </summary>
-                        <div class="text-sm text-amber-800 mt-2 pl-5 border-l-2 border-amber-300 leading-relaxed">
-                            Сообщения обрабатываются через OpenAI API на вашем бэкенде.
-                            Бот определит намерение (заказ, бронь, вопрос) и ответит структурированно.
+                    <div class="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_22rem] gap-6">
+                        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                            <div class="bg-emerald-700 px-5 py-3 flex items-center justify-between gap-3">
+                                <div class="flex items-center gap-3">
+                                    <div class="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-white font-bold text-sm">R</div>
+                                    <div class="text-white">
+                                        <div class="font-medium text-sm">RestoMind Bot</div>
+                                        <div class="text-xs text-emerald-100">Тестовый режим без отправки гостям</div>
+                                    </div>
+                                </div>
+                                <span class="hidden sm:inline text-xs font-semibold text-emerald-100">OpenAI API через ваш бэкенд</span>
+                            </div>
+
+                            <div class="p-5 max-h-[420px] overflow-y-auto space-y-3" id="testChatArea">
+                                <template x-for="(msg, idx) in testMessages" :key="idx">
+                                    <div :class="msg.role === 'user' ? 'justify-end' : 'justify-start'" class="flex">
+                                        <div :class="msg.role === 'user'
+                                            ? 'bg-emerald-600 text-white rounded-2xl rounded-br-md'
+                                            : 'bg-gray-100 text-gray-800 rounded-2xl rounded-bl-md'"
+                                            class="max-w-[75%] px-4 py-2.5 text-sm whitespace-pre-line">
+                                            <p x-show="msg.role === 'assistant' && msg.intent" class="text-[10px] text-gray-500 mb-1 font-mono" x-text="'intent: ' + msg.intent"></p>
+                                            <div x-text="msg.text"></div>
+                                        </div>
+                                    </div>
+                                </template>
+                                <div x-show="!testMessages.length && !testLoading" class="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-8 text-center text-sm text-gray-500">
+                                    Напишите тестовый вопрос клиента: адрес, бронь, заказ или просьбу заменить позицию.
+                                </div>
+                                <div x-show="testLoading" class="flex justify-start">
+                                    <div class="bg-gray-100 rounded-2xl rounded-bl-md px-4 py-3">
+                                        <div class="flex gap-1">
+                                            <span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></span>
+                                            <span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0.1s"></span>
+                                            <span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0.2s"></span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="border-t border-gray-100 px-4 py-3 flex gap-3">
+                                <input x-model="testInput" type="text" placeholder="Сообщение клиента..."
+                                    class="flex-1 border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                                    @keydown.enter="sendTestMessage()" :disabled="testLoading">
+                                <button @click="sendTestMessage()" :disabled="testLoading || !testInput.trim()"
+                                    class="px-5 py-2.5 bg-emerald-700 text-white rounded-xl hover:bg-emerald-800 transition font-medium text-sm disabled:opacity-50 min-h-[44px]"
+                                    aria-label="Отправить тестовое сообщение">
+                                    &#x27A4;
+                                </button>
+                            </div>
                         </div>
-                    </details>
+
+                        <div class="space-y-4">
+                            <div class="rm-card-surface p-5">
+                                <h4 class="text-sm font-bold text-slate-900">Промпт и источники</h4>
+                                <p class="mt-2 text-sm text-slate-600">Ответ собирается из профиля ресторана, активной базы знаний, меню, стоп-листа и правил допродаж.</p>
+                                <div class="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                                    KPI допродаж сверяются с <code class="bg-white px-1 rounded border border-slate-200">prompt.md</code>: предложено, принято, конверсия, средний чек.
+                                </div>
+                            </div>
+                            <div class="rm-card-surface p-5">
+                                <h4 class="text-sm font-bold text-slate-900">Быстрые проверки</h4>
+                                <div class="mt-3 flex flex-col gap-2">
+                                    <button type="button" @click="testInput = 'Здравствуйте, хочу заказать плов на компанию и напитки'; sendTestMessage()"
+                                        class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-left text-xs font-semibold text-slate-800 hover:bg-slate-50 min-h-[44px]">Проверить заказ + допродажу</button>
+                                    <button type="button" @click="testInput = 'Можно забронировать столик на пятницу вечером?'; sendTestMessage()"
+                                        class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-left text-xs font-semibold text-slate-800 hover:bg-slate-50 min-h-[44px]">Проверить бронь</button>
+                                    <button type="button" @click="testInput = 'Где вы находитесь и есть ли парковка?'; sendTestMessage()"
+                                        class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-left text-xs font-semibold text-slate-800 hover:bg-slate-50 min-h-[44px]">Проверить базу знаний</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -4004,9 +4245,10 @@
             </div>
         </div>
 
-        <div x-show="showOrderModal && selectedOrder" x-cloak class="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/40" @click.self="showOrderModal = false; orderCompositionOpen = false">
+        <div x-show="showOrderModal && selectedOrder" x-cloak>
+            <div class="ds-modal-backdrop" @click="showOrderModal = false; orderCompositionOpen = false" role="presentation" aria-hidden="true"></div>
             <template x-if="selectedOrder">
-                <div class="bg-white shadow-2xl w-full max-w-lg h-[100dvh] sm:h-auto max-h-[100dvh] sm:max-h-[92vh] flex flex-col fade-in overflow-hidden rounded-t-3xl sm:rounded-2xl min-h-0" @click.stop role="dialog" aria-modal="true" aria-labelledby="order-modal-title">
+                <div class="ds-modal-panel flex flex-col fade-in min-h-0 h-[100dvh] sm:h-auto max-h-[100dvh] sm:max-h-[92vh] rounded-t-3xl sm:rounded-2xl overflow-hidden" @click.stop role="dialog" aria-modal="true" aria-labelledby="order-modal-title">
                     <div class="flex items-start justify-between gap-3 px-6 pt-6 pb-4 border-b border-gray-100 shrink-0">
                         <div class="min-w-0 flex-1">
                             <h3 id="order-modal-title" class="text-lg font-bold text-gray-900" x-text="'Заказ #' + selectedOrder.id"></h3>
@@ -4212,6 +4454,16 @@
                                             </li>
                                         </template>
                                     </ul>
+                                    <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                        <button type="button" @click="createUpsellFeedback('forbid')" :disabled="upsellFeedbackLoading"
+                                            class="min-h-[44px] rounded-xl border border-rose-200 bg-white text-rose-700 text-xs font-bold hover:bg-rose-50 disabled:opacity-50">
+                                            Исправить логику
+                                        </button>
+                                        <button type="button" @click="createUpsellFeedback('suggest')" :disabled="upsellFeedbackLoading"
+                                            class="min-h-[44px] rounded-xl border border-violet-200 bg-white text-violet-800 text-xs font-bold hover:bg-violet-50 disabled:opacity-50">
+                                            Создать правило
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -4303,6 +4555,11 @@
                                             <input type="text" x-model="line.packaging_plov_1kg" placeholder="пусто · tabak · foil_kazan"
                                                 class="w-full font-mono text-xs rounded-lg border border-gray-200 px-2 py-1.5 focus:ring-2 focus:ring-brand-500">
                                         </div>
+                                        <div>
+                                            <label class="block text-[10px] font-bold text-gray-400 uppercase mb-1">Модификаторы</label>
+                                            <input type="text" x-model="line.modifiers_text" placeholder="соус:uuid, размер:uuid"
+                                                class="w-full font-mono text-xs rounded-lg border border-gray-200 px-2 py-1.5 focus:ring-2 focus:ring-brand-500">
+                                        </div>
                                         <details class="text-[11px] text-gray-400" x-show="line.iiko_item_id || line.name">
                                             <summary class="cursor-pointer select-none hover:text-gray-600">Для разработчика: ID блюда в iiko</summary>
                                             <input type="text" x-model="line.iiko_item_id" placeholder="uuid из меню"
@@ -4330,6 +4587,8 @@
                                     <div class="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3">
                                         <div>
                                             <div class="font-medium" x-text="item.name"></div>
+                                            <div x-show="item.modifiers?.length || item.modifiers_ids?.length" class="text-xs text-sky-700 mt-0.5"
+                                                x-text="'Модификаторы: ' + ((item.modifiers || []).map(m => m.name || m.iiko_id || m.id).filter(Boolean).join(', ') || (item.modifiers_ids || []).join(', '))"></div>
                                             <div x-show="item.exclude_ingredients?.length" class="text-xs text-red-500 mt-0.5" x-text="'Без: ' + (item.exclude_ingredients || []).join(', ')"></div>
                                         </div>
                                         <div class="text-right">
@@ -4394,8 +4653,9 @@
         </div>
 
         <!-- Ручной черновик заказа (тест) -->
-        <div x-show="showManualOrderModal" x-cloak class="fixed inset-0 z-[55] flex items-center justify-center p-4 bg-black/40" @click.self="closeManualOrderModal()">
-            <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 fade-in border border-gray-100" @click.stop role="dialog" aria-modal="true" aria-labelledby="manual-order-modal-title">
+        <div x-show="showManualOrderModal" x-cloak>
+            <div class="ds-modal-backdrop" @click="closeManualOrderModal()" role="presentation" aria-hidden="true"></div>
+            <div class="ds-modal-panel !max-w-md p-6 fade-in border border-gray-100" @click.stop role="dialog" aria-modal="true" aria-labelledby="manual-order-modal-title">
                 <div class="flex items-start justify-between gap-3 mb-4">
                     <div>
                         <h3 id="manual-order-modal-title" class="text-lg font-bold text-gray-900">Новый заказ (тест)</h3>
@@ -4467,9 +4727,10 @@
         </div>
 
         <!-- Модалка деталей бронирования -->
-        <div x-show="showBookingModal && selectedBooking" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" @click.self="closeBookingModal()">
+        <div x-show="showBookingModal && selectedBooking" x-cloak>
+            <div class="ds-modal-backdrop" @click="closeBookingModal()" role="presentation" aria-hidden="true"></div>
             <template x-if="selectedBooking">
-                <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 fade-in border border-gray-100" @click.stop role="dialog" aria-modal="true" aria-labelledby="booking-modal-title">
+                <div class="ds-modal-panel max-h-[90vh] overflow-y-auto p-6 fade-in border border-gray-100" @click.stop role="dialog" aria-modal="true" aria-labelledby="booking-modal-title">
                     <div class="flex items-start justify-between gap-3 mb-5">
                         <div>
                             <h3 id="booking-modal-title" class="text-lg font-bold text-gray-900" x-text="'Бронирование #' + (selectedBooking.id ?? '')"></h3>

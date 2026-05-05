@@ -1,0 +1,13 @@
+{# Вариант underline: кнопки с классом ds-tab-active на активной (Alpine/статика). #}
+{% macro tabs_underline(extra_class='') -%}
+<div class="ds-tabs-underline {{ extra_class }}">
+  {{ caller() }}
+</div>
+{%- endmacro %}
+
+{# Pills: контейнер ds-segmented #}
+{% macro tabs_pills(extra_class='') -%}
+<div class="ds-segmented {{ extra_class }}">
+  {{ caller() }}
+</div>
+{%- endmacro %}

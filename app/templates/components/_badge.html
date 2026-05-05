@@ -1,0 +1,3 @@
+{% macro badge(text, variant='neutral', extra_class='') -%}
+<span class="ds-badge {% if variant == 'success' %}ds-badge-success{% elif variant == 'warning' %}ds-badge-warning{% elif variant == 'danger' %}ds-badge-danger{% else %}ds-badge-neutral{% endif %} {{ extra_class }}">{{ text }}</span>
+{%- endmacro %}

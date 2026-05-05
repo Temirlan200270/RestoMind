@@ -48,6 +48,16 @@
 - `requirements.txt`, `Dockerfile`, `render.yaml`, `docker-compose*.yml`.
 - Тесты в `tests/` для бэкенд-слоя.
 
+### Зоны UI (эпик E-UI, см. [docs/UI_REDESIGN_PLAN.md](docs/UI_REDESIGN_PLAN.md))
+
+| Зона | ИИ 1 (backend) | ИИ 2 (frontend / документация) |
+|------|------------------|--------------------------------|
+| Компоненты и стили | Только тонкий роут **storybook**: `GET /admin/_/components` (рендер шаблона, доступ superadmin / debug) | **`app/templates/components/*`**, сборка **`src/css/admin-input.css` → `app/static/css/admin.css`**, [`app/templates/_components_storybook.html`](app/templates/_components_storybook.html) |
+| AI Value (шапка, ROI) | Расширения **`GET /api/admin/stats`** и связанные read-only поля при необходимости | Бейдж, баннеры, тосты, мини-метрики в [`admin.html`](app/templates/admin.html) / [`admin-app.js`](app/static/js/admin-app.js) |
+| Документация редизайна | Обновление **`IMPLEMENTATION_PLAN.md`** (строка эпика E-UI), при необходимости согласование контрактов | **`docs/UI_DESIGN_SYSTEM.md`**, **`docs/UI_REDESIGN_PLAN.md`** (статусы фаз), **`CHANGELOG.md`**, этот файл (**зоны**) |
+
+Общие файлы changelog/plan — узкий diff, без перезаписи истории.
+
 ### Зона ИИ 2 — фронт / UX / документация для оператора
 
 Файлы, которые трогает **только ИИ 2**:

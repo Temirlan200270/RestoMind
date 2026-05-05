@@ -1,0 +1,13 @@
+{% macro app_shell_demo(aside_label='Sidebar', main_html='', extra_class='') -%}
+<div class="ds-app-shell-demo {{ extra_class }}">
+  <aside class="ds-app-shell-demo-aside">{{ aside_label }}</aside>
+  <main class="ds-app-shell-demo-main">{{ main_html|safe }}</main>
+</div>
+{%- endmacro %}
+
+{# Рабочий каркас «список диалогов · переписка · инфо» (Phase U5). Внутри — три caller-слота. #}
+{% macro chat_shell_layout(extra_class='') -%}
+<div class="ds-chat-shell {{ extra_class }}">
+{{ caller() }}
+</div>
+{%- endmacro %}

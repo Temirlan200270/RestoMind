@@ -1,0 +1,8 @@
+{# Карточка U1: тело через {% call card(...) %}...{% endcall %} #}
+{% macro card(title='', subtitle='', extra_class='', padding_class='p-6') -%}
+<div class="ds-card {{ padding_class }} {{ extra_class }}">
+  {% if title %}<h3 class="text-base font-bold" style="color: var(--color-text); margin-bottom: var(--space-3);">{{ title }}</h3>{% endif %}
+  {% if subtitle %}<p class="text-sm ds-text-muted" style="margin-bottom: var(--space-4);">{{ subtitle }}</p>{% endif %}
+  {{ caller() }}
+</div>
+{%- endmacro %}

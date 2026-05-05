@@ -1,0 +1,17 @@
+{% macro skeleton(kind='line', rows=3, extra_class='') -%}
+<div class="{{ extra_class }}" style="display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-4);">
+  {% if kind == 'card' %}
+  <div class="ds-skeleton-line" style="width: 40%;"></div>
+  <div class="ds-skeleton-line" style="width: 70%;"></div>
+  <div class="ds-skeleton-line" style="width: 90%;"></div>
+  {% elif kind == 'table' %}
+  {% for _ in range(rows|int) %}
+  <div class="ds-skeleton-line" style="width: {{ [100, 92, 88, 95][loop.index0 % 4] }}%;"></div>
+  {% endfor %}
+  {% else %}
+  {% for _ in range(rows|int) %}
+  <div class="ds-skeleton-line" style="width: {{ 100 - (loop.index0 * 7) % 35 }}%;"></div>
+  {% endfor %}
+  {% endif %}
+</div>
+{%- endmacro %}

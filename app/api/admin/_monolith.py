@@ -913,6 +913,9 @@ class OrderPatchBody(BaseModel):
         description="Ожидаемая row_version; при рассинхроне — 409.",
     )
 
+    notify_customer: bool = False
+    message_template: str | None = Field(default=None, max_length=1000)
+
 
 class AdminFoodLineIn(BaseModel):
     """Позиции еды для пересборки черновика (админка)."""
@@ -921,6 +924,8 @@ class AdminFoodLineIn(BaseModel):
     quantity: int = Field(ge=1, le=99)
     iiko_item_id: str = ""
     packaging_plov_1kg: str = ""
+    modifiers_ids: list[str] = Field(default_factory=list)
+    modifiers: list[dict[str, Any]] = Field(default_factory=list)
     exclude_ingredients: list[str] = Field(default_factory=list)
 
 
@@ -1209,6 +1214,30 @@ async def patch_order_status(
                 "iiko_last_error": locked.iiko_last_error,
             }
 
+    fulfillment_allowed = {
+        OrderStatus.SENT_TO_IIKO.value: {OrderStatus.IN_TRANSIT.value, OrderStatus.WAITING_PICKUP.value, OrderStatus.COMPLETED.value},
+        OrderStatus.IN_TRANSIT.value: {OrderStatus.WAITING_PICKUP.value, OrderStatus.COMPLETED.value, OrderStatus.SENT_TO_IIKO.value},
+        OrderStatus.WAITING_PICKUP.value: {OrderStatus.COMPLETED.value, OrderStatus.IN_TRANSIT.value, OrderStatus.SENT_TO_IIKO.value},
+    }
+    if want in fulfillment_allowed.get(cur, set()):
+        order.status = want
+        order.iiko_last_error = None
+        order.row_version = int(order.row_version or 0) + 1
+        ij = dict(order.items_json or {}) if isinstance(order.items_json, dict) else {}
+        om = dict(ij.get("order_meta") or {}) if isinstance(ij.get("order_meta"), dict) else {}
+        events = list(om.get("fulfillment_events") or []) if isinstance(om.get("fulfillment_events"), list) else []
+        event = {"from": cur, "to": want, "at": datetime.now(timezone.utc).isoformat(), "actor": _admin_actor_key(request)}
+        if body.message_template:
+            event["message_template"] = body.message_template
+        events.append(event)
+        om["fulfillment_events"] = events[-25:]
+        ij["order_meta"] = om
+        order.items_json = ij
+        await db.commit()
+        if body.notify_customer and phone_s and body.message_template:
+            await admin_send_message(request, phone_s, TextRequest(text=body.message_template), db)
+        return await _emit(order, fulfillment_event=event)
+
     raise HTTPException(
         status_code=400,
         detail=f"Переход {cur!r} → {want!r} не поддерживается",
@@ -1372,6 +1401,8 @@ async def rebuild_order_draft(
                 quantity=line.quantity,
                 iiko_item_id=(line.iiko_item_id or "").strip(),
                 packaging_plov_1kg=pkg_raw,  # type: ignore[arg-type]
+                modifiers_ids=list(line.modifiers_ids or []),
+                modifiers=list(line.modifiers or []),
                 exclude_ingredients=list(line.exclude_ingredients or []),
             ),
         )
@@ -1548,6 +1579,8 @@ async def create_manual_order(
                     quantity=line.quantity,
                     iiko_item_id=(line.iiko_item_id or "").strip(),
                     packaging_plov_1kg=pkg_raw,  # type: ignore[arg-type]
+                    modifiers_ids=list(line.modifiers_ids or []),
+                    modifiers=list(line.modifiers or []),
                     exclude_ingredients=list(line.exclude_ingredients or []),
                 ),
             )
@@ -2976,12 +3009,75 @@ async def patch_booking(
 # ─── Диалоги ────────────────────────────────────────────
 
 
+def _parse_dt(value: object) -> datetime | None:
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
+def _admin_actor_key(request: Request) -> str:
+    sid = request.session.get("staff_id")
+    if sid is not None:
+        return f"staff:{sid}"
+    email = request.session.get("email") or request.session.get("staff_email")
+    if email:
+        return f"staff:{email}"
+    return "staff:session"
+
+
+def _chat_triage_from_meta(meta: object) -> dict[str, Any]:
+    src = dict(meta or {}) if isinstance(meta, dict) else {}
+    raw = src.get("chat_triage")
+    triage = dict(raw) if isinstance(raw, dict) else {}
+    state = str(triage.get("state") or "active").lower()
+    if state not in {"active", "closed"}:
+        state = "active"
+    return {
+        "state": state,
+        "assignee": str(triage.get("assignee") or ""),
+        "snoozed_until": triage.get("snoozed_until"),
+        "snooze_reason": str(triage.get("snooze_reason") or ""),
+        "closed_at": triage.get("closed_at"),
+        "closed_by": str(triage.get("closed_by") or ""),
+    }
+
+
+async def _user_for_chat(db: AsyncSession, org_id: int, phone: str) -> User:
+    user = await db.scalar(select(User).where(User.phone == phone, User.organization_id == org_id))
+    if user is None:
+        raise HTTPException(status_code=404, detail="Chat user not found")
+    return user
+
+
+async def _save_chat_triage(
+    request: Request,
+    db: AsyncSession,
+    phone: str,
+    patch: dict[str, Any],
+) -> dict:
+    org_id = admin_org_from_session(request)
+    user = await _user_for_chat(db, org_id, phone)
+    meta = dict(user.meta_json or {}) if isinstance(user.meta_json, dict) else {}
+    triage = _chat_triage_from_meta(meta)
+    triage.update(patch)
+    meta["chat_triage"] = triage
+    user.meta_json = meta
+    await db.commit()
+    await publish_event("chat_triage_updated", {"phone": phone, "organization_id": org_id, "triage": triage})
+    return {"ok": True, "phone": phone, "triage": triage}
+
+
 @router.get("/chats")
 async def list_chats_sidebar(
     request: Request,
     limit: int = Query(50, ge=1, le=200),
     cursor_at: str | None = Query(None, description="Cursor: lastAt ISO (for infinite scroll)"),
     cursor_id: int | None = Query(None, ge=1, description="Cursor: last message id (tie-breaker)"),
+    mode: Literal["active", "mine", "closed", "snoozed", "all"] = Query("active"),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """
@@ -3010,6 +3106,7 @@ async def list_chats_sidebar(
             ChatLog.content.label("content"),
             User.phone.label("phone"),
             User.name.label("user_name"),
+            User.meta_json.label("user_meta"),
             func.row_number()
             .over(
                 partition_by=ChatLog.user_id,
@@ -3047,9 +3144,24 @@ async def list_chats_sidebar(
     rows = rows[:limit]
     chats: list[dict] = []
     next_cursor: dict[str, object] | None = None
+    staff_key = _admin_actor_key(request)
+    now = datetime.now(timezone.utc)
     for r in rows:
         phone = r.phone
         if not phone:
+            continue
+        triage = _chat_triage_from_meta(r.user_meta)
+        snoozed_until = _parse_dt(triage.get("snoozed_until"))
+        is_snoozed = snoozed_until is not None and snoozed_until > now
+        is_closed = triage.get("state") == "closed"
+        assignee = str(triage.get("assignee") or "")
+        if mode == "active" and (is_closed or is_snoozed):
+            continue
+        if mode == "mine" and assignee != staff_key:
+            continue
+        if mode == "closed" and not is_closed:
+            continue
+        if mode == "snoozed" and not is_snoozed:
             continue
         chats.append(
             {
@@ -3059,6 +3171,10 @@ async def list_chats_sidebar(
                 "state": "chatting",
                 "unread": False,
                 "userName": r.user_name,
+                "triage": triage,
+                "triageState": triage.get("state") or "active",
+                "assignee": assignee,
+                "snoozedUntil": triage.get("snoozed_until"),
             }
         )
     if chats:
@@ -3165,6 +3281,8 @@ async def customer_summary(
     revenue_statuses = (
         OrderStatus.CONFIRMED.value,
         OrderStatus.SENT_TO_IIKO.value,
+        OrderStatus.IN_TRANSIT.value,
+        OrderStatus.WAITING_PICKUP.value,
         OrderStatus.COMPLETED.value,
     )
     rev_row = await db.execute(
@@ -5308,7 +5426,12 @@ async def analytics(
         await db.scalar(
             select(func.count(Order.id)).where(
                 Order.status.in_(
-                    [OrderStatus.SENT_TO_IIKO.value, OrderStatus.COMPLETED.value],
+                    [
+                        OrderStatus.SENT_TO_IIKO.value,
+                        OrderStatus.IN_TRANSIT.value,
+                        OrderStatus.WAITING_PICKUP.value,
+                        OrderStatus.COMPLETED.value,
+                    ],
                 ),
                 not_cancelled,
                 org_orders,
@@ -5330,7 +5453,12 @@ async def analytics(
         await db.scalar(
             select(func.count(Order.id)).where(
                 Order.status.in_(
-                    [OrderStatus.SENT_TO_IIKO.value, OrderStatus.COMPLETED.value],
+                    [
+                        OrderStatus.SENT_TO_IIKO.value,
+                        OrderStatus.IN_TRANSIT.value,
+                        OrderStatus.WAITING_PICKUP.value,
+                        OrderStatus.COMPLETED.value,
+                    ],
                 ),
                 not_cancelled,
                 org_orders,
@@ -5494,7 +5622,7 @@ async def analytics(
 
 
 @router.post("/chats/{phone}/takeover")
-async def takeover_chat(request: Request, phone: str) -> dict:
+async def takeover_chat(request: Request, phone: str, db: AsyncSession = Depends(get_db)) -> dict:
     """
     Перехватить диалог — AI замолкает, оператор ведёт общение вручную.
     Устанавливает флаг HUMAN_MODE в Redis.
@@ -5506,6 +5634,15 @@ async def takeover_chat(request: Request, phone: str) -> dict:
         "state": UserState.HUMAN_MODE,
         "organization_id": org_id,
     })
+    try:
+        await _save_chat_triage(
+            request,
+            db,
+            phone,
+            {"state": "active", "assignee": _admin_actor_key(request), "snoozed_until": None, "snooze_reason": ""},
+        )
+    except HTTPException:
+        pass
     logger.info("Оператор перехватил диалог: %s", phone)
     return {"status": "ok", "phone": phone, "mode": "human"}
 
@@ -5525,6 +5662,82 @@ async def release_chat(request: Request, phone: str) -> dict:
     })
     logger.info("Оператор вернул бота: %s", phone)
     return {"status": "ok", "phone": phone, "mode": "bot"}
+
+
+class ChatSnoozeBody(BaseModel):
+    minutes: int = Field(30, ge=1, le=60 * 24 * 14)
+    reason: str = Field("", max_length=240)
+
+
+@router.post("/chats/{phone}/assign-me")
+async def assign_chat_to_me(request: Request, phone: str, db: AsyncSession = Depends(get_db)) -> dict:
+    return await _save_chat_triage(
+        request,
+        db,
+        phone,
+        {
+            "state": "active",
+            "assignee": _admin_actor_key(request),
+            "snoozed_until": None,
+            "snooze_reason": "",
+        },
+    )
+
+
+@router.post("/chats/{phone}/snooze")
+async def snooze_chat(
+    request: Request,
+    phone: str,
+    body: ChatSnoozeBody,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    until = datetime.now(timezone.utc) + timedelta(minutes=int(body.minutes))
+    return await _save_chat_triage(
+        request,
+        db,
+        phone,
+        {
+            "state": "active",
+            "assignee": _admin_actor_key(request),
+            "snoozed_until": until.isoformat(),
+            "snooze_reason": (body.reason or "").strip(),
+        },
+    )
+
+
+@router.post("/chats/{phone}/close")
+async def close_chat(request: Request, phone: str, db: AsyncSession = Depends(get_db)) -> dict:
+    now = datetime.now(timezone.utc).isoformat()
+    return await _save_chat_triage(
+        request,
+        db,
+        phone,
+        {
+            "state": "closed",
+            "assignee": _admin_actor_key(request),
+            "snoozed_until": None,
+            "snooze_reason": "",
+            "closed_at": now,
+            "closed_by": _admin_actor_key(request),
+        },
+    )
+
+
+@router.post("/chats/{phone}/reopen")
+async def reopen_chat(request: Request, phone: str, db: AsyncSession = Depends(get_db)) -> dict:
+    return await _save_chat_triage(
+        request,
+        db,
+        phone,
+        {
+            "state": "active",
+            "assignee": _admin_actor_key(request),
+            "snoozed_until": None,
+            "snooze_reason": "",
+            "closed_at": None,
+            "closed_by": "",
+        },
+    )
 
 
 class TextRequest(BaseModel):
@@ -5791,6 +6004,8 @@ def _packaging_rule_dict(r: PackagingRule) -> dict:
         "iiko_product_id": r.iiko_product_id or "",
         "keywords": r.keywords or "",
         "option_key": r.option_key or "",
+        "scope": getattr(r, "scope", None) or "item",
+        "category_match": getattr(r, "category_match", None) or "",
         "is_active": r.is_active,
         "sort_order": r.sort_order,
         "created_at": r.created_at.isoformat() if r.created_at else None,
@@ -5833,6 +6048,16 @@ class UpsellRulePatchBody(BaseModel):
     phrase_template: str | None = None
     sort_order: int | None = None
     is_active: bool | None = None
+
+
+class UpsellFeedbackBody(BaseModel):
+    mode: Literal["suggest", "forbid"] = "forbid"
+    trigger_category: str = Field("", max_length=120)
+    suggest_category: str = Field("", max_length=120)
+    item_iiko_id: str = Field("", max_length=100)
+    item_name: str = Field("", max_length=255)
+    phrase_template: str = Field("", max_length=1000)
+    is_active: bool = True
 
 
 @router.get("/upsell-rules")
@@ -5909,6 +6134,77 @@ async def delete_upsell_rule(
     return {"ok": True}
 
 
+@router.post("/orders/{order_id}/feedback/upsell-rule")
+async def create_upsell_rule_from_order_feedback(
+    request: Request,
+    order_id: int,
+    body: UpsellFeedbackBody,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    org_id = admin_org_from_session(request)
+    order = await _order_in_org(db, order_id, org_id)
+    items_json = order.items_json if isinstance(order.items_json, dict) else {}
+    foods = items_json.get("items") if isinstance(items_json.get("items"), list) else []
+    first_food = next((x for x in foods if isinstance(x, dict)), {})
+    meta = order_meta_from_items_json(items_json)
+    trace = meta.get("recommendation_trace")
+    trace_item = next((x for x in trace if isinstance(x, dict)), {}) if isinstance(trace, list) else {}
+
+    trigger_category = (body.trigger_category or str(first_food.get("category") or "")).strip()
+    suggest_category = (body.suggest_category or str(trace_item.get("category") or trace_item.get("suggest_category") or "")).strip()
+    item_iiko_id = (body.item_iiko_id or str(trace_item.get("item_iiko_id") or trace_item.get("iiko_id") or "")).strip()
+    item_name = (body.item_name or str(trace_item.get("item_name") or trace_item.get("name") or "")).strip()
+
+    if body.mode == "suggest":
+        if not trigger_category or not suggest_category:
+            raise HTTPException(status_code=400, detail="trigger_category and suggest_category are required")
+        row = UpsellRule(
+            organization_id=org_id,
+            trigger_mode="missing_category",
+            trigger_category=trigger_category,
+            suggest_category=suggest_category,
+            min_order_sum=0,
+            max_order_sum=None,
+            phrase_template=(body.phrase_template or "").strip() or "К заказу хорошо подойдёт {item_name} ({price} ₸). Добавить?",
+            sort_order=100,
+            is_active=bool(body.is_active),
+        )
+        db.add(row)
+        await db.flush()
+        created: dict[str, Any] = {"kind": "upsell_rule", "rule": _upsell_rule_dict(row)}
+    else:
+        if not item_iiko_id and not item_name:
+            raise HTTPException(status_code=400, detail="item_iiko_id or item_name is required")
+        q = select(MenuItem).where(MenuItem.organization_id == org_id)
+        if item_iiko_id:
+            q = q.where(MenuItem.iiko_id == item_iiko_id)
+        else:
+            q = q.where(func.lower(MenuItem.name) == item_name.lower())
+        menu_item = (await db.execute(q.limit(1))).scalar_one_or_none()
+        if menu_item is None:
+            raise HTTPException(status_code=404, detail="Menu item not found for anti-rule")
+        tags = [t.strip() for t in (menu_item.tags or "").split(",") if t.strip()]
+        if "not_upsell" not in {t.lower() for t in tags}:
+            tags.append("not_upsell")
+        menu_item.tags = ", ".join(tags)
+        created = {"kind": "anti_rule", "menu_item_id": int(menu_item.id), "tags": menu_item.tags}
+
+    ij = dict(items_json)
+    om = dict(ij.get("order_meta") or {}) if isinstance(ij.get("order_meta"), dict) else {}
+    audit = list(om.get("upsell_feedback_audit") or []) if isinstance(om.get("upsell_feedback_audit"), list) else []
+    audit.append({
+        "mode": body.mode,
+        "at": datetime.now(timezone.utc).isoformat(),
+        "actor": _admin_actor_key(request),
+        "result": created,
+    })
+    om["upsell_feedback_audit"] = audit[-25:]
+    ij["order_meta"] = om
+    order.items_json = ij
+    await db.commit()
+    return {"ok": True, "feedback": created}
+
+
 class PackagingRuleCreateBody(BaseModel):
     kind: str = Field(..., min_length=1, max_length=60)
     name: str = Field(..., min_length=1, max_length=200)
@@ -5916,6 +6212,8 @@ class PackagingRuleCreateBody(BaseModel):
     iiko_product_id: str | None = None
     keywords: str = ""
     option_key: str = ""
+    scope: Literal["item", "category", "order"] = "item"
+    category_match: str = Field("", max_length=120)
     is_active: bool = True
     sort_order: int = 0
 
@@ -5927,6 +6225,8 @@ class PackagingRulePatchBody(BaseModel):
     iiko_product_id: str | None = None
     keywords: str | None = None
     option_key: str | None = None
+    scope: Literal["item", "category", "order"] | None = None
+    category_match: str | None = Field(None, max_length=120)
     is_active: bool | None = None
     sort_order: int | None = None
 
@@ -6037,6 +6337,8 @@ async def create_packaging_rule(
         iiko_product_id=(body.iiko_product_id or "").strip() or None,
         keywords=(body.keywords or "").strip(),
         option_key=(body.option_key or "").strip(),
+        scope=body.scope,
+        category_match=(body.category_match or "").strip(),
         is_active=body.is_active,
         sort_order=body.sort_order,
     )
@@ -6057,7 +6359,7 @@ async def patch_packaging_rule(
     if row is None or int(row.organization_id) != org_id:
         raise HTTPException(status_code=404, detail="Правило не найдено")
     data = body.model_dump(exclude_unset=True)
-    for key in ("kind", "name", "keywords", "option_key"):
+    for key in ("kind", "name", "keywords", "option_key", "category_match"):
         if key in data and data[key] is not None:
             data[key] = data[key].strip()
     if "iiko_product_id" in data:

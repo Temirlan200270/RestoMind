@@ -1,0 +1,56 @@
+---
+description: Зоны ответственности и запреты при работе в RestoMind. Подключается всегда.
+alwaysApply: true
+---
+
+# RestoMind — общие правила работы
+
+## Документы, которые читать первыми
+
+- [README.md](mdc:README.md) — что за продукт, стек, быстрый старт.
+- [codebase.md](mdc:codebase.md) — карта репозитория.
+- [plan.md](mdc:plan.md) — соглашения по разработке (async-first, тонкие роутеры, idempotency, версионирование заказа).
+- [IMPLEMENTATION_PLAN.md](mdc:IMPLEMENTATION_PLAN.md) — статус эпиков (E0–E18, E-UI).
+- [PARALLEL_AI_PLAN.md](mdc:PARALLEL_AI_PLAN.md) — распределение между ИИ 1 / ИИ 2.
+- [CHANGELOG.md](mdc:CHANGELOG.md) — история (всегда писать в `## [Unreleased]` при изменениях).
+
+## Жёсткие запреты
+
+1. **Платежи и финтех** — не трогать `app/api/payment_webhook.py`, `app/services/payment_*`, `app/services/payment_adapters.py` без явного согласования. Любая поломка = реальные деньги.
+2. **Idempotency и версионирование** — не убирать `Order.row_version`, `whatsapp_inbound_dedupe`, `payment_events.unique_constraint`. Это защита от двойных списаний и дублей.
+3. **Миграции** — пишет ИИ 1 (backend). Имя ревизии: `<YYYYMMDD>_<epic>_<slug>.py`. Никогда не редактировать уже применённые миграции — только новые.
+4. **Без `--no-verify`, `--no-gpg-sign`, `--force` push в main** без явного запроса.
+5. **`organization_id`** — всегда фильтруем выборки, никогда не делать «глобальные» запросы без скоупа арендатора.
+6. **Redis ≠ источник истины** — состав заказа в `orders.items_json`, диалоговое состояние резервируется в `users.current_*`.
+
+## Контракты, которые нельзя ломать
+
+- `GET /api/admin/auth/me` — описан в [PARALLEL_AI_PLAN.md §4](mdc:PARALLEL_AI_PLAN.md). Поля `available_organizations`, `branding`, `tenant`, `ws_token` обязательны.
+- WhatsApp `message_id` дедуп — Redis + `whatsapp_inbound_dedupe`.
+- Webhook платежей — идемпотентность по `(provider_slug, external_payment_id)` через `apply_payment_webhook`.
+
+## Зоны ответственности
+
+| Зона | ИИ 1 (backend) | ИИ 2 (frontend) |
+|------|----------------|------------------|
+| `app/api/` | да | нет (кроме узких UI-стабов после согласования) |
+| `app/services/` | да | нет |
+| `app/db/`, миграции | да | нет |
+| `app/integrations/` | да | нет |
+| `app/templates/` | редко (только Storybook) | да |
+| `app/static/` | нет | да |
+| `tests/` | бэкенд-тесты | UI-тесты (если появятся) |
+| Общие `.md` | дописывание в `## [Unreleased]` и статусы — оба | — |
+
+Полная карта — [PARALLEL_AI_PLAN.md](mdc:PARALLEL_AI_PLAN.md).
+
+## Когда нужны рассуждения и проверка
+
+- Перед изменением структуры БД — продумать миграцию + downgrade.
+- Перед изменением шаблона — проверить, есть ли компонент в `app/templates/components/` (после Phase U1 это обязательно).
+- Перед коммитом — `pytest -q` (бэкенд) или smoke в браузере через Chrome DevTools MCP (фронт).
+- Перед PR — обновить `CHANGELOG.md` и при закрытии эпика — `IMPLEMENTATION_PLAN.md`.
+
+## Память
+
+Память агента (если есть) — это не источник правды. Перед действием проверяй текущее состояние кода (`git log`, `grep`, чтение файла). Закрытые эпики могут оказаться открытыми и наоборот.
