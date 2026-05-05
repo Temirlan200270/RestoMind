@@ -153,6 +153,13 @@
     .ds-drawer-panel {
         @apply fixed bottom-0 left-0 right-0 z-[61] max-h-[85vh] rounded-t-2xl bg-white shadow-2xl ring-1 ring-slate-900/10 overflow-hidden flex flex-col;
     }
+    .rm-mobile-sheet {
+        @apply max-h-[88dvh];
+    }
+    .rm-mobile-sheet-actions {
+        @apply flex items-center gap-2;
+        padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
+    }
     .ds-drawer-panel-static {
         @apply relative z-auto max-h-none rounded-2xl shadow-lg;
     }
@@ -204,6 +211,10 @@
     .rm-focusable {
         @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2;
     }
+    .rm-settings-savebar {
+        @apply fixed left-3 right-3 z-[55] flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white/95 px-4 py-3 shadow-2xl shadow-slate-900/20 backdrop-blur;
+        bottom: calc(4.75rem + env(safe-area-inset-bottom, 0px));
+    }
 }
 
 /* U6: safe-area inset + визуальная «ручка» у нижних модалок (bottom-sheet) */
@@ -226,6 +237,27 @@
     }
     .admin-root .kanban-card {
         min-height: 44px;
+    }
+}
+
+@media (max-width: 767px) {
+    .ds-chat-shell {
+        border-radius: 0;
+        border-left-width: 0;
+        border-right-width: 0;
+        box-shadow: none;
+    }
+    .ds-chat-shell-list {
+        border-right-width: 0;
+    }
+    .rm-chat-actions > button {
+        min-height: 40px;
+    }
+}
+
+@media (max-width: 639px) {
+    .rm-mobile-safe-bottom {
+        padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
     }
 }
 

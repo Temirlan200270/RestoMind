@@ -38,6 +38,7 @@
 - **Документация (ранее):** добавлен эпик **[§E0](IMPLEMENTATION_PLAN.md)** (техдолг: раскол админ-API, E0.1–E0.7); §11 и спринт A: приоритет **E0.1**, правила для пакета `app/api/admin/`.
 - **Документация (ранее):** [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md), [PARALLEL_AI_PLAN.md](PARALLEL_AI_PLAN.md), [docs/AI2_PARALLEL_PROMPT.md](docs/AI2_PARALLEL_PROMPT.md) — актуализация: E2.1.F и E2 (частично), E1 payload.bin, E3/E16; очередь E2.2.B → E2.2.F.
 - **Документация (ранее):** [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) (статусы E1/E3/E17, §E3 и `/ai-value`, порядок спринтов, §S2 CI), [plan.md](plan.md) (AI Value), [codebase.md](codebase.md), [README.md](README.md) — Super Admin аудит webhook, вкладка «Вклад ИИ», навигация «Ошибки»; ссылка на AI2 для параллельных агентов.
+- **Документация:** актуализированы [codebase.md](codebase.md) (дерево `app/api/admin/`) и [README.md](README.md) (скрипты сборки CSS/линтинга админки из `package.json`).
 
 - **Доступы и блокировки:** `Organization.is_active=False` теперь блокирует вход staff в админку и игнорирует входящие WhatsApp webhooks для этого ресторана (без ретраев Meta).
 - **Self-serve onboarding:** legacy `POST /api/admin/auth/signup` переведён в `410 Gone`; маршрут `/onboarding` редиректит на `/request-access`.

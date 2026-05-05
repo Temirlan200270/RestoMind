@@ -389,6 +389,8 @@ function adminMixinState() {
         ],
         /** Вкладка внутри Settings (Stripe-like). */
         settingsTab: 'restaurant', // restaurant | branding | connections | smart_sales | team | …
+        orgProfileDirty: false,
+        brandingDirty: false,
         navItems: [
             { id: 'dashboard', section: 'overview', label: 'Дашборд', desc: 'Общая статистика и последние заказы',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25A2.25 2.25 0 018.25 10.5H6A2.25 2.25 0 013.75 8.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z"/></svg>' },
@@ -509,6 +511,7 @@ function adminMixinState() {
         orderSearchQ: '',
         orderSumMin: '',
         orderSumMax: '',
+        ordersMobileFiltersOpen: false,
         /** Сортировка таблицы заказов: id | client | items | total | status | date */
         ordersSort: { column: 'date', dir: 'desc' },
         showOrderModal: false,
@@ -2208,6 +2211,11 @@ function adminMixinSearchBookings() {
                 this.chatMobileInfoOpen = false;
                 return;
             }
+            if (this.ordersMobileFiltersOpen) {
+                e.preventDefault();
+                this.ordersMobileFiltersOpen = false;
+                return;
+            }
             if (this.sidebarOpen) {
                 e.preventDefault();
                 this.sidebarOpen = false;
@@ -2238,6 +2246,30 @@ function adminMixinSearchBookings() {
                 /* ignore */
             }
             this.ordersKanbanHintDismissed = true;
+        },
+
+        activeOrderFiltersCount() {
+            let n = 0;
+            if ((this.orderFilter || '').trim()) n += 1;
+            if ((this.orderSearchQ || '').trim()) n += 1;
+            if (this.orderSumMin !== '' && this.orderSumMin != null) n += 1;
+            if (this.orderSumMax !== '' && this.orderSumMax != null) n += 1;
+            return n;
+        },
+
+        resetOrderFilters() {
+            this.orderFilter = '';
+            this.orderSearchQ = '';
+            this.orderSumMin = '';
+            this.orderSumMax = '';
+            this.ordersPage = 1;
+            void this.loadOrders();
+        },
+
+        applyMobileOrderFilters() {
+            this.ordersPage = 1;
+            this.ordersMobileFiltersOpen = false;
+            void this.loadOrders();
         },
 
         async reindexMenuEmbeddings() {
@@ -2860,6 +2892,7 @@ function adminMixinAuthKnowledge() {
                     is_business_open: !!data?.is_business_open,
                     is_kitchen_open: !!data?.is_kitchen_open,
                 };
+                this.orgProfileDirty = false;
             } finally {
                 this.orgProfileLoading = false;
             }
@@ -2911,6 +2944,7 @@ function adminMixinAuthKnowledge() {
                     is_business_open: !!data?.is_business_open,
                     is_kitchen_open: !!data?.is_kitchen_open,
                 };
+                this.orgProfileDirty = false;
             } finally {
                 this.orgProfileSaving = false;
             }
@@ -2942,6 +2976,7 @@ function adminMixinAuthKnowledge() {
             this.brandingPreviewObjectUrl = '';
             this.brandingLogoPending = null;
             this.brandingLogoPendingLabel = '';
+            this.brandingDirty = false;
             try {
                 const el = this.$refs?.brandingLogoInput;
                 if (el) el.value = '';
@@ -3011,6 +3046,7 @@ function adminMixinAuthKnowledge() {
             this.brandingLogoPending = f;
             this.brandingLogoPendingLabel = `Выбран файл: ${f.name}`;
             this.brandingPreviewObjectUrl = URL.createObjectURL(f);
+            this.brandingDirty = true;
         },
 
         async refreshAuthMeBranding() {
@@ -3065,6 +3101,7 @@ function adminMixinAuthKnowledge() {
                     }
                 }
                 await this.refreshAuthMeBranding();
+                this.brandingDirty = false;
                 if (logoWarn) void this.showUiAlert(logoWarn, 'Внимание');
                 else this.setToast('Брендинг сохранён');
             } finally {
@@ -3191,6 +3228,7 @@ function adminMixinAuthKnowledge() {
                 };
             }
             this.orgProfile.schedule_json = payload;
+            this.orgProfileDirty = true;
             this.closeScheduleEditor();
         },
 
@@ -4644,6 +4682,10 @@ function adminMixinLiveChat() {
         navigateToTab(tabId, opts) {
             const o = opts && typeof opts === 'object' ? opts : {};
             this.currentTab = tabId;
+            this.ordersMobileFiltersOpen = false;
+            if (tabId !== 'chats') {
+                this.chatMobileInfoOpen = false;
+            }
             if (tabId === 'settings' && typeof o.settingsTab === 'string' && o.settingsTab.trim()) {
                 const st = o.settingsTab.trim();
                 if (this._adminSettingsTabIds.has(st)) this.settingsTab = st;

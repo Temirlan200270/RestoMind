@@ -78,8 +78,8 @@ async function obtainSessionCookie() {
 
     const sidebar = page.locator('nav.admin-sidebar-scroll');
     if (!(await sidebar.isVisible().catch(() => false))) {
-        const demoBtn = page.getByRole('button', { name: 'Попробовать демо' });
-        const submitBtn = page.getByRole('button', { name: 'Войти' });
+        const demoBtn = page.locator('form button[type="button"]').first();
+        const submitBtn = page.locator('form button[type="submit"]').first();
         await demoBtn.or(submitBtn).first().waitFor({ state: 'visible', timeout: 60000 });
 
         if (adminPass) {
@@ -178,7 +178,7 @@ async function run() {
                     throughputKbps: 1638.4,
                     cpuSlowdownMultiplier: 4,
                 },
-                extraHeaders: JSON.stringify({ Cookie: cookieHeader }),
+                extraHeaders: { Cookie: cookieHeader },
             });
 
             const lhr = JSON.parse(runner.report);
@@ -194,7 +194,11 @@ async function run() {
             console.log(`A11y ${row.accessibility ?? '—'} / Perf ${row.performance ?? '—'} / BP ${row.bestPractices ?? '—'}`);
         }
     } finally {
-        await chrome.kill();
+        try {
+            await chrome.kill();
+        } catch (e) {
+            console.warn('[lh:admin] Chrome cleanup warning:', e?.message || e);
+        }
     }
 
     fs.writeFileSync(path.join(OUT_DIR, 'summary.json'), JSON.stringify(summary, null, 2), 'utf8');

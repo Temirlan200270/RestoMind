@@ -1,52 +1,38 @@
 # Lighthouse — админка (mobile)
 
-Автоматический прогон **Lighthouse** по авторизованным URL админки (профиль **mobile**, категории Performance / Accessibility / Best practices).
+Автоматический прогон Lighthouse по авторизованным URL (профиль **mobile**).
 
 ## Как запустить
 
-1. Установить зависимости (из корня репозитория):
+```bash
+npm install
+npx playwright install chromium
+python -m uvicorn app.main:app --reload   # отдельный терминал
+npm run lh:admin
+```
 
-   ```bash
-   npm install
-   npx playwright install chromium
-   ```
+Переменные: `LH_BASE_URL` (по умолчанию `http://127.0.0.1:8000`), `ADMIN_USERNAME`, `ADMIN_PASSWORD` (если пароль пуст — **Попробовать демо**).
 
-2. В другом терминале поднять API:
-
-   ```bash
-   python -m uvicorn app.main:app --reload
-   ```
-
-3. Запустить отчёты:
-
-   ```bash
-   npm run lh:admin
-   ```
-
-Переменные окружения (опционально):
-
-| Переменная | Значение по умолчанию |
-|------------|------------------------|
-| `LH_BASE_URL` | `http://127.0.0.1:8000` |
-| `ADMIN_USERNAME` | `admin` |
-| `ADMIN_PASSWORD` | пусто → кнопка **«Попробовать демо»** (если API отвечает **503** «Демо временно недоступно», задайте пароль в `.env`, как для обычного входа) |
-
-Скрипт подхватывает **`ADMIN_USERNAME` / `ADMIN_PASSWORD` из файла `.env`** в корне репозитория, если они не заданы в shell.
-
-После успешного прогона появятся:
-
-- **`summary.json`** — сводка баллов по каждому экрану;
-- **`README.md`** в этой папке — будет **перезаписан** скриптом таблицей с цифрами;
-- **`reports/*.json`** — полные отчёты Lighthouse (каталог `reports/` в `.gitignore`).
-
-## Что прогоняется
-
-Дашборд, заказы, меню и **все 8** подвкладок настроек (`restaurant`, `branding`, `connections`, `smart_sales`, `team`, `health`, `technical`, `bot_test`) — см. `scripts/run_admin_lighthouse.mjs`.
-
-## Целевые пороги (из UI_REDESIGN_PLAN)
-
-На ключевых экранах ориентир: **Accessibility ≥ 90**, **Performance ≥ 80**, **Best practices ≥ 90**. Фактические числа зависят от БД, сети и железа; зафиксируйте `summary.json` после локального прогона перед релизом.
+Артефакты: **`summary.json`**, таблица ниже, полные отчёты в **`reports/`** (в `.gitignore`).
 
 ---
 
-*Таблица результатов появится здесь после первого успешного `npm run lh:admin`.*
+## Сводка (сгенерировано 2026-05-05T13:49:22.578Z)
+
+База: `http://127.0.0.1:9892` · профиль: **mobile**
+
+| Экран | Performance | Accessibility | Best practices |
+|--------|------------:|--------------:|---------------:|
+| dashboard | 29 | 89 | 96 |
+| orders | 42 | 90 | 93 |
+| menu | 56 | 94 | 96 |
+| settings_restaurant | 33 | 83 | 96 |
+| settings_branding | 57 | 87 | 96 |
+| settings_connections | 57 | 93 | 96 |
+| settings_smart_sales | 57 | 87 | 96 |
+| settings_team | 57 | 87 | 96 |
+| settings_health | 56 | 93 | 96 |
+| settings_technical | 56 | 93 | 96 |
+| settings_bot_test | 40 | 93 | 96 |
+
+**Интерпретация:** [UI_REDESIGN_PLAN.md](../UI_REDESIGN_PLAN.md) — на ключевых экранах ориентир: Accessibility ≥ 90, Performance ≥ 80, Best practices ≥ 90. Баллы зависят от данных БД и окружения.

@@ -1,55 +1,21 @@
 {# desktop_nav: на вкладке «Профиль и логистика» липкая полоска уже содержит чипы — вторую колонку не показываем. #}
 {% macro settings_tabs(margin_class='mb-6', desktop_nav=true) -%}
 <div class="{{ margin_class }}">
-  <div class="flex overflow-x-auto gap-2 rounded-2xl bg-white border border-gray-100 shadow-sm p-2 {% if desktop_nav %}lg:hidden{% endif %} scrollbar-none" style="-webkit-overflow-scrolling: touch; scroll-snap-type: x mandatory">
-    <button type="button"
-      @click="setSettingsTab('restaurant')"
-      :class="settingsTab === 'restaurant' ? 'bg-brand-600 text-white shadow-sm' : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'"
-      class="shrink-0 px-4 py-2 rounded-xl text-sm font-semibold transition min-h-[44px] scroll-snap-align-start">
-      Профиль и логистика
-    </button>
-    <button type="button"
-      @click="setSettingsTab('branding')"
-      :class="settingsTab === 'branding' ? 'bg-brand-600 text-white shadow-sm' : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'"
-      class="shrink-0 px-4 py-2 rounded-xl text-sm font-semibold transition min-h-[44px] scroll-snap-align-start">
-      Бренд
-    </button>
-    <button type="button"
-      @click="setSettingsTab('connections')"
-      :class="settingsTab === 'connections' ? 'bg-brand-600 text-white shadow-sm' : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'"
-      class="shrink-0 px-4 py-2 rounded-xl text-sm font-semibold transition min-h-[44px] scroll-snap-align-start">
-      Интеграции
-    </button>
-    <button type="button"
-      @click="setSettingsTab('smart_sales')"
-      :class="settingsTab === 'smart_sales' ? 'bg-brand-600 text-white shadow-sm' : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'"
-      class="shrink-0 px-4 py-2 rounded-xl text-sm font-semibold transition min-h-[44px] scroll-snap-align-start">
-      Допродажи
-    </button>
-    <button type="button"
-      @click="setSettingsTab('bot_test')"
-      :class="settingsTab === 'bot_test' ? 'bg-emerald-700 text-white shadow-sm' : 'bg-white text-emerald-800 hover:bg-emerald-50 border border-emerald-200'"
-      class="shrink-0 px-4 py-2 rounded-xl text-sm font-semibold transition min-h-[44px] scroll-snap-align-start">
-      Бот / ИИ
-    </button>
-    <button type="button"
-      @click="setSettingsTab('team')"
-      :class="settingsTab === 'team' ? 'bg-brand-600 text-white shadow-sm' : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200'"
-      class="shrink-0 px-4 py-2 rounded-xl text-sm font-semibold transition min-h-[44px] scroll-snap-align-start">
-      Команда
-    </button>
-    <button type="button"
-      @click="setSettingsTab('health')"
-      :class="settingsTab === 'health' ? 'bg-slate-800 text-white shadow-sm' : 'bg-white text-slate-700 hover:bg-slate-50 border border-slate-200'"
-      class="shrink-0 px-4 py-2 rounded-xl text-sm font-semibold transition min-h-[44px] scroll-snap-align-start">
-      Состояние
-    </button>
-    <button type="button"
-      @click="setSettingsTab('technical')"
-      :class="settingsTab === 'technical' ? 'bg-slate-900 text-white shadow-sm' : 'bg-white text-slate-700 hover:bg-slate-50 border border-slate-200'"
-      class="shrink-0 px-4 py-2 rounded-xl text-sm font-semibold transition min-h-[44px] scroll-snap-align-start">
-      Данные и безопасность
-    </button>
+  <div class="rounded-2xl bg-white border border-gray-100 shadow-sm p-3 {% if desktop_nav %}lg:hidden{% endif %}">
+    <label class="block text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-1.5" for="settings-mobile-tab">Раздел настроек</label>
+    <select id="settings-mobile-tab"
+      x-model="settingsTab"
+      @change="setSettingsTab(settingsTab)"
+      class="w-full min-h-[48px] rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-semibold text-slate-900 focus:bg-white focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20">
+      <option value="restaurant">Профиль и логистика</option>
+      <option value="branding">Бренд</option>
+      <option value="connections">Интеграции</option>
+      <option value="smart_sales">Допродажи</option>
+      <option value="bot_test">Бот / ИИ</option>
+      <option value="team">Команда</option>
+      <option value="health">Состояние</option>
+      <option value="technical">Данные и безопасность</option>
+    </select>
   </div>
   {% if desktop_nav %}
   <nav class="hidden lg:flex lg:flex-col lg:gap-1 lg:w-56 lg:shrink-0 lg:sticky lg:top-24 lg:z-10 lg:py-2 lg:px-2 lg:rounded-2xl lg:bg-white lg:border lg:border-gray-100 lg:shadow-sm" aria-label="Подразделы настроек">

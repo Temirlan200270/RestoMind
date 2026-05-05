@@ -25,7 +25,7 @@
 | **E2** | Частично | **E2.1.B + E2.1.F** — backend (`tenant_owner_id`, `/auth/me`, `/auth/select-org`) и **селектор филиалов в шапке** ([`admin.html`](app/templates/admin.html) / [`admin-app.js`](app/static/js/admin-app.js)). **E2.2.F (UI)** — вкладка **«Брендинг»** в настройках (форма, превью, вызовы API при появлении E2.2.B). **E2.2.B** — не сделан: нет колонок `Tenant.brand_*`, нет `GET/PATCH /api/admin/branding` / `POST .../branding/logo` (ожидает ИИ 1). **E2.3.B** — биллинг в коде отсутствует; в `/auth/me` у блока `tenant` поле `plan_status` пока заглушка до миграций. |
 | **E3** | Частично | Дашборд — `/api/admin/stats`; вкладка «Вклад ИИ» — **`GET /api/admin/ai-value`** + отполированный UI (периоды, пустые состояния, fallback на `stats`). Полный набор KPI §E3 и тяжёлые агрегаты — по мере доработки backend. |
 | **E16** | Частично | Поле `prepayment_legal_text`, UI «Мой ресторан», дисклеймер в WhatsApp; в `prompts.py` мультиязычные константы **`DEFAULT_PREPAYMENT_LEGAL_TEXT_RU` / `_KZ` / `_EN`**; сервис [`prepayment_legal.py`](app/services/prepayment_legal.py) пока подставляет общий дефолт (`DEFAULT_PREPAYMENT_LEGAL_TEXT`, по умолчанию RU). Юридическая выверка текстов — продукт / юрист. |
-| **E0** | В работе / приоритет **E0.1** | Техдолг: раскол [`app/api/admin.py`](app/api/admin.py), типизация JSON-заказа, единый dialog state, интеграции в отдельной таблице, tenancy Depends, шина событий. **Не заменяет** продуктовые E2/E3 — режет стоимость merge и ошибок. Детали — [§E0](#e0-рефакторинг-архитектуры-техдолг-сквозной). |
+| **E0** | В работе / приоритет **E0.1** | Техдолг: раскол admin-API из временного монолита [`app/api/admin/_monolith.py`](app/api/admin/_monolith.py) в подмодули пакета [`app/api/admin/`](app/api/admin/), типизация JSON-заказа, единый dialog state, интеграции в отдельной таблице, tenancy Depends, шина событий. **Не заменяет** продуктовые E2/E3 — режет стоимость merge и ошибок. Детали — [§E0](#e0-рефакторинг-архитектуры-техдолг-сквозной). |
 
 ### Роли и следующий упор
 
@@ -38,7 +38,7 @@
 
 Правила параллели:
 - Перед большими правками сверяйся с актуальным `IMPLEMENTATION_PLAN.md`: не дублируй эпики, которые уже помечены закрытыми (`E17`/`E18` в текущем объёме).
-- Избегай конфликтующих правок с ИИ 1 в одних и тех же файлах в одном коммите. Если нужны правки в `app/api/admin.py`, делай узкий diff на одну фичу или договаривайся очередностью merge: ИИ 1 → ИИ 2.
+- Избегай конфликтующих правок с ИИ 1 в одних и тех же файлах в одном коммите. Если нужны правки в `app/api/admin/_monolith.py` или в подмодулях `app/api/admin/*`, делай узкий diff на одну фичу или договаривайся очередностью merge: ИИ 1 → ИИ 2.
 - ИИ 1 не должен править UX-задачи без необходимости; ИИ 2 не меняет `app/api/payment_webhook.py` и связанные платёжные сервисы без явной договорённости.
 
 Приоритетные направления ИИ 2 по запросу заказчика:
@@ -93,7 +93,7 @@ flowchart LR
 
 ## E0. Рефакторинг архитектуры (техдолг, сквозной)
 
-**Цель.** Снизить конфликты merge, размер «god-файла» [`app/api/admin.py`](app/api/admin.py) и стоимость изменений **без** отмены продуктовых эпиков E2/E3. Не «Clean Architecture по книжке»: достаточно модульных роутеров, типизированного доступа к JSON заказа и явных границ сервисов.
+**Цель.** Снизить конфликты merge, размер временного «god-файла» [`app/api/admin/_monolith.py`](app/api/admin/_monolith.py) и стоимость изменений **без** отмены продуктовых эпиков E2/E3. Не «Clean Architecture по книжке»: достаточно модульных роутеров, типизированного доступа к JSON заказа и явных границ сервисов.
 
 **Контекст.** Секции `# ── EX.Y ──` в `admin.py` — временный компромисс для параллельной работы двух ИИ; после роста файла (>6k строк, десятки эндпоинтов) приоритет — **E0.1** до дальнейшего раздувания файла новыми API (**E2.2**, **E2.3**). **E2.1.B** уже закрыт в коде — очередь: **E0.1 → E2.2.B**, а не наоборот.
 
@@ -101,12 +101,12 @@ flowchart LR
 
 | ID | Что | Когда / связь с эпиками | Definition of Done |
 |----|-----|-------------------------|---------------------|
-| **E0.1** | Расколить `app/api/admin.py` на **8–10 подмодулей** (например `admin/auth`, `admin/orders`, `admin/menu`, `admin/analytics`, `admin/integrations`, …), единая сборка роутера в `admin/__init__.py` или тонком `admin.py`. Логика эндпоинтов **без изменения поведения** — только перенос и импорты. | **Первым среди E0**; желательно завершить до **E2.2.B** / **E2.3.B**. Допускается **несколько последовательных PR** (например сначала auth+ws, затем orders, …) с зелёным CI после каждого. | Все прежние пути `/api/admin/*` работают; полный **`pytest`** зелёный; [`main.py`](app/main.py) подключает собранный роутер. |
+| **E0.1** | Расколить временный монолит `app/api/admin/_monolith.py` на **8–10 подмодулей** (например `admin/auth`, `admin/orders`, `admin/menu`, `admin/analytics`, `admin/integrations`, …), единая сборка роутера в `admin/__init__.py` или тонком `__init__.py`. Логика эндпоинтов **без изменения поведения** — только перенос и импорты. | **Первым среди E0**; желательно завершить до **E2.2.B** / **E2.3.B**. Допускается **несколько последовательных PR** (например сначала auth+ws, затем orders, …) с зелёным CI после каждого. | Все прежние пути `/api/admin/*` работают; полный **`pytest`** зелёный; [`main.py`](app/main.py) подключает собранный роутер. |
 | **E0.2** | Вынести массовый SQL/CRUD из роутеров в сервисы (`order_admin`, `analytics_admin` и т.д.). | Параллельно / после E0.1; удобно в связке с **E2** (новые поля tenant). | Роутеры остаются тонкими; повторяющиеся запросы в одном месте. |
 | **E0.3** | Pydantic-модели для структуры `Order.items_json` (вложенные order_meta, fee_lines, recommendation_trace и т.д.) — **без миграции БД**, только типизированный доступ в коде. | До или вместе с **E13** (вынос trace в таблицу). | Меньше «магических» ключей в dict; одно место для валидации формы. |
 | **E0.4** | Один «владелец» dialog state: убрать рассинхрон Redis vs `users.current_*` — либо канон + снапшот, либо явная политика восстановления. | Вместе с **E5** (ARQ-only, единая модель фоновых задач). | Документированный поток state; тесты на восстановление. |
 | **E0.5** | Таблица `organization_integration_settings` 1:1 с `Organization`; широкая `organizations` — только бизнес-поля (имя, tz, валюта, tenant и т.д.). | Вместе с **E2.3** (биллинг / план). | Меньше колонок в одной таблице; миграция + обратная совместимость. |
-| **E0.6** | Tenancy: единый `Depends` для активного `organization_id` (поверх [`admin_org_from_session`](app/api/admin.py) / [`tenant_scope`](app/services/tenant_scope.py)); опционально **RLS** на Postgres позже. | Инкремент после **E2.1**; не дублировать уже сделанное. | Меньше ручных `.where(organization_id == …)` в новых эндпоинтах. |
+| **E0.6** | Tenancy: единый `Depends` для активного `organization_id` (поверх [`admin_org_from_session`](app/api/admin/deps.py) / [`tenant_scope`](app/services/tenant_scope.py)); опционально **RLS** на Postgres позже. | Инкремент после **E2.1**; не дублировать уже сделанное. | Меньше ручных `.where(organization_id == …)` в новых эндпоинтах. |
 | **E0.7** | Минимальная шина доменных событий поверх существующего [`publish_event`](app/services/events.py): WS / Telegram / autoprint подписываются на события, а не размазаны по call-sites. | Вместе с **E11** (Strategy Engine). | Один способ добавить нового подписчика. |
 
 **Чего не делаем в E0:** полный Hexagonal/Clean с портами на всю кодовую базу — избыточно для текущего масштаба.
@@ -240,7 +240,7 @@ class ParsedPayment:
 **Файлы.**
 - `app/db/models.py` — `StaffUser`: добавить колонку `tenant_owner_id INT FK tenants(id) NULL` (взамен фиксированного `organization_id`, либо в дополнение).
 - `app/services/tenant_scope.py` — функции выбора `org_id` для запросов.
-- `app/api/admin.py` — функция `admin_org_from_session` должна уметь возвращать список доступных филиалов и активный.
+- `app/api/admin/deps.py` / `app/api/admin/_monolith.py` — функция `admin_org_from_session` должна уметь возвращать список доступных филиалов и активный.
 - `app/templates/admin.html`, `app/static/js/admin-app.js` — селектор филиала в шапке для tenant-owner.
 
 **Схема (миграция):**
@@ -267,13 +267,13 @@ CREATE INDEX ix_staff_users_tenant_owner ON staff_users(tenant_owner_id);
 
 **DoD.** Один email видит и переключает несколько филиалов; обычные admin/operator продолжают работать без изменений.
 
-**Статус:** **E2.1.B** (backend) и **E2.1.F** (селектор филиалов в шапке + `select-org` на фронте) — выполнены. Дальше по спринту A: **E2.2.B** (миграция `Tenant.brand_*`, API branding в `app/api/admin.py` секция `# ── E2.2 ──`) — **ИИ 1**; затем **E2.2.F** (форма брендинга) — **ИИ 2**. Блок `branding` в `/auth/me` сейчас заполняется заглушкой до E2.2 ([`tenant_scope.branding_placeholder_e21`](app/services/tenant_scope.py)).
+**Статус:** **E2.1.B** (backend) и **E2.1.F** (селектор филиалов в шапке + `select-org` на фронте) — выполнены. Дальше по спринту A: **E2.2.B** (миграция `Tenant.brand_*`, API branding в `app/api/admin/_monolith.py` до завершения раскола) — **ИИ 1**; затем **E2.2.F** (форма брендинга) — **ИИ 2**. Блок `branding` в `/auth/me` сейчас заполняется заглушкой до E2.2 ([`tenant_scope.branding_placeholder_e21`](app/services/tenant_scope.py)).
 
 ### E2.2. Брендинг (лого, цвет, название бренда)
 
 **Файлы.**
 - `app/db/models.py` — `Tenant`: `brand_name`, `brand_logo_url`, `brand_color_hex`. (или `Organization` если бренд индивидуальный — продуктовое решение; начинаем с `Tenant`).
-- `app/api/admin.py` — `GET/PATCH /api/admin/branding`.
+- `app/api/admin/_monolith.py` (до завершения раскола) — `GET/PATCH /api/admin/branding`.
 - `app/templates/_layout_admin.html` (или `admin.html`) — рендер шапки с лого и цветом.
 - Хранение лого: `app/static/uploads/branding/<tenant_id>.png` (или подключить S3 в будущем; на старте — локально, как меню-картинки).
 
@@ -312,12 +312,12 @@ ALTER TABLE tenants ADD COLUMN brand_color_hex VARCHAR(9) NOT NULL DEFAULT '';
 
 ## E3. AI Value Dashboard (P0)
 
-**Статус:** частично — см. таблицу «Статус по эпикам». **Сделано:** главная тянет `/api/admin/stats`; вкладка **«Вклад ИИ»** — `GET /api/admin/ai-value` (`app/api/admin.py`), фронт [`admin-app.js`](app/static/js/admin-app.js) / [`admin.html`](app/templates/admin.html); тесты [`tests/test_ai_value_metrics.py`](tests/test_ai_value_metrics.py). **Осталось:** расширить KPI до полного списка ниже (средние чеки бот vs оператор строго по продуктовым правилам, `first_response_avg_sec` и т.д.), вынести тяжёлые агрегаты в сервис при росте объёма.
+**Статус:** частично — см. таблицу «Статус по эпикам». **Сделано:** главная тянет `/api/admin/stats`; вкладка **«Вклад ИИ»** — `GET /api/admin/ai-value` (`app/api/admin/_monolith.py`), фронт [`admin-app.js`](app/static/js/admin-app.js) / [`admin.html`](app/templates/admin.html); тесты [`tests/test_ai_value_metrics.py`](tests/test_ai_value_metrics.py). **Осталось:** расширить KPI до полного списка ниже (средние чеки бот vs оператор строго по продуктовым правилам, `first_response_avg_sec` и т.д.), вынести тяжёлые агрегаты в сервис при росте объёма.
 
 **Цель.** Закрыть пункт «Dashboard: деньги + вклад ИИ» из prompt.md этап 1 и [plan.md](plan.md) §«AI Value».
 
 **Файлы.**
-- `app/api/admin.py` — `GET /api/admin/ai-value` (агрегаты за окно UTC; reuse `upsell_stats_from_items_json`, `menu_engineering_rows`, та же эвристика «оператор до заказа», что в `/analytics`).
+- `app/api/admin/_monolith.py` — `GET /api/admin/ai-value` (агрегаты за окно UTC; reuse `upsell_stats_from_items_json`, `menu_engineering_rows`, та же эвристика «оператор до заказа», что в `/analytics`).
 - `app/services/intelligence_analytics.py` — разбор `order_meta` / trace (уже используется эндпоинтом).
 - `app/templates/admin.html`, `app/static/js/admin-app.js` — вкладка «Вклад ИИ», fallback на `stats` при ошибке.
 
@@ -464,7 +464,7 @@ GET /api/admin/ai-value?period=7d|30d|90d|custom&date_from=YYYY-MM-DD&date_to=YY
   ```json
   {"call_sid":"…","stt_ms":420,"llm_ms":1800,"tts_ttfb_ms":300,"tts_total_ms":2200,"end_to_end_ms":2520}
   ```
-- `app/api/admin.py` — `GET /api/admin/voice-metrics?period=7d` → агрегаты p50/p95/p99 по этапам.
+- `app/api/admin/_monolith.py` — `GET /api/admin/voice-metrics?period=7d` → агрегаты p50/p95/p99 по этапам.
 - UI: в «Интеграции» / «Аналитика» — блок «Голос: латентность».
 
 **DoD.** Видно, на каком этапе тратится время — в реальном времени и в исторических агрегатах.
@@ -654,7 +654,7 @@ order_suggestion_events
 **Файлы.**
 - Миграция Alembic.
 - `app/services/recommendation_sync.py` — расширить: писать одновременно в `order_meta.recommendation_trace` (обратная совместимость) **и** в новую таблицу.
-- `app/api/admin.py` — `GET /api/admin/upsell-events`.
+- `app/api/admin/_monolith.py` — `GET /api/admin/upsell-events`.
 
 **DoD.** Аналитика upsell больше не требует сканировать `items_json`; A/B-варианты различаются по `ab_variant`.
 
@@ -719,7 +719,7 @@ class PaymentLinkProvider(Protocol):
 **Файлы.**
 - `app/templates/admin.html` — добавить вкладку «Ошибки».
 - `app/static/js/admin-app.js` — `loadFailedTasks`, фильтры (resolved/open, период, телефон), `markResolved`, `retry` (вызов `process_message` через новый `POST /api/admin/failed-tasks/{id}/retry`).
-- `app/api/admin.py` — `POST /api/admin/failed-tasks/{id}/retry`.
+- `app/api/admin/_monolith.py` — `POST /api/admin/failed-tasks/{id}/retry`.
 
 **DoD.** Оператор в одну вкладку видит исчерпанные retry, может пометить решённой или повторить.
 

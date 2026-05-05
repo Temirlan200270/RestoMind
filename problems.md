@@ -1,7 +1,7 @@
 ﻿# Backend
 
 🔴 Критичность: High Backend Утечка данных меню между организациями
-Где: app/services/order_logic.py:197, app/api/webhooks.py:942, app/api/admin.py:3782, app/services/intent_router.py:347
+Где: app/services/order_logic.py:197, app/api/webhooks.py:942, app/api/admin/_monolith.py:3782, app/services/intent_router.py:347
 Угроза: `load_available_menu()` читает все доступные позиции без фильтра по `organization_id`. В multi-tenant SaaS это прямой data leak: оператор и ИИ одной точки могут видеть меню другой точки, собирать заказ из чужих SKU и отправлять некорректный payload в iiko.
 Как исправить:
 ```python
@@ -104,7 +104,7 @@ if result.new_state:
 `dialog_mgr` должен уметь режим `cache_only`, а source of truth для durable state должна быть одна транзакция БД.
 
 🔴 Критичность: High Backend Исходящее сообщение оператора отправляется наружу до фиксации ChatLog
-Где: app/api/admin.py:3641, app/api/admin.py:3682, app/api/admin.py:3781
+Где: app/api/admin/_monolith.py:3641, app/api/admin/_monolith.py:3682, app/api/admin/_monolith.py:3781
 Угроза: в `admin_send_message` и resend flow сообщение уходит в WhatsApp при еще незафиксированном `ChatLog(status='sending')`. Если commit потом упадет, клиент получил сообщение, а система не знает об отправке. Повторный resend создаст дубль, история чата и audit trail разъедутся. В `admin test-bot` OpenAI тоже вызывается внутри живой DB-сессии, удерживая connection во время внешнего I/O.
 Как исправить:
 ```python
@@ -126,7 +126,7 @@ async with async_session_factory() as db2:
 Для test-bot: сначала вычитать контекст из БД, закрыть сессию, потом вызывать OpenAI.
 
 🟠 Критичность: Medium Backend События публикуются в UI до commit и создают phantom state
-Где: app/api/webhooks.py:780, app/services/intent_router.py:661, app/api/admin.py:3666
+Где: app/api/webhooks.py:780, app/services/intent_router.py:661, app/api/admin/_monolith.py:3666
 Угроза: WebSocket может показать новый message/order update, которого еще нет в committed БД. Следующий REST reload откатит интерфейс назад. Под нагрузкой оператор увидит "мигающие" заказы и статусы, а часть действий уйдет по устаревшим данным.
 Как исправить:
 ```python
@@ -156,7 +156,7 @@ async def publish_event(...):
 Staff notification лучше вынести в очередь.
 
 🟠 Критичность: Medium Backend Payload `order_updated` недостаточен для version-guard на клиенте
-Где: app/api/admin.py:730, app/services/intent_router.py:661
+Где: app/api/admin/_monolith.py:730, app/services/intent_router.py:661
 Угроза: часть событий приходит без полной сериализации заказа и без актуального `row_version`. Клиент вынужден делать `loadOrders()`, а это снова открывает окно гонки между WS и REST.
 Как исправить:
 ```python

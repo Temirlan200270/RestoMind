@@ -102,7 +102,7 @@
 
 Полный список открытого объёма:
 
-- **E0** — рефакторинг архитектуры: см. [IMPLEMENTATION_PLAN.md §E0](IMPLEMENTATION_PLAN.md); приоритет **E0.1** (раскол `app/api/admin.py`) до крупных новых блоков **E2.2 / E2.3** в том же файле.
+- **E0** — рефакторинг архитектуры: см. [IMPLEMENTATION_PLAN.md §E0](IMPLEMENTATION_PLAN.md); приоритет **E0.1** (раскол временного `app/api/admin/_monolith.py` в подмодули пакета `app/api/admin/`) до крупных новых блоков **E2.2 / E2.3** в том же монолите.
 - **E1 хвост** — UNIQUE-индекс `(provider_slug, external_payment_id)` (продуктовое решение); скачивание сырого payload — `GET /api/superadmin/payment-webhook-events/{id}/payload.bin` + UI в Super Admin.
 - **E2** — мульти-тенант «на продажу» (роли, брендинг, биллинг).
 - **E3 хвост** — расширение KPI до полного списка из плана.
@@ -133,7 +133,7 @@
 
 | Подзадача | Кому | Файлы | DoD-флаг |
 |-----------|------|-------|----------|
-| **E0.1** Раскол монолита на подмодули (перенос без смены логики) | B | `app/api/admin.py` → `app/api/admin/*.py`, [`main.py`](app/main.py) | те же URL; `pytest` зелёный; допускается цепочка PR |
+| **E0.1** Раскол монолита на подмодули (перенос без смены логики) | B | `app/api/admin/_monolith.py` → `app/api/admin/*.py`, [`main.py`](app/main.py) | те же URL; `pytest` зелёный; допускается цепочка PR |
 | E0.2 SQL/CRUD → сервисы | B | `app/services/order_admin.py`, … | тонкие роутеры |
 | E0.3 Pydantic для `items_json` | B | `app/schemas/order_items.py` (или аналог) | типизированный доступ без миграции |
 | E0.4 Единый владелец dialog state | B | `dialog_mgr`, `users`, Redis | см. E5 |
@@ -148,14 +148,14 @@
 | Подзадача | Кому | Файлы | DoD-флаг |
 |-----------|------|-------|----------|
 | E2.1.B Модель `StaffUser.tenant_owner_id`, миграция | B | `app/db/models.py`, `alembic/versions/<ts>_tenant_owner.py` | миграция применена |
-| E2.1.B API `GET /auth/me` (расширение), `POST /auth/select-org` | B | `app/api/admin.py` (секция `# ── E2.1 ──`), `app/services/tenant_scope.py` | контракт ниже зафиксирован |
+| E2.1.B API `GET /auth/me` (расширение), `POST /auth/select-org` | B | `app/api/admin/auth.py` + `app/api/admin/_monolith.py` (остальные места), `app/services/tenant_scope.py` | контракт ниже зафиксирован |
 | E2.1.B Тесты scope | B | `tests/test_tenant_owner_scope.py`, `tests/test_select_org.py` | `pytest` зелёный |
 | E2.1.F Селектор филиала в шапке | F | `app/templates/admin.html`, `app/static/js/admin-app.js` | **готово** — дропдаун при `available_organizations.length > 1`, `POST /auth/select-org` |
 | E2.2.B Колонки `Tenant.brand_*`, миграция | B | `app/db/models.py`, миграция | DDL применён |
-| E2.2.B API `GET/PATCH /api/admin/branding`, `POST /branding/logo` | B | `app/api/admin.py` (секция `# ── E2.2 ──`), `app/services/branding.py` (новый) | загрузка логотипа ≤ 1 MB, валидация PNG/JPG |
+| E2.2.B API `GET/PATCH /api/admin/branding`, `POST /branding/logo` | B | `app/api/admin/_monolith.py` (до завершения раскола), `app/services/branding.py` (новый) | загрузка логотипа ≤ 1 MB, валидация PNG/JPG |
 | E2.2.F UI «Настройки → Брендинг» (загрузка лого, color picker, превью шапки) | F | [`admin.html`](app/templates/admin.html), [`admin-app.js`](app/static/js/admin-app.js) | вкладка и сохранение при наличии E2.2.B; шапка — цвет аватара из `brand_color_hex`, лого из URL |
 | E2.3.B Колонки `Tenant.plan_status / trial_ends_at / seats_limit / monthly_message_limit`, таблица `billing_usage`, ежедневный rollup | B | `app/db/models.py`, `alembic/versions/<ts>_billing.py`, `app/services/billing.py`, регистрация cron в `app/main.py` | ежедневный job заполняет `billing_usage` |
-| E2.3.B Блок входа: при `plan_status='suspended'` — 403 на login и игнор WA | B | `app/api/admin.py` (auth/login), `app/api/webhooks.py` | юнит-тест блокировки |
+| E2.3.B Блок входа: при `plan_status='suspended'` — 403 на login и игнор WA | B | `app/api/admin/auth.py` (login) + guards, `app/api/webhooks.py` | юнит-тест блокировки |
 | E2.3.B Superadmin API `/tenants/{id}/usage` | B | `app/api/superadmin.py` | пагинация по дням |
 | E2.3.F Superadmin UI: usage-страница, индикатор плана | F | `app/templates/superadmin.html`, `app/static/js/admin-app.js` (или отдельный JS) | график за 30/90 дней |
 | E2.3.F Дашборд админки: «Использовано X из Y сообщений» | F | `app/templates/admin.html`, `admin-app.js` (читает из `/api/admin/auth/me`) | блок виден при наличии лимита |
@@ -182,7 +182,7 @@
 
 | Подзадача | Кому | Файлы |
 |-----------|------|-------|
-| Расширить агрегаты: средний чек bot vs operator, `first_response_avg_sec`, разбивка по дням `bot_orders` / `bot_revenue` | B | `app/services/intelligence_analytics.py`, `app/api/admin.py` (`/ai-value`) |
+| Расширить агрегаты: средний чек bot vs operator, `first_response_avg_sec`, разбивка по дням `bot_orders` / `bot_revenue` | B | `app/services/intelligence_analytics.py`, `app/api/admin/_monolith.py` (`/ai-value`) |
 | Полировка UI «Вклад ИИ»: топ-5 принятых, тренд `ai_profit`, пустые состояния, период custom | F | `app/templates/admin.html`, `app/static/js/admin-app.js` |
 | Тесты на новые поля | B | `tests/test_ai_value_metrics.py` |
 
@@ -255,11 +255,11 @@
 | Подзадача | Кому | Файлы |
 |-----------|------|-------|
 | Сервис `menu_autotag` (эвристики + LLM-фоллбек) | B | `app/services/menu_autotag.py` |
-| `POST /api/admin/menu/autotag?dry_run=` | B | `app/api/admin.py` (секция `# ── E9.1 ──`) |
+| `POST /api/admin/menu/autotag?dry_run=` | B | `app/api/admin/_monolith.py` (до завершения раскола) |
 | Сервис `upsell_seed` | B | `app/services/upsell_seed.py` |
-| `POST /api/admin/upsell-rules/seed?dry_run=` | B | `app/api/admin.py` (секция `# ── E9.2 ──`) |
+| `POST /api/admin/upsell-rules/seed?dry_run=` | B | `app/api/admin/_monolith.py` (до завершения раскола) |
 | Сервис `packaging_seed` | B | `app/services/packaging_seed.py` |
-| `POST /api/admin/packaging-rules/seed?dry_run=` | B | `app/api/admin.py` (секция `# ── E9.3 ──`) |
+| `POST /api/admin/packaging-rules/seed?dry_run=` | B | `app/api/admin/_monolith.py` (до завершения раскола) |
 | Кнопка «Предложить теги» с модалкой diff в «Меню» | F | `admin-app.js`, `admin.html` |
 | Кнопка «Создать стартовые правила» в «Допродажи» (мастер) | F | `admin-app.js`, `admin.html` |
 | Кнопка «Предложить правила упаковки» в «Упаковка» | F | `admin-app.js`, `admin.html` |
@@ -283,7 +283,7 @@
 | Streaming TTS | B | `app/services/tts_streaming.py`, интеграция в pipeline |
 | Filler-фразы | B | `app/services/voice_filler.py` + `.wav` сэмплы в `app/static/voice_filler/<lang>/` |
 | Метрики latency (структурированные JSON-логи) | B | `app/services/voice_metrics.py` |
-| `GET /api/admin/voice-metrics?period=` | B | `app/api/admin.py` (секция `# ── E6 ──`) |
+| `GET /api/admin/voice-metrics?period=` | B | `app/api/admin/_monolith.py` (до завершения раскола) |
 | Юнит-тесты | B | `tests/test_voice_vad.py`, `tests/test_twilio_outbound_frames.py` |
 | Симулятор stream | B | `scripts/twilio_stream_simulator.py` |
 | UI «Голос: латентность» — p50/p95/p99 по этапам | F | блок в «Аналитика» или «Интеграции» |
@@ -317,7 +317,7 @@
 |-----------|------|-------|
 | Модель + миграция | B | `app/db/models.py`, миграция |
 | Запись из `recommendation_sync` (двойная запись + обратная совместимость) | B | `app/services/recommendation_sync.py` |
-| `GET /api/admin/upsell-events?period=&accepted=` | B | `app/api/admin.py` (секция `# ── E13 ──`) |
+| `GET /api/admin/upsell-events?period=&accepted=` | B | `app/api/admin/_monolith.py` (до завершения раскола) |
 | Тесты | B | `tests/test_order_suggestion_events.py` |
 | Список upsell-событий в «Допродажи» с фильтрами | F | `admin.html`, `admin-app.js` |
 
@@ -374,7 +374,7 @@
 ### ИИ 1
 1. `git pull origin main`.
 2. Открыть [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) и [PARALLEL_AI_PLAN.md](PARALLEL_AI_PLAN.md), сверить «закрыто» / «в работе».
-3. Если эпик трогает `app/api/admin.py` — проверить, нет ли свежих правок ИИ 2 в той же функции; если есть — взять задачу из другого эпика.
+3. Если эпик трогает `app/api/admin/_monolith.py` (или подмодули `app/api/admin/*`) — проверить, нет ли свежих правок ИИ 2 в той же функции; если есть — взять задачу из другого эпика.
 4. После реализации: `pytest`, обновить статус в IMPLEMENTATION_PLAN, дописать в CHANGELOG `## [Unreleased]`.
 5. PR с заголовком `E<N>.<M>: <краткое описание>`.
 
@@ -389,7 +389,7 @@
 
 ## 8. Правила разрешения конфликтов
 
-1. **Конфликт в `app/api/admin.py`.** Каждый эндпоинт в собственной секции с маркером `# ── E<N>.<M> ──`. При git-конфликте — оба блока сохраняются, никогда не сливать в один.
+1. **Конфликт в `app/api/admin/_monolith.py`.** Каждый эндпоинт в собственной секции с маркером `# ── E<N>.<M> ──`. При git-конфликте — оба блока сохраняются, никогда не сливать в один.
 2. **Конфликт в `CHANGELOG.md`.** Берём обе записи, кладём подряд под `## [Unreleased]`.
 3. **Конфликт в `admin.html`.** ИИ 1 не трогает `admin.html`, кроме случаев генерации скрытого `<script>` с серверным флагом. Если нужно — узкий diff и явное согласование.
 4. **Конфликт в `admin-app.js`.** ИИ 1 не трогает; если ИИ 1 случайно добавил JS — переносится в ветку ИИ 2.
@@ -427,7 +427,7 @@
 
 ## 11. Что делать первым
 
-1. **ИИ 1:** **E2.1.B** уже закрыт в коде (`tenant_owner_id`, расширенный `/auth/me`, `/auth/select-org`). Следующий приоритет: **E0.1** — раскол [`app/api/admin.py`](app/api/admin.py) на подмодули (**до** добавления **E2.2.B** / **E2.3.B** в тот же монолит). Детали — [IMPLEMENTATION_PLAN.md §E0](IMPLEMENTATION_PLAN.md).
+1. **ИИ 1:** **E2.1.B** уже закрыт в коде (`tenant_owner_id`, расширенный `/auth/me`, `/auth/select-org`). Следующий приоритет: **E0.1** — раскол admin-API из временного монолита [`app/api/admin/_monolith.py`](app/api/admin/_monolith.py) в подмодули пакета [`app/api/admin/`](app/api/admin/) (**до** добавления **E2.2.B** / **E2.3.B** в тот же монолит). Детали — [IMPLEMENTATION_PLAN.md §E0](IMPLEMENTATION_PLAN.md).
 2. **ИИ 2:** **E2.1.F** и полировка **E3** могут идти параллельно; следующий крупный UI — **E2.2.F** (брендинг), когда готов контракт API (**E2.2.B**) или по мокам. На время серии PR **E0.1** согласовывать любые правки в зоне будущего пакета `app/api/admin/*`.
 
 Дальше — по таблице из §4 (спринт A включает **E0** и **E2**), спринты A → E.

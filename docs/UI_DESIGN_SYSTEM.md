@@ -65,6 +65,8 @@
 
 Живые макросы: **`GET /admin/_/components`** (superadmin или `APP_DEBUG=true`). Ниже — фиксированные скрины из [`docs/ui/baseline/`](../docs/ui/baseline/) (регрессия визуала по разделам; не замена storybook, а доказательный ряд экранов в репозитории).
 
+Дополнительно: **mobile review** со скриншотами из Playwright и приоритезированным списком улучшений — [`docs/ui/mobile-review/README.md`](ui/mobile-review/README.md).
+
 | Дашборд | Заказы | Меню |
 |--------|--------|------|
 | ![Дашборд](ui/baseline/admin_dashboard.png) | ![Заказы](ui/baseline/admin_orders.png) | ![Меню](ui/baseline/admin_menu.png) |

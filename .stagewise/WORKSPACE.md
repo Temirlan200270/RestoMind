@@ -40,7 +40,7 @@ None (single package).
 ### restomind (`w13fb/`)
 
 **entry:** `app/main.py`  
-**routing:** `app/api/admin.py` (admin CRUD), `app/api/webhooks.py` (WhatsApp webhook)  
+**routing:** `app/api/admin/` (admin CRUD; временно часть роутов в `_monolith.py`), `app/api/webhooks.py` (WhatsApp webhook)
 **state:** Redis cache (optional), SQLite/PostgreSQL session, in-memory fallback  
 **api:** RESTful JSON, WebSocket (admin live), WhatsApp Meta API, iiko Cloud API  
 **db:** SQLAlchemy async ORM → SQLite (dev) | PostgreSQL (prod); 8 tables: users, orders, bookings, menu_items, chat_logs, organizations, integration_events, escalation_events  
@@ -175,7 +175,7 @@ High-signal directories:
 Map tasks to authoritative files:
 
 - **add WhatsApp webhook route** → `app/api/webhooks.py`, `app/main.py` (include_router)
-- **add admin endpoint** → `app/api/admin.py` (router), `app/main.py` (include_router)
+- **add admin endpoint** → `app/api/admin/` (router; временно `_monolith.py`), `app/main.py` (include_router)
 - **add AI prompt template** → `app/services/prompts.py` (RESTAURANT_SYSTEM_PROMPT)
 - **add intent handler** → `app/services/intent_router.py` (route_intent function, new branch)
 - **add ORM model** → `app/db/models.py` (add Base subclass, migration in alembic/versions/)
@@ -200,7 +200,7 @@ Map tasks to authoritative files:
 | `app/db/models.py` | orm | 8 ORM models (User, Order, Booking, MenuItem, ChatLog, Organization, IntegrationEvent, IntegrationHealth, EscalationEvent) | schema, relationships, field types, defaults |
 | `app/db/session.py` | db-init | async engine, session factory, Redis client (or in-memory fallback), dependency injection | DB connection pooling, how to add new dependency |
 | `app/api/webhooks.py` | routes | WhatsApp webhook endpoint (`POST /api/whatsapp/webhook`), message parsing, rate limiting, background task dispatch | WhatsApp message flow, how to route intents |
-| `app/api/admin.py` | routes | 30+ admin endpoints (orders, bookings, menu, integrations, sync, demo, websocket) | admin CRUD operations, WebSocket broadcasting |
+| `app/api/admin/` | routes | 30+ admin endpoints (orders, bookings, menu, integrations, sync, demo, websocket) | admin CRUD operations, WebSocket broadcasting |
 | `app/services/ai_brain.py` | ai | call OpenAI API with structured output (AIBrainResponse), retry logic, fallback on error | how to modify AI prompt, how to add fields to response |
 | `app/services/intent_router.py` | logic | dispatch AI intent → order/book/faq/escalate logic, validation, DB writes, event publish | how to add new intent, how to modify order/booking flow |
 | `app/services/dialog_mgr.py` | state | user conversation state (Redis/in-memory), chat history, pending order/booking, HUMAN_MODE flag | how conversation context is stored, state machine |
@@ -270,7 +270,7 @@ Map tasks to authoritative files:
 4. Implement handler (e.g., `handle_new_intent()`)
 
 **Add new admin endpoint:**
-1. Define handler in `app/api/admin.py` (with `@router.get()`, `@router.post()`, etc.)
+1. Define handler in `app/api/admin/` (временное место — `_monolith.py`, далее — целевой подмодуль) (with `@router.get()`, `@router.post()`, etc.)
 2. Add to `app/main.py` `include_router()` call
 3. Update `admin.html` Alpine.js component to call endpoint
 

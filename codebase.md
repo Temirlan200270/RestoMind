@@ -27,8 +27,12 @@ RestoMind/
 │   ├── worker.py                  # фоновый воркер ARQ (очереди; если включено)
 │   │
 │   ├── api/                       # HTTP-слой: тонкие хендлеры → services
-│   │   ├── admin.py               # админка: auth, заказы, чаты, меню, stats / analytics / ai-value, WS,
-│   │   │                          # инциденты (в т.ч. mode=summary), readiness, timeline заказа
+│   │   ├── admin/                 # админка API (пакет): auth, WS, test-bot + временный монолит роутов
+│   │   │   ├── auth.py            # /api/admin/auth/* (cookie-сессия, demo-login, request-access, select-org)
+│   │   │   ├── ws.py              # /api/admin/ws?token=... (live-события)
+│   │   │   ├── test_bot.py        # /api/admin/test-bot (ручное тестирование диалога)
+│   │   │   ├── deps.py            # зависимости: сессия, tenant-scope, guards
+│   │   │   └── _monolith.py       # временно: остальной admin API до завершения раскола E0.1
 │   │   ├── webhooks.py            # Meta WhatsApp: verify + входящие → обработка сообщений
 │   │   ├── payment_webhook.py     # внешние провайдеры оплаты (Bearer/HMAC)
 │   │   └── superadmin.py          # организации, заявки, аудит payment-webhook-events, модерация
@@ -101,7 +105,7 @@ RestoMind/
 | Направление | Где вход | Куда логика |
 |-------------|----------|-------------|
 | WhatsApp → бот | `api/webhooks.py` | `services/dialog_mgr`, `intent_router`, `ai_brain`, Redis |
-| Админ UI | `templates/` + `static/js/admin-app.js` | `api/admin.py` → сервисы, БД |
+| Админ UI | `templates/` + `static/js/admin-app.js` | `api/admin/` → сервисы, БД |
 | Live-обновления | WS `/api/admin/ws` | `services/events` + Redis Pub/Sub (или in-memory) |
 | Оплата провайдера | `api/payment_webhook.py` | заказ, `PaymentEvent`, фон: автопечать iiko при флаге org |
 | Superadmin | `api/superadmin.py` | организации, заявки, синхронизация меню |
@@ -126,3 +130,4 @@ python -m pytest tests/ -v
 | [plan.md](plan.md) | Правила разработки, детали архитектуры, roadmap-мысли |
 | [CHANGELOG.md](CHANGELOG.md) | История версий |
 | [DEPLOY_RENDER.md](DEPLOY_RENDER.md) / [DEPLOY_GUIDE.md](DEPLOY_GUIDE.md) | Продакшен |
+| [docs/SUPERADMIN_GUIDE.md](docs/SUPERADMIN_GUIDE.md) | Super Admin (владелец платформы): заявки/регистрация, управление ресторанами, аудит webhook, идеи улучшений |

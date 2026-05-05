@@ -133,7 +133,8 @@
 
     <!-- Правая колонка: шапка + алерт (shrink-0) + область контента (flex-1 min-h-0) -->
     <main class="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
-        <header class="shrink-0 glass border-b border-gray-200 px-3 sm:px-4 md:px-8 py-2.5 md:py-4 z-10 min-w-0 max-w-full overflow-x-clip">
+        <header class="shrink-0 glass border-b border-gray-200 px-3 sm:px-4 md:px-8 py-2.5 md:py-4 z-10 min-w-0 max-w-full overflow-x-clip"
+            :class="currentTab === 'chats' && activeChatPhone ? 'max-md:hidden' : ''">
             <!-- Мобильная шапка: один компактный ряд -->
             <div class="flex items-center gap-2 md:hidden min-w-0">
                 <h1 class="flex-1 min-w-0 text-base font-bold text-gray-900 truncate"
@@ -386,25 +387,53 @@
             id="admin-content-scroll"
             class="flex-1 min-h-0"
             :class="currentTab === 'chats'
-                ? 'flex flex-col overflow-hidden px-3 sm:px-4 md:px-6 pb-16 md:pb-6'
+                ? 'flex flex-col overflow-hidden px-0 md:px-6 pb-0 md:pb-6'
                 : 'overflow-y-auto overflow-x-hidden min-w-0 px-4 sm:px-6 md:px-8 py-4 md:py-6 pb-20 md:pb-6'"
         >
             <!-- ========== ДАШБОРД ========== -->
             <div x-show="currentTab === 'dashboard'" x-cloak class="fade-in space-y-6">
                 <div class="flex flex-wrap items-end justify-between gap-4">
                     <div class="min-w-0 flex-1">
-                        {{ section_header('Главная', subtitle='Выручка, допродажи ИИ и сэкономленное время (UTC).', extra_class='!mb-0') }}
+                        {{ section_header('Главная', subtitle='Выручка, вклад ИИ и время команды.', extra_class='!mb-0') }}
                         <div class="flex flex-wrap items-center gap-2 mt-1">
                             <span x-show="orgProfile && orgProfile.operational_label" x-cloak
-                                class="text-[11px] font-semibold px-2 py-1 rounded-full border"
+                                class="hidden sm:inline-flex text-[11px] font-semibold px-2 py-1 rounded-full border"
                                 :class="(orgProfile.is_kitchen_open ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : (orgProfile.is_business_open ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-slate-50 border-slate-200 text-slate-700'))"
                                 x-text="(orgProfile.is_kitchen_open ? '🟢 ' : (orgProfile.is_business_open ? '🟡 ' : '⚫️ ')) + (orgProfile.operational_label || '')"></span>
                         </div>
                     </div>
-                    <div class="flex flex-wrap items-center gap-2">
+                    <div class="hidden sm:flex flex-wrap items-center gap-2">
                         <button type="button" class="ds-btn ds-btn-secondary ds-btn-md"
                             @click="navigateToTab('analytics')">Подробная аналитика</button>
                     </div>
+                </div>
+
+                <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                    <button type="button" class="text-left rounded-2xl bg-white ring-1 ring-slate-200/80 shadow-sm px-4 py-3 min-h-[96px]"
+                        @click="navigateToTab('analytics')">
+                        <div class="text-[11px] font-bold uppercase text-slate-500">Выручка сегодня</div>
+                        <div class="mt-2 text-xl font-black text-slate-950 tabular-nums" x-text="fmt.money(dashStats.today_revenue || 0)"></div>
+                        <div class="mt-1 text-[11px] text-slate-500"><span x-text="dashStats.today_orders || 0"></span> заказов</div>
+                    </button>
+                    <button type="button" class="text-left rounded-2xl bg-violet-50 ring-1 ring-violet-200/80 shadow-sm px-4 py-3 min-h-[96px]"
+                        @click="navigateToTab('ai_value')">
+                        <div class="text-[11px] font-bold uppercase text-violet-900/75">Вклад ИИ</div>
+                        <div class="mt-2 text-xl font-black text-violet-950 tabular-nums" x-text="fmt.money(dashStats.ai_revenue_today ?? dashStats.upsell_revenue_today ?? 0)"></div>
+                        <div class="mt-1 text-[11px] font-semibold text-violet-800">Открыть вклад ИИ</div>
+                    </button>
+                    <button type="button" class="text-left rounded-2xl bg-white ring-1 ring-slate-200/80 shadow-sm px-4 py-3 min-h-[96px]"
+                        @click="navigateToTab('orders')">
+                        <div class="text-[11px] font-bold uppercase text-slate-500">Доля ИИ</div>
+                        <div class="mt-2 text-xl font-black text-slate-950 tabular-nums"
+                            x-text="(dashStats.ai_revenue_share_pct ?? '—') + (dashStats.ai_revenue_share_pct != null ? '%' : '')"></div>
+                        <div class="mt-1 text-[11px] text-slate-500">в выручке</div>
+                    </button>
+                    <button type="button" class="text-left rounded-2xl bg-emerald-50 ring-1 ring-emerald-200/80 shadow-sm px-4 py-3 min-h-[96px]"
+                        @click="navigateToTab('chats')">
+                        <div class="text-[11px] font-bold uppercase text-emerald-900/75">Время команды</div>
+                        <div class="mt-2 text-xl font-black text-emerald-950 tabular-nums" x-text="(dashStats.ai_time_saved_hours ?? 0) + ' ч'"></div>
+                        <div class="mt-1 text-[11px] text-emerald-800"><span x-text="dashStats.ai_messages_today ?? 0"></span> сообщений ИИ</div>
+                    </button>
                 </div>
 
                 <!-- Блок «Сейчас»: быстрые переходы по инцидентам — скрыт на мобиле (баннер сверху делает то же самое) -->
@@ -547,7 +576,7 @@
                         ≈ <span class="tabular-nums" x-text="fmt.money(dashStats.ai_profit_per_saved_hour_kzt)"></span> доп. выручки ИИ на каждый «час сэкономленного» времени
                     </div>
                 {% endset %}
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="hidden md:grid grid-cols-1 md:grid-cols-3 gap-4">
                     {{ kpi_card('Выручка сегодня', value_html=dashboard_revenue_kpi) }}
                     {{ kpi_card('Сколько заработал ИИ', value_html=dashboard_ai_revenue_kpi, extra_class='!bg-violet-50/95 !ring-violet-200/80 text-slate-900', label_class='!text-violet-900/80') }}
                     {{ kpi_card('Сколько часов сэкономил ИИ', value_html=dashboard_time_kpi) }}
@@ -1418,9 +1447,37 @@
             </div>
 
             <!-- ========== ЗАКАЗЫ (по этапам + таблица) ========== -->
-            <div x-show="currentTab === 'orders'" x-cloak class="fade-in">
+            <div x-show="currentTab === 'orders'" x-cloak class="fade-in pb-20 md:pb-0">
+                <div class="md:hidden sticky top-0 z-20 -mx-4 mb-3 border-b border-gray-200/80 bg-gray-50/95 px-4 py-3 backdrop-blur">
+                    <div class="flex items-center gap-2">
+                        {% call segmented(extra_class='flex-1 border border-gray-200 bg-white') %}
+                        <div class="contents" role="tablist" aria-label="Вид заказов">
+                            <button type="button" @click="ordersView = 'kanban'; ordersPage = 1; loadOrders()"
+                                :class="ordersView === 'kanban' ? 'ds-segmented-active' : ''"
+                                class="flex-1 min-h-[44px] px-3 py-2 rounded-lg text-xs font-semibold"
+                                :aria-selected="ordersView === 'kanban' ? 'true' : 'false'" role="tab">
+                                По этапам
+                            </button>
+                            <button type="button" @click="ordersView = 'table'; ordersPage = 1; loadOrders()"
+                                :class="ordersView === 'table' ? 'ds-segmented-active' : ''"
+                                class="flex-1 min-h-[44px] px-3 py-2 rounded-lg text-xs font-semibold"
+                                :aria-selected="ordersView === 'table' ? 'true' : 'false'" role="tab">
+                                Список
+                            </button>
+                        </div>
+                        {% endcall %}
+                        <button type="button" @click="ordersMobileFiltersOpen = true"
+                            class="relative shrink-0 min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-700 shadow-sm"
+                            aria-label="Фильтры заказов">
+                            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h18M6 12h12M10 19h4"/></svg>
+                            <span x-show="activeOrderFiltersCount() > 0" x-cloak
+                                class="absolute -right-1 -top-1 min-w-[18px] h-[18px] rounded-full bg-brand-600 px-1 text-[10px] font-bold text-white"
+                                x-text="activeOrderFiltersCount()"></span>
+                        </button>
+                    </div>
+                </div>
                 <!-- Переключатель вида -->
-                <div class="flex flex-wrap items-center justify-between gap-3 mb-5">
+                <div class="hidden md:flex flex-wrap items-center justify-between gap-3 mb-5">
                     {% call segmented(extra_class='border border-gray-200 bg-white') %}
                     <div class="contents" role="tablist" aria-label="Вид заказов">
                         <button type="button" @click="ordersView = 'kanban'"
@@ -1458,13 +1515,13 @@
                     </div>
 
                 <div x-show="!ordersKanbanHintDismissed" x-cloak
-                    class="mb-4 flex flex-wrap items-start justify-between gap-3 rounded-xl border border-sky-200 bg-sky-50/90 px-4 py-3 text-sm text-sky-950">
+                    class="hidden sm:flex mb-4 flex-wrap items-start justify-between gap-3 rounded-xl border border-sky-200 bg-sky-50/90 px-4 py-3 text-sm text-sky-950">
                     <p class="flex-1 min-w-0 pr-2"><span class="font-semibold">Подсказка:</span> режим «По этапам» — канбан по статусам; «Список» — таблица с поиском и фильтром.</p>
                     <button type="button" @click="dismissOrdersViewHint()"
                         class="shrink-0 text-xs font-semibold text-sky-900 hover:underline min-h-[44px] px-2 rounded-lg rm-focusable">Скрыть навсегда</button>
                 </div>
 
-                <div x-show="ordersView === 'table'" x-cloak>
+                <div x-show="ordersView === 'table'" x-cloak class="hidden md:block">
                 {% call card(extra_class='mb-5', padding_class='p-4 sm:p-5') %}
                 <div class="flex flex-wrap items-end gap-3">
                     <div class="flex-1 min-w-[220px] max-w-md">
@@ -1487,6 +1544,68 @@
                     </div>
                 </div>
                 {% endcall %}
+                </div>
+
+                <div x-show="ordersMobileFiltersOpen" x-cloak x-transition.opacity
+                    class="fixed inset-0 z-[60] md:hidden"
+                    @keydown.escape.window="ordersMobileFiltersOpen = false">
+                    <div class="absolute inset-0 bg-slate-900/45" @click="ordersMobileFiltersOpen = false" aria-hidden="true"></div>
+                    <div class="ds-drawer-panel rm-mobile-sheet" role="dialog" aria-modal="true" aria-labelledby="orders-mobile-filters-title" @click.stop>
+                        <div class="flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-3">
+                            <div class="min-w-0">
+                                <h2 id="orders-mobile-filters-title" class="text-base font-bold text-gray-900">Фильтры</h2>
+                                <p class="text-xs text-gray-500">Поиск, статус и сумма заказа.</p>
+                            </div>
+                            <button type="button" @click="ordersMobileFiltersOpen = false"
+                                class="min-h-[44px] min-w-[44px] rounded-xl border border-gray-200 bg-gray-50 text-gray-700"
+                                aria-label="Закрыть фильтры">&times;</button>
+                        </div>
+                        <div class="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+                            <label class="block">
+                                <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">Поиск</span>
+                                <input type="search" x-model="orderSearchQ" @input.debounce.400ms="ordersPage = 1; loadOrders()"
+                                    placeholder="Телефон, имя или № заказа"
+                                    class="ds-input min-h-[48px]">
+                            </label>
+                            <label class="block">
+                                <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">Статус</span>
+                                <select x-model="orderFilter" @change="ordersPage = 1; loadOrders()" class="ds-input min-h-[48px]">
+                                    <option value="">Все статусы</option>
+                                    <option value="draft">Черновик</option>
+                                    <option value="confirmed">Подтверждён</option>
+                                    <option value="sending_to_iiko">Отправляется на кухню</option>
+                                    <option value="sent_to_iiko">В iiko</option>
+                                    <option value="completed">Завершён</option>
+                                    <option value="cancelled">Отменён</option>
+                                </select>
+                            </label>
+                            <div class="grid grid-cols-2 gap-3">
+                                <label class="block">
+                                    <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">Сумма от</span>
+                                    <input type="number" min="0" step="1" x-model="orderSumMin" @change="ordersPage = 1; loadOrders()"
+                                        inputmode="decimal" class="ds-input min-h-[48px]">
+                                </label>
+                                <label class="block">
+                                    <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">Сумма до</span>
+                                    <input type="number" min="0" step="1" x-model="orderSumMax" @change="ordersPage = 1; loadOrders()"
+                                        inputmode="decimal" class="ds-input min-h-[48px]">
+                                </label>
+                            </div>
+                            <div class="rounded-xl border border-sky-100 bg-sky-50 px-3 py-2 text-xs text-sky-900">
+                                «По этапам» показывает канбан, «Список» даёт поиск и пагинацию.
+                            </div>
+                        </div>
+                        <div class="rm-mobile-sheet-actions border-t border-gray-100 bg-white px-4 py-3">
+                            <button type="button" @click="resetOrderFilters()"
+                                class="min-h-[44px] rounded-xl border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700">
+                                Сбросить
+                            </button>
+                            <button type="button" @click="applyMobileOrderFilters()"
+                                class="min-h-[44px] flex-1 rounded-xl bg-brand-600 px-4 text-sm font-semibold text-white">
+                                Показать
+                            </button>
+                        </div>
+                    </div>
                 </div>
 
                 <div x-show="ordersLoadError" x-cloak
@@ -1763,6 +1882,12 @@
                 </div>
                 {% endcall %}
                 </div>
+                <button type="button" @click="openManualOrderModal()"
+                    class="md:hidden fixed right-4 z-40 inline-flex min-h-[52px] min-w-[52px] items-center justify-center rounded-2xl bg-brand-600 px-4 text-sm font-bold text-white shadow-xl shadow-brand-600/25"
+                    style="bottom: calc(4.25rem + env(safe-area-inset-bottom, 0px));"
+                    aria-label="Новый заказ">
+                    + <span class="ml-1">Заказ</span>
+                </button>
             </div>
 
             <!-- ========== ПОМОЩЬ КЛИЕНТАМ (Inbox Zero) ========== -->
@@ -1965,12 +2090,12 @@
             </div>
 
             <!-- ========== ЖИВЫЕ ДИАЛОГИ: flex-1 min-h-0 внутри #admin-content-scroll — без calc, алерт сжимает область ========== -->
-            <div x-show="currentTab === 'chats'" x-cloak class="fade-in flex flex-1 min-h-0 flex-col overflow-hidden">
+            <div x-show="currentTab === 'chats'" x-cloak class="fade-in flex flex-1 min-h-0 flex-col overflow-hidden md:pt-0">
                 {% call chat_shell_layout() %}
                     <!-- ЛЕВАЯ ПАНЕЛЬ: список (на мобилке — полный экран, пока не выбран чат) -->
                     <div class="ds-chat-shell-list w-full max-w-none md:max-w-sm md:w-[340px] lg:w-[360px] flex-shrink-0 border-r border-gray-100 flex flex-col min-h-0 bg-white flex-1 md:flex-none"
                         :class="activeChatPhone ? 'hidden md:flex' : 'flex'">
-                        <div class="p-4 border-b border-gray-50 shrink-0 space-y-3">
+                        <div class="p-4 border-b border-gray-50 shrink-0 space-y-3 md:p-4">
                             <h2 class="text-lg font-semibold text-gray-900">Диалоги</h2>
                             <div class="relative">
                                 <input type="text" x-model="chatSearch" placeholder="Поиск по номеру..." inputmode="tel" autocomplete="tel"
@@ -2031,7 +2156,7 @@
                                 </button>
                             </div>
                         </div>
-                        <div class="p-3 border-t border-gray-100 shrink-0 bg-gray-50/50">
+                        <div class="p-3 border-t border-gray-100 shrink-0 bg-gray-50/50 rm-mobile-safe-bottom">
                             <div class="flex gap-2">
                                 <input x-model="chatPhone" type="text" placeholder="Номер как в WhatsApp (+7…)" inputmode="tel" autocomplete="tel"
                                     class="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-brand-500"
@@ -2101,7 +2226,7 @@
                                                     Вы ведёте диалог
                                                 </span>
                                             </div>
-                                            <div class="flex flex-wrap items-center gap-1.5 shrink-0 min-[520px]:justify-end">
+                                            <div class="rm-chat-actions flex flex-wrap items-center gap-1.5 shrink-0 min-[520px]:justify-end">
                                                 <button type="button" x-show="customerSummary.user_exists" @click="toggleAiPaused()"
                                                     class="px-2.5 py-1.5 text-xs font-medium rounded-lg border bg-white transition touch-manipulation active:opacity-90"
                                                     :class="customerSummary.ai_paused
@@ -2190,7 +2315,7 @@
                                     </div>
                                 </div>
 
-                                <div class="p-4 bg-white border-t border-gray-100 shrink-0">
+                                <div class="p-3 md:p-4 bg-white border-t border-gray-100 shrink-0 rm-mobile-safe-bottom">
                                     <div class="relative">
                                         <textarea x-model="operatorInput"
                                             @keydown.enter="handleOperatorEnter($event)"
@@ -2871,14 +2996,14 @@
                     <span x-show="brandingApiUnavailable" x-cloak>API <code class="text-xs bg-white/80 px-1 rounded border border-indigo-100">PATCH /api/admin/branding</code> пока не развёрнут (ожидается <strong>E2.2.B</strong>). Форма и предпросмотр работают локально; после обновления платформы нажмите «Сохранить» ещё раз.</span>
                     <span x-show="!brandingApiUnavailable" x-cloak>Изменения отправляются на сервер; логотип — до 1 МБ, PNG или JPG.</span>
                 </div>
-                <div class="rm-card-surface p-6 space-y-6">
+                <div class="rm-card-surface p-6 space-y-6" @input="brandingDirty = true" @change="brandingDirty = true">
                     <div class="flex flex-wrap items-start justify-between gap-3">
                         <div>
                             <h3 class="text-lg font-bold text-gray-900">Внешний вид в панели</h3>
                             <p class="text-sm text-gray-500 mt-1">Название бренда, цвет акцента и логотип в шапке (контракт <code class="text-xs bg-gray-100 px-1 rounded">/api/admin/auth/me → branding</code>).</p>
                         </div>
                         <button type="button" @click="saveBranding()" :disabled="brandingSaving || isDemoSession"
-                            class="shrink-0 px-4 py-2.5 rounded-xl bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 disabled:opacity-40">
+                            class="hidden md:inline-flex shrink-0 px-4 py-2.5 rounded-xl bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 disabled:opacity-40">
                             <span x-show="!brandingSaving">Сохранить</span>
                             <span x-show="brandingSaving" x-cloak>Сохраняем…</span>
                         </button>
@@ -2927,6 +3052,17 @@
                         </div>
                     </div>
                 </div>
+                <div x-show="brandingDirty" x-cloak class="rm-settings-savebar md:hidden">
+                    <div class="min-w-0">
+                        <div class="text-sm font-bold text-slate-900">Есть изменения</div>
+                        <div class="text-xs text-slate-500" x-show="isDemoSession">В демо сохранение отключено</div>
+                    </div>
+                    <button type="button" @click="saveBranding()" :disabled="brandingSaving || isDemoSession"
+                        class="shrink-0 px-4 py-2.5 rounded-xl bg-brand-600 text-white text-sm font-semibold disabled:opacity-40">
+                        <span x-show="!brandingSaving">Сохранить</span>
+                        <span x-show="brandingSaving" x-cloak>Сохраняем…</span>
+                    </button>
+                </div>
                 </div>
             </div>
 
@@ -2949,14 +3085,14 @@
                     </a>
                 </nav>
                 <section id="settings-restaurant-profile" class="scroll-mt-4" aria-label="Профиль ресторана">
-                <div class="rm-card-surface p-6">
+                <div class="rm-card-surface p-6" @input="orgProfileDirty = true" @change="orgProfileDirty = true">
                     <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
                         <div>
                             <h3 class="text-lg font-bold text-gray-900">Профиль ресторана</h3>
                             <p class="text-sm text-gray-500 mt-1">Эти данные видны в шапке и задают контекст текущего заведения.</p>
                         </div>
                         <button type="button" @click="saveOrgProfile()" :disabled="orgProfileSaving"
-                            class="shrink-0 px-4 py-2.5 rounded-xl bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 disabled:opacity-40">
+                            class="hidden md:inline-flex shrink-0 px-4 py-2.5 rounded-xl bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 disabled:opacity-40">
                             <span x-show="!orgProfileSaving">Сохранить</span>
                             <span x-show="orgProfileSaving" x-cloak>Сохраняем…</span>
                         </button>
@@ -3446,6 +3582,18 @@
                     </div>
                     <h3 class="text-lg font-bold text-gray-900">Правил пока нет</h3>
                     <p class="text-gray-500 max-w-sm mx-auto mt-2">Добавьте первое правило или перезагрузите вкладку — при первом запуске сиды могут создать правила автоматически.</p>
+                </div>
+            </div>
+                <div x-show="orgProfileDirty" x-cloak class="rm-settings-savebar md:hidden">
+                    <div class="min-w-0">
+                        <div class="text-sm font-bold text-slate-900">Профиль изменен</div>
+                        <div class="text-xs text-slate-500">Сохраните перед уходом со страницы</div>
+                    </div>
+                    <button type="button" @click="saveOrgProfile()" :disabled="orgProfileSaving"
+                        class="shrink-0 px-4 py-2.5 rounded-xl bg-brand-600 text-white text-sm font-semibold disabled:opacity-40">
+                        <span x-show="!orgProfileSaving">Сохранить</span>
+                        <span x-show="orgProfileSaving" x-cloak>Сохраняем…</span>
+                    </button>
                 </div>
             </div>
             </div>
@@ -4131,6 +4279,7 @@
 
         <!-- ═══ НИЖНЯЯ НАВИГАЦИЯ (только мобильные < md) ═══ -->
         <nav aria-label="Основная навигация" class="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur-md border-t border-gray-200 safe-area-bottom"
+            :class="currentTab === 'chats' && activeChatPhone ? 'hidden' : ''"
             style="padding-bottom: env(safe-area-inset-bottom, 0px)">
             <div class="flex items-stretch h-14">
 

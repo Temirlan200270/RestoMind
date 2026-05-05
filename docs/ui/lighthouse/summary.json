@@ -1,0 +1,85 @@
+{
+  "generatedAt": "2026-05-05T13:49:22.578Z",
+  "baseUrl": "http://127.0.0.1:9892",
+  "formFactor": "mobile",
+  "cookieAuth": true,
+  "pages": [
+    {
+      "id": "dashboard",
+      "url": "http://127.0.0.1:9892/admin#dashboard",
+      "performance": 29,
+      "accessibility": 89,
+      "bestPractices": 96
+    },
+    {
+      "id": "orders",
+      "url": "http://127.0.0.1:9892/admin#orders",
+      "performance": 42,
+      "accessibility": 90,
+      "bestPractices": 93
+    },
+    {
+      "id": "menu",
+      "url": "http://127.0.0.1:9892/admin#menu",
+      "performance": 56,
+      "accessibility": 94,
+      "bestPractices": 96
+    },
+    {
+      "id": "settings_restaurant",
+      "url": "http://127.0.0.1:9892/admin#settings/restaurant",
+      "performance": 33,
+      "accessibility": 83,
+      "bestPractices": 96
+    },
+    {
+      "id": "settings_branding",
+      "url": "http://127.0.0.1:9892/admin#settings/branding",
+      "performance": 57,
+      "accessibility": 87,
+      "bestPractices": 96
+    },
+    {
+      "id": "settings_connections",
+      "url": "http://127.0.0.1:9892/admin#settings/connections",
+      "performance": 57,
+      "accessibility": 93,
+      "bestPractices": 96
+    },
+    {
+      "id": "settings_smart_sales",
+      "url": "http://127.0.0.1:9892/admin#settings/smart_sales",
+      "performance": 57,
+      "accessibility": 87,
+      "bestPractices": 96
+    },
+    {
+      "id": "settings_team",
+      "url": "http://127.0.0.1:9892/admin#settings/team",
+      "performance": 57,
+      "accessibility": 87,
+      "bestPractices": 96
+    },
+    {
+      "id": "settings_health",
+      "url": "http://127.0.0.1:9892/admin#settings/health",
+      "performance": 56,
+      "accessibility": 93,
+      "bestPractices": 96
+    },
+    {
+      "id": "settings_technical",
+      "url": "http://127.0.0.1:9892/admin#settings/technical",
+      "performance": 56,
+      "accessibility": 93,
+      "bestPractices": 96
+    },
+    {
+      "id": "settings_bot_test",
+      "url": "http://127.0.0.1:9892/admin#settings/bot_test",
+      "performance": 40,
+      "accessibility": 93,
+      "bestPractices": 96
+    }
+  ]
+}

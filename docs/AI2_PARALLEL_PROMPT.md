@@ -32,4 +32,4 @@
 
 ## Следующий фокус ИИ 1 (для ориентира)
 
-**E0.1** (раскол `app/api/admin.py`) — до крупных новых кусков в том же файле; затем **E2.2.B**, **E2.3.B**, хвосты **E3** / **E1**; см. [IMPLEMENTATION_PLAN.md §E0](../IMPLEMENTATION_PLAN.md).
+**E0.1** (раскол временного монолита `app/api/admin/_monolith.py` в подмодули пакета `app/api/admin/`) — до крупных новых кусков в том же монолите; затем **E2.2.B**, **E2.3.B**, хвосты **E3** / **E1**; см. [IMPLEMENTATION_PLAN.md §E0](../IMPLEMENTATION_PLAN.md).

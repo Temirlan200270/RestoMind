@@ -140,6 +140,11 @@ RestoMind/
 └── docs/
 ```
 
+Полезные UI-доки:
+
+- `docs/UI_DESIGN_SYSTEM.md` — дизайн-система админки (компоненты, токены, a11y, Lighthouse).
+- `docs/ui/mobile-review/README.md` — mobile review (Playwright-скриншоты и план улучшений).
+
 ## API (кратко)
 
 Полный перечень см. в OpenAPI: [http://localhost:8000/docs](http://localhost:8000/docs) после запуска.
@@ -202,5 +207,10 @@ RestoMind/
 ## Разработка
 
 - **Тесты:** `pytest` из корня проекта.  
+- **Админка (CSS/инструменты):** если правите `app/templates/*` или стили, установите dev-зависимости Node.js и используйте скрипты из `package.json`:
+  - `npm ci`
+  - `npm run build:admin-css` (Tailwind → `app/static/css/admin.css`)
+  - `npm run check:admin-js` / `npm run lint:js`
+  - `npm run lh:admin` (Lighthouse, см. `docs/ui/lighthouse/README.md`)
 - **CI:** `.github/workflows/ci.yml` — pytest и проверка импорта приложения.  
 - **Deploy по SSH (VPS):** `.github/workflows/deploy.yml` — только если в репозитории задана переменная **`ENABLE_SSH_DEPLOY=true`** и секреты `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY`. Для деплоя на **Render** этот workflow не нужен.
