@@ -7,10 +7,12 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 def test_kanban_columns_have_data_attribute_and_handler():
-    admin_html = (REPO / "app" / "templates" / "admin.html").read_text(encoding="utf-8")
-    assert admin_html.count("data-kanban-col") == 6
-    assert "handleKanbanKeydown" in admin_html
-    assert 'role="tab"' in admin_html
+    # После декомпозиции `admin.html` на `{% include %}` нужная разметка живёт в конкретном экране.
+    # Проверяем именно таб заказов, где расположен канбан.
+    orders_tab = (REPO / "app" / "templates" / "screens" / "_tab_orders.html").read_text(encoding="utf-8")
+    assert orders_tab.count("data-kanban-col") == 6
+    assert "handleKanbanKeydown" in orders_tab
+    assert 'role="tab"' in orders_tab
 
 
 def test_drawer_macro_has_heading_for_aria():
