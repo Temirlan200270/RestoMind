@@ -4294,7 +4294,21 @@ function adminMixinWebSocketEvents() {
                 this.wsChannelReady = false;
                 this.ws = null;
                 this.wsEpoch++;
-                adminLogger.debug('[WS] Disconnected');
+                // Важно для диагностики: если сервер закрывает до accept(), браузер пишет
+                // "WebSocket is closed before the connection is established" без деталей.
+                // CloseEvent.code/reason помогают отличить Unauthorized (4003) от сетевых проблем.
+                try {
+                    const ev = arguments && arguments.length ? arguments[0] : null;
+                    const code = ev && typeof ev.code === 'number' ? ev.code : null;
+                    const reason = ev && typeof ev.reason === 'string' ? ev.reason : '';
+                    if (code != null) {
+                        adminLogger.warn(`[WS] Disconnected code=${code}${reason ? ` reason="${reason}"` : ''}`);
+                    } else {
+                        adminLogger.debug('[WS] Disconnected');
+                    }
+                } catch (_e) {
+                    adminLogger.debug('[WS] Disconnected');
+                }
                 this.scheduleReconnect();
             };
 

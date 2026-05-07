@@ -47,6 +47,13 @@ async def admin_websocket(ws: WebSocket, token: str = "") -> None:
     """
     claims = parse_admin_ws_token(token)
     if claims is None:
+        # Лог нужен, чтобы в Render Logs было видно причину "WS closed before established":
+        # чаще всего это неверный SESSION_SECRET (подпись ws_token) или протухший токен.
+        try:
+            short = (token or "")[:16]
+            logger.warning("Admin WebSocket unauthorized; token_prefix=%r", short)
+        except Exception:
+            logger.warning("Admin WebSocket unauthorized")
         await ws.close(code=4003, reason="Unauthorized")
         return
     await ws.accept()
