@@ -6887,11 +6887,12 @@ function adminMixinDataChartsSettings() {
         async renderChart() {
             const canvas = document.getElementById('revenueChart');
             if (!canvas) return;
-            const daily = this.analyticsData.daily || [];
-            if (daily.length === 0) {
-                adminDestroyAnalyticsMainChart();
-                this._destroyAnalyticsSparklines();
-                return;
+            let daily = this.analyticsData.daily || [];
+            // Раньше график "просто рисовался по нулям", даже когда данных нет.
+            // Если daily пустой — рисуем 1 точку с нулём, чтобы вкладка не выглядела "сломанной".
+            if (!Array.isArray(daily) || daily.length === 0) {
+                const today = new Date().toISOString().slice(0, 10);
+                daily = [{ date: today, revenue: 0, ai_profit: 0 }];
             }
             await adminEnsureChartJs();
 
