@@ -136,12 +136,6 @@
                                                 </span>
                                             </div>
                                             <div class="rm-chat-actions flex flex-wrap items-center gap-1.5 shrink-0 min-[520px]:justify-end">
-                                                <button type="button" x-show="customerSummary.user_exists" @click="toggleAiPaused()"
-                                                    class="px-2.5 py-1.5 text-xs font-medium rounded-lg border bg-white transition touch-manipulation active:opacity-90"
-                                                    :class="customerSummary.ai_paused
-                                                        ? 'border-slate-300 text-slate-800 hover:bg-slate-50'
-                                                        : 'border-violet-200 text-violet-800 hover:bg-violet-50/80'"
-                                                    x-text="customerSummary.ai_paused ? 'Включить ИИ' : 'Заблокировать ИИ'"></button>
                                                 <button type="button" @click="toggleTakeover()"
                                                     :title="chatIsBotActive()
                                                         ? 'Перехват: бот не отвечает, пишете вы.'
@@ -151,14 +145,24 @@
                                                         ? 'border-amber-200 text-amber-800 hover:bg-amber-50/90'
                                                         : 'border-emerald-200 text-emerald-800 hover:bg-emerald-50/90'"
                                                     x-text="chatIsBotActive() ? 'Перехватить' : 'Вернуть ИИ'"></button>
-                                                <button type="button" @click="postChatTriageAction('assign-me')"
-                                                    class="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-sky-200 text-sky-800 bg-white hover:bg-sky-50 transition">На мне</button>
-                                                <button type="button" @click="snoozeActiveChat(30)"
-                                                    class="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-violet-200 text-violet-800 bg-white hover:bg-violet-50 transition">Snooze 30</button>
                                                 <button type="button" x-show="chatTriageMode !== 'closed'" @click="postChatTriageAction('close')"
                                                     class="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-slate-200 text-slate-800 bg-white hover:bg-slate-50 transition">Закрыть</button>
                                                 <button type="button" x-show="chatTriageMode === 'closed'" @click="postChatTriageAction('reopen')"
                                                     class="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-emerald-200 text-emerald-800 bg-white hover:bg-emerald-50 transition">Вернуть</button>
+                                                <details class="relative">
+                                                    <summary class="list-none px-2.5 py-1.5 text-xs font-medium rounded-lg border border-slate-200 text-slate-700 bg-white hover:bg-slate-50 transition cursor-pointer select-none">
+                                                        Еще
+                                                    </summary>
+                                                    <div class="absolute right-0 top-full mt-2 w-48 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl shadow-slate-900/10 z-30">
+                                                        <button type="button" x-show="customerSummary.user_exists" @click="toggleAiPaused(); $el.closest('details').open = false"
+                                                            class="w-full text-left px-3 py-2 text-xs font-medium rounded-lg text-slate-700 hover:bg-slate-50"
+                                                            x-text="customerSummary.ai_paused ? 'Включить ИИ' : 'Заблокировать ИИ'"></button>
+                                                        <button type="button" @click="postChatTriageAction('assign-me'); $el.closest('details').open = false"
+                                                            class="w-full text-left px-3 py-2 text-xs font-medium rounded-lg text-slate-700 hover:bg-slate-50">Назначить на меня</button>
+                                                        <button type="button" @click="snoozeActiveChat(30); $el.closest('details').open = false"
+                                                            class="w-full text-left px-3 py-2 text-xs font-medium rounded-lg text-slate-700 hover:bg-slate-50">Отложить на 30 минут</button>
+                                                    </div>
+                                                </details>
                                             </div>
                                         </div>
                                         <p class="mt-1.5 text-[10px] text-gray-400 leading-tight min-[520px]:text-right"
