@@ -157,7 +157,7 @@ async def superadmin_organizations(
     rows = []
     for org, tenant_name, tenant_plan, orders_30d, revenue_30d, staff_count in q.all():
         op = check_operational_status(
-            (org.timezone or "").strip() or "Asia/Almaty",
+            (org.timezone or "").strip() or "Etc/GMT-5",
             getattr(org, "schedule_json", None),
         )
         rows.append(

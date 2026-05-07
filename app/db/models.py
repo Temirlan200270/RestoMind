@@ -62,7 +62,10 @@ class Organization(Base):
         String(120), default="", server_default="", index=True, comment="URL-safe идентификатор арендатора",
     )
     timezone: Mapped[str] = mapped_column(
-        String(64), default="Asia/Almaty", server_default="Asia/Almaty", comment="IANA timezone (например Asia/Almaty)",
+        String(64),
+        default="Etc/GMT-5",
+        server_default="Etc/GMT-5",
+        comment="IANA timezone key (например Etc/GMT-5 для UTC+5 или Asia/Almaty)",
     )
     currency: Mapped[str] = mapped_column(String(8), default="KZT", server_default="KZT", comment="ISO код валюты")
     iiko_api_login: Mapped[str] = mapped_column(

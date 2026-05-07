@@ -3267,7 +3267,7 @@ function adminMixinAuthKnowledge() {
         },
 
         tzBadgeLabel(tz) {
-            const zone = String(tz || '').trim() || 'Asia/Almaty';
+            const zone = String(tz || '').trim() || 'Etc/GMT-5';
             try {
                 const fmt = new Intl.DateTimeFormat('en-US', { timeZone: zone, timeZoneName: 'shortOffset' });
                 const parts = fmt.formatToParts(new Date());
@@ -3279,11 +3279,11 @@ function adminMixinAuthKnowledge() {
                     const sign = hh >= 0 ? '+' : '-';
                     const absH = Math.abs(hh);
                     const label = `UTC${sign}${absH}${mm ? `:${String(mm).padStart(2,'0')}` : ''}`;
-                    const place = zone === 'Asia/Almaty' ? ' (Казахстан)' : '';
+                    const place = zone === 'Etc/GMT-5' ? '' : '';
                     return `${label}${place}`;
                 }
             } catch { /* ignore */ }
-            const place = zone === 'Asia/Almaty' ? 'UTC+5 (Казахстан)' : `UTC (${zone})`;
+            const place = zone === 'Etc/GMT-5' ? 'UTC+5' : `UTC (${zone})`;
             return place;
         },
 

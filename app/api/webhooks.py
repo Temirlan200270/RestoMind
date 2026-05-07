@@ -1081,7 +1081,7 @@ async def process_message(
         customer_ctx = read_ctx.customer_ctx
         org_ent = read_ctx.org
         current_time_ctx = format_org_current_time_block(
-            getattr(org_ent, "timezone", None) if org_ent is not None else "Asia/Almaty",
+            getattr(org_ent, "timezone", None) if org_ent is not None else "Etc/GMT-5",
             getattr(org_ent, "schedule_json", None) if org_ent is not None else None,
         )
         kb_context = read_ctx.kb_context

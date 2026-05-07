@@ -22,7 +22,9 @@ _WEEKDAYS_RU: dict[int, str] = {
     6: "воскресенье",
 }
 _WEEKDAY_KEYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
-DEFAULT_ORG_TIMEZONE = "Asia/Almaty"
+# Единый дефолт UTC+5 для проекта. В zoneinfo валидный ключ для UTC+5 — Etc/GMT-5
+# (у него "инвертированный" знак по IANA правилам).
+DEFAULT_ORG_TIMEZONE = "Etc/GMT-5"
 
 
 def _to_hhmm(v: str) -> str:

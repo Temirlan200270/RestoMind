@@ -36,7 +36,7 @@ def _offset_hours_to_etc_gmt(hours: int) -> str:
 def normalize_timezone_name(
     tz_name: str | None,
     *,
-    default: str = "Asia/Almaty",
+    default: str = "Etc/GMT-5",
 ) -> str:
     """
     Нормализовать строку часового пояса до ключа, который понимает zoneinfo.
@@ -87,7 +87,7 @@ def normalize_timezone_name(
 def zoneinfo_or_default(
     tz_name: str | None,
     *,
-    default: str = "Asia/Almaty",
+    default: str = "Etc/GMT-5",
 ) -> NormalizedTimezone:
     """Вернуть валидный ZoneInfo и нормализованное имя."""
     name = normalize_timezone_name(tz_name, default=default)

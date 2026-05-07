@@ -307,7 +307,7 @@ async def _apply_sqlite_startup_schema_patches() -> None:
     for sql_sqlite in (
         "ALTER TABLE organizations ADD COLUMN tenant_id INTEGER",
         "ALTER TABLE organizations ADD COLUMN slug VARCHAR(120) DEFAULT ''",
-        "ALTER TABLE organizations ADD COLUMN timezone VARCHAR(64) DEFAULT 'Asia/Almaty'",
+        "ALTER TABLE organizations ADD COLUMN timezone VARCHAR(64) DEFAULT 'Etc/GMT-5'",
         "ALTER TABLE organizations ADD COLUMN currency VARCHAR(8) DEFAULT 'KZT'",
         "ALTER TABLE organizations ADD COLUMN iiko_api_login_enc TEXT",
         "ALTER TABLE organizations ADD COLUMN iiko_terminal_group_id VARCHAR(255) DEFAULT ''",
@@ -500,7 +500,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await conn.execute(text(sql2))
             # Казахстан: по умолчанию используем единый локальный пояс UTC+5.
             sql3 = (
-                "UPDATE organizations SET timezone = 'Asia/Almaty' "
+                "UPDATE organizations SET timezone = 'Etc/GMT-5' "
                 "WHERE timezone IS NULL OR timezone = '' OR UPPER(timezone) = 'UTC'"
             )
             await conn.execute(text(sql3))
@@ -529,7 +529,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     slug="demo",
                     is_active=True,
                     is_demo=True,
-                    timezone="Asia/Almaty",
+                    timezone="Etc/GMT-5",
                     currency="KZT",
                 )
                 db.add(demo_org)

@@ -2523,7 +2523,7 @@ async def patch_organization_profile(
     if body.timezone is not None:
         tz_in = (body.timezone or "").strip()
         if tz_in:
-            org.timezone = normalize_timezone_name(tz_in, default=(org.timezone or "Asia/Almaty"))
+            org.timezone = normalize_timezone_name(tz_in, default=(org.timezone or "Etc/GMT-5"))
     if body.currency is not None:
         org.currency = (body.currency or "").strip().upper() or org.currency
     if body.whatsapp_phone_number_id is not None:
@@ -6004,7 +6004,7 @@ async def test_bot(request: Request, body: TextRequest) -> dict:
     async with async_session_factory() as db:
         org_ent = await db.get(Organization, org_id)
         current_time_ctx = format_org_current_time_block(
-            getattr(org_ent, "timezone", None) if org_ent is not None else "Asia/Almaty",
+            getattr(org_ent, "timezone", None) if org_ent is not None else "Etc/GMT-5",
             getattr(org_ent, "schedule_json", None) if org_ent is not None else None,
         )
         menu_items = await load_available_menu(db, organization_id=org_id)
