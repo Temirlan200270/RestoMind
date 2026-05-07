@@ -30,7 +30,7 @@ from app.services.tenant_scope import (
     resolve_tenant_summary_for_session,
 )
 
-from .deps import _credentials_ok, admin_org_from_session
+from .deps import _credentials_ok, _superadmin_credentials_ok, admin_org_from_session
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +135,31 @@ async def admin_login(request: Request, body: LoginBody, db: AsyncSession = Depe
             "organization_id": oid,
             "staff_role": StaffRole.ADMIN.value,
             "is_superadmin": False,
+            "ws_token": ws_token,
+        }
+
+    if _superadmin_credentials_ok(body.username.strip(), password):
+        # Legacy superadmin (SUPERADMIN_USERNAME/PASSWORD): без StaffUser, но с правами superadmin.
+        # organization_id нужен для tenant-scope в UI и фильтрации WS-событий; стартуем с первой org.
+        oid_db = await db.scalar(select(Organization.id).order_by(Organization.id.asc()).limit(1))
+        oid = int(oid_db) if oid_db is not None else int(settings.default_organization_id)
+        request.session["admin_ok"] = True
+        request.session["admin_user"] = body.username.strip()
+        request.session["organization_id"] = oid
+        request.session["staff_id"] = None
+        request.session["superadmin_ok"] = True
+        request.session.pop("is_demo", None)
+        ws_token = create_admin_ws_token(
+            organization_id=oid,
+            email=body.username.strip(),
+            staff_id=None,
+        )
+        return {
+            "ok": True,
+            "username": body.username.strip(),
+            "organization_id": oid,
+            "staff_role": StaffRole.ADMIN.value,
+            "is_superadmin": True,
             "ws_token": ws_token,
         }
 
@@ -253,7 +278,7 @@ async def _admin_auth_me_payload(request: Request, db: AsyncSession) -> dict[str
     sid = request.session.get("staff_id")
     staff_role = StaffRole.ADMIN.value
     is_demo = bool(request.session.get("is_demo"))
-    is_superadmin = False
+    is_superadmin = bool(request.session.get("superadmin_ok"))
     staff_me: StaffUser | None = None
     if sid is not None:
         staff_me = await db.get(StaffUser, int(sid))
@@ -330,7 +355,7 @@ async def admin_select_org(
     sid = request.session.get("staff_id")
     staff_me: StaffUser | None = None
     is_demo = bool(request.session.get("is_demo"))
-    is_superadmin = False
+    is_superadmin = bool(request.session.get("superadmin_ok"))
     if sid is not None:
         staff_me = await db.get(StaffUser, int(sid))
         if staff_me is not None:

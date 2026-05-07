@@ -55,6 +55,17 @@ def _credentials_ok(username: str, password: str) -> bool:
     return u_ok and p_ok
 
 
+def _superadmin_credentials_ok(username: str, password: str) -> bool:
+    """Legacy супер-админ по env (без StaffUser). Включается только если заданы оба секрета."""
+    su = (settings.superadmin_username or "").strip()
+    sp = (settings.superadmin_password or "").strip()
+    if not su or not sp:
+        return False
+    u_ok = secrets.compare_digest(username, su)
+    p_ok = secrets.compare_digest(password, sp)
+    return u_ok and p_ok
+
+
 def require_admin_session(request: Request) -> None:
     """Доступ только после успешного входа (cookie-сессия)."""
     if not request.session.get("admin_ok"):
@@ -139,7 +150,10 @@ async def _session_staff_user(request: Request, db: AsyncSession) -> StaffUser |
 
 async def _session_is_superadmin(request: Request, db: AsyncSession) -> bool:
     staff = await _session_staff_user(request, db)
-    return bool(staff is not None and staff.is_active and staff.is_superadmin)
+    if staff is not None:
+        return bool(staff.is_active and staff.is_superadmin)
+    # Legacy супер-админ (по env): помечаем флагом в cookie-сессии на login.
+    return bool(request.session.get("superadmin_ok"))
 
 
 async def require_superadmin(request: Request, db: AsyncSession = Depends(get_db)) -> None:

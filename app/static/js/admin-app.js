@@ -5473,6 +5473,10 @@ function adminMixinDataChartsSettings() {
             if (!this._adminSettingsTabIds?.has(t)) return;
             this.currentTab = 'settings';
             this.settingsTab = t;
+            this.$nextTick(() => {
+                const scroller = document.getElementById('admin-content-scroll');
+                if (scroller) scroller.scrollTo({ top: 0, behavior: 'auto' });
+            });
             this.loadTabData();
             this._schedulePushAdminHash();
         },

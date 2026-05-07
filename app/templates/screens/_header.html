@@ -65,7 +65,9 @@
                                 <template x-if="(userData?.available_organizations || []).length <= 1">
                                     <div class="text-xs font-semibold text-gray-700 truncate" x-text="orgProfile?.name || '—'"></div>
                                 </template>
-                                <div class="text-[9px] text-gray-400 uppercase font-bold tracking-tight" x-show="userData?.tenant?.name" x-text="userData?.tenant?.name || ''"></div>
+                                <div class="text-[9px] text-gray-400 uppercase font-bold tracking-tight"
+                                    x-show="userData?.tenant?.name && String(userData.tenant.name).toLowerCase() !== 'default'"
+                                    x-text="String(userData?.tenant?.name || '').toLowerCase() === 'default' ? '' : (userData?.tenant?.name || '')"></div>
                             </div>
                             <div class="text-[10px] text-gray-400 tabular-nums shrink-0"
                                 x-show="(settingsEnv?.app_debug || isSuperadmin) && orgProfile?.organization_id"

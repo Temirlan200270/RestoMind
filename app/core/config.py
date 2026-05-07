@@ -451,6 +451,16 @@ class Settings(BaseSettings):
     # --- Админ-панель ---
     admin_username: str = "admin"
     admin_password: str = "restomind"
+    # Отдельные legacy-креды супер-админа (опционально).
+    # Если заданы — позволяют войти без StaffUser (по env) и получить is_superadmin=true.
+    superadmin_username: str = Field(
+        default="",
+        validation_alias=AliasChoices("SUPERADMIN_USERNAME", "superadmin_username"),
+    )
+    superadmin_password: str = Field(
+        default="",
+        validation_alias=AliasChoices("SUPERADMIN_PASSWORD", "superadmin_password"),
+    )
     # Организация по умолчанию (fallback вебхука и legacy-логина), если в БД одна запись — обычно 1
     default_organization_id: int = Field(
         default=1,

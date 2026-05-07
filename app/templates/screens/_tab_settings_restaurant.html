@@ -3,29 +3,19 @@
                 {{ settings_tabs() }}
                 <div class="flex-1 min-w-0 space-y-6">
                 <!-- Мобильные чип-якоря: только на sm/md, на desktop не конкурируют с левым сайдбаром -->
-                <nav class="sticky top-0 z-10 lg:static lg:bg-transparent lg:border-none lg:shadow-none lg:py-0 lg:mb-0 flex flex-wrap gap-2 py-2 mb-4 -mx-4 md:-mx-0 px-4 md:px-0 bg-white/95 backdrop-blur-sm border-b border-gray-100 shadow-sm" aria-label="Разделы страницы «Мой ресторан»">
-                    <!-- Кнопочные чипы — только mobile/tablet -->
-                    <a href="#settings-restaurant-profile"
-                        class="lg:hidden text-xs sm:text-sm font-semibold px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 min-h-[44px] inline-flex items-center transition-colors">
+                <nav class="lg:hidden sticky top-0 z-10 flex flex-wrap gap-2 py-2 mb-4 -mx-4 md:-mx-0 px-4 md:px-0 bg-white/95 backdrop-blur-sm border-b border-gray-100 shadow-sm" aria-label="Разделы страницы «Мой ресторан»">
+                    <button type="button" @click="$nextTick(() => document.getElementById('settings-restaurant-profile')?.scrollIntoView({ behavior: 'smooth', block: 'start' }))"
+                        class="text-xs sm:text-sm font-semibold px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 min-h-[44px] inline-flex items-center transition-colors">
                         Профиль
-                    </a>
-                    <a href="#settings-restaurant-knowledge" @click="loadKnowledgeBase()"
-                        class="lg:hidden text-xs sm:text-sm font-semibold px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 min-h-[44px] inline-flex items-center transition-colors">
+                    </button>
+                    <button type="button" @click="loadKnowledgeBase(); $nextTick(() => document.getElementById('settings-restaurant-knowledge')?.scrollIntoView({ behavior: 'smooth', block: 'start' }))"
+                        class="text-xs sm:text-sm font-semibold px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 min-h-[44px] inline-flex items-center transition-colors">
                         База знаний
-                    </a>
-                    <a href="#settings-restaurant-packaging" @click="loadMenu(); loadPackagingRules()"
-                        class="lg:hidden text-xs sm:text-sm font-semibold px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 min-h-[44px] inline-flex items-center transition-colors">
+                    </button>
+                    <button type="button" @click="loadMenu(); loadPackagingRules(); $nextTick(() => document.getElementById('settings-restaurant-packaging')?.scrollIntoView({ behavior: 'smooth', block: 'start' }))"
+                        class="text-xs sm:text-sm font-semibold px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 min-h-[44px] inline-flex items-center transition-colors">
                         Упаковка
-                    </a>
-                    <!-- Компактные текстовые якоря — только desktop, без кнопочного вида -->
-                    <p class="hidden lg:flex items-center gap-1 text-xs text-slate-400 mb-1">
-                        <span>Перейти:</span>
-                        <a href="#settings-restaurant-profile" class="text-slate-500 hover:text-brand-600 underline underline-offset-2 decoration-dotted transition-colors">Профиль</a>
-                        <span>·</span>
-                        <a href="#settings-restaurant-knowledge" @click="loadKnowledgeBase()" class="text-slate-500 hover:text-brand-600 underline underline-offset-2 decoration-dotted transition-colors">База знаний</a>
-                        <span>·</span>
-                        <a href="#settings-restaurant-packaging" @click="loadMenu(); loadPackagingRules()" class="text-slate-500 hover:text-brand-600 underline underline-offset-2 decoration-dotted transition-colors">Упаковка</a>
-                    </p>
+                    </button>
                 </nav>
                 <section id="settings-restaurant-profile" class="scroll-mt-20" aria-label="Профиль ресторана">
                 <div class="rm-card-surface p-6" @input="orgProfileDirty = true" @change="orgProfileDirty = true">
