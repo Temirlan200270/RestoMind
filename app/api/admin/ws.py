@@ -6,6 +6,7 @@ WebSocket админки: live-события по подписанному то
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 
@@ -17,6 +18,8 @@ from app.services.events import subscribe_events
 logger = logging.getLogger(__name__)
 
 ws_router = APIRouter(prefix="/admin", tags=["Admin Panel"])
+
+_WS_KEEPALIVE_SEC = 25
 
 
 def _ws_event_allowed_for_org(event_json: str, claims: AdminWsClaims) -> bool:
@@ -58,9 +61,25 @@ async def admin_websocket(ws: WebSocket, token: str = "") -> None:
         return
     await ws.accept()
     logger.info("Admin WebSocket подключён org=%s", claims.organization_id)
+    keepalive_task: asyncio.Task[None] | None = None
+
+    async def _keepalive() -> None:
+        # App-level keepalive. Некоторые прокси/балансировщики (особенно на free-tier)
+        # закрывают "тихий" WebSocket без трафика. Браузер не умеет отправлять ping,
+        # поэтому шлём лёгкое служебное сообщение.
+        while True:
+            await asyncio.sleep(_WS_KEEPALIVE_SEC)
+            try:
+                await ws.send_text(json.dumps({"type": "ws_ping"}, ensure_ascii=False))
+            except Exception:
+                return
+
+    keepalive_task = asyncio.create_task(_keepalive())
     try:
         await ws.send_text(json.dumps({"type": "ws_ready", "v": 1}, ensure_ascii=False))
     except Exception:
+        if keepalive_task is not None:
+            keepalive_task.cancel()
         return
     try:
         async for event_json in subscribe_events():
@@ -70,3 +89,6 @@ async def admin_websocket(ws: WebSocket, token: str = "") -> None:
         logger.info("Admin WebSocket отключён: %s", exc)
     except Exception as exc:
         logger.error("WebSocket error: %s", exc)
+    finally:
+        if keepalive_task is not None:
+            keepalive_task.cancel()
