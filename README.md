@@ -144,6 +144,7 @@ RestoMind/
 
 - `docs/UI_DESIGN_SYSTEM.md` — дизайн-система админки (компоненты, токены, a11y, Lighthouse).
 - `docs/ui/mobile-review/README.md` — mobile review (Playwright-скриншоты и план улучшений).
+- `docs/ADMIN_ARCH_CHECKLIST.md` — чек-лист архитектурного аудита админки (UI/WS/AI): что смотреть и как измерять проблемы.
 
 ## API (кратко)
 

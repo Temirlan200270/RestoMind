@@ -1,8 +1,31 @@
 /**
  * RestoMind admin panel — Alpine x-data="adminApp()".
- * Подключать после Alpine и Chart.js.
+ * Chart.js загружается лениво только когда график становится нужен.
  */
 'use strict';
+
+let adminChartJsLoadPromise = null;
+function adminEnsureChartJs() {
+    if (typeof window !== 'undefined' && window.Chart) return Promise.resolve(window.Chart);
+    if (adminChartJsLoadPromise) return adminChartJsLoadPromise;
+    adminChartJsLoadPromise = new Promise((resolve, reject) => {
+        const existing = document.querySelector('script[data-admin-chartjs]');
+        if (existing) {
+            existing.addEventListener('load', () => resolve(window.Chart), { once: true });
+            existing.addEventListener('error', reject, { once: true });
+            return;
+        }
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js';
+        script.async = true;
+        script.defer = true;
+        script.dataset.adminChartjs = 'true';
+        script.onload = () => resolve(window.Chart);
+        script.onerror = () => reject(new Error('Chart.js failed to load'));
+        document.head.appendChild(script);
+    });
+    return adminChartJsLoadPromise;
+}
 
 /**
  * Экземпляры Chart.js вне реактивного объекта Alpine — иначе Proxy может ломать внутренние ссылки на canvas.
@@ -13,9 +36,34 @@ const charts = {
     analyticsSparks: {},
 };
 
+function adminDefaultSettingsEnv() {
+    return {
+        app_version: '—',
+        db_mode: '',
+        redis_backend: '',
+        app_debug: false,
+        integrations: {
+            iiko: {},
+            whatsapp: {},
+            telegram: {},
+            openai: {},
+            public_base_url_set: false,
+        },
+        chat_log_retention: null,
+    };
+}
+
+function adminDefaultDashRoiSummary() {
+    return { narrative: '', metrics: null, achievements: [] };
+}
+
+function adminDefaultReadinessPayload() {
+    return { checks: [], links: {}, generated_at: '' };
+}
+
 /** Общие настройки Chart.js (Phase U5): шрифты, сетка. */
 function adminChartJsCommonFont() {
-    return { family: 'Inter, system-ui, sans-serif', size: 11 };
+    return { family: 'system-ui, -apple-system, Segoe UI, sans-serif', size: 11 };
 }
 
 function adminDestroyDashboardChart() {
@@ -325,7 +373,7 @@ function adminMixinState() {
         settingsPurgeAck: false,
         settingsPurgeLoading: false,
         settingsPurgeError: '',
-        settingsEnv: null,
+        settingsEnv: adminDefaultSettingsEnv(),
         settingsEnvLoading: false,
         settingsRedisPhone: '',
         settingsRedisPurgeLoading: false,
@@ -432,6 +480,7 @@ function adminMixinState() {
         dashStats: {},
         dashStatsLoading: false,
         dashStatsLoadedOnce: false,
+        _dashboardChartObserver: null,
         /** GET /api/admin/roi/today — нарратив + достижения. */
         dashRoiSummary: null,
         dashRoiLoading: false,
@@ -552,7 +601,7 @@ function adminMixinState() {
         systemBannerDismissed: false,
         orderTimeline: [],
         orderTimelineLoading: false,
-        readinessPayload: null,
+        readinessPayload: adminDefaultReadinessPayload(),
         readinessLoading: false,
         /** Сессия demo-login — read-only для мутаций на бэке; для UI дизейбла кнопок демо */
         isDemoSession: false,
@@ -4217,8 +4266,10 @@ function adminMixinWebSocketEvents() {
                 this.wsChannelReady = true;
                 this.wsEpoch++;
                 // После реконнекта могли потеряться события. Догружаем состояние по REST.
-                if (this.currentTab === 'orders' || this.currentTab === 'dashboard') {
+                if (this.currentTab === 'orders') {
                     void this.loadOrders();
+                }
+                if (this.currentTab === 'orders' || this.currentTab === 'dashboard') {
                     void this.loadDashStats();
                 }
                 if (this.currentTab === 'chats') {
@@ -5214,11 +5265,12 @@ function adminMixinDataChartsSettings() {
                 if (this.currentTab === 'dashboard') {
                     await Promise.all([
                         this.loadDashStats(),
-                        this.loadDashRoiSummary(),
-                        this.loadDashActivity(),
                         this.loadAttentionSummary(),
-                        this.loadOrders(),
                     ]);
+                    this.deferIdleWork(async () => {
+                        if (this.currentTab !== 'dashboard') return;
+                        await Promise.all([this.loadDashRoiSummary(), this.loadDashActivity()]);
+                    }, 1200);
                 } else if (this.currentTab === 'analytics') {
                     await this.loadAnalytics();
                 } else if (this.currentTab === 'ai_value') {
@@ -5258,7 +5310,8 @@ function adminMixinDataChartsSettings() {
                         this.syncBrandingDraftFromUser();
                     } else {
                         // restaurant
-                        await Promise.all([this.loadOrgProfile(), this.loadKnowledgeBase(), this.loadPackagingRules()]);
+                        await this.loadOrgProfile();
+                        this.armRestaurantSettingsLazyLoad();
                     }
                 } else if (this.currentTab === 'chats') {
                     await this.loadChatList();
@@ -5268,7 +5321,13 @@ function adminMixinDataChartsSettings() {
                 adminLogger.error(e);
                 void this.showUiAlert('Не удалось загрузить данные вкладки. Проверьте сеть и обновите страницу.', 'Ошибка');
             }
-            if (this.currentTab !== 'dashboard') adminDestroyDashboardChart();
+            if (this.currentTab !== 'dashboard') {
+                if (this._dashboardChartObserver) {
+                    try { this._dashboardChartObserver.disconnect(); } catch (_e) { /* ignore */ }
+                    this._dashboardChartObserver = null;
+                }
+                adminDestroyDashboardChart();
+            }
             if (this.currentTab !== 'analytics') adminDestroyAnalyticsMainChart();
             if (this.currentTab !== 'analytics') {
                 this._destroyAnalyticsSparklines();
@@ -5280,7 +5339,7 @@ function adminMixinDataChartsSettings() {
             setTimeout(() => {
                 if (this.currentTab !== tab) return;
                 if (tab === 'dashboard') {
-                    this.scheduleDashboardChartRender();
+                    this.armDashboardChartLazyRender();
                 }
                 // Одна отрисовка аналитики после layout (loadAnalytics только грузит данные).
                 if (tab === 'analytics') {
@@ -5290,6 +5349,54 @@ function adminMixinDataChartsSettings() {
             }, 100);
             [150, 400, 800].forEach((ms) => {
                 setTimeout(() => this._resizeVisibleCharts(tab), ms);
+            });
+        },
+
+        isMobileViewport() {
+            try {
+                return window.matchMedia('(max-width: 767px)').matches;
+            } catch (_e) {
+                return false;
+            }
+        },
+
+        deferIdleWork(fn, timeout = 1500) {
+            const runner = () => {
+                try {
+                    const out = fn();
+                    if (out && typeof out.catch === 'function') out.catch((e) => adminLogger.warn('idle work', e));
+                } catch (e) {
+                    adminLogger.warn('idle work', e);
+                }
+            };
+            if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+                window.requestIdleCallback(runner, { timeout });
+            } else {
+                setTimeout(runner, timeout);
+            }
+        },
+
+        armRestaurantSettingsLazyLoad() {
+            const observe = (id, loader) => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                if (typeof IntersectionObserver === 'undefined') {
+                    this.deferIdleWork(loader, 2500);
+                    return;
+                }
+                const observer = new IntersectionObserver((entries) => {
+                    if (!entries.some((entry) => entry.isIntersecting)) return;
+                    try { observer.disconnect(); } catch (_e) { /* ignore */ }
+                    void loader();
+                }, { rootMargin: '160px 0px' });
+                observer.observe(el);
+            };
+            observe('settings-restaurant-knowledge', async () => {
+                if (this.currentTab === 'settings' && this.settingsTab === 'restaurant') await this.loadKnowledgeBase();
+            });
+            observe('settings-restaurant-packaging', async () => {
+                if (this.currentTab !== 'settings' || this.settingsTab !== 'restaurant') return;
+                await Promise.all([this.loadMenu(), this.loadPackagingRules()]);
             });
         },
 
@@ -5492,7 +5599,7 @@ function adminMixinDataChartsSettings() {
             this.readinessLoading = true;
             try {
                 const { ok, data } = await this.apiJsonResponse('/api/admin/readiness');
-                if (ok && data) this.readinessPayload = data;
+                this.readinessPayload = ok && data ? data : adminDefaultReadinessPayload();
             } catch (e) {
                 adminLogger.error('[admin] loadReadiness', e);
             } finally {
@@ -5603,7 +5710,7 @@ function adminMixinDataChartsSettings() {
                     this.dashRoiSummary = null;
                     return;
                 }
-                this.dashRoiSummary = data;
+                this.dashRoiSummary = data || adminDefaultDashRoiSummary();
             } finally {
                 this.dashRoiLoading = false;
             }
@@ -5616,9 +5723,9 @@ function adminMixinDataChartsSettings() {
         scheduleDashboardChartRender() {
             return new Promise((resolve) => {
                 requestAnimationFrame(() => {
-                    requestAnimationFrame(() => {
+                    requestAnimationFrame(async () => {
                         try {
-                            this.renderDashboardMiniChart();
+                            await this.renderDashboardMiniChart();
                             const canvas = document.getElementById('dashboardHeroChart');
                             const parent = canvas?.parentElement;
                             if (charts.dashboard && parent) {
@@ -5632,11 +5739,38 @@ function adminMixinDataChartsSettings() {
             });
         },
 
+        armDashboardChartLazyRender() {
+            if (this.currentTab !== 'dashboard' || charts.dashboard) return;
+            // На mobile график ниже первого решения владельца; не грузим Chart.js в initial render.
+            if (this.isMobileViewport()) return;
+            const canvas = document.getElementById('dashboardHeroChart');
+            if (!canvas) return;
+            if (this._dashboardChartObserver) {
+                try { this._dashboardChartObserver.disconnect(); } catch (_e) { /* ignore */ }
+                this._dashboardChartObserver = null;
+            }
+            if (typeof IntersectionObserver === 'undefined') {
+                if (!this.isMobileViewport()) void this.scheduleDashboardChartRender();
+                return;
+            }
+            this._dashboardChartObserver = new IntersectionObserver((entries) => {
+                if (!entries.some((entry) => entry.isIntersecting)) return;
+                try { this._dashboardChartObserver?.disconnect(); } catch (_e) { /* ignore */ }
+                this._dashboardChartObserver = null;
+                void this.scheduleDashboardChartRender();
+            }, { rootMargin: '220px 0px' });
+            this._dashboardChartObserver.observe(canvas);
+        },
+
         /** После изменения заказов: перерисовать мини-график, если открыт дашборд. */
         async syncDashboardChartIfVisible() {
             await this.$nextTick();
             if (this.currentTab === 'dashboard') {
-                await this.scheduleDashboardChartRender();
+                if (charts.dashboard) {
+                    await this.scheduleDashboardChartRender();
+                } else {
+                    this.armDashboardChartLazyRender();
+                }
             }
         },
 
@@ -6025,10 +6159,10 @@ function adminMixinDataChartsSettings() {
             this.settingsEnvLoading = true;
             try {
                 const { ok, data } = await this.apiJsonResponse('/api/admin/settings/environment');
-                this.settingsEnv = ok && data ? data : null;
+                this.settingsEnv = ok && data ? data : adminDefaultSettingsEnv();
             } catch (e) {
                 adminLogger.error('[admin] loadSettingsEnvironment', e);
-                this.settingsEnv = null;
+                this.settingsEnv = adminDefaultSettingsEnv();
             } finally {
                 this.settingsEnvLoading = false;
             }
@@ -6591,9 +6725,9 @@ function adminMixinDataChartsSettings() {
         },
 
         /** Перерисовка графика аналитики после стабилизации layout (вызов из loadTabData или reloadAnalyticsForUi). */
-        _paintAnalyticsChartAfterLayout() {
+        async _paintAnalyticsChartAfterLayout() {
             try {
-                this.renderChart();
+                await this.renderChart();
                 const canvas = document.getElementById('revenueChart');
                 const parent = canvas?.parentElement;
                 if (charts.analytics && parent) {
@@ -6614,7 +6748,7 @@ function adminMixinDataChartsSettings() {
             }, 100);
         },
 
-        renderChart() {
+        async renderChart() {
             const canvas = document.getElementById('revenueChart');
             if (!canvas) return;
             const daily = this.analyticsData.daily || [];
@@ -6623,6 +6757,7 @@ function adminMixinDataChartsSettings() {
                 this._destroyAnalyticsSparklines();
                 return;
             }
+            await adminEnsureChartJs();
 
             const ctx = canvas.getContext('2d');
             adminDestroyAnalyticsMainChart();
@@ -6820,13 +6955,14 @@ function adminMixinDataChartsSettings() {
         },
 
         /** Плавная area-линия с градиентом под кривой (премиум-дашборд). */
-        renderDashboardMiniChart() {
+        async renderDashboardMiniChart() {
             if (this.currentTab !== 'dashboard') return;
             const canvas = document.getElementById('dashboardHeroChart');
             if (!canvas) return;
             const series = this.dashStats.daily_series || [];
             // Пустая серия: не вызываем destroy() — иначе график исчезает навсегда до следующего успешного /stats.
             if (series.length === 0) return;
+            await adminEnsureChartJs();
 
             const ctx = canvas.getContext('2d');
             adminDestroyDashboardChart();

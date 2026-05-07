@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-05T13:49:22.578Z",
+  "generatedAt": "2026-05-05T14:27:15.984Z",
   "baseUrl": "http://127.0.0.1:9892",
   "formFactor": "mobile",
   "cookieAuth": true,
@@ -7,71 +7,71 @@
     {
       "id": "dashboard",
       "url": "http://127.0.0.1:9892/admin#dashboard",
-      "performance": 29,
-      "accessibility": 89,
+      "performance": 21,
+      "accessibility": 100,
       "bestPractices": 96
     },
     {
       "id": "orders",
       "url": "http://127.0.0.1:9892/admin#orders",
-      "performance": 42,
-      "accessibility": 90,
+      "performance": 30,
+      "accessibility": 96,
       "bestPractices": 93
     },
     {
       "id": "menu",
       "url": "http://127.0.0.1:9892/admin#menu",
-      "performance": 56,
+      "performance": 39,
       "accessibility": 94,
       "bestPractices": 96
     },
     {
       "id": "settings_restaurant",
       "url": "http://127.0.0.1:9892/admin#settings/restaurant",
-      "performance": 33,
-      "accessibility": 83,
+      "performance": 41,
+      "accessibility": 100,
       "bestPractices": 96
     },
     {
       "id": "settings_branding",
       "url": "http://127.0.0.1:9892/admin#settings/branding",
-      "performance": 57,
-      "accessibility": 87,
+      "performance": 38,
+      "accessibility": 100,
       "bestPractices": 96
     },
     {
       "id": "settings_connections",
       "url": "http://127.0.0.1:9892/admin#settings/connections",
-      "performance": 57,
-      "accessibility": 93,
+      "performance": 40,
+      "accessibility": 98,
       "bestPractices": 96
     },
     {
       "id": "settings_smart_sales",
       "url": "http://127.0.0.1:9892/admin#settings/smart_sales",
-      "performance": 57,
-      "accessibility": 87,
+      "performance": 44,
+      "accessibility": 93,
       "bestPractices": 96
     },
     {
       "id": "settings_team",
       "url": "http://127.0.0.1:9892/admin#settings/team",
-      "performance": 57,
-      "accessibility": 87,
+      "performance": 37,
+      "accessibility": 93,
       "bestPractices": 96
     },
     {
       "id": "settings_health",
       "url": "http://127.0.0.1:9892/admin#settings/health",
-      "performance": 56,
-      "accessibility": 93,
+      "performance": 13,
+      "accessibility": 98,
       "bestPractices": 96
     },
     {
       "id": "settings_technical",
       "url": "http://127.0.0.1:9892/admin#settings/technical",
-      "performance": 56,
-      "accessibility": 93,
+      "performance": 37,
+      "accessibility": 98,
       "bestPractices": 96
     },
     {

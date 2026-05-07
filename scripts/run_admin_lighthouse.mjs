@@ -245,6 +245,14 @@ function writeReadme(summary) {
         '',
         '**Интерпретация:** [UI_REDESIGN_PLAN.md](../UI_REDESIGN_PLAN.md) — на ключевых экранах ориентир: Accessibility ≥ 90, Performance ≥ 80, Best practices ≥ 90. Баллы зависят от данных БД и окружения.',
         '',
+        '## Текущий mobile baseline',
+        '',
+        'Accessibility уже приведена к рабочему уровню на большинстве экранов; оставшиеся просадки Performance — известный архитектурный долг, а не финальное целевое состояние. Главный bottleneck по отчётам: один большой `admin.html` (~550 KiB HTML), Alpine инициализирует скрытые `x-show` деревья всех вкладок, из-за чего растут DOM size, script evaluation и style/layout cost.',
+        '',
+        'Что уже вынесено из initial render: Chart.js загружается лениво, Alpine отдается локально, Google Fonts снят с critical path, Dashboard не догружает заказы на `ws_ready`, длинные блоки настроек ресторана грузятся по видимости/клику.',
+        '',
+        'Следующий крупный шаг к Performance ≥ 80: разделить админку на route/partial chunks или заменить тяжелые `x-show` вкладки на mount-on-demand (`x-if`/динамические partials), чтобы мобильный экран не создавал DOM для таблиц, канбана, аналитики, настроек и модалок одновременно.',
+        '',
     );
 
     fs.writeFileSync(path.join(OUT_DIR, 'README.md'), lines.join('\n'), 'utf8');
