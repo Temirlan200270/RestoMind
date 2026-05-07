@@ -1,6 +1,6 @@
 # Настройка AI-инструментов для работы над RestoMind
 
-Документ описывает, как настроить **Claude Code**, **Cursor** и подобные агенты, чтобы они могли исполнять планы из репозитория ([IMPLEMENTATION_PLAN.md](../IMPLEMENTATION_PLAN.md), [PARALLEL_AI_PLAN.md](../PARALLEL_AI_PLAN.md), [docs/UI_REDESIGN_PLAN.md](UI_REDESIGN_PLAN.md)) с одинаковыми правилами и MCP-инструментами.
+Документ описывает, как настроить **Claude Code**, **Cursor** и подобные агенты, чтобы они работали по одному набору правил и MCP-инструментам.
 
 Цель — чтобы любой агент (Claude Code, Cursor Composer / Background Agent, Aider и т.д.) поднимал одинаковый контекст из репо и работал по одному набору правил.
 
@@ -14,14 +14,14 @@ RestoMind/
 │   ├── mcp.json               # MCP-серверы (browser, context7)
 │   └── rules/
 │       ├── restomind-zones.mdc   # alwaysApply: true — общие правила репо
+│       ├── restomind-ai.mdc      # alwaysApply: true — соло-workflow (статусы в ROADMAP)
 │       └── ui-redesign.mdc       # globs: app/templates/**, app/static/** — UI-правила
 ├── CLAUDE.md (опционально)    # специфика Claude Code
 ├── docs/
-│   ├── UI_REDESIGN_PLAN.md    # план UI-редизайна (агностичен инструменту)
-│   ├── UI_REDESIGN_NOTES.md   # baseline-замечания (Phase U0)
+│   ├── ROADMAP.md             # единственный трекер задач/статусов
+│   ├── sprints/               # временные мини‑родмапы/чеклисты по спринтам
+│   ├── UI_DESIGN_SYSTEM.md    # спецификация UI и компонентов
 │   └── AI_TOOLS_SETUP.md      # этот файл
-├── IMPLEMENTATION_PLAN.md     # эпики и статусы
-├── PARALLEL_AI_PLAN.md        # карта работы между ИИ 1 / ИИ 2
 └── CHANGELOG.md               # история (агенты дописывают в [Unreleased])
 ```
 
@@ -58,16 +58,13 @@ Cursor подхватывает их сам — отдельно ничего д
 
 | Режим | Когда использовать |
 |-------|--------------------|
-| **Composer (Cmd/Ctrl+I)** | Интерактивная работа: «Сделай Phase U1 из docs/UI_REDESIGN_PLAN.md». Агент читает план, разводит работу, спрашивает в неоднозначных местах. |
+| **Composer (Cmd/Ctrl+I)** | Интерактивная работа: «Открой docs/ROADMAP.md и сделай задачу X». |
 | **Chat (Cmd/Ctrl+L)** | Q&A, обсуждение, ревью кода без изменений. |
 | **Background Agent** | Долгие задачи без присмотра (миграция раздела, генерация компонентов). Работает в облачном Linux-контейнере, требует push в GitHub-ветку. MCP-серверы доступны. |
 
-### 2.4. Параллельная работа двух агентов
+### 2.4. Параллельная работа (если нужно)
 
-1. Создать две ветки: `ai1/<задача>` и `ai2/<задача>` от `main`.
-2. Запустить два Cursor Background Agent — каждому дать соответствующую ветку и инструкции из [PARALLEL_AI_PLAN.md](../PARALLEL_AI_PLAN.md).
-3. Мерджить в `main` по очереди: ИИ 1 → ИИ 2 (порядок описан в плане).
-4. Конфликты в `app/api/admin/*` и общих `.md` — по правилам из плана (секции с маркерами, дописывание в `[Unreleased]`).
+Если запускаете два агента одновременно — давайте им **разные вертикальные задачи** (не один и тот же файл). Статусы отмечаем только в `docs/ROADMAP.md`, факт — в `CHANGELOG.md`.
 
 ### 2.5. Скрины и визуальная верификация
 
@@ -102,7 +99,7 @@ Claude Code использует `~/.claude/.mcp.json` (глобально) ил
 
 ### 3.2. CLAUDE.md (опционально)
 
-Если хочется специфичные для Claude Code инструкции (slash-команды, примеры) — создаётся `CLAUDE.md` в корне. Для общих правил репо достаточно тех же `.cursor/rules/*.mdc`, но Claude Code их не читает напрямую — поэтому ключевые ссылки на `IMPLEMENTATION_PLAN.md` / `PARALLEL_AI_PLAN.md` дублируются в `CLAUDE.md` или в `docs/`.
+Если хочется специфичные для Claude Code инструкции (slash-команды, примеры) — создаётся `CLAUDE.md` в корне. Для общих правил репо достаточно `.cursor/rules/*.mdc`.
 
 ### 3.3. Skills и Plan Mode
 
@@ -113,10 +110,10 @@ Claude Code использует `~/.claude/.mcp.json` (глобально) ил
 
 ## 4. Универсальные принципы для любого агента
 
-1. **Перед началом** — читать `IMPLEMENTATION_PLAN.md` (статусы) + `PARALLEL_AI_PLAN.md` (зоны).
+1. **Перед началом** — читать `docs/ROADMAP.md` (задачи/статусы) и `.cursor/rules/*.mdc` (запреты/стандарты).
 2. **При изменениях** — дописывать в `## [Unreleased]` секцию `CHANGELOG.md`, никогда не переписывать существующие записи.
-3. **При закрытии эпика** — обновлять статус в `IMPLEMENTATION_PLAN.md`.
-4. **Для UI** — `docs/UI_REDESIGN_PLAN.md` обязателен; новые блоки только через макросы из `app/templates/components/` (после Phase U1).
+3. **При закрытии задачи** — обновлять статус в `docs/ROADMAP.md`.
+4. **Для UI** — опираться на `docs/UI_DESIGN_SYSTEM.md`; новые блоки только через макросы из `app/templates/components/`.
 5. **Не трогать платежи** (`app/api/payment_webhook.py`, `app/services/payment_*`) без явного согласования.
 6. **`pytest -q` перед PR** для backend-изменений; smoke в браузере для UI.
 7. **Никаких `--force`, `--no-verify`, `--no-gpg-sign`** push без явного запроса от пользователя.
@@ -137,5 +134,5 @@ Background Agent работает в облаке Cursor (Linux-контейне
 **Q: Что если у меня нет Node.js для `npx`?**
 MCP-серверы можно установить глобально (`npm i -g chrome-devtools-mcp`) и заменить команды в `mcp.json` на абсолютные пути. Но проще поставить Node.js.
 
-**Q: Как запустить Cursor по `docs/UI_REDESIGN_PLAN.md`?**
-Открыть Composer (Cmd/Ctrl+I), сказать: «Прочитай docs/UI_REDESIGN_PLAN.md и сделай Phase U1». Cursor сам подхватит rules из `.cursor/rules/`, прочитает план, начнёт исполнение.
+**Q: Как запускать задачи по roadmap?**
+Открыть Composer (Cmd/Ctrl+I), сказать: «Открой `docs/ROADMAP.md`, возьми задачу `<название>` и выполни». В конце: отметь `[x]` в `docs/ROADMAP.md` и допиши в `CHANGELOG.md`.

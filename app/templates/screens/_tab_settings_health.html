@@ -1,0 +1,56 @@
+            <!-- ========== НАСТРОЙКИ: Состояние (readiness) ========== -->
+            <template x-if="currentTab === 'settings' && settingsTab === 'health'">
+            <div class="fade-in w-full max-w-6xl mx-auto lg:flex lg:gap-8 lg:items-start pb-16">
+                {{ settings_tabs() }}
+                <div class="flex-1 min-w-0 space-y-6">
+                <div class="rm-card-surface p-5 sm:p-6 space-y-4">
+                    <div class="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                            <h3 class="text-base font-bold text-slate-900">Проверки окружения</h3>
+                            <p class="text-xs text-slate-500 mt-0.5" x-text="isSuperadmin ? 'БД, Redis, миграции и ключевые интеграции — без отображения секретов.' : 'Статусы интеграций и последняя синхронизация.'"></p>
+                        </div>
+                        <button type="button" @click="loadReadiness()" :disabled="readinessLoading"
+                            class="text-xs font-semibold px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 min-h-[44px] shrink-0">
+                            <span x-show="!readinessLoading">Проверить снова</span>
+                            <span x-show="readinessLoading" x-cloak>Запрос…</span>
+                        </button>
+                    </div>
+                    <div x-show="readinessLoading && !readinessPayload" class="h-24 rounded-xl bg-slate-100 animate-pulse"></div>
+                    <ul x-show="readinessPayload?.checks?.length" x-cloak class="space-y-2">
+                        <template x-for="c in (readinessPayload.checks || [])" :key="c.id">
+                            <li x-show="!['database','redis','alembic'].includes(c.id) || isSuperadmin"
+                                class="flex gap-3 rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-2.5 text-sm">
+                                <span class="shrink-0 mt-0.5 text-lg leading-none" aria-hidden="true"
+                                    x-text="c.ok ? '✓' : '⚠'"></span>
+                                <div class="min-w-0 flex-1">
+                                    <div class="font-semibold text-slate-900" x-text="c.label"></div>
+                                    <div class="text-xs text-slate-600 mt-0.5 leading-snug break-words" x-text="c.detail"></div>
+                                </div>
+                            </li>
+                        </template>
+                    </ul>
+                    <div class="rounded-xl border border-slate-100 bg-white px-3 py-3 space-y-2">
+                        <div class="text-xs font-bold uppercase tracking-wide text-slate-500">Ссылки для интеграций</div>
+                        <div class="flex flex-wrap gap-2">
+                            <button type="button" @click="copyReadinessLink('payment_webhook')"
+                                class="text-xs font-semibold px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 min-h-[44px]">
+                                Копировать URL webhook оплаты
+                            </button>
+                            <button type="button" @click="copyReadinessLink('whatsapp')"
+                                class="text-xs font-semibold px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 min-h-[44px]">
+                                Копировать URL WhatsApp
+                            </button>
+                            <button type="button" @click="copyReadinessLink('public_base')"
+                                class="text-xs font-semibold px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 min-h-[44px]">
+                                Копировать PUBLIC_BASE_URL
+                            </button>
+                        </div>
+                        <p class="text-[11px] text-slate-500 font-mono break-all" x-show="readinessPayload?.links?.payment_webhook_url"
+                            x-text="'Оплата: ' + (readinessPayload.links.payment_webhook_url || '')"></p>
+                    </div>
+                    <p class="text-[11px] text-slate-400" x-show="readinessPayload?.generated_at" x-text="'Проверено: ' + (readinessPayload.generated_at || '')"></p>
+                </div>
+                </div>
+            </div>
+            </template>
+

@@ -89,6 +89,7 @@ async def test_bot(request: Request, body: TextRequest) -> dict:
     history = await get_chat_history(redis_client, phone, organization_id=org_id)
     await append_to_history(redis_client, phone, "user", message_text, organization_id=org_id)
 
+    # ФАЗА 1: Чтение контекста — короткая сессия, закрывается до LLM
     async with async_session_factory() as db:
         org_ent = await db.get(Organization, org_id)
         current_time_ctx = format_org_current_time_block(
@@ -124,18 +125,28 @@ async def test_bot(request: Request, body: TextRequest) -> dict:
             strategy_ctx = format_strategy_for_prompt(decision)
             sales_gastro_hint = (decision.gastro_hint or "").strip()
             sales_target_iiko_ids = list(decision.target_iiko_ids or [])
-        ai_response = await call_openai(
-            history,
-            message_text,
-            menu_context,
-            kb_context,
-            draft_order_context=draft_ctx,
-            sales_strategy_context=strategy_ctx,
-            customer_context=customer_ctx,
-            current_time_context=current_time_ctx,
-            raise_on_transient=False,
-        )
-        inbound_mid = f"admin-test-bot:{secrets.token_hex(8)}"
+        u_meta = u_row.meta_json if u_row is not None else None
+    # DB-сессия закрыта — все данные в памяти
+
+    # ФАЗА 2: LLM-вызов вне DB-сессии (не держим соединение в пуле)
+    from app.services.ai_usage import schedule_log_ai_usage
+    ai_response = await call_openai(
+        history,
+        message_text,
+        menu_context,
+        kb_context,
+        draft_order_context=draft_ctx,
+        sales_strategy_context=strategy_ctx,
+        customer_context=customer_ctx,
+        current_time_context=current_time_ctx,
+        raise_on_transient=False,
+    )
+
+    schedule_log_ai_usage(org_id, getattr(ai_response, "_usage", None))
+
+    # ФАЗА 3: Запись результатов — новая короткая сессия
+    inbound_mid = f"admin-test-bot:{secrets.token_hex(8)}"
+    async with async_session_factory() as db:
         result = await route_intent(
             db,
             phone,
@@ -162,17 +173,16 @@ async def test_bot(request: Request, body: TextRequest) -> dict:
                 else {}
             ),
         )
-
         await db.commit()
 
-        if result.new_state:
-            await set_user_state(redis_client, phone, result.new_state, organization_id=org_id)
-        if result.pending_order_id:
-            await set_pending_order(redis_client, phone, result.pending_order_id, organization_id=org_id)
-        if result.pending_booking_id:
-            await set_pending_booking(redis_client, phone, result.pending_booking_id, organization_id=org_id)
-        for evt_type, evt_data in (result.events or []):
-            await publish_event(evt_type, evt_data)
+    if result.new_state:
+        await set_user_state(redis_client, phone, result.new_state, organization_id=org_id)
+    if result.pending_order_id:
+        await set_pending_order(redis_client, phone, result.pending_order_id, organization_id=org_id)
+    if result.pending_booking_id:
+        await set_pending_booking(redis_client, phone, result.pending_booking_id, organization_id=org_id)
+    for evt_type, evt_data in (result.events or []):
+        await publish_event(evt_type, evt_data)
 
     await append_to_history(redis_client, phone, "assistant", result.reply_text, organization_id=org_id)
 

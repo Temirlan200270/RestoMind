@@ -1,0 +1,39 @@
+        <!-- Системный баннер: интеграции degraded (iiko / WhatsApp / AI) — вместо отдельного пункта сайдбара -->
+        <div x-show="incidentsTotalOpen() > 0 && !systemBannerDismissed" x-cloak
+            class="shrink-0 z-20 border-b"
+            :class="(attentionSummary?.summary?.critical || 0) > 0
+                ? 'bg-red-50 border-red-200'
+                : 'bg-amber-50 border-amber-200'">
+            <div class="px-4 sm:px-6 md:px-8 py-2 flex flex-wrap items-center justify-between gap-2">
+                <div class="flex items-center gap-2 min-w-0">
+                    <svg class="w-4 h-4 shrink-0"
+                        :class="(attentionSummary?.summary?.critical || 0) > 0 ? 'text-red-500' : 'text-amber-500'"
+                        fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M12 9v3.75m0 3.75h.007M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+                    </svg>
+                    <span class="text-xs font-semibold"
+                        :class="(attentionSummary?.summary?.critical || 0) > 0 ? 'text-red-800' : 'text-amber-800'">
+                        Системные предупреждения:
+                        <span x-text="incidentsTotalOpen()"></span>
+                        <template x-if="(attentionSummary?.summary?.critical || 0) > 0">
+                            <span> · критических: <span x-text="attentionSummary.summary.critical"></span></span>
+                        </template>
+                    </span>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                    <button type="button"
+                        @click="navigateToTab('incidents')"
+                        class="text-xs font-semibold px-3 py-1 rounded-lg border transition min-h-[32px]"
+                        :class="(attentionSummary?.summary?.critical || 0) > 0
+                            ? 'bg-red-100 border-red-300 text-red-800 hover:bg-red-200'
+                            : 'bg-amber-100 border-amber-300 text-amber-800 hover:bg-amber-200'">
+                        Посмотреть
+                    </button>
+                    <button type="button" @click="systemBannerDismissed = true"
+                        class="text-gray-400 hover:text-gray-600 text-lg leading-none px-1" aria-label="Скрыть">
+                        &times;
+                    </button>
+                </div>
+            </div>
+        </div>

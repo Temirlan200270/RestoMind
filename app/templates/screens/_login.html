@@ -1,0 +1,41 @@
+<!-- ========== ЭКРАН ВХОДА ========== -->
+<div x-show="!authenticated" x-cloak
+    class="fixed inset-0 z-[100] flex items-center justify-center bg-gradient-to-br from-brand-900 via-brand-800 to-slate-900 p-4">
+    <div class="w-full max-w-md rounded-3xl bg-white shadow-2xl border border-white/10 overflow-hidden fade-in">
+        <div class="bg-gradient-to-r from-brand-600 to-brand-700 px-8 py-10 text-center text-white">
+            <div class="w-16 h-16 mx-auto rounded-2xl bg-white/20 flex items-center justify-center text-3xl font-bold mb-4">R</div>
+            <h1 class="text-2xl font-bold">RestoMind</h1>
+            <p class="text-brand-100 text-sm mt-1">Панель управления рестораном</p>
+        </div>
+        <form class="px-8 py-8 space-y-5" @submit.prevent="submitLogin()">
+            <div x-show="loginError" x-cloak class="text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-3" x-text="loginError"></div>
+            <div>
+                <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Логин</label>
+                <input type="text" x-model="loginUsername" autocomplete="username"
+                    class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    placeholder="Email сотрудника или admin" required>
+            </div>
+            <div>
+                <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Пароль</label>
+                <input type="password" x-model="loginPassword" autocomplete="current-password"
+                    class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    placeholder="••••••••" required>
+            </div>
+            <button type="submit" :disabled="loginLoading"
+                class="w-full py-3.5 rounded-xl bg-brand-600 text-white font-semibold text-sm hover:bg-brand-700 transition disabled:opacity-50 shadow-lg shadow-brand-600/25">
+                <span x-show="!loginLoading">Войти</span>
+                <span x-show="loginLoading" x-cloak>Вход...</span>
+            </button>
+            <button type="button" :disabled="loginLoading" @click="submitDemoLogin()"
+                class="w-full py-3.5 rounded-xl bg-white text-brand-700 font-semibold text-sm border border-brand-200 hover:bg-brand-50 transition disabled:opacity-50">
+                Попробовать демо
+            </button>
+            <div class="text-center text-sm text-gray-500">
+                Хотите подключить ресторан?
+                <a href="/request-access" class="font-semibold text-brand-700 hover:text-brand-800 underline underline-offset-2">
+                    Оставить заявку
+                </a>
+            </div>
+        </form>
+    </div>
+</div>

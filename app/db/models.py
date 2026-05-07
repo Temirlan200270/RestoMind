@@ -104,6 +104,17 @@ class Organization(Base):
         nullable=True,
         comment="График работы по дням недели (структурированный JSON)",
     )
+    force_closed_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Экстренное закрытие: заведение закрыто до этого момента (UTC)",
+    )
+    force_closed_reason: Mapped[str] = mapped_column(
+        String(255),
+        default="",
+        server_default="",
+        comment="Причина экстренного закрытия (показывается боту)",
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_demo: Mapped[bool] = mapped_column(
         Boolean,
@@ -855,6 +866,26 @@ class IntegrationHealth(Base):
     )
     last_menu_sync_ok: Mapped[bool] = mapped_column(Boolean, default=False)
     last_menu_sync_error: Mapped[str] = mapped_column(Text, default="")
+
+
+class AiUsageLog(Base):
+    """Агрегированный учёт токенов AI по организации/дню (upsert: один ряд = org + day)."""
+
+    __tablename__ = "ai_usage_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    day: Mapped[date] = mapped_column(Date, nullable=False, comment="Дата UTC агрегации")
+    provider: Mapped[str] = mapped_column(String(32), default="openai", server_default="openai")
+    model: Mapped[str] = mapped_column(String(64), default="", server_default="")
+    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    completion_tokens: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    call_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 class OrganizationIntegrationSync(Base):

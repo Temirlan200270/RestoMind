@@ -2476,7 +2476,14 @@ async def get_organization_profile(request: Request, db: AsyncSession = Depends(
     org = await db.get(Organization, org_id)
     if org is None:
         raise HTTPException(status_code=404, detail="Organization not found")
-    op = check_operational_status(org.timezone, getattr(org, "schedule_json", None))
+    fc_until = getattr(org, "force_closed_until", None)
+    fc_reason = getattr(org, "force_closed_reason", "") or ""
+    op = check_operational_status(
+        org.timezone,
+        getattr(org, "schedule_json", None),
+        force_closed_until=fc_until,
+        force_closed_reason=fc_reason,
+    )
     return {
         "id": int(org.id),
         "organization_id": int(org.id),
@@ -2490,6 +2497,9 @@ async def get_organization_profile(request: Request, db: AsyncSession = Depends(
         "operational_label": op.human_label,
         "is_business_open": op.is_business_open,
         "is_kitchen_open": op.is_kitchen_open,
+        "force_closed": fc_until is not None,
+        "force_closed_until": fc_until.isoformat() if fc_until else None,
+        "force_closed_reason": fc_reason,
     }
 
 
@@ -2524,7 +2534,12 @@ async def patch_organization_profile(
         org.prepayment_legal_text = raw if raw else None
     await db.commit()
     await db.refresh(org)
-    op = check_operational_status(org.timezone, getattr(org, "schedule_json", None))
+    op = check_operational_status(
+        org.timezone,
+        getattr(org, "schedule_json", None),
+        force_closed_until=getattr(org, "force_closed_until", None),
+        force_closed_reason=getattr(org, "force_closed_reason", ""),
+    )
     return {
         "ok": True,
         "organization_id": int(org.id),
@@ -2535,6 +2550,50 @@ async def patch_organization_profile(
         "telegram_ops_chat_id": (getattr(org, "telegram_ops_chat_id", None) or "").strip(),
         "prepayment_legal_text": (getattr(org, "prepayment_legal_text", None) or "").strip(),
         "schedule_json": parse_schedule_json(getattr(org, "schedule_json", None)).model_dump(mode="json"),
+        "operational_label": op.human_label,
+        "is_business_open": op.is_business_open,
+        "is_kitchen_open": op.is_kitchen_open,
+    }
+
+
+class ForceCloseBody(BaseModel):
+    minutes: int = Field(..., ge=0, le=1440, description="0 = снять закрытие; >0 = закрыть на N минут")
+    reason: str = Field(default="", max_length=255, description="Причина закрытия")
+
+
+@router.post("/organization/force-close")
+async def organization_force_close(
+    request: Request,
+    body: ForceCloseBody,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Экстренное закрытие/открытие заведения на N минут."""
+    from datetime import timezone as _tz
+    org_id = admin_org_from_session(request)
+    org = await db.get(Organization, org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    if body.minutes == 0:
+        org.force_closed_until = None
+        org.force_closed_reason = ""
+    else:
+        from datetime import timedelta
+        org.force_closed_until = datetime.now(_tz.utc) + timedelta(minutes=body.minutes)
+        org.force_closed_reason = (body.reason or "").strip()
+    await db.commit()
+    await db.refresh(org)
+    fc_until = getattr(org, "force_closed_until", None)
+    op = check_operational_status(
+        org.timezone,
+        getattr(org, "schedule_json", None),
+        force_closed_until=fc_until,
+        force_closed_reason=getattr(org, "force_closed_reason", ""),
+    )
+    return {
+        "ok": True,
+        "force_closed": fc_until is not None,
+        "force_closed_until": fc_until.isoformat() if fc_until else None,
+        "force_closed_reason": getattr(org, "force_closed_reason", ""),
         "operational_label": op.human_label,
         "is_business_open": op.is_business_open,
         "is_kitchen_open": op.is_kitchen_open,
@@ -2788,6 +2847,24 @@ async def setup_status(request: Request, db: AsyncSession = Depends(get_db)) -> 
         for sid, label, done, tab, hint in step_rows
     ]
     score = int(round(100 * sum(1 for s in steps if s["done"]) / max(len(steps), 1)))
+
+    # Токены за сегодня
+    from datetime import date as _date
+    from sqlalchemy import select as _sel
+    tokens_today: int | None = None
+    try:
+        from app.db.models import AiUsageLog
+        today = _date.today()
+        tok_row = await db.scalar(
+            _sel(AiUsageLog.total_tokens).where(
+                AiUsageLog.organization_id == org_id,
+                AiUsageLog.day == today,
+            )
+        )
+        tokens_today = int(tok_row) if tok_row is not None else 0
+    except Exception:
+        pass
+
     return {
         "score": score,
         "steps": steps,
@@ -2795,6 +2872,7 @@ async def setup_status(request: Request, db: AsyncSession = Depends(get_db)) -> 
         "packaging_rules": packaging_n,
         "upsell_rules": rules_n,
         "knowledge_items": kb_n,
+        "tokens_today": tokens_today,
     }
 
 
@@ -4277,6 +4355,8 @@ async def settings_environment(request: Request, db: AsyncSession = Depends(get_
                 "org_chat_set": tg_org_chat_ok,
             },
             "openai": {"configured": bool(str(settings.openai_api_key or "").strip())},
+            "gemini": {"configured": bool(str(settings.gemini_api_key or "").strip())},
+            "ai_provider": (settings.ai_provider or "openai").strip().lower(),
             "public_base_url_set": bool(str(settings.public_base_url or "").strip()),
         },
         "integration_health": {

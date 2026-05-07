@@ -6,11 +6,11 @@ alwaysApply: false
 
 # UI Redesign — обязательные правила
 
-Полный план — [docs/UI_REDESIGN_PLAN.md](mdc:docs/UI_REDESIGN_PLAN.md). Этот файл — короткие правила для агента, чтобы не перечитывать план каждый раз.
+Основа по UI — `docs/UI_DESIGN_SYSTEM.md`. Статусы задач — `docs/ROADMAP.md`. Этот файл — короткие правила для агента, чтобы не перечитывать спецификацию каждый раз.
 
 ## Стек и философия
 
-- Стек: **Jinja2 + Alpine.js + Tailwind CSS + Chart.js**. Vite/Vue/React сейчас не вводим. См. [docs/VITE_DECISION.md](mdc:docs/VITE_DECISION.md).
+- Стек: **Jinja2 + Alpine.js + Tailwind CSS + Chart.js**. Vite/Vue/React сейчас не вводим (“Vite — не сейчас” зафиксировано в `docs/UI_DESIGN_SYSTEM.md`).
 - Light-тема через **CSS-переменные** в `app/static/css/admin.css` с заделом на dark.
 - Поэтапный совместимый редизайн — каждый PR мерджится без слома прода. Никакого big-bang.
 
@@ -24,28 +24,25 @@ alwaysApply: false
 
 ## Что обязательно делать
 
-- Каждый новый блок UI начинается с проверки: «есть ли подходящий компонент в `app/templates/components/`?». Нет — добавь сначала макрос, потом используй.
+- Каждый новый блок UI начинается с проверки: «есть ли подходящий компонент в `app/templates/components/`?». Нет — расширь/добавь макрос, потом используй.
 - AI Value Visibility — на каждом разделе должна быть видна ценность бота владельцу (бейдж в шапке, mini-metric, banner). Подробности — Phase U2 в плане.
 - Mobile-first — touch-targets ≥ 44px, модалки на `<sm` через `_drawer` (bottom-sheet).
 - Accessibility WCAG AA — контраст, ARIA, keyboard navigation. Проверяется через Chrome DevTools MCP.
 
 ## Workflow для UI-агента
 
-1. Перед работой — прочитать [docs/UI_REDESIGN_PLAN.md](mdc:docs/UI_REDESIGN_PLAN.md) (актуальная фаза).
+1. Перед работой — прочитать `docs/UI_DESIGN_SYSTEM.md` (паттерны и компоненты).
 2. Сделать baseline-скрин текущего экрана через Chrome DevTools MCP (`takeScreenshot`).
 3. Внести изменения в шаблон / CSS / JS — **только** через компоненты.
 4. Сделать post-change скрин, сравнить визуально.
 5. `pytest -q` (Python почти не трогается, но Storybook-роут проверяем).
-6. Записать в `## [Unreleased]` секцию [CHANGELOG.md](mdc:CHANGELOG.md).
-7. Обновить статус фазы в [IMPLEMENTATION_PLAN.md](mdc:IMPLEMENTATION_PLAN.md) и [PARALLEL_AI_PLAN.md](mdc:PARALLEL_AI_PLAN.md).
+6. Записать в `## [Unreleased]` секцию `CHANGELOG.md`.
+7. Обновить статус задачи в `docs/ROADMAP.md`.
 
-## Зоны двух агентов
+## Зоны
 
-- **ИИ 1 (backend):** `app/api/`, `app/services/`, `app/db/`, `app/integrations/`, `alembic/`. В UI-плане его роль — `/admin/_/components` route (тонкий) + расширение `/api/admin/stats` для AI Value.
-- **ИИ 2 (frontend):** `app/templates/`, `app/static/`. Полный редизайн UI — его зона.
-- **Общие файлы:** `CHANGELOG.md`, `IMPLEMENTATION_PLAN.md`, `PARALLEL_AI_PLAN.md`, `docs/UI_*.md` — дописывают оба, не переписывают.
-
-Полные правила параллельной работы — [PARALLEL_AI_PLAN.md](mdc:PARALLEL_AI_PLAN.md).
+- UI: `app/templates/`, `app/static/` (макросы, `ds-*`, без inline Tailwind в новых секциях).
+- Backend (по необходимости для UI): только узкие, согласованные правки (роут витрины компонентов и т.п.).
 
 ## Anti-patterns (что не должно появиться в diff)
 

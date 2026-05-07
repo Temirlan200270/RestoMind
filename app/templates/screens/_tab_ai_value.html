@@ -1,0 +1,154 @@
+            <!-- ========== ВКЛАД ИИ ========== -->
+            <div x-show="currentTab === 'ai_value'" x-cloak class="fade-in">
+                <div class="flex flex-col gap-4 mb-6">
+                    {{ section_header('Вклад ИИ', subtitle='Допродажи, экономия времени и качество подсказок за выбранный период.', extra_class='!mb-0') }}
+                    <p class="text-sm font-semibold text-brand-700 -mt-2">AI Value</p>
+                    <div class="flex flex-wrap items-center gap-3">
+                        {% call segmented(extra_class='border border-slate-200 bg-white shrink-0') %}
+                        <div class="contents" role="tablist" aria-label="Период вклад ИИ">
+                            <template x-for="p in [{id:'7d', label:'7д'}, {id:'30d', label:'30д'}, {id:'90d', label:'90д'}]" :key="p.id">
+                                <button type="button" @click="setAiValuePeriod(p.id)"
+                                    :class="aiValuePeriod === p.id && !aiValueCustom ? 'ds-segmented-active' : ''"
+                                    class="px-3 py-2 rounded-lg text-sm font-semibold transition"
+                                    x-text="p.label"></button>
+                            </template>
+                            <button type="button" @click="setAiValuePeriod('custom')"
+                                :class="aiValueCustom ? 'ds-segmented-active' : ''"
+                                class="px-3 py-2 rounded-lg text-sm font-semibold transition">
+                                Свой
+                            </button>
+                        </div>
+                        {% endcall %}
+                        <div x-show="aiValueCustom" x-cloak class="flex flex-wrap items-center gap-2">
+                            <input type="date" x-model="aiValueFrom" class="ds-input text-xs min-h-[36px]">
+                            <span class="text-slate-400">—</span>
+                            <input type="date" x-model="aiValueTo" class="ds-input text-xs min-h-[36px]">
+                            <button type="button" @click="loadAiValue()" class="ds-btn ds-btn-primary ds-btn-sm">Применить</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div x-show="aiValueSource === 'stats'" x-cloak class="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                    Резервный режим: данные из /api/admin/stats (сводка за сегодня). Для периода выберите обновление страницы или проверьте доступность GET /api/admin/ai-value.
+                </div>
+
+                <!-- Основные KPI -->
+                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+                    {% set ai_kpi_rev %}
+                        <div class="mt-2 text-3xl font-black tabular-nums" style="color: var(--color-text);" x-text="fmt.money(aiValueData?.revenue || 0)"></div>
+                        <div class="mt-1 text-xs ds-text-muted">
+                            <span x-text="aiValueData?.revenue_share_pct == null ? 'Доля: —' : ('Доля в общей выручке: ' + aiValueData.revenue_share_pct + '%')"></span>
+                        </div>
+                    {% endset %}
+                    {{ kpi_card('Выручка ИИ', value_html=ai_kpi_rev, extra_class='!p-5') }}
+                    {% call card(title='Заказы через бота', padding_class='p-5') %}
+                        <div class="flex items-center justify-end mb-2 -mt-1">
+                            <span class="text-xs font-bold text-brand-600" x-text="(aiValueData?.automation_rate || 0) + '%'"></span>
+                        </div>
+                        <div class="mt-1 h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                            <div class="h-full bg-brand-500 transition-all duration-500" :style="'width: ' + (aiValueData?.automation_rate || 0) + '%'"></div>
+                        </div>
+                        <div class="mt-2 text-[10px] text-slate-500 flex justify-between">
+                            <span>Бот: <b class="text-slate-900" x-text="aiValueData?.bot_orders || 0"></b></span>
+                            <span>Всего: <b class="text-slate-900" x-text="aiValueData?.total_orders || 0"></b></span>
+                        </div>
+                    {% endcall %}
+                    {% set ai_kpi_profit_ph %}
+                        <div class="mt-2 text-3xl font-black tabular-nums" style="color: var(--color-text);"
+                            x-text="aiValueData?.profit_per_saved_hour_kzt == null ? '—' : fmt.money(aiValueData.profit_per_saved_hour_kzt)"></div>
+                        <p class="mt-1 text-xs ds-text-muted">Выручка допродаж на час работы</p>
+                    {% endset %}
+                    {{ kpi_card('Прибыль от ИИ', value_html=ai_kpi_profit_ph, extra_class='!p-5') }}
+                    {% set ai_kpi_esc %}
+                        <div class="mt-2 text-3xl font-black tabular-nums" style="color: var(--color-text);" x-text="aiValueData?.escalation_count || 0"></div>
+                        <p class="mt-1 text-xs ds-text-muted">Чатов передано человеку</p>
+                    {% endset %}
+                    {{ kpi_card('Помощь персонала', value_html=ai_kpi_esc, extra_class='!p-5') }}
+                </div>
+
+                <!-- Второстепенные метрики -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+                    {% call card(padding_class='p-5', extra_class='flex flex-col sm:flex-row items-stretch sm:items-center gap-6') %}
+                        <div class="flex-1 min-w-0">
+                            <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Советы гостям</div>
+                            <div class="mt-2 flex items-baseline gap-2 flex-wrap">
+                                <span class="text-2xl font-bold text-slate-900" x-text="aiValueData?.accepted || 0"></span>
+                                <span class="text-sm text-slate-400">принято из</span>
+                                <span class="text-sm font-bold text-slate-600" x-text="aiValueData?.offered || 0"></span>
+                            </div>
+                        </div>
+                        <div class="w-16 h-16 rounded-full border-4 border-brand-50 flex items-center justify-center shrink-0 mx-auto sm:mx-0">
+                            <div class="text-xs font-bold text-brand-600" x-text="(aiValueData?.conversion_pct || 0) + '%'"></div>
+                        </div>
+                    {% endcall %}
+                    {% call card(padding_class='p-5', extra_class='flex flex-col sm:flex-row items-stretch sm:items-center gap-6') %}
+                        <div class="flex-1 min-w-0">
+                            <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Экономия времени</div>
+                            <div class="mt-2 text-2xl font-bold text-slate-900" x-text="(aiValueData?.time_saved_hours || 0) + ' ч'"></div>
+                            <div class="text-xs text-slate-500" x-text="(aiValueData?.messages || 0) + ' ответов бота без участия людей'"></div>
+                        </div>
+                        <div class="p-3 bg-blue-50 rounded-2xl text-blue-600 shrink-0 mx-auto sm:mx-0">
+                            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                        </div>
+                    {% endcall %}
+                </div>
+
+                <div class="grid grid-cols-1 xl:grid-cols-2 gap-5">
+                    {% call card(padding_class='p-5') %}
+                        <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+                            <h3 class="font-semibold text-slate-900 text-base">Средний чек</h3>
+                            <span class="text-xs text-slate-500" x-text="aiValuePeriodLabel()"></span>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div class="rounded-xl bg-slate-50 p-4">
+                                <div class="text-xs text-slate-500">С принятым советом</div>
+                                <div class="mt-1 text-xl font-bold tabular-nums" x-text="aiValueData?.avg_check_accepted == null ? '—' : fmt.money(aiValueData.avg_check_accepted)"></div>
+                            </div>
+                            <div class="rounded-xl bg-slate-50 p-4">
+                                <div class="text-xs text-slate-500">Без предложения ИИ</div>
+                                <div class="mt-1 text-xl font-bold tabular-nums" x-text="aiValueData?.avg_check_no_offer == null ? '—' : fmt.money(aiValueData.avg_check_no_offer)"></div>
+                            </div>
+                        </div>
+                    {% endcall %}
+                    {% call card(title='Прибыль от ИИ', padding_class='p-5') %}
+                        <div class="space-y-2">
+                            <template x-for="d in (aiValueData?.daily_series || [])" :key="d.date">
+                                <div class="flex items-center gap-3">
+                                    <div class="w-24 text-xs text-slate-500" x-text="fmt.date(d.date)"></div>
+                                    <div class="flex-1 h-2 rounded-full bg-slate-100 overflow-hidden">
+                                        <div class="h-2 rounded-full bg-brand-600" :style="'width:' + Math.min(100, ((Number(d.ai_profit || 0) / Math.max(1, Number(aiValueData?.revenue || 0))) * 100)) + '%'"></div>
+                                    </div>
+                                    <div class="w-24 text-right text-xs font-semibold tabular-nums" x-text="fmt.money(d.ai_profit || 0)"></div>
+                                </div>
+                            </template>
+                            <div x-show="!(aiValueData?.daily_series || []).length" class="text-sm text-slate-400 py-6 text-center">За этот период ИИ еще не приносил допродаж.</div>
+                        </div>
+                    {% endcall %}
+                </div>
+
+                {% call card(title='Популярные допродажи', padding_class='p-5', extra_class='mt-6') %}
+                    <div class="overflow-hidden">
+                        <table class="min-w-full divide-y divide-slate-200">
+                            <thead>
+                                <tr>
+                                    <th class="px-3 py-3 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">Блюдо</th>
+                                    <th class="px-3 py-3 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider">Купили</th>
+                                    <th class="px-3 py-3 text-right text-[10px] font-bold text-slate-500 uppercase tracking-wider">Выручка</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-100">
+                                <template x-for="item in (aiValueData?.top_upsell_items || [])" :key="item.iiko_id || item.name">
+                                    <tr class="hover:bg-slate-50 transition">
+                                        <td class="px-3 py-3 text-sm text-slate-900 font-medium" x-text="item.name"></td>
+                                        <td class="px-3 py-3 text-sm text-slate-600 text-center tabular-nums" x-text="item.accepted"></td>
+                                        <td class="px-3 py-3 text-sm text-slate-900 text-right font-semibold tabular-nums" x-text="fmt.money(item.revenue_kzt)"></td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                        <div x-show="!(aiValueData?.top_upsell_items || []).length" class="text-sm text-slate-400 py-8 text-center">ИИ еще не продал ни одного блюда за этот период.</div>
+                    </div>
+                {% endcall %}
+                <div x-show="aiValueLoading" x-cloak class="fixed inset-0 z-40 pointer-events-none bg-white/30"></div>
+            </div>
+

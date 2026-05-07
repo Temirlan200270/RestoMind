@@ -72,9 +72,10 @@ async def publish_event(event_type: str, data: dict[str, Any]) -> None:
     try:
         from app.services.notification_router import notify_staff_from_event
 
-        await notify_staff_from_event(event_type, data)
+        # Fire-and-forget: уведомления не блокируют realtime-путь
+        asyncio.create_task(notify_staff_from_event(event_type, data))
     except Exception:
-        logger.exception("Staff notification failed for %s", event_type)
+        logger.exception("Staff notification task creation failed for %s", event_type)
 
 
 def _broadcast_in_memory(payload: str) -> None:

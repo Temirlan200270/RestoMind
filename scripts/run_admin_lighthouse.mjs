@@ -243,7 +243,7 @@ function writeReadme(summary) {
 
     lines.push(
         '',
-        '**Интерпретация:** [UI_REDESIGN_PLAN.md](../UI_REDESIGN_PLAN.md) — на ключевых экранах ориентир: Accessibility ≥ 90, Performance ≥ 80, Best practices ≥ 90. Баллы зависят от данных БД и окружения.',
+        '**Интерпретация:** [UI_DESIGN_SYSTEM.md](../UI_DESIGN_SYSTEM.md) — целевые пороги и подход (a11y/Lighthouse). Баллы зависят от данных БД и окружения.',
         '',
         '## Текущий mobile baseline',
         '',

@@ -47,6 +47,8 @@ function adminDefaultSettingsEnv() {
             whatsapp: {},
             telegram: {},
             openai: {},
+            gemini: {},
+            ai_provider: 'openai',
             public_base_url_set: false,
         },
         chat_log_retention: null,
@@ -394,6 +396,7 @@ function adminMixinState() {
         teamTempPassword: '',
 
         packagingRules: [],
+        packagingFilter: 'all',
         packagingLoading: false,
         packagingCreateOpen: false,
         packagingCreateLoading: false,
@@ -535,6 +538,10 @@ function adminMixinState() {
         brandingApiUnavailable: false,
         orgProfileLoading: false,
         orgProfileSaving: false,
+        forceCloseOpen: false,
+        forceCloseSaving: false,
+        forceCloseMinutes: 60,
+        forceCloseReason: '',
         orders: [],
         _ordersLoadSeq: 0,
         ordersLoading: false,
@@ -708,7 +715,7 @@ function adminMixinState() {
         integrationSyncLoading: false,
         integrationEvents: [],
         /** Онбординг (GET /api/admin/setup-status). */
-        setupStatus: { score: 0, steps: [], menu_items: 0, upsell_rules: 0, packaging_rules: 0, knowledge_items: 0 },
+        setupStatus: { score: 0, steps: [], menu_items: 0, upsell_rules: 0, packaging_rules: 0, knowledge_items: 0, tokens_today: null },
         iikoOnboardApiLogin: '',
         iikoOnboardOrgs: [],
         iikoOnboardSelectedOrg: '',
@@ -2059,6 +2066,7 @@ function adminMixinMenuOrdersUi() {
                     const bits = [];
                     if (o.total_price) bits.push(this.fmt.money(o.total_price));
                     if (o.user_phone) bits.push(o.user_phone);
+                    if (o.created_at) bits.push(this.fmt.date(o.created_at));
                     if (bits.length) lines.push(bits.join(' · '));
                 }
                 message = lines.join('\n\n');
@@ -2940,6 +2948,9 @@ function adminMixinAuthKnowledge() {
                     operational_label: String(data?.operational_label || '').trim(),
                     is_business_open: !!data?.is_business_open,
                     is_kitchen_open: !!data?.is_kitchen_open,
+                    force_closed: !!data?.force_closed,
+                    force_closed_until: data?.force_closed_until || null,
+                    force_closed_reason: String(data?.force_closed_reason || '').trim(),
                 };
                 this.orgProfileDirty = false;
             } finally {
@@ -2998,6 +3009,62 @@ function adminMixinAuthKnowledge() {
                 this.orgProfileSaving = false;
             }
         },
+
+        openForceCloseModal() {
+            this.forceCloseMinutes = 60;
+            this.forceCloseReason = '';
+            this.forceCloseOpen = true;
+        },
+
+        async submitForceClose() {
+            if (this.forceCloseSaving || !this.forceCloseMinutes) return;
+            this.forceCloseSaving = true;
+            try {
+                const { ok, data } = await this.apiJsonResponse('/api/admin/organization/force-close', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ minutes: this.forceCloseMinutes, reason: this.forceCloseReason }),
+                });
+                if (!ok) { void this.showUiAlert(this.formatApiError(data) || 'Ошибка', 'Ошибка'); return; }
+                this.orgProfile = { ...this.orgProfile,
+                    force_closed: !!data?.force_closed,
+                    force_closed_until: data?.force_closed_until || null,
+                    force_closed_reason: data?.force_closed_reason || '',
+                    operational_label: data?.operational_label || '',
+                    is_business_open: !!data?.is_business_open,
+                    is_kitchen_open: !!data?.is_kitchen_open,
+                };
+                this.forceCloseOpen = false;
+                this.flashToast('Заведение временно закрыто', 'warning', 4000);
+            } finally {
+                this.forceCloseSaving = false;
+            }
+        },
+
+        async liftForceClose() {
+            if (this.forceCloseSaving) return;
+            this.forceCloseSaving = true;
+            try {
+                const { ok, data } = await this.apiJsonResponse('/api/admin/organization/force-close', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ minutes: 0 }),
+                });
+                if (!ok) { void this.showUiAlert(this.formatApiError(data) || 'Ошибка', 'Ошибка'); return; }
+                this.orgProfile = { ...this.orgProfile,
+                    force_closed: false,
+                    force_closed_until: null,
+                    force_closed_reason: '',
+                    operational_label: data?.operational_label || '',
+                    is_business_open: !!data?.is_business_open,
+                    is_kitchen_open: !!data?.is_kitchen_open,
+                };
+                this.flashToast('Заведение снова открыто', 'success', 3000);
+            } finally {
+                this.forceCloseSaving = false;
+            }
+        },
+
 
         normalizeBrandingColorHex(raw) {
             let s = String(raw ?? '').trim();
@@ -3763,6 +3830,7 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                         upsell_rules: Number(r.data.upsell_rules) || 0,
                         packaging_rules: Number(r.data.packaging_rules) || 0,
                         knowledge_items: Number(r.data.knowledge_items) || 0,
+                        tokens_today: r.data.tokens_today != null ? Number(r.data.tokens_today) : null,
                     };
                     const sc = Number(this.setupStatus.score ?? 0);
                     if (sc >= 60) this.setupProgressExpanded = false;

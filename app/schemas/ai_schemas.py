@@ -275,6 +275,9 @@ class AIBrainResponse(BaseModel):
         ),
     )
 
+    # Служебное поле: статистика токенов, заполняется движком после вызова LLM (не от LLM).
+    _usage: dict | None = None  # {"prompt_tokens": N, "completion_tokens": N, "total_tokens": N, "model": str, "provider": str}
+
     # Поля, для которых `null` от LLM семантически эквивалентен «не указано» и
     # должен быть схлопнут в дефолт. Это защищает схему от распространённой
     # привычки LLM заполнять все ключи `null` вместо пропуска ключа.

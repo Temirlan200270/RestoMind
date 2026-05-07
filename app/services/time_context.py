@@ -154,6 +154,8 @@ def check_operational_status(
     schedule_json: dict[str, Any] | None,
     *,
     now: datetime | None = None,
+    force_closed_until: datetime | None = None,
+    force_closed_reason: str = "",
 ) -> OperationalStatus:
     tz_in = (timezone_name or "").strip()
     tz = DEFAULT_ORG_TIMEZONE if not tz_in or tz_in.upper() == "UTC" else tz_in
@@ -162,7 +164,27 @@ def check_operational_status(
     except Exception:
         tz = DEFAULT_ORG_TIMEZONE
         z = ZoneInfo(DEFAULT_ORG_TIMEZONE)
-    now_local = now.astimezone(z) if now is not None else datetime.now(tz=z)
+    now_utc = now if now is not None else datetime.now(tz=ZoneInfo("UTC"))
+    now_local = now_utc.astimezone(z)
+
+    # Экстренное закрытие: проверяем до расписания
+    if force_closed_until is not None and now_utc < force_closed_until:
+        reason_text = (force_closed_reason or "").strip()
+        label = f"Заведение временно закрыто.{' ' + reason_text if reason_text else ''}"
+        instr = (
+            "OPERATIONAL_STATUS: BUSINESS_OPEN=0 KITCHEN_OPEN=0 FORCE_CLOSED=1. "
+            f"Причина: {reason_text or 'не указана'}. "
+            "Не принимай заказ; сообщи гостю что заведение временно не работает."
+        )
+        return OperationalStatus(
+            is_business_open=False,
+            is_kitchen_open=False,
+            next_business_open_at=None,
+            next_kitchen_open_at=None,
+            kitchen_closes_in_minutes=None,
+            human_label=label,
+            prompt_instruction=instr,
+        )
     sch = parse_schedule_json(schedule_json)
 
     day_key = _WEEKDAY_KEYS[now_local.weekday()]

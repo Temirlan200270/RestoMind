@@ -1,0 +1,100 @@
+            <!-- ========== ПОМОЩЬ КЛИЕНТАМ (Inbox Zero) ========== -->
+            <div x-show="currentTab === 'operator_queue'" x-cloak class="fade-in">
+                {% set op_q_open %}
+                    <div class="flex items-center gap-4">
+                        <div class="text-4xl font-black tabular-nums shrink-0" style="color: var(--color-text);" x-text="dashStats.failed_tasks_open ?? 0"></div>
+                        <p class="text-sm ds-text-muted mt-0">Считаем неразрешённые задачи «нужен человек». Идеально — <span class="font-semibold text-emerald-700">0</span>.</p>
+                    </div>
+                {% endset %}
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+                    {{ kpi_card('Открытых обращений', value_html=op_q_open, extra_class='!p-5 flex flex-col justify-center') }}
+                    {% call card(padding_class='p-5', extra_class='!border-2 !border-dashed !border-emerald-200 !bg-emerald-50/40 flex items-center gap-3') %}
+                        <div class="text-4xl shrink-0" aria-hidden="true">📭</div>
+                        <div>
+                            <div class="font-semibold text-emerald-900">Inbox Zero</div>
+                            <p class="text-sm text-emerald-900/80 mt-0.5">Когда список ниже пуст — команда свободна, бот справляется сам.</p>
+                        </div>
+                    {% endcall %}
+                </div>
+                <p class="text-sm text-gray-600 mb-4 max-w-3xl leading-relaxed">
+                    Здесь — обращения, где системе нужен человек: что-то пошло не так или нужен ручной ответ.
+                    Цель этого экрана — <span class="font-semibold text-emerald-800">пусто</span>.
+                </p>
+                <div class="flex flex-wrap items-end gap-4 mb-6">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Статус</label>
+                        <select x-model="failedTasksFilter" @change="loadFailedTasks()"
+                            class="ds-input text-sm min-w-[11rem] min-h-[44px]">
+                            <option value="open">Неразрешённые</option>
+                            <option value="resolved">Разрешённые</option>
+                            <option value="all">Все</option>
+                        </select>
+                    </div>
+                    <div class="flex-1 min-w-[200px] max-w-md">
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Телефон</label>
+                        <input type="search" x-model="failedTasksPhone" @input.debounce.400ms="loadFailedTasks()"
+                            placeholder="Фильтр по номеру"
+                            class="ds-input w-full text-sm min-h-[44px]">
+                    </div>
+                    <button type="button" @click="loadFailedTasks()"
+                        class="ds-btn ds-btn-primary ds-btn-md">Обновить</button>
+                </div>
+                {% call card(padding_class='p-0', extra_class='overflow-hidden') %}
+                    <div x-show="failedTasksLoading" class="p-8 text-center text-gray-400 text-sm">Загрузка…</div>
+                    <div x-show="!failedTasksLoading && failedTasks.length === 0" class="p-12 text-center text-gray-500">
+                        <div class="text-5xl mb-3" aria-hidden="true">✅</div>
+                        <div class="text-lg font-semibold text-gray-800">Inbox Zero</div>
+                        <div class="text-sm mt-1 max-w-md mx-auto">Обращений «нужен человек» сейчас нет — отличный знак.</div>
+                        <p class="text-xs text-gray-500 mt-3 max-w-sm mx-auto">Чтобы убедиться, что бот отвечает, загляните в диалоги или напишите ему в WhatsApp с тестового номера.</p>
+                        <button type="button" @click="navigateToTab('chats')"
+                            class="mt-5 min-h-[44px] px-5 py-2.5 rounded-xl text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700 shadow-sm shadow-brand-600/20">Открыть диалоги</button>
+                    </div>
+                    <table x-show="!failedTasksLoading && failedTasks.length > 0" class="w-full text-sm">
+                        <thead class="bg-gray-50 text-left text-gray-500 border-b border-gray-100">
+                            <tr>
+                                <th class="px-4 py-3 font-medium">Время</th>
+                                <th class="px-4 py-3 font-medium">Клиент</th>
+                                <th class="px-4 py-3 font-medium">Ситуация</th>
+                                <th class="px-4 py-3 font-medium w-44">Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="t in failedTasks" :key="'ft-' + t.id">
+                                <tr class="border-b border-gray-50 hover:bg-gray-50/80 align-top">
+                                    <td class="px-4 py-3 text-gray-500 whitespace-nowrap" x-text="fmt.date(t.created_at)"></td>
+                                    <td class="px-4 py-3">
+                                        <div class="font-mono text-xs text-gray-800" x-text="t.phone"></div>
+                                    </td>
+                                    <td class="px-4 py-3">
+                                        <p class="text-gray-800 line-clamp-2" x-text="t.error"></p>
+                                        <p class="text-xs text-gray-400 mt-1 line-clamp-2" x-text="t.message_text"></p>
+                                    </td>
+                                    <td class="px-4 py-3">
+                                        <div class="flex flex-col gap-2">
+                                            <button type="button"
+                                                @click="openHelpChat(t.phone)"
+                                                class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-brand-50 text-brand-700 border border-brand-200 hover:bg-brand-100">Открыть диалог</button>
+                                            <button type="button" x-show="!t.resolved"
+                                                @click="retryFailedTask(t)"
+                                                :disabled="failedTaskRetryingId === t.id"
+                                                class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 disabled:opacity-50">
+                                                <span x-text="failedTaskRetryingId === t.id ? 'Ставим…' : 'Повторить'"></span>
+                                            </button>
+                                            <button type="button" x-show="!t.resolved"
+                                                @click="setFailedTaskResolved(t, true)"
+                                                class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100">Закрыто</button>
+                                            <button type="button" x-show="t.resolved"
+                                                @click="setFailedTaskResolved(t, false)"
+                                                class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 border border-gray-200">Вернуть</button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                    <p class="px-4 py-3 text-xs text-gray-400 border-t border-gray-100" x-show="failedTasksTotal > 0">
+                        Показано <span x-text="failedTasks.length"></span> из <span x-text="failedTasksTotal"></span>
+                    </p>
+                {% endcall %}
+            </div>
+

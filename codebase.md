@@ -1,6 +1,6 @@
 # RestoMind — обзор кодовой базы
 
-Документ для быстрой ориентации (люди и ИИ): **что за проект**, **как устроен репозиторий**, **куда смотреть за логикой**. Детали API — OpenAPI `/docs`; глубокая архитектура и правила — [plan.md](plan.md); история изменений — [CHANGELOG.md](CHANGELOG.md).
+Документ для быстрой ориентации (люди и ИИ): **что за проект**, **как устроен репозиторий**, **куда смотреть за логикой**. Детали API — OpenAPI `/docs`; инварианты разработки — [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md); история изменений — [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
@@ -87,7 +87,7 @@ RestoMind/
 │
 ├── README.md                      # быстрый старт и возможности
 ├── codebase.md                    # этот файл
-├── plan.md                        # архитектура и соглашения разработки
+├── docs/CONVENTIONS.md            # инварианты разработки (контракт)
 ├── CHANGELOG.md
 ├── DEPLOY_RENDER.md
 ├── DEPLOY_GUIDE.md
@@ -127,7 +127,7 @@ python -m pytest tests/ -v
 | Файл | Назначение |
 |------|------------|
 | [README.md](README.md) | Установка, `.env`, запуск, краткая структура |
-| [plan.md](plan.md) | Правила разработки, детали архитектуры, roadmap-мысли |
+| [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md) | Правила разработки (инварианты/контракт) |
 | [CHANGELOG.md](CHANGELOG.md) | История версий |
 | [DEPLOY_RENDER.md](DEPLOY_RENDER.md) / [DEPLOY_GUIDE.md](DEPLOY_GUIDE.md) | Продакшен |
 | [docs/SUPERADMIN_GUIDE.md](docs/SUPERADMIN_GUIDE.md) | Super Admin (владелец платформы): заявки/регистрация, управление ресторанами, аудит webhook, идеи улучшений |

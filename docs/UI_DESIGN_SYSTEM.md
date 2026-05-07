@@ -1,6 +1,6 @@
 # RestoMind Admin — дизайн-система
 
-Финальная спецификация UI админки после фаз **U1–U7** ([UI_REDESIGN_PLAN.md](UI_REDESIGN_PLAN.md)). Стек: **Jinja2**, **Alpine.js**, **Tailwind CSS** (сборка в `app/static/css/admin.css`), **Chart.js**.
+Финальная спецификация UI админки (компоненты, токены, IA, a11y, Lighthouse). Стек: **Jinja2**, **Alpine.js**, **Tailwind CSS** (сборка в `app/static/css/admin.css`), **Chart.js**.
 
 ---
 
@@ -85,7 +85,7 @@
 
 ## Информационная архитектура (IA)
 
-Старая → новая структура (меню сайдбара), см. [UI_REDESIGN_PLAN § Phase U3](UI_REDESIGN_PLAN.md).
+Старая → новая структура (меню сайдбара): это фиксируется в текущем UI (см. `admin.html`/`admin-app.js`), а “что делать дальше” — в `docs/ROADMAP.md`.
 
 | Было | Стало |
 |------|--------|
@@ -120,18 +120,17 @@
 
 ---
 
-## Доступность и мобильная приёмка (Phase U6)
+## Доступность и мобильная приёмка
 
 - **Touch:** цели ≥ **44×44 px** — классы `ds-segmented`, `ds-btn-*`, массовое `min-h-[44px]` для компактных кнопок в [`admin.html`](../app/templates/admin.html).  
 - **Модалки:** `role="dialog"` `aria-modal="true"`; нижняя «ручка» и `padding-bottom: max(1rem, env(safe-area-inset-bottom))` на узком экране.  
-- **Lighthouse (mobile), авторизованная сессия:** скрипт [`scripts/run_admin_lighthouse.mjs`](../scripts/run_admin_lighthouse.mjs) + `npm run lh:admin` (нужен запущенный `uvicorn`). Сохраняет **`docs/ui/lighthouse/summary.json`**, таблицу в **`docs/ui/lighthouse/README.md`** и полные отчёты в `docs/ui/lighthouse/reports/` (каталог в `.gitignore`). Целевые пороги из [UI_REDESIGN_PLAN.md](UI_REDESIGN_PLAN.md): **Accessibility ≥ 90**, **Performance ≥ 80**, **Best practices ≥ 90** на дашборде, заказах, меню и настройках (в скрипт включены все 8 подвкладок настроек).  
+- **Lighthouse (mobile), авторизованная сессия:** скрипт [`scripts/run_admin_lighthouse.mjs`](../scripts/run_admin_lighthouse.mjs) + `npm run lh:admin` (нужен запущенный `uvicorn`). Сохраняет **`docs/ui/lighthouse/summary.json`**, таблицу в **`docs/ui/lighthouse/README.md`** и полные отчёты в `docs/ui/lighthouse/reports/` (каталог в `.gitignore`). Целевые пороги: **Accessibility ≥ 90**, **Performance ≥ 80**, **Best practices ≥ 90** на дашборде, заказах, меню и настройках (в скрипт включены все 8 подвкладок настроек).  
 - Первый запуск Playwright: `npx playwright install chromium`.
 
 ---
 
 ## Связанные документы
 
-- [UI_REDESIGN_PLAN.md](UI_REDESIGN_PLAN.md) — фазы U0–U7 и DoD.  
-- [UI_REDESIGN_NOTES.md](UI_REDESIGN_NOTES.md) — визуальный долг / baseline.  
-- [IMPLEMENTATION_PLAN.md](../IMPLEMENTATION_PLAN.md) — эпик **E-UI**.  
-- [PARALLEL_AI_PLAN.md](../PARALLEL_AI_PLAN.md) — зоны ответственности UI.
+- `docs/ROADMAP.md` — единственный трекер задач/техдолга.  
+- `docs/ui/baseline/` — фиксированные baseline-скрины для визуальной регрессии.  
+- `docs/ui/lighthouse/` — отчёты Lighthouse и таблица сводки.  

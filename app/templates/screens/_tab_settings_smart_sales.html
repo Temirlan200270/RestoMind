@@ -1,0 +1,68 @@
+            <!-- ========== ДОПРОДАЖИ (Strategy Engine) ========== -->
+            <template x-if="currentTab === 'settings' && settingsTab === 'smart_sales'">
+            <div class="fade-in w-full max-w-6xl mx-auto lg:flex lg:gap-8 lg:items-start pb-16">
+                {{ settings_tabs() }}
+                <div class="flex-1 min-w-0 space-y-6">
+                <div class="rm-card-surface p-6">
+                    <h3 class="text-lg font-bold text-gray-900">Правила допродаж</h3>
+                    <p class="text-sm text-gray-500 mt-1">Режим «нет категории в корзине» → предложить позицию из другой категории. Работает после ответа AI.</p>
+                    <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label class="text-[11px] font-semibold text-gray-500 uppercase">Если нет категории (подстрока)</label>
+                            <input type="text" x-model="upsellNew.trigger_category" placeholder="напит"
+                                class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
+                        </div>
+                        <div>
+                            <label class="text-[11px] font-semibold text-gray-500 uppercase">Предложить из категории</label>
+                            <input type="text" x-model="upsellNew.suggest_category" placeholder="напит"
+                                class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
+                        </div>
+                        <div>
+                            <label class="text-[11px] font-semibold text-gray-500 uppercase">Мин. сумма заказа ₸</label>
+                            <input type="number" x-model.number="upsellNew.min_order_sum" min="0" step="100"
+                                class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
+                        </div>
+                        <div>
+                            <label class="text-[11px] font-semibold text-gray-500 uppercase">Макс. сумма (пусто = нет)</label>
+                            <input type="number" x-model="upsellNew.max_order_sum" min="0" step="100" placeholder="15000"
+                                class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
+                        </div>
+                        <div class="md:col-span-2">
+                            <label class="text-[11px] font-semibold text-gray-500 uppercase">Шаблон фразы ({item_name}, {price})</label>
+                            <input type="text" x-model="upsellNew.phrase_template" placeholder="по умолчанию из сервера"
+                                class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
+                        </div>
+                    </div>
+                    <button type="button" @click="upsellAddRule()" class="mt-4 px-5 py-2.5 rounded-xl bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700">
+                        Добавить правило
+                    </button>
+                </div>
+                <p x-show="upsellLoading" class="text-sm text-gray-400">Загрузка…</p>
+                <div x-show="!upsellLoading && upsellRules.length" x-cloak class="space-y-3">
+                    <template x-for="r in upsellRules" :key="r.id">
+                        <div class="bg-white rounded-xl border border-gray-100 p-4 flex flex-wrap items-center justify-between gap-3">
+                            <div class="min-w-0">
+                                <div class="text-sm font-semibold text-gray-900">
+                                    Нет «<span x-text="r.trigger_category"></span>» → из «<span x-text="r.suggest_category"></span>»
+                                </div>
+                                <div class="text-xs text-gray-500 mt-1">
+                                    сумма <span x-text="r.min_order_sum"></span>–<span x-text="r.max_order_sum != null ? r.max_order_sum : '∞'"></span> ₸
+                                    · порядок <span x-text="r.sort_order"></span>
+                                </div>
+                            </div>
+                            <div class="flex gap-2 shrink-0">
+                                <button type="button" @click="upsellToggle(r)" class="px-3 py-1.5 rounded-lg text-xs font-semibold border"
+                                    :class="r.is_active ? 'border-emerald-200 text-emerald-800 bg-emerald-50' : 'border-gray-200 text-gray-600'"
+                                    x-text="r.is_active ? 'Вкл' : 'Выкл'"></button>
+                                <button type="button" @click="upsellDeleteRule(r)" class="px-3 py-1.5 rounded-lg text-xs font-semibold border border-red-200 text-red-700 bg-red-50">Удалить</button>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+                <p x-show="!upsellLoading && !upsellRules.length" x-cloak class="text-sm text-gray-500 text-center py-8 border border-dashed border-gray-200 rounded-xl">
+                    Правил пока нет — добавьте первое (например «напит» → «напит»).
+                </p>
+                </div>
+            </div>
+            </template>
+

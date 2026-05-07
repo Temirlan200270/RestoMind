@@ -188,6 +188,13 @@ class OpenAIProvider(BaseAIProvider):
                                 ct,
                                 tt,
                             )
+                            object.__setattr__(parsed, "_usage", {
+                                "provider": "openai",
+                                "model": model,
+                                "prompt_tokens": int(pt or 0),
+                                "completion_tokens": int(ct or 0),
+                                "total_tokens": int(tt or 0),
+                            })
                     except Exception:
                         pass
                     logger.info(

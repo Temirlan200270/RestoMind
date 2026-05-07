@@ -1,0 +1,101 @@
+            <!-- ========== ТРЕБУЕТ ВНИМАНИЯ ========== -->
+            <div x-show="currentTab === 'incidents'" x-cloak class="fade-in space-y-5">
+                <div class="flex flex-wrap items-end justify-between gap-4">
+                    <div class="min-w-0">
+                        <h2 class="text-xl sm:text-2xl font-extrabold tracking-tight text-slate-900">Требует внимания</h2>
+                        <p class="text-sm text-slate-500 mt-0.5">Единая очередь ошибок по заказам, оплатам, WhatsApp и интеграциям.</p>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <span x-show="incidents.generated_at" x-cloak class="text-xs text-slate-400">
+                            <span>Обновлено </span><span x-text="fmt.time(incidents.generated_at)"></span>
+                        </span>
+                        <button type="button" @click="loadIncidents()" :disabled="incidentsLoading"
+                            class="min-h-[44px] px-3.5 py-2 rounded-xl text-sm font-semibold bg-white text-slate-800 ring-1 ring-slate-900/10 hover:bg-slate-50 disabled:opacity-50 transition">
+                            <span x-show="!incidentsLoading">Обновить</span>
+                            <span x-show="incidentsLoading" x-cloak>Обновляем…</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                    <div class="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-900/5">
+                        <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Всего открыто</div>
+                        <div class="mt-2 text-2xl font-extrabold tabular-nums" :class="incidentsTotalOpen() > 0 ? 'text-amber-600' : 'text-emerald-600'" x-text="incidentsTotalOpen()"></div>
+                    </div>
+                    <div class="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-900/5">
+                        <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Критично</div>
+                        <div class="mt-2 text-2xl font-extrabold tabular-nums text-red-600" x-text="incidentSummaryCount('critical')"></div>
+                    </div>
+                    <div class="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-900/5">
+                        <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Внимание</div>
+                        <div class="mt-2 text-2xl font-extrabold tabular-nums text-amber-600" x-text="incidentSummaryCount('warning')"></div>
+                    </div>
+                    <div class="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-900/5">
+                        <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Super Admin</div>
+                        <div class="mt-2 text-2xl font-extrabold tabular-nums" :class="isSuperadmin ? 'text-slate-900' : 'text-slate-400'" x-text="isSuperadmin ? (incidents.groups || []).filter(g => g.id === 'platform_risks').reduce((n, g) => n + (Number(g.count) || 0), 0) : (incidents.restricted_count || 0)"></div>
+                    </div>
+                </div>
+
+                <div x-show="incidentsLoading && !incidentsLoadedOnce" x-cloak class="rm-loading-line border border-slate-100 rounded-xl px-3 bg-white">
+                    <svg class="animate-spin h-4 w-4 text-brand-600 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                    <span>Загружаем очередь инцидентов…</span>
+                </div>
+
+                <div x-show="!incidentsLoading && incidentsLoadedOnce && incidentsTotalOpen() === 0" x-cloak
+                    class="rounded-2xl border border-emerald-200 bg-emerald-50/80 px-5 py-6 text-emerald-900">
+                    <div class="font-bold">Открытых инцидентов нет</div>
+                    <div class="text-sm text-emerald-800 mt-1">Заказы, доставки сообщений, оплаты и интеграции сейчас без явных ошибок.</div>
+                </div>
+
+                <div x-show="!isSuperadmin && (incidents.restricted_count || 0) > 0" x-cloak
+                    class="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+                    <span class="font-semibold text-slate-900">Часть технических рисков скрыта.</span>
+                    Доступ к опасным настройкам есть только у Super Admin.
+                </div>
+
+                <div class="space-y-4" x-show="Array.isArray(incidents.groups) && incidents.groups.length" x-cloak>
+                    <template x-for="group in incidents.groups" :key="group.id">
+                        <section class="rounded-2xl bg-white shadow-sm ring-1 ring-slate-900/5 overflow-hidden">
+                            <div class="p-4 sm:p-5 border-b border-slate-100">
+                                <div class="flex flex-wrap items-start justify-between gap-3">
+                                    <div class="min-w-0">
+                                        <div class="flex flex-wrap items-center gap-2">
+                                            <span class="h-2.5 w-2.5 rounded-full shrink-0" :class="incidentDotClass(group.severity)"></span>
+                                            <h3 class="text-base font-bold text-slate-900" x-text="group.title"></h3>
+                                            <span class="text-xs font-bold px-2 py-1 rounded-full border"
+                                                :class="incidentSeverityClass(group.severity)"
+                                                x-text="incidentSeverityLabel(group.severity)"></span>
+                                            <span class="text-xs font-bold px-2 py-1 rounded-full bg-slate-100 text-slate-700 tabular-nums" x-text="group.count"></span>
+                                        </div>
+                                        <p class="text-sm text-slate-500 mt-1" x-text="group.description || ''"></p>
+                                    </div>
+                                    <button type="button" x-show="group.action && group.action.tab" x-cloak
+                                        @click="incidentGo(group.action)"
+                                        class="min-h-[44px] px-3.5 py-2 rounded-xl text-sm font-semibold bg-slate-900 text-white hover:bg-slate-800 transition"
+                                        x-text="group.action.label || 'Открыть'"></button>
+                                </div>
+                            </div>
+                            <div class="divide-y divide-slate-100">
+                                <template x-for="item in incidentGroupPreviewItems(group)" :key="item.id">
+                                    <button type="button" @click="incidentGo(item.target || group.action)"
+                                        class="w-full text-left px-4 sm:px-5 py-3 hover:bg-slate-50 transition">
+                                        <div class="flex flex-wrap items-start justify-between gap-3">
+                                            <div class="min-w-0 flex-1">
+                                                <div class="font-semibold text-slate-900 truncate" x-text="item.title || ''"></div>
+                                                <div class="text-sm text-slate-500 truncate" x-text="item.subtitle || ''"></div>
+                                                <div class="text-xs text-slate-600 mt-1 line-clamp-2" x-text="item.detail || ''"></div>
+                                                <div class="text-[11px] text-slate-400 mt-1" x-show="incidentMetaText(item.meta)" x-text="incidentMetaText(item.meta)"></div>
+                                            </div>
+                                            <div class="text-[11px] text-slate-400 tabular-nums shrink-0" x-show="item.created_at" x-text="fmt.date(item.created_at) + ' ' + fmt.time(item.created_at)"></div>
+                                        </div>
+                                    </button>
+                                </template>
+                            </div>
+                            <div class="px-4 sm:px-5 py-3 bg-slate-50 text-xs text-slate-500" x-show="Number(group.count || 0) > incidentGroupPreviewItems(group).length">
+                                Показаны последние <span x-text="incidentGroupPreviewItems(group).length"></span> из <span x-text="group.count"></span>.
+                            </div>
+                        </section>
+                    </template>
+                </div>
+            </div>
+

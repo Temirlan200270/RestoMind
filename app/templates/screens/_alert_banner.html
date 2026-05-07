@@ -1,0 +1,20 @@
+        <!-- Алерт в потоке: при появлении чат получает меньше высоты, поле ввода остаётся в viewport -->
+        <div x-show="alertQueue.length > 0" x-cloak
+            class="shrink-0 bg-red-600 text-white px-6 md:px-8 py-3 shadow-md border-b border-red-800/30 z-20">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+                <div class="flex items-center gap-3 min-w-0">
+                    <span class="text-2xl shrink-0">&#x1F6A8;</span>
+                    <div class="min-w-0">
+                        <div class="font-bold text-sm">Бот просит помощи!</div>
+                        <div class="text-xs text-red-100 truncate" x-text="alertQueue[0]?.message || ''"></div>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                    <button type="button" @click="openAlertChat(alertQueue[0]?.phone)"
+                        class="px-4 py-1.5 bg-white text-red-600 rounded-lg text-sm font-semibold hover:bg-red-50 transition">
+                        Перехватить
+                    </button>
+                    <button type="button" @click="dismissAlert()" class="text-white/80 hover:text-white text-2xl leading-none px-1" aria-label="Закрыть уведомление о запросе помощи">&times;</button>
+                </div>
+            </div>
+        </div>

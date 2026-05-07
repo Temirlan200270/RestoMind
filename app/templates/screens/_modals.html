@@ -1,0 +1,815 @@
+        <!-- Модалки и оверлеи вне <main>: иначе fixed + z-index ограничены stacking context (scroll/transform внутри main). -->
+        <!-- Глобальный поиск Ctrl+K -->
+        <div x-show="globalSearchOpen" x-cloak x-transition.opacity
+            class="fixed inset-0 z-[70] flex items-start justify-center pt-[8vh] px-4 bg-slate-900/50 backdrop-blur-sm"
+            @click.self="globalSearchOpen = false">
+            <div class="bg-white rounded-2xl shadow-2xl border border-gray-100 w-full max-w-lg overflow-hidden fade-in" @click.stop role="dialog" aria-modal="true" aria-label="Глобальный поиск по заказам, чатам и бронированиям">
+                <div class="p-4 border-b border-gray-100 flex items-center gap-2">
+                    <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                    <input id="global-search-input" type="search" x-model="globalSearchQ" @input.debounce.300ms="runGlobalSearch()"
+                        placeholder="Телефон, имя или № заказа…"
+                        class="flex-1 text-sm border-0 focus:ring-0 focus:outline-none placeholder:text-gray-400">
+                    <kbd class="text-[10px] text-gray-400 hidden sm:inline">Esc</kbd>
+                </div>
+                <div class="max-h-[60vh] overflow-y-auto p-3 text-sm">
+                    <p x-show="globalSearchLoading" class="text-gray-400 text-xs px-2 py-3">Поиск…</p>
+                    <template x-if="!globalSearchLoading && (globalSearchQ || '').trim().length >= 3">
+                        <div class="space-y-4">
+                            <div x-show="(globalSearchResults.orders || []).length">
+                                <div class="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-2 mb-1">Заказы</div>
+                                <template x-for="o in globalSearchResults.orders" :key="'o-' + o.id">
+                                    <button type="button" @click="globalSearchGoOrders(o)"
+                                        class="w-full text-left px-3 py-2 rounded-xl hover:bg-brand-50 border border-transparent hover:border-brand-100">
+                                        <span class="font-semibold text-brand-600" x-text="'#' + o.id"></span>
+                                        <span class="text-gray-600" x-text="' · ' + (o.user_phone || '')"></span>
+                                        <span class="text-xs text-gray-400 block" x-text="o.status"></span>
+                                    </button>
+                                </template>
+                            </div>
+                            <div x-show="(globalSearchResults.chats || []).length">
+                                <div class="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-2 mb-1">Диалоги</div>
+                                <template x-for="c in globalSearchResults.chats" :key="'c-' + c.phone">
+                                    <button type="button" @click="globalSearchGoChat(c)"
+                                        class="w-full text-left px-3 py-2 rounded-xl hover:bg-brand-50 border border-transparent hover:border-brand-100">
+                                        <span class="font-mono text-xs" x-text="c.phone"></span>
+                                        <span class="text-xs text-gray-400 block" x-text="c.user_name || ''"></span>
+                                    </button>
+                                </template>
+                            </div>
+                            <div x-show="(globalSearchResults.bookings || []).length">
+                                <div class="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-2 mb-1">Бронирования</div>
+                                <template x-for="b in globalSearchResults.bookings" :key="'b-' + b.id">
+                                    <button type="button" @click="globalSearchGoBooking(b)"
+                                        class="w-full text-left px-3 py-2 rounded-xl hover:bg-brand-50 border border-transparent hover:border-brand-100">
+                                        <span class="font-semibold" x-text="'#' + b.id"></span>
+                                        <span class="text-gray-600" x-text="' · ' + b.date + ' ' + b.time"></span>
+                                    </button>
+                                </template>
+                            </div>
+                            <p x-show="!(globalSearchResults.orders || []).length && !(globalSearchResults.chats || []).length && !(globalSearchResults.bookings || []).length"
+                                class="text-gray-400 text-xs px-2 py-4 text-center">Ничего не найдено</p>
+                        </div>
+                    </template>
+                    <p x-show="(globalSearchQ || '').trim().length < 3 && !globalSearchLoading" class="text-gray-400 text-xs px-2 py-4 text-center">Введите минимум 3 символа</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Модалка деталей заказа -->
+        <!-- Модалка: безопасное удаление демо-данных -->
+        <div x-show="showDemoDeleteModal" x-cloak x-transition.opacity
+            class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
+            @click.self="closeDemoDeleteModal()">
+            <div class="bg-white rounded-2xl shadow-2xl border border-gray-100 w-full max-w-md overflow-hidden fade-in" @click.stop role="dialog" aria-modal="true" aria-labelledby="demo-delete-title">
+                <div class="h-1.5 bg-gradient-to-r from-red-500 via-rose-500 to-orange-400"></div>
+                <div class="p-6 md:p-8">
+                    <div class="flex items-start gap-4 mb-5">
+                        <div class="w-12 h-12 rounded-2xl bg-red-50 border border-red-100 flex items-center justify-center shrink-0">
+                            <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                        </div>
+                        <div class="min-w-0">
+                            <h2 id="demo-delete-title" class="text-lg font-bold text-gray-900">Удалить демо-данные?</h2>
+                            <p class="text-sm text-gray-500 mt-1">Будут безвозвратно удалены только записи с префиксом телефона <span class="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded">demo7700…</span></p>
+                        </div>
+                    </div>
+                    <ul class="text-sm text-gray-600 space-y-2 mb-6 pl-1 border-l-2 border-gray-200 ml-1">
+                        <li class="pl-3">Демо-пользователи и их заказы</li>
+                        <li class="pl-3">Бронирования и переписки в БД</li>
+                        <li class="pl-3">Быстрая «память» диалога бота для этих номеров</li>
+                    </ul>
+                    <p class="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 mb-5">
+                        Меню ресторана и реальные клиенты <strong>не затрагиваются</strong>.
+                    </p>
+                    <label class="flex items-start gap-3 cursor-pointer group mb-2">
+                        <input type="checkbox" x-model="demoDeleteAck" class="mt-1 rounded border-gray-300 text-red-600 focus:ring-red-500">
+                        <span class="text-sm text-gray-700 group-hover:text-gray-900">Я понимаю, что эти данные нельзя восстановить</span>
+                    </label>
+                    <p x-show="demoDeleteError" x-cloak class="text-sm text-red-600 mt-3" x-text="demoDeleteError"></p>
+                    <div class="flex flex-col-reverse sm:flex-row gap-3 mt-8">
+                        <button type="button" @click="closeDemoDeleteModal()" :disabled="demoActionLoading"
+                            class="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 font-semibold text-sm hover:bg-gray-50 transition disabled:opacity-50">
+                            Отмена
+                        </button>
+                        <button type="button" @click="confirmDemoDelete()"
+                            :disabled="demoActionLoading || !demoDeleteAck"
+                            class="flex-1 py-3 rounded-xl bg-red-600 text-white font-semibold text-sm hover:bg-red-700 shadow-lg shadow-red-600/25 transition disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+                            <span x-show="!demoActionLoading">Удалить навсегда</span>
+                            <span x-show="demoActionLoading" x-cloak class="flex items-center gap-2">
+                                <span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                                Удаляем…
+                            </span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Модалка: сброс всех операционных данных (настройки) -->
+        <div x-show="settingsPurgeModalOpen" x-cloak x-transition.opacity
+            class="fixed inset-0 z-[61] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
+            @click.self="settingsPurgeModalOpen = false">
+            <div class="bg-white rounded-2xl shadow-2xl border border-gray-100 w-full max-w-md overflow-hidden fade-in" @click.stop role="dialog" aria-modal="true" aria-labelledby="settings-purge-title">
+                <div class="h-1.5 bg-gradient-to-r from-red-600 via-red-500 to-orange-500"></div>
+                <div class="p-6 md:p-8">
+                    <h2 id="settings-purge-title" class="text-lg font-bold text-gray-900">Удалить все операционные данные?</h2>
+                    <p class="text-sm text-gray-500 mt-2">Будут удалены все строки в таблицах: чаты, заказы, брони, эскалации, журнал интеграций. Сбросится блок последних синхронизаций в настройках интеграций.</p>
+                    <p class="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 mt-4"><strong>Не удаляются:</strong> клиенты (<code class="text-[11px]">users</code>), меню (<code class="text-[11px]">menu_items</code>), организации.</p>
+                    <label class="block text-sm font-medium text-gray-700 mt-5">Введите фразу <span class="font-mono text-xs bg-gray-100 px-1 rounded">УДАЛИТЬ ВСЕ ДАННЫЕ</span></label>
+                    <input type="text" x-model="settingsPurgePhrase" autocomplete="off"
+                        class="mt-2 w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                        placeholder="УДАЛИТЬ ВСЕ ДАННЫЕ">
+                    <label class="flex items-start gap-3 cursor-pointer group mt-4">
+                        <input type="checkbox" x-model="settingsPurgeAck" class="mt-1 rounded border-gray-300 text-red-600 focus:ring-red-500">
+                        <span class="text-sm text-gray-700">Я понимаю, что восстановление невозможно</span>
+                    </label>
+                    <p x-show="settingsPurgeError" x-cloak class="text-sm text-red-600 mt-3" x-text="settingsPurgeError"></p>
+                    <div class="flex flex-col-reverse sm:flex-row gap-3 mt-6">
+                        <button type="button" @click="settingsPurgeModalOpen = false" :disabled="settingsPurgeLoading"
+                            class="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 font-semibold text-sm hover:bg-gray-50 disabled:opacity-50">Отмена</button>
+                        <button type="button" @click="confirmSettingsPurgeOperational()"
+                            :disabled="settingsPurgeLoading || !settingsPurgeAck || settingsPurgePhrase.trim() !== 'УДАЛИТЬ ВСЕ ДАННЫЕ'"
+                            class="flex-1 py-3 rounded-xl bg-red-600 text-white font-semibold text-sm hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed">
+                            <span x-show="!settingsPurgeLoading">Выполнить сброс</span>
+                            <span x-show="settingsPurgeLoading" x-cloak>Удаление…</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Тост после удаления демо -->
+        <div x-show="setupChecklistOpen" x-cloak x-transition.opacity
+            class="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
+            @click.self="closeSetupChecklist()"
+            @keydown.escape.window="setupChecklistOpen && closeSetupChecklist()">
+            <div class="bg-white rounded-2xl shadow-2xl border border-gray-100 w-full max-w-lg overflow-hidden fade-in" @click.stop role="dialog" aria-modal="true" aria-labelledby="setup-checklist-title">
+                <div class="p-6">
+                    <div class="flex items-start justify-between gap-4">
+                        <div>
+                            <h2 id="setup-checklist-title" class="text-lg font-bold text-gray-900">Готовность филиала</h2>
+                            <p class="text-sm text-gray-500 mt-1">
+                                <span class="font-semibold tabular-nums text-gray-800" x-text="setupDoneCount() + '/' + setupTotalCount()"></span>
+                                <span> шагов закрыто</span>
+                            </p>
+                        </div>
+                        <button type="button" @click="closeSetupChecklist()" class="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-50" aria-label="Закрыть окно готовности филиала">Закрыть</button>
+                    </div>
+                    <div class="mt-5 h-2 rounded-full bg-gray-100 overflow-hidden">
+                        <div class="h-full bg-emerald-500 transition-all duration-700" :style="'width:' + (setupStatus.score || 0) + '%'"></div>
+                    </div>
+                    <div class="mt-5 space-y-2 max-h-[55vh] overflow-y-auto pr-1">
+                        <template x-for="s in (setupStatus.steps || [])" :key="'setup-modal-' + s.id">
+                            <div class="flex items-start gap-3 rounded-xl border px-3 py-3"
+                                :class="s.done ? 'border-emerald-100 bg-emerald-50/50' : 'border-amber-100 bg-amber-50/40'">
+                                <span class="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs font-bold"
+                                    :class="s.done ? 'bg-emerald-500 text-white' : 'bg-amber-400 text-white'"
+                                    x-text="s.done ? '✓' : '!'"></span>
+                                <div class="min-w-0 flex-1">
+                                    <div class="text-sm font-semibold text-gray-900" x-text="s.label"></div>
+                                    <p class="text-xs text-gray-500 leading-snug mt-1" x-text="s.hint || ''"></p>
+                                </div>
+                                <button type="button" x-show="!s.done" x-cloak
+                                    class="shrink-0 rounded-lg border border-brand-200 bg-brand-50 px-2.5 py-1.5 text-xs font-bold text-brand-700 hover:bg-brand-100"
+                                    @click="closeSetupChecklist(); navigateToTab('settings', { settingsTab: s.open_tab || 'connections' })">
+                                    Открыть
+                                </button>
+                            </div>
+                        </template>
+                    </div>
+                    <div class="mt-5 flex justify-end">
+                        <button type="button" x-show="setupIncompleteSteps().length" x-cloak
+                            @click="closeSetupChecklist(); openFirstIncompleteSetupStep()"
+                            class="rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700">
+                            Следующий шаг
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div x-show="demoToastMessage" x-cloak x-transition
+            :class="demoToastKind === 'success' ? 'rm-toast-success' : demoToastKind === 'warning' ? 'rm-toast-warning' : demoToastKind === 'error' ? 'rm-toast-error' : 'rm-toast-info'"
+            x-text="demoToastMessage"></div>
+
+        <!-- Универсальное подтверждение / ввод (вместо нативных диалогов) -->
+        <div x-show="uiConfirmOpen" x-cloak x-transition.opacity
+            class="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
+            @click.self="uiConfirmBackdrop()"
+            @keydown.escape.window="uiConfirmOpen && uiConfirmBackdrop()">
+            <div class="bg-white rounded-2xl shadow-2xl w-full p-6 fade-in" :class="uiConfirmInputMultiline ? 'max-w-2xl' : 'max-w-md'" @click.stop
+                role="dialog" aria-modal="true" data-ui-confirm-panel
+                aria-labelledby="ui-confirm-title"
+                :aria-describedby="(uiConfirmMessage && String(uiConfirmMessage).trim()) ? 'ui-confirm-description' : null">
+                <h3 id="ui-confirm-title" class="text-lg font-bold text-gray-900" x-text="uiConfirmTitle"></h3>
+                <p id="ui-confirm-description" class="mt-3 text-sm text-gray-600 whitespace-pre-wrap" x-show="uiConfirmMessage" x-text="uiConfirmMessage"></p>
+                <div x-show="uiConfirmShowInput" class="mt-4">
+                    <label x-show="uiConfirmInputLabel" class="block text-xs font-semibold text-gray-500 mb-1" x-text="uiConfirmInputLabel"></label>
+                    <input type="text" x-show="!uiConfirmInputMultiline" x-model="uiConfirmInputValue"
+                        data-ui-confirm-autofocus
+                        :readonly="uiConfirmInputReadonly"
+                        :placeholder="uiConfirmInputPlaceholder"
+                        class="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500"
+                        @keydown.enter="uiConfirmSubmit()" />
+                    <textarea x-show="uiConfirmInputMultiline" x-cloak x-model="uiConfirmInputValue"
+                        data-ui-confirm-autofocus
+                        :readonly="uiConfirmInputReadonly"
+                        :placeholder="uiConfirmInputPlaceholder"
+                        :rows="uiConfirmInputRows"
+                        class="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm font-mono leading-relaxed focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 min-h-[12rem]"></textarea>
+                    <p x-show="uiConfirmError" class="mt-2 text-xs text-red-600" x-text="uiConfirmError"></p>
+                </div>
+                <label x-show="uiConfirmRequireAck" x-cloak
+                    class="mt-5 flex items-start gap-3 cursor-pointer group select-none">
+                    <input type="checkbox" x-model="uiConfirmAckChecked"
+                        class="mt-0.5 rounded border-gray-300 text-red-600 focus:ring-red-500">
+                    <span class="text-sm text-gray-700 group-hover:text-gray-900" x-text="uiConfirmAckLabel"></span>
+                </label>
+                <div class="mt-6 flex flex-wrap gap-3 justify-end items-center">
+                    <button type="button" x-show="uiConfirmShowFormatJson" x-cloak
+                        @click="uiConfirmTryFormatJson()"
+                        :disabled="uiConfirmSubmitting"
+                        class="mr-auto py-2.5 px-4 rounded-xl border border-gray-200 text-gray-700 font-semibold text-sm hover:bg-gray-50 disabled:opacity-50">
+                        Форматировать JSON
+                    </button>
+                    <button type="button" x-show="uiConfirmShowCancel"
+                        @click="uiConfirmCancel()"
+                        :disabled="uiConfirmSubmitting"
+                        class="py-2.5 px-4 rounded-xl border border-gray-200 text-gray-700 font-semibold text-sm hover:bg-gray-50 disabled:opacity-50"
+                        x-text="uiConfirmCancelText"></button>
+                    <button type="button"
+                        @click="uiConfirmSubmit()"
+                        :disabled="uiConfirmSubmitting || (uiConfirmRequireAck && !uiConfirmAckChecked)"
+                        :class="uiConfirmDanger ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'"
+                        class="py-2.5 px-4 rounded-xl text-white font-semibold text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+                        x-text="uiConfirmConfirmText"></button>
+                </div>
+            </div>
+        </div>
+
+        <div x-show="showOrderModal && selectedOrder" x-cloak>
+            <div class="ds-modal-backdrop" @click="showOrderModal = false; orderCompositionOpen = false" role="presentation" aria-hidden="true"></div>
+            <template x-if="selectedOrder">
+                <div class="ds-modal-panel flex flex-col fade-in min-h-0 h-[100dvh] sm:h-auto max-h-[100dvh] sm:max-h-[92vh] rounded-t-3xl sm:rounded-2xl overflow-hidden" @click.stop role="dialog" aria-modal="true" aria-labelledby="order-modal-title">
+                    <div class="flex items-start justify-between gap-3 px-6 pt-6 pb-4 border-b border-gray-100 shrink-0">
+                        <div class="min-w-0 flex-1">
+                            <h3 id="order-modal-title" class="text-lg font-bold text-gray-900" x-text="'Заказ #' + selectedOrder.id"></h3>
+                            <div class="mt-2 flex flex-wrap items-center gap-1.5">
+                                <span x-show="selectedOrder.order_type"
+                                    class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-semibold bg-indigo-50 text-indigo-800 border border-indigo-200/70"
+                                    x-text="orderTypeBadge(selectedOrder)"></span>
+                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-white border border-gray-200"
+                                    :class="paymentModalPayClass(selectedOrder)">
+                                    <span aria-hidden="true" x-text="paymentIcon(selectedOrder)"></span>
+                                    <span x-text="paymentMethodTitle(selectedOrder)"></span>
+                                </span>
+                                <span x-show="selectedOrder?.prepayment_status && selectedOrder?.prepayment_status !== 'not_required'"
+                                    class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-semibold bg-amber-50 text-amber-900 border border-amber-200/70"
+                                    x-text="prepaymentLabel(selectedOrder?.prepayment_status)"></span>
+                                <template x-if="paymentMixedSplit(selectedOrder)">
+                                    <template x-for="part in paymentMixedSplit(selectedOrder)" :key="'hdr-' + part.label">
+                                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-purple-50 text-purple-800 border border-purple-200/70">
+                                            <span aria-hidden="true" x-text="part.icon"></span>
+                                            <span x-text="part.label"></span>
+                                            <span class="tabular-nums" x-text="fmt.money(part.amount)"></span>
+                                        </span>
+                                    </template>
+                                </template>
+                            </div>
+                            <template x-if="selectedOrder?.payment_split_warning">
+                                <div class="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                                    ⚠️ <span x-text="selectedOrder.payment_split_warning"></span>
+                                </div>
+                            </template>
+                        </div>
+                        <button type="button" @click="showOrderModal = false; orderCompositionOpen = false" class="text-gray-400 hover:text-gray-600 text-xl shrink-0 leading-none" aria-label="Закрыть окно заказа">&times;</button>
+                    </div>
+                    <div class="flex-1 min-h-0 overflow-y-auto overscroll-contain px-6 py-5">
+                    <div class="mb-4 rounded-xl border border-violet-200 bg-violet-50/60 px-4 py-3 text-sm" x-show="selectedOrder?.booking">
+                        <div class="text-xs font-bold text-violet-800 uppercase tracking-wide mb-1">Бронь (предзаказ в зале)</div>
+                        <p class="text-gray-900 font-semibold" x-text="fmt.bookingDate(selectedOrder?.booking?.date) + ' в ' + (selectedOrder?.booking?.time?.slice(0,5) || '—')"></p>
+                        <p class="text-gray-700 mt-1">
+                            <span x-text="selectedOrder?.booking?.guests"></span> гост. ·
+                            <span x-text="bookingHallLabel(selectedOrder?.booking?.hall)"></span>
+                        </p>
+                        <p class="text-xs text-violet-700 mt-1" x-show="selectedOrder?.booking?.comment" x-text="selectedOrder?.booking?.comment"></p>
+                        <p class="text-[11px] text-violet-600 mt-2">Бронь №<span class="font-mono tabular-nums" x-text="selectedOrder?.booking?.id"></span></p>
+                    </div>
+                    <div class="mb-4 rounded-xl border border-emerald-200 bg-emerald-50/50 px-4 py-3 text-sm" x-show="selectedOrder?.payment_link_url">
+                        <div class="text-xs font-bold text-emerald-800 uppercase tracking-wide mb-1">Ссылка на оплату</div>
+                        <a :href="selectedOrder?.payment_link_url" target="_blank" rel="noopener noreferrer" class="text-emerald-700 font-mono text-xs break-all underline" x-text="selectedOrder?.payment_link_url"></a>
+                    </div>
+                    <div class="mb-4" x-show="selectedOrder?.prepayment_status === 'pending'">
+                        <button type="button"
+                            @click="confirmPrepayment()"
+                            class="w-full py-3 rounded-xl text-sm font-bold border-2 border-emerald-300 text-emerald-900 bg-emerald-50 hover:bg-emerald-100 transition flex items-center justify-center gap-2">
+                            <span>✅</span>
+                            <span>Подтвердить предоплату</span>
+                        </button>
+                        <p class="text-[11px] text-gray-400 text-center mt-1.5">Клиент сможет подтвердить заказ после нажатия</p>
+                    </div>
+                    <div class="mb-4 rounded-xl bg-gray-50 border border-gray-100 px-4 py-3 text-sm" x-show="selectedOrder?.user_phone || selectedOrder?.user_name">
+                        <div class="text-xs text-gray-500 mb-0.5">Клиент (WhatsApp)</div>
+                        <div class="font-mono text-gray-900" x-text="selectedOrder?.user_phone || '—'"></div>
+                        <div class="text-gray-600 mt-1" x-show="selectedOrder?.user_name" x-text="selectedOrder?.user_name"></div>
+                    </div>
+                    <div class="mb-4">
+                        <div class="text-xs font-bold uppercase tracking-wide text-gray-500 mb-2">Хронология</div>
+                        <div x-show="orderTimelineLoading" class="text-sm text-gray-400 py-2">Загрузка…</div>
+                        <div x-show="!orderTimelineLoading && orderTimeline.length" x-cloak class="relative pl-4 border-l-2 border-gray-200 space-y-4">
+                            <template x-for="(ev, tidx) in orderTimeline" :key="'otl-' + tidx + '-' + (ev.kind || '') + '-' + (ev.at || '')">
+                                <div class="relative -ml-px">
+                                    <span class="absolute -left-[21px] top-1.5 h-2.5 w-2.5 rounded-full ring-2 ring-white bg-gray-400" aria-hidden="true"></span>
+                                    <div class="text-[11px] text-gray-400 tabular-nums"
+                                        x-text="ev.at ? (fmt.date(ev.at) + ', ' + fmt.time(ev.at)) : '—'"></div>
+                                    <div class="text-sm font-semibold text-gray-900 mt-0.5" x-text="ev.title"></div>
+                                    <div class="text-xs text-gray-600 mt-1 whitespace-pre-wrap break-words" x-show="ev.detail" x-text="ev.detail"></div>
+                                </div>
+                            </template>
+                        </div>
+                        <p x-show="!orderTimelineLoading && !orderTimeline.length" x-cloak class="text-sm text-gray-400">Нет событий для отображения.</p>
+                    </div>
+                    <div x-show="selectedOrder?.iiko_last_error" class="mb-4 flex gap-3 rounded-xl border-2 border-red-400 bg-gradient-to-r from-red-50 to-rose-50 px-4 py-3 shadow-sm" role="alert">
+                        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-600 text-white text-lg font-black shadow-md" aria-hidden="true">!</div>
+                        <div class="min-w-0">
+                            <p class="text-xs font-bold uppercase tracking-wider text-red-900">Ошибка отправки в iiko</p>
+                            <p class="text-sm text-red-900 font-semibold leading-snug break-words mt-1" x-text="selectedOrder?.iiko_last_error"></p>
+                            <p class="text-[11px] text-red-800/90 mt-2 leading-snug">Проверьте в настройках филиала терминальную группу iiko и тип заказа (доставка / самовывоз / зал). Заказ остаётся подтверждённым — после исправления нажмите «Повторить отправку в iiko».</p>
+                        </div>
+                    </div>
+                    <details class="mb-4 rounded-xl border border-slate-200 bg-slate-50/90 px-4 py-3 text-sm"
+                        x-show="canEditOrderComposition(selectedOrder)"
+                        x-data="{ payEditorOpen: false }"
+                        x-init="payEditorOpen = (orderPayMode === 'mixed' || !!selectedOrder?.payment_split_warning || !!orderPaymentError) || (window.matchMedia && window.matchMedia('(min-width:640px)').matches)"
+                        x-effect="if (orderPayMode === 'mixed' || selectedOrder?.payment_split_warning || orderPaymentError) payEditorOpen = true"
+                        :open="payEditorOpen"
+                        @toggle="payEditorOpen = $event.target.open">
+                        <summary class="flex items-center justify-between gap-2 cursor-pointer select-none list-none min-h-[44px] sm:min-h-0">
+                            <span class="text-xs font-bold text-slate-700 uppercase tracking-wide">Изменить способ оплаты</span>
+                            <span class="text-[11px] font-semibold text-slate-500"
+                                x-text="payEditorOpen ? 'Свернуть' : 'Раскрыть'"></span>
+                        </summary>
+                        <div class="mt-3 space-y-3">
+                        <div class="flex flex-wrap gap-3 text-sm">
+                            <label class="inline-flex items-center gap-2 cursor-pointer">
+                                <input type="radio" class="rounded-full border-gray-300 text-brand-600" value="single" x-model="orderPayMode" @change="onOrderPayModeChange()">
+                                <span>Один способ</span>
+                            </label>
+                            <label class="inline-flex items-center gap-2 cursor-pointer">
+                                <input type="radio" class="rounded-full border-gray-300 text-brand-600" value="mixed" x-model="orderPayMode" @change="onOrderPayModeChange()">
+                                <span>Смешанная</span>
+                            </label>
+                        </div>
+                        <div x-show="orderPayMode === 'single'" class="flex flex-wrap gap-2">
+                            <button type="button" @click="orderPayMethod = 'cash'; onOrderPayMethodQuickPick()"
+                                :class="orderPayMethod === 'cash' ? 'bg-gray-800 text-white' : 'bg-white border border-gray-200 text-gray-700'"
+                                class="px-3 py-1.5 rounded-lg text-xs font-bold">Наличные</button>
+                            <button type="button" @click="orderPayMethod = 'card'; onOrderPayMethodQuickPick()"
+                                :class="orderPayMethod === 'card' ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-700'"
+                                class="px-3 py-1.5 rounded-lg text-xs font-bold">Карта</button>
+                            <button type="button" @click="orderPayMethod = 'remote'; onOrderPayMethodQuickPick()"
+                                :class="orderPayMethod === 'remote' ? 'bg-amber-600 text-white' : 'bg-white border border-gray-200 text-gray-700'"
+                                class="px-3 py-1.5 rounded-lg text-xs font-bold">Удалённо</button>
+                        </div>
+                        <div x-show="orderPayMode === 'mixed'" class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                            <div>
+                                <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Наличные ₸</label>
+                                <input type="number" min="0" step="1" x-model.number="orderPaySplitCash" class="w-full rounded-lg border border-gray-200 px-2 py-1.5 text-sm">
+                            </div>
+                            <div>
+                                <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Карта ₸</label>
+                                <input type="number" min="0" step="1" x-model.number="orderPaySplitCard" class="w-full rounded-lg border border-gray-200 px-2 py-1.5 text-sm">
+                            </div>
+                            <div>
+                                <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Удалённо ₸</label>
+                                <input type="number" min="0" step="1" x-model.number="orderPaySplitRemote" class="w-full rounded-lg border border-gray-200 px-2 py-1.5 text-sm">
+                            </div>
+                        </div>
+                        <p x-show="orderPaymentError" class="text-xs text-red-600 whitespace-pre-wrap" x-text="orderPaymentError"></p>
+                        <button type="button" @click="saveOrderPaymentSplit()" :disabled="orderPaymentSaving"
+                            class="w-full py-2.5 rounded-xl bg-slate-800 text-white text-sm font-bold hover:bg-slate-900 disabled:opacity-50 flex items-center justify-center gap-2">
+                            <span x-show="orderPaymentSaving" class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                            <span x-text="orderPaymentSaving ? 'Сохраняем…' : 'Сохранить оплату'"></span>
+                        </button>
+                        </div>
+                    </details>
+                    <template x-if="orderSalesInsightSteps(selectedOrder).length">
+                        <div class="mb-4 rounded-2xl border border-violet-200/80 bg-gradient-to-br from-violet-50/90 via-white to-indigo-50/50 p-4 shadow-sm ring-1 ring-violet-900/5 relative overflow-hidden">
+                            <div class="absolute -right-6 -top-6 w-24 h-24 bg-violet-200/40 rounded-full blur-2xl pointer-events-none"></div>
+                            <div class="relative z-10 space-y-3">
+                                <div class="flex flex-wrap items-start justify-between gap-2">
+                                    <div>
+                                        <p class="text-[10px] font-bold uppercase tracking-wider text-violet-800">Sales Insight</p>
+                                        <p class="text-sm font-bold text-gray-900">Работа ИИ‑продавца</p>
+                                        <p class="text-xs text-gray-500 mt-0.5">Что предложили гостю и что оказалось в чеке</p>
+                                    </div>
+                                    <div x-show="orderAiEfficiencyPct(selectedOrder) != null" class="shrink-0 rounded-xl bg-violet-600 text-white px-3 py-2 text-center shadow-sm">
+                                        <p class="text-[9px] font-semibold uppercase tracking-wide text-violet-100">ИИ в чеке</p>
+                                        <p class="text-lg font-extrabold tabular-nums leading-tight" x-text="orderAiEfficiencyPct(selectedOrder) + '%'"></p>
+                                    </div>
+                                </div>
+                                <p class="text-xs text-gray-600" x-show="orderAcceptedUpsellRevenueSum(selectedOrder) > 0">
+                                    Принятые допродажи:
+                                    <span class="font-semibold text-violet-900 tabular-nums" x-text="fmt.money(orderAcceptedUpsellRevenueSum(selectedOrder))"></span>
+                                    из
+                                    <span class="font-semibold tabular-nums" x-text="fmt.money(selectedOrder.total_price)"></span>
+                                </p>
+                                <div class="relative pl-1">
+                                    <div class="absolute left-[11px] top-2 bottom-2 w-0.5 bg-violet-200 rounded-full" aria-hidden="true"></div>
+                                    <ul class="space-y-0 max-h-[min(38vh,300px)] sm:max-h-[min(52vh,420px)] overflow-y-auto overscroll-contain pr-1">
+                                        <template x-for="(trace, tidx) in orderSalesInsightSteps(selectedOrder)" :key="'si-' + tidx">
+                                            <li class="relative flex gap-3 pb-4 last:pb-0">
+                                                <div class="relative z-10 mt-0.5 flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full border-2 border-white bg-violet-500 text-[10px] font-bold text-white shadow-sm" x-text="tidx + 1"></div>
+                                                <div class="min-w-0 flex-1 rounded-xl border border-gray-100 bg-white/90 px-3 py-2.5 shadow-sm">
+                                                    <div class="flex flex-wrap items-center gap-2 gap-y-1">
+                                                        <span class="text-sm font-semibold text-gray-900" x-text="trace.offered || 'Позиция'"></span>
+                                                        <span class="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-600 border border-slate-200" x-text="salesInsightSourceLabel(trace)"></span>
+                                                    </div>
+                                                    <p x-show="salesInsightAiReason(trace)" class="text-xs text-gray-700 mt-1 leading-snug" x-text="salesInsightAiReason(trace)"></p>
+                                                    <div x-show="salesInsightShowLogicBlock(trace)" x-cloak
+                                                        class="mt-2 rounded-lg border border-slate-200/90 bg-slate-50/90 px-2.5 py-1.5">
+                                                        <div class="flex items-center gap-1.5 flex-wrap">
+                                                            <span class="text-[9px] font-bold tracking-wide text-slate-500 uppercase">LOGIC</span>
+                                                            <span class="text-xs text-slate-500 leading-none" aria-hidden="true" title="Алгоритм заведения">⚙️</span>
+                                                            <span x-show="salesInsightStrategyLogic(trace) === 'Custom AI Choice'"
+                                                                class="text-[9px] font-semibold px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-900 border border-amber-200/90">
+                                                                Custom AI Choice
+                                                            </span>
+                                                        </div>
+                                                        <p x-show="salesInsightGastroHint(trace)" class="text-[10px] text-slate-600 mt-1 leading-snug font-mono" x-text="salesInsightGastroHint(trace)"></p>
+                                                    </div>
+                                                    <div class="flex flex-wrap items-center gap-x-2 gap-y-1 mt-2 text-xs">
+                                                        <template x-if="trace.accepted === true">
+                                                            <span class="inline-flex items-center gap-1 font-semibold text-emerald-700">✅ Принято в заказ</span>
+                                                        </template>
+                                                        <template x-if="trace.accepted === false">
+                                                            <span class="inline-flex items-center gap-1 font-semibold text-rose-600">❌ Не добавлено</span>
+                                                        </template>
+                                                        <template x-if="trace.accepted !== true && trace.accepted !== false">
+                                                            <span class="text-gray-400">Нет данных о принятии</span>
+                                                        </template>
+                                                        <span x-show="trace.accepted === true && trace.accepted_revenue_kzt != null && Number(trace.accepted_revenue_kzt) > 0"
+                                                            class="text-emerald-800 font-semibold tabular-nums"
+                                                            x-text="'+' + fmt.money(trace.accepted_revenue_kzt)"></span>
+                                                    </div>
+                                                </div>
+                                            </li>
+                                        </template>
+                                    </ul>
+                                    <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                        <button type="button" @click="createUpsellFeedback('forbid')" :disabled="upsellFeedbackLoading"
+                                            class="min-h-[44px] rounded-xl border border-rose-200 bg-white text-rose-700 text-xs font-bold hover:bg-rose-50 disabled:opacity-50">
+                                            Исправить логику
+                                        </button>
+                                        <button type="button" @click="createUpsellFeedback('suggest')" :disabled="upsellFeedbackLoading"
+                                            class="min-h-[44px] rounded-xl border border-violet-200 bg-white text-violet-800 text-xs font-bold hover:bg-violet-50 disabled:opacity-50">
+                                            Создать правило
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+                    <template x-if="selectedOrder.items?.items">
+                        <div class="space-y-3">
+                            <div class="flex flex-wrap items-center justify-between gap-2" x-show="canEditOrderComposition(selectedOrder)">
+                                <p class="text-xs font-bold text-gray-500 uppercase tracking-wide">Состав</p>
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <button type="button" x-show="!orderCompositionOpen" @click="openOrderCompositionEditor()"
+                                        class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-brand-600 text-white hover:bg-brand-700 shadow-sm">
+                                        Изменить состав
+                                    </button>
+                                    <button type="button" x-show="!orderCompositionOpen" @click="openOrderCompositionJsonModal()"
+                                        class="text-xs font-semibold px-3 py-1.5 rounded-lg border border-brand-200 text-brand-800 bg-white hover:bg-brand-50 shadow-sm">
+                                        JSON…
+                                    </button>
+                                    <button type="button" x-show="orderCompositionOpen" @click="closeOrderCompositionEditor()"
+                                        class="text-xs font-semibold px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50">
+                                        Отмена
+                                    </button>
+                                </div>
+                            </div>
+                            <p x-show="orderCompositionOpen" class="text-xs text-amber-900 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                                После сохранения пересчитаются контейнеры, доставка и итог (тот же пайплайн, что в чате).
+                            </p>
+                            <div x-show="orderCompositionOpen" class="space-y-3 rounded-xl border border-brand-100 bg-brand-50/40 p-4 max-h-[50vh] overflow-y-auto">
+                                <template x-for="(line, li) in orderEditLines" :key="'oe-' + li">
+                                    <div class="rounded-xl bg-white border border-gray-100 p-3 space-y-2 shadow-sm"
+                                        x-data="{ pickOpen: false, pickQuery: '' }"
+                                        @click.outside="pickOpen = false">
+                                        <div class="grid grid-cols-1 sm:grid-cols-[1fr_90px] gap-2">
+                                            <div class="relative">
+                                                <label class="block text-[10px] font-bold text-gray-400 uppercase mb-1">Блюдо из меню</label>
+                                                <div class="relative">
+                                                    <input type="text" x-model="line.name"
+                                                        @focus="pickQuery = line.name || ''; pickOpen = true"
+                                                        @input="pickQuery = line.name || ''; pickOpen = true; line.iiko_item_id = ''"
+                                                        @keydown.escape="pickOpen = false"
+                                                        placeholder="Начните вводить название…"
+                                                        autocomplete="off" spellcheck="false"
+                                                        class="w-full rounded-lg border border-gray-200 pl-2 pr-7 py-1.5 text-sm focus:ring-2 focus:ring-brand-500">
+                                                    <button type="button" x-show="line.name" @click="line.name = ''; line.iiko_item_id = ''; pickQuery = ''; pickOpen = true"
+                                                        class="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-base leading-none" aria-label="Очистить поле названия блюда">&times;</button>
+                                                </div>
+                                                <div class="mt-1 flex items-center gap-1.5 text-[10px]"
+                                                    x-show="line.iiko_item_id">
+                                                    <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 font-semibold">
+                                                        <span>✓</span><span>Из меню</span>
+                                                    </span>
+                                                    <span class="font-mono text-gray-400 truncate" :title="line.iiko_item_id" x-text="'id: ' + (line.iiko_item_id || '').slice(0, 8) + '…'"></span>
+                                                </div>
+                                                <p x-show="line.name && !line.iiko_item_id" x-cloak
+                                                    class="mt-1 text-[10px] text-amber-700">
+                                                    Название введено вручную — iiko попробует найти блюдо при отправке.
+                                                </p>
+                                                <div x-show="pickOpen" x-cloak
+                                                    class="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-xl max-h-64 overflow-y-auto">
+                                                    <template x-for="mi in (menuItems || []).filter(m => m && m.name && (!pickQuery.trim() || (m.name + ' ' + (m.category || '')).toLowerCase().includes(pickQuery.trim().toLowerCase()))).slice(0, 50)"
+                                                        :key="'pick-' + li + '-' + mi.id">
+                                                        <button type="button"
+                                                            @mousedown.prevent="line.name = mi.name; line.iiko_item_id = mi.iiko_id || ''; pickQuery = mi.name; pickOpen = false"
+                                                            class="w-full text-left px-3 py-2 text-sm hover:bg-brand-50 border-b border-gray-50 last:border-b-0 flex items-center justify-between gap-2">
+                                                            <span class="min-w-0 flex-1 flex flex-col">
+                                                                <span class="truncate text-gray-900 font-medium" x-text="mi.name"></span>
+                                                                <span class="flex items-center gap-1.5 text-[10px] text-gray-400 mt-0.5">
+                                                                    <span x-show="mi.category" x-text="mi.category"></span>
+                                                                    <span x-show="mi.is_available === false" class="text-rose-600 font-semibold">· в стопе</span>
+                                                                </span>
+                                                            </span>
+                                                            <span class="text-xs text-gray-600 shrink-0 tabular-nums"
+                                                                x-show="mi.price" x-text="fmt.money(mi.price)"></span>
+                                                        </button>
+                                                    </template>
+                                                    <div x-show="!(menuItems || []).filter(m => m && m.name && (!pickQuery.trim() || (m.name + ' ' + (m.category || '')).toLowerCase().includes(pickQuery.trim().toLowerCase()))).length"
+                                                        class="px-3 py-3 text-xs text-gray-500">
+                                                        Ничего не нашли. Можно ввести название вручную — при сохранении бот попытается распознать его по меню.
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <label class="block text-[10px] font-bold text-gray-400 uppercase mb-1">Кол-во</label>
+                                                <input type="number" min="1" max="99" x-model.number="line.quantity"
+                                                    class="w-full rounded-lg border border-gray-200 px-2 py-1.5 text-sm focus:ring-2 focus:ring-brand-500">
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label class="block text-[10px] font-bold text-gray-400 uppercase mb-1">Плов 1 кг (упаковка)</label>
+                                            <input type="text" x-model="line.packaging_plov_1kg" placeholder="пусто · tabak · foil_kazan"
+                                                class="w-full font-mono text-xs rounded-lg border border-gray-200 px-2 py-1.5 focus:ring-2 focus:ring-brand-500">
+                                        </div>
+                                        <div>
+                                            <label class="block text-[10px] font-bold text-gray-400 uppercase mb-1">Модификаторы</label>
+                                            <input type="text" x-model="line.modifiers_text" placeholder="соус:uuid, размер:uuid"
+                                                class="w-full font-mono text-xs rounded-lg border border-gray-200 px-2 py-1.5 focus:ring-2 focus:ring-brand-500">
+                                        </div>
+                                        <details class="text-[11px] text-gray-400" x-show="line.iiko_item_id || line.name">
+                                            <summary class="cursor-pointer select-none hover:text-gray-600">Для разработчика: ID блюда в iiko</summary>
+                                            <input type="text" x-model="line.iiko_item_id" placeholder="uuid из меню"
+                                                class="mt-2 w-full font-mono text-[11px] rounded-lg border border-gray-200 px-2 py-1.5 focus:ring-2 focus:ring-brand-500">
+                                        </details>
+                                        <button type="button" @click="removeOrderEditLine(li)" :disabled="orderEditLines.length <= 1"
+                                            class="text-xs font-semibold text-red-600 hover:text-red-700 disabled:opacity-40 disabled:cursor-not-allowed">
+                                            Удалить строку
+                                        </button>
+                                    </div>
+                                </template>
+                                <button type="button" @click="addOrderEditLine()"
+                                    class="w-full py-2 rounded-lg border border-dashed border-brand-200 text-sm font-semibold text-brand-700 hover:bg-white/80">
+                                    + Добавить позицию
+                                </button>
+                                <p x-show="orderRebuildError" class="text-sm text-red-600 whitespace-pre-wrap" x-text="orderRebuildError"></p>
+                                <button type="button" @click="submitOrderCompositionFromLines()" :disabled="orderRebuildLoading"
+                                    class="w-full py-3 rounded-xl bg-brand-600 text-white text-sm font-bold hover:bg-brand-700 disabled:opacity-50 flex items-center justify-center gap-2">
+                                    <span x-show="orderRebuildLoading" class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                                    <span x-text="orderRebuildLoading ? 'Сохраняем…' : 'Сохранить и пересчитать'"></span>
+                                </button>
+                            </div>
+                            <div x-show="!orderCompositionOpen" class="space-y-3">
+                                <template x-for="(item, idx) in selectedOrder.items.items" :key="idx">
+                                    <div class="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3">
+                                        <div>
+                                            <div class="font-medium" x-text="item.name"></div>
+                                            <div x-show="item.modifiers?.length || item.modifiers_ids?.length" class="text-xs text-sky-700 mt-0.5"
+                                                x-text="'Модификаторы: ' + ((item.modifiers || []).map(m => m.name || m.iiko_id || m.id).filter(Boolean).join(', ') || (item.modifiers_ids || []).join(', '))"></div>
+                                            <div x-show="item.exclude_ingredients?.length" class="text-xs text-red-500 mt-0.5" x-text="'Без: ' + (item.exclude_ingredients || []).join(', ')"></div>
+                                        </div>
+                                        <div class="text-right">
+                                            <div class="font-semibold" x-text="fmt.money(item.item_total)"></div>
+                                            <div class="text-xs text-gray-400" x-text="item.quantity + ' x ' + fmt.money(item.price_per_unit)"></div>
+                                        </div>
+                                    </div>
+                                </template>
+                                <template x-if="selectedOrder.items?.fee_lines?.length">
+                                    <div class="space-y-2">
+                                        <p class="text-xs font-bold text-gray-500 uppercase tracking-wide">Дополнительно</p>
+                                        <template x-for="(fl, fi) in selectedOrder.items.fee_lines" :key="'fee-' + fi">
+                                            <div class="flex items-center justify-between bg-amber-50/80 border border-amber-100 rounded-xl px-4 py-2.5">
+                                                <span class="text-sm font-medium text-amber-900" x-text="fl.name"></span>
+                                                <span class="font-bold text-amber-800" x-text="fmt.money(fl.item_total)"></span>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </template>
+                                <div class="flex justify-between items-center pt-3 border-t border-gray-200">
+                                    <span class="font-semibold text-gray-600">Итого:</span>
+                                    <span class="text-xl font-bold text-brand-600" x-text="fmt.money(selectedOrder?.total_price)"></span>
+                                </div>
+                                <div x-show="selectedOrder?.delivery_address" class="text-xs text-gray-600 bg-gray-50 rounded-lg px-3 py-2 border border-gray-100">
+                                    <span class="font-semibold text-gray-500">Адрес:</span>
+                                    <span x-text="selectedOrder?.delivery_address"></span>
+                                </div>
+                                <button type="button"
+                                    x-show="selectedOrder?.status === 'confirmed' || selectedOrder?.iiko_last_error"
+                                    @click="confirmSendToIiko()"
+                                    class="w-full mt-2 py-3.5 rounded-xl text-white font-bold text-sm tracking-wide bg-emerald-600 hover:bg-emerald-700 shadow-sm shadow-emerald-600/20 transition">
+                                    <span x-text="selectedOrder?.iiko_last_error ? 'Повторить отправку в iiko' : 'Подтвердить и печать в iiko'"></span>
+                                </button>
+                                <div x-show="selectedOrder?.items?.order_meta?.iiko_last_send && selectedOrder?.status === 'sent_to_iiko'"
+                                    class="mt-2 rounded-xl border border-emerald-200 bg-emerald-50/90 px-3 py-2 text-xs text-emerald-900">
+                                    <p class="font-semibold">Заказ принят iiko Cloud</p>
+                                    <p class="mt-1 text-emerald-800/90">В iiko ищите по номеру заказа <span class="font-mono font-bold" x-text="'#' + (selectedOrder.items.order_meta.iiko_last_send.external_number || selectedOrder.id)"></span> — это тот же номер, что видит клиент.</p>
+                                    <details class="mt-2 text-[11px] text-emerald-900/90" x-show="selectedOrder.items.order_meta.iiko_last_send.correlation_id">
+                                        <summary class="cursor-pointer font-semibold">Номер для поиска в iiko / у поддержки</summary>
+                                        <p class="mt-1 font-mono break-all opacity-90" x-text="selectedOrder.items.order_meta.iiko_last_send.correlation_id"></p>
+                                    </details>
+                                    <p class="text-[11px] text-emerald-800/80 mt-1">В iiko заказы из RestoMind создаются через API доставки: их видно в очереди доставок/самовывоза для той терминальной группы, что задана в настройках сервера, а не обязательно в той же ленте, что розничные чеки на кассе — уточните у администратора iiko, где смотреть внешние заказы.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+                    </div><!-- /scrollable body -->
+                    <div class="border-t border-gray-100 bg-gray-50/80 px-6 py-3 flex items-center justify-between gap-3 shrink-0">
+                        <button type="button"
+                            @click="confirmAndDeleteOrdersFromModal()"
+                            class="text-xs font-semibold text-red-600 hover:text-red-700 hover:underline transition"
+                            title="Удалить заказ из базы (потребует подтверждения)">
+                            Удалить заказ…
+                        </button>
+                        <button type="button" @click="showOrderModal = false; orderCompositionOpen = false"
+                            class="py-2 px-4 rounded-lg text-sm font-semibold text-gray-700 hover:bg-gray-100 transition">
+                            Закрыть
+                        </button>
+                    </div>
+                </div>
+            </template>
+        </div>
+
+        <!-- Ручной черновик заказа (тест) -->
+        <div x-show="showManualOrderModal" x-cloak>
+            <div class="ds-modal-backdrop" @click="closeManualOrderModal()" role="presentation" aria-hidden="true"></div>
+            <div class="ds-modal-panel !max-w-md p-6 fade-in border border-gray-100" @click.stop role="dialog" aria-modal="true" aria-labelledby="manual-order-modal-title">
+                <div class="flex items-start justify-between gap-3 mb-4">
+                    <div>
+                        <h3 id="manual-order-modal-title" class="text-lg font-bold text-gray-900">Новый заказ (тест)</h3>
+                        <p class="text-xs text-gray-500 mt-1">Создаётся черновик с одной позицией из меню (если список позиций пуст). Номер не должен иметь открытого черновика.</p>
+                    </div>
+                    <button type="button" @click="closeManualOrderModal()" class="text-gray-400 hover:text-gray-600 text-xl shrink-0 leading-none" aria-label="Закрыть окно нового тестового заказа">&times;</button>
+                </div>
+                <div class="space-y-3 text-sm">
+                    <div>
+                        <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Телефон</label>
+                        <input type="text" x-model="manualOrderForm.phone" placeholder="+77001234567"
+                            class="w-full rounded-lg border border-gray-200 px-3 py-2 font-mono text-sm focus:ring-2 focus:ring-brand-500">
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Тип</label>
+                        <select x-model="manualOrderForm.order_type" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm">
+                            <option value="pickup">Самовывоз</option>
+                            <option value="delivery">Доставка</option>
+                            <option value="hall">В зале</option>
+                        </select>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div>
+                            <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Оплата</label>
+                            <select x-model="manualOrderForm.payment_mode" class="w-full rounded-lg border border-gray-200 px-2 py-2 text-xs">
+                                <option value="single">Один способ</option>
+                                <option value="mixed">Смешанная</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Способ</label>
+                            <select x-model="manualOrderForm.payment_method" class="w-full rounded-lg border border-gray-200 px-2 py-2 text-xs">
+                                <option value="cash">Наличные</option>
+                                <option value="card">Карта</option>
+                                <option value="remote">Удалённо</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div x-show="manualOrderForm.payment_mode === 'mixed'" class="grid grid-cols-3 gap-2">
+                        <div>
+                            <label class="text-[10px] font-bold text-gray-500 uppercase">Нал. ₸</label>
+                            <input type="number" min="0" step="1" x-model.number="manualOrderForm.split_cash" class="w-full rounded border px-1 py-1 text-xs">
+                        </div>
+                        <div>
+                            <label class="text-[10px] font-bold text-gray-500 uppercase">Карт. ₸</label>
+                            <input type="number" min="0" step="1" x-model.number="manualOrderForm.split_card" class="w-full rounded border px-1 py-1 text-xs">
+                        </div>
+                        <div>
+                            <label class="text-[10px] font-bold text-gray-500 uppercase">Удал. ₸</label>
+                            <input type="number" min="0" step="1" x-model.number="manualOrderForm.split_remote" class="w-full rounded border px-1 py-1 text-xs">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Адрес доставки</label>
+                        <input type="text" x-model="manualOrderForm.delivery_address" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Время самовывоза (заметка)</label>
+                        <input type="text" x-model="manualOrderForm.pickup_time_note" class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm">
+                    </div>
+                    <p x-show="manualOrderError" class="text-xs text-red-600 whitespace-pre-wrap" x-text="manualOrderError"></p>
+                    <button type="button" @click="submitManualOrder()" :disabled="manualOrderLoading"
+                        class="w-full py-3 rounded-xl bg-brand-600 text-white text-sm font-bold hover:bg-brand-700 disabled:opacity-50 flex items-center justify-center gap-2">
+                        <span x-show="manualOrderLoading" class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                        <span x-text="manualOrderLoading ? 'Создаём…' : 'Создать черновик'"></span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Модалка деталей бронирования -->
+        <div x-show="showBookingModal && selectedBooking" x-cloak>
+            <div class="ds-modal-backdrop" @click="closeBookingModal()" role="presentation" aria-hidden="true"></div>
+            <template x-if="selectedBooking">
+                <div class="ds-modal-panel max-h-[90vh] overflow-y-auto p-6 fade-in border border-gray-100" @click.stop role="dialog" aria-modal="true" aria-labelledby="booking-modal-title">
+                    <div class="flex items-start justify-between gap-3 mb-5">
+                        <div>
+                            <h3 id="booking-modal-title" class="text-lg font-bold text-gray-900" x-text="'Бронирование #' + (selectedBooking.id ?? '')"></h3>
+                            <p class="text-xs text-gray-400 mt-0.5">Столик · резервация</p>
+                        </div>
+                        <button type="button" @click="closeBookingModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none shrink-0" aria-label="Закрыть окно бронирования">&times;</button>
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 block">Статус</label>
+                        <select
+                            class="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                            x-model="selectedBooking.status"
+                            @change="scheduleBookingFieldPatch('status')">
+                            <option value="draft">Черновик</option>
+                            <option value="pending">Ожидает</option>
+                            <option value="confirmed">Подтверждён</option>
+                            <option value="cancelled">Отменён</option>
+                        </select>
+                    </div>
+
+                    <div class="rounded-2xl bg-gradient-to-br from-emerald-50 to-teal-50/80 border border-emerald-100/80 px-4 py-4 mb-4">
+                        <p class="text-[10px] font-semibold uppercase tracking-wider text-emerald-700/80 mb-1">Дата и время</p>
+                        <p class="text-lg font-bold text-gray-900" x-text="fmt.bookingDate(selectedBooking.date) + ' в ' + (selectedBooking.time?.slice(0, 5) || '—')"></p>
+                        <p class="text-sm text-gray-600 mt-2">
+                            <span class="font-semibold text-gray-800" x-text="selectedBooking.guests ?? '—'"></span>
+                            <span x-text="' ' + bookingGuestsWord(selectedBooking.guests)"></span>
+                        </p>
+                    </div>
+
+                    <div class="mb-4 rounded-xl border border-violet-100 bg-violet-50/30 px-4 py-3">
+                        <label class="text-xs font-semibold text-violet-900/80 uppercase tracking-wide mb-2 block">Зал</label>
+                        <p class="text-[11px] text-violet-700/80 mb-2">VIP — один стол на слот (дата и время); при занятости сервер не даст сохранить.</p>
+                        <select
+                            class="w-full rounded-xl border border-violet-200/80 bg-white px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                            x-model="selectedBooking.hall"
+                            @change="scheduleBookingFieldPatch('hall')">
+                            <option value="hall_1">Зал 1</option>
+                            <option value="hall_2">Зал 2</option>
+                            <option value="vip">VIP зал</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-4 rounded-xl bg-gray-50 border border-gray-100 px-4 py-3 text-sm space-y-2">
+                        <p class="text-xs text-gray-500 font-medium uppercase tracking-wide">Клиент (WhatsApp)</p>
+                        <div class="flex items-center justify-between gap-2 flex-wrap">
+                            <p class="font-mono text-gray-900 break-all min-w-0" x-text="selectedBooking.user_phone || '—'"></p>
+                            <button type="button" x-show="selectedBooking.user_phone"
+                                @click="copyBookingPhone()"
+                                class="shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg bg-white text-brand-700 hover:bg-brand-50 border border-brand-200 shadow-sm">
+                                Копировать
+                            </button>
+                        </div>
+                        <p class="text-gray-700" x-show="selectedBooking.user_name" x-text="selectedBooking.user_name"></p>
+                        <p class="text-[11px] text-gray-400" x-show="selectedBooking.user_id">user_id: <span class="font-mono tabular-nums" x-text="selectedBooking.user_id"></span></p>
+                    </div>
+
+                    <div class="mb-4 rounded-xl border border-amber-100 bg-amber-50/50 px-4 py-3" x-show="selectedBooking.comment">
+                        <p class="text-xs font-semibold text-amber-800/90 mb-1">Пожелания и комментарий</p>
+                        <p class="text-sm text-gray-800 whitespace-pre-line" x-text="selectedBooking.comment"></p>
+                    </div>
+                    <div x-show="!selectedBooking.comment" class="mb-4 text-sm text-gray-400 italic">Комментарий к брони не указан</div>
+
+                    <div class="rounded-xl bg-slate-50 border border-slate-100 px-4 py-3 text-xs text-slate-600">
+                        <span class="text-slate-400">Запись в системе:</span>
+                        <span class="tabular-nums" x-text="selectedBooking.created_at ? (fmt.date(selectedBooking.created_at) + ', ' + fmt.time(selectedBooking.created_at)) : '—'"></span>
+                    </div>
+
+                    <div class="flex flex-col-reverse sm:flex-row gap-3 mt-6">
+                        <button type="button" @click="closeBookingModal()"
+                            class="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 font-semibold text-sm hover:bg-gray-50 transition">
+                            Закрыть
+                        </button>
+                        <button type="button" x-show="selectedBooking.user_phone" @click="goToChatFromBooking()"
+                            class="flex-1 py-3 rounded-xl bg-brand-600 text-white font-semibold text-sm hover:bg-brand-700 shadow-lg shadow-brand-600/20 transition">
+                            Открыть диалог
+                        </button>
+                    </div>
+                </div>
+            </template>
+        </div>

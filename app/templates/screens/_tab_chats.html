@@ -1,0 +1,278 @@
+            <!-- ========== ЖИВЫЕ ДИАЛОГИ: flex-1 min-h-0 внутри #admin-content-scroll — без calc, алерт сжимает область ========== -->
+            <div x-show="currentTab === 'chats'" x-cloak class="fade-in flex flex-1 min-h-0 flex-col overflow-hidden md:pt-0">
+                {% call chat_shell_layout() %}
+                    <!-- ЛЕВАЯ ПАНЕЛЬ: список (на мобилке — полный экран, пока не выбран чат) -->
+                    <div class="ds-chat-shell-list w-full max-w-none md:max-w-sm md:w-[340px] lg:w-[360px] flex-shrink-0 border-r border-gray-100 flex flex-col min-h-0 bg-white flex-1 md:flex-none"
+                        :class="activeChatPhone ? 'hidden md:flex' : 'flex'">
+                        <div class="p-4 border-b border-gray-50 shrink-0 space-y-3 md:p-4">
+                            <h2 class="text-lg font-semibold text-gray-900">Диалоги</h2>
+                            <div class="relative">
+                                <input type="text" x-model="chatSearch" placeholder="Поиск по номеру..." inputmode="tel" autocomplete="tel"
+                                    class="w-full bg-gray-50 border border-gray-200 text-sm rounded-lg pl-10 pr-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                                <svg class="w-5 h-5 text-gray-400 absolute left-3 top-2.5 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                                </svg>
+                            </div>
+                            {% call tabs_pills('w-full') %}
+                                <button type="button" @click="setChatTriageMode('active')"
+                                    class="min-h-[36px] rounded-lg text-[11px] font-semibold flex-1"
+                                    :class="chatTriageMode === 'active' ? 'ds-segmented-active' : ''">Активные</button>
+                                <button type="button" @click="setChatTriageMode('mine')"
+                                    class="min-h-[36px] rounded-lg text-[11px] font-semibold flex-1"
+                                    :class="chatTriageMode === 'mine' ? 'ds-segmented-active' : ''">На мне</button>
+                                <button type="button" @click="setChatTriageMode('closed')"
+                                    class="min-h-[36px] rounded-lg text-[11px] font-semibold flex-1"
+                                    :class="chatTriageMode === 'closed' ? 'ds-segmented-active' : ''">Закрытые</button>
+                            {% endcall %}
+                        </div>
+                        <div class="flex-1 min-h-0 overflow-y-auto" @scroll.passive="onChatListScroll($event)">
+                            <template x-for="chat in filteredChatList" :key="chat.phone">
+                                <button type="button" @click="selectChat(chat.phone)"
+                                    class="w-full text-left p-4 border-b border-gray-50 hover:bg-gray-50 transition-colors flex items-start gap-3"
+                                    :class="activeChatPhone === chat.phone ? 'bg-brand-50/90 hover:bg-brand-50/90 ring-1 ring-inset ring-brand-200/60' : ''">
+                                    <div class="w-10 h-10 rounded-full bg-brand-100 flex items-center justify-center text-brand-700 font-bold text-sm shrink-0"
+                                        x-text="chatInitials(chat)"></div>
+                                    <div class="flex-1 min-w-0">
+                                        <div class="flex justify-between items-center gap-2 mb-0.5">
+                                            <h4 class="text-sm font-semibold text-gray-900 truncate" x-text="chat.userName || chat.phone"></h4>
+                                            <span class="text-xs text-gray-400 shrink-0 tabular-nums" x-text="fmt.time(chat.lastAt)"></span>
+                                        </div>
+                                        <p class="text-xs text-gray-500 font-mono truncate opacity-80" x-text="chat.phone"></p>
+                                        <p class="text-xs text-gray-500 truncate mt-0.5" x-text="chat.lastMessage || 'Нет сообщений'"></p>
+                                        <div class="flex items-center gap-2 mt-1.5">
+                                            <span class="text-[10px] px-2 py-0.5 rounded-md font-medium"
+                                                :class="chat.state === 'human_mode' ? 'bg-orange-100 text-orange-700' : chat.state === 'confirming_order' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-50 text-emerald-700'"
+                                                x-text="chat.state === 'human_mode' ? 'Оператор' : chat.state === 'confirming_order' ? 'Подтверждение' : 'ИИ'"></span>
+                                        </div>
+                                    </div>
+                                    <div x-show="chat.unread" class="w-2 h-2 bg-brand-500 rounded-full mt-2 shrink-0" title="Непрочитано"></div>
+                    </button>
+                            </template>
+                            <div x-show="filteredChatList.length === 0" class="text-center py-14 px-4 text-gray-500 text-sm space-y-3">
+                                <div class="mx-auto w-14 h-14 rounded-2xl bg-gray-100 flex items-center justify-center text-gray-300" aria-hidden="true">
+                                    <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+                                </div>
+                                <p class="font-semibold text-gray-800">Диалоги появятся здесь</p>
+                                <p class="text-xs text-gray-500 max-w-xs mx-auto">Когда клиенты напишут боту в WhatsApp, переписки отобразятся в этом списке. Снизу можно открыть чат по номеру.</p>
+                            </div>
+                            <div class="py-4 px-4" x-show="chatListLoading" x-cloak>
+                                <div class="h-10 rounded-xl bg-slate-100 animate-pulse"></div>
+                            </div>
+                            <div class="py-3 px-4" x-show="!chatListLoading && chatListHasMore && !chatSearch.trim()" x-cloak>
+                                <button type="button" @click="loadMoreChats()"
+                                    class="w-full min-h-[44px] rounded-xl bg-white ring-1 ring-slate-200/70 hover:ring-slate-300 text-slate-700 text-sm font-semibold transition">
+                                    Показать ещё
+                                </button>
+                            </div>
+                        </div>
+                        <div class="p-3 border-t border-gray-100 shrink-0 bg-gray-50/50 rm-mobile-safe-bottom">
+                            <div class="flex gap-2">
+                                <input x-model="chatPhone" type="text" placeholder="Номер как в WhatsApp (+7…)" inputmode="tel" autocomplete="tel"
+                                    class="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+                                    @keydown.enter="selectChat(chatPhone)">
+                                <button type="button" @click="selectChat(chatPhone)"
+                                    class="px-3 py-2 bg-brand-600 text-white rounded-lg text-xs font-semibold hover:bg-brand-700 shrink-0">
+                                    Открыть
+                                </button>
+                            </div>
+                        </div>
+                </div>
+
+                    <!-- Центр: переписка + кабина оператора (на мобилке — полный экран поверх списка) -->
+                    <div class="ds-chat-shell-main flex-1 flex flex-row min-h-0 min-w-0 bg-slate-50/40 relative"
+                        :class="activeChatPhone ? 'flex flex-1 min-h-0' : 'hidden md:flex md:flex-1'">
+                    <div class="flex-1 flex flex-col min-h-0 min-w-0">
+                        <div x-show="!activeChatPhone" class="flex-1 flex flex-col items-center justify-center text-gray-400 p-6 md:p-8 min-h-0 hidden md:flex">
+                            <svg class="w-16 h-16 mb-4 text-gray-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+                            </svg>
+                            <p class="text-sm font-medium text-gray-600">Выберите диалог слева</p>
+                            <p class="text-xs text-gray-500 mt-1 text-center max-w-sm">Нет переписок? Напишите боту в WhatsApp с телефона клиента — и откройте чат по номеру внизу списка.</p>
+                            <button type="button" @click="navigateToTab('orders')"
+                                class="mt-4 min-h-[44px] px-4 py-2 rounded-xl text-xs font-semibold bg-white text-brand-700 ring-1 ring-brand-200 hover:bg-brand-50">Посмотреть заказы</button>
+                            <p class="text-xs text-gray-400 mt-3 text-center max-w-sm"><strong class="text-gray-500">Ctrl+K</strong> — быстрый поиск по заказам и чатам.</p>
+                            <ul class="mt-4 text-left text-xs text-gray-500 space-y-1 max-w-sm border border-dashed border-gray-200 rounded-xl px-4 py-3 bg-gray-50/80">
+                                <li><kbd class="font-mono bg-white px-1 rounded border">Enter</kbd> — отправить сообщение</li>
+                                <li><kbd class="font-mono bg-white px-1 rounded border">Shift+Enter</kbd> — новая строка</li>
+                                <li><kbd class="font-mono bg-white px-1 rounded border">Ctrl+K</kbd> — глобальный поиск</li>
+                            </ul>
+                        </div>
+
+                        <template x-if="activeChatPhone">
+                            <div class="flex flex-col flex-1 min-h-0 h-full">
+                                <!-- Шапка: фиксированные строки — кнопки не наезжают друг на друга и на ленту -->
+                                <div class="shrink-0 border-b border-gray-100 bg-white z-10 shadow-sm shadow-slate-200/60">
+                                    <div class="flex items-center gap-2 px-3 pt-2.5 pb-2 md:px-6 md:pt-3 md:pb-2 min-w-0">
+                                        <button type="button" class="md:hidden min-h-[48px] min-w-[48px] shrink-0 inline-flex items-center justify-center rounded-xl border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 touch-manipulation"
+                                            @click="backFromMobileChat()" aria-label="К списку диалогов">
+                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                                        </button>
+                                        <button type="button" class="lg:hidden min-h-[48px] min-w-[48px] shrink-0 inline-flex items-center justify-center rounded-xl border border-brand-200 bg-brand-50 text-brand-700 hover:bg-brand-100 touch-manipulation"
+                                            @click="chatMobileInfoOpen = true" aria-label="О клиенте" title="О клиенте">
+                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                                        </button>
+                                        <div class="w-10 h-10 rounded-full bg-brand-100 flex items-center justify-center text-brand-700 font-bold text-sm shrink-0"
+                                            x-text="activeChatInitials()"></div>
+                                        <div class="min-w-0 flex-1">
+                                            <h3 class="font-semibold text-gray-900 truncate text-sm md:text-base" x-text="activeChatTitle()"></h3>
+                                            <p class="text-xs text-gray-400 font-mono truncate" x-text="activeChatPhone"></p>
+                                        </div>
+                                    </div>
+                                    <!-- Статус + действия: одна сетка, фиксированные отступы — не «плывёт» при human_mode -->
+                                    <div class="border-t border-gray-100 px-3 py-2 md:px-6">
+                                        <div class="flex flex-col gap-2 min-[520px]:flex-row min-[520px]:items-center min-[520px]:justify-between min-w-0">
+                                            <div class="flex flex-wrap items-center gap-1.5 min-w-0 min-h-[1.5rem]">
+                                                <span x-show="activeChatState !== 'human_mode' && activeChatState !== 'confirming_order'"
+                                                    class="inline-flex px-2 py-0.5 bg-emerald-50 text-emerald-700 text-[11px] font-medium rounded border border-emerald-100 shrink-0">
+                                                    ИИ отвечает
+                                                </span>
+                                                <span x-show="activeChatState === 'confirming_order'"
+                                                    class="inline-flex px-2 py-0.5 bg-amber-50 text-amber-800 text-[11px] font-medium rounded border border-amber-100 shrink-0">
+                                                    Подтверждение заказа
+                                                </span>
+                                                <span x-show="activeChatState === 'human_mode'"
+                                                    class="inline-flex px-2 py-0.5 bg-orange-50 text-orange-800 text-[11px] font-medium rounded border border-orange-100 shrink-0">
+                                                    Вы ведёте диалог
+                                                </span>
+                                            </div>
+                                            <div class="rm-chat-actions flex flex-wrap items-center gap-1.5 shrink-0 min-[520px]:justify-end">
+                                                <button type="button" x-show="customerSummary.user_exists" @click="toggleAiPaused()"
+                                                    class="px-2.5 py-1.5 text-xs font-medium rounded-lg border bg-white transition touch-manipulation active:opacity-90"
+                                                    :class="customerSummary.ai_paused
+                                                        ? 'border-slate-300 text-slate-800 hover:bg-slate-50'
+                                                        : 'border-violet-200 text-violet-800 hover:bg-violet-50/80'"
+                                                    x-text="customerSummary.ai_paused ? 'Включить ИИ' : 'Заблокировать ИИ'"></button>
+                                                <button type="button" @click="toggleTakeover()"
+                                                    :title="chatIsBotActive()
+                                                        ? 'Перехват: бот не отвечает, пишете вы.'
+                                                        : 'Вернуть бота: снова отвечает ИИ.'"
+                                                    class="px-2.5 py-1.5 text-xs font-medium rounded-lg border bg-white transition touch-manipulation active:opacity-90"
+                                                    :class="chatIsBotActive()
+                                                        ? 'border-amber-200 text-amber-800 hover:bg-amber-50/90'
+                                                        : 'border-emerald-200 text-emerald-800 hover:bg-emerald-50/90'"
+                                                    x-text="chatIsBotActive() ? 'Перехватить' : 'Вернуть ИИ'"></button>
+                                                <button type="button" @click="postChatTriageAction('assign-me')"
+                                                    class="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-sky-200 text-sky-800 bg-white hover:bg-sky-50 transition">На мне</button>
+                                                <button type="button" @click="snoozeActiveChat(30)"
+                                                    class="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-violet-200 text-violet-800 bg-white hover:bg-violet-50 transition">Snooze 30</button>
+                                                <button type="button" x-show="chatTriageMode !== 'closed'" @click="postChatTriageAction('close')"
+                                                    class="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-slate-200 text-slate-800 bg-white hover:bg-slate-50 transition">Закрыть</button>
+                                                <button type="button" x-show="chatTriageMode === 'closed'" @click="postChatTriageAction('reopen')"
+                                                    class="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-emerald-200 text-emerald-800 bg-white hover:bg-emerald-50 transition">Вернуть</button>
+                                            </div>
+                                        </div>
+                                        <p class="mt-1.5 text-[10px] text-gray-400 leading-tight min-[520px]:text-right"
+                                            x-show="activeChatState === 'human_mode'">
+                                            Завершите перехват кнопкой «Вернуть ИИ», чтобы снова отвечал бот.
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div class="flex-1 min-h-0 overflow-y-auto p-4 md:p-6 space-y-4" id="admin-chat-messages" @scroll.passive="onChatMessagesScroll($event)">
+                                    <div x-show="chatMessagesLoadingOlder" x-cloak class="flex justify-center py-2">
+                                        <div class="h-8 w-36 rounded-full bg-slate-100 animate-pulse"></div>
+                                    </div>
+                                    <div x-show="!chatMessagesLoadingOlder && chatMessagesHasMore" x-cloak class="flex justify-center pb-2">
+                                        <button type="button" @click="loadOlderChatMessages()"
+                                            class="min-h-[44px] px-4 rounded-full bg-white ring-1 ring-slate-200/70 hover:ring-slate-300 text-slate-700 text-xs font-bold uppercase tracking-wide transition">
+                                            Загрузить выше
+                                        </button>
+                                    </div>
+                                    <template x-for="(msg, idx) in chatMessages" :key="msg.id != null ? 'm-' + msg.id : 'i-' + idx">
+                                        <div class="flex w-full msg-new"
+                                            :class="msg.role === 'user' ? 'justify-start' : 'justify-end'">
+                                            <div x-show="msg.role === 'user'"
+                                                class="bg-white border border-gray-100 text-gray-800 px-4 py-3 rounded-2xl rounded-tl-md max-w-[85%] sm:max-w-[70%] shadow-sm">
+                                                <p class="text-sm whitespace-pre-line" x-text="msg.content"></p>
+                                                <span class="text-[10px] text-gray-400 mt-1 block tabular-nums" x-text="fmt.time(msg.created_at)"></span>
+                                            </div>
+                                            <div x-show="msg.role !== 'user'"
+                                                class="px-4 py-3 rounded-2xl rounded-tr-md max-w-[85%] sm:max-w-[70%] shadow-md"
+                                                :class="msg.role === 'operator' ? 'bg-amber-500 text-white shadow-amber-500/25' : 'bg-brand-600 text-white shadow-brand-600/25'">
+                                                <div class="flex items-center gap-1.5 mb-1">
+                                                    <span class="text-[10px] font-bold uppercase tracking-wide opacity-90"
+                                                        x-text="msg.role === 'operator' ? 'Менеджер' : (msg.role === 'assistant' ? 'ИИ-агент' : 'Система')"></span>
+                                                </div>
+                                                <p x-show="msg.role === 'assistant' && (msg.meta?.monologue || msg.meta?.intent)"
+                                                    class="text-[10px] leading-snug opacity-90 border-l-2 border-white/30 pl-2 mb-2 text-white/85 italic"
+                                                    x-text="msg.meta?.monologue || ('Интент: ' + (msg.meta?.intent || ''))"></p>
+                                                <p class="text-sm whitespace-pre-line" x-text="msg.content"></p>
+                                                <div class="flex justify-end items-center gap-2 mt-1 flex-wrap">
+                                                    <button type="button"
+                                                        x-show="String(msg.delivery_status || '').toLowerCase() === 'failed' && (msg.role === 'operator' || msg.role === 'assistant' || msg.role === 'system')"
+                                                        @click="resendFailedChatMessage(msg)"
+                                                        class="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-md bg-white/20 hover:bg-white/30 border border-white/30">
+                                                        Переотправить
+                                                    </button>
+                                                    <span class="text-[10px] opacity-80 tabular-nums" x-text="fmt.time(msg.created_at)"></span>
+                                                    <span x-show="chatDeliveryBadge(msg)" x-cloak
+                                                        class="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border cursor-default shrink-0"
+                                                        :class="chatDeliveryBadge(msg)?.cls || 'bg-white/15 text-white border-white/20'"
+                                                        :title="chatDeliveryBadge(msg)?.label || ''">
+                                                        <span class="tabular-nums" x-text="chatDeliveryBadge(msg)?.icon || ''"></span>
+                                                        <span x-text="chatDeliveryBadge(msg)?.label || ''"></span>
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </template>
+                                    <div x-show="chatMessages.length === 0" class="flex flex-col items-center justify-center py-16 px-4 text-gray-500 text-center">
+                                        <p class="text-sm font-semibold text-gray-800">Сообщений пока нет</p>
+                                        <p class="text-xs mt-2 max-w-sm">Попросите гостя написать в WhatsApp ещё раз или отправьте первое сообщение сами — история появится здесь.</p>
+                                        <button type="button" x-show="activeChatPhone" @click="navigateToTab('orders')"
+                                            class="mt-4 min-h-[44px] px-4 py-2 rounded-xl text-xs font-semibold bg-brand-600 text-white hover:bg-brand-700">Открыть заказы</button>
+                                    </div>
+                                </div>
+
+                                <div class="p-3 md:p-4 bg-white border-t border-gray-100 shrink-0 rm-mobile-safe-bottom">
+                                    <div class="relative">
+                                        <textarea x-model="operatorInput"
+                                            @keydown.enter="handleOperatorEnter($event)"
+                                            :disabled="chatIsBotActive()"
+                                            :placeholder="chatIsBotActive() ? 'Нажмите «Остановить ИИ», чтобы ответить клиенту…' : 'Сообщение клиенту (Enter — отправить, Shift+Enter — новая строка)…'"
+                                            class="w-full bg-gray-50 border border-gray-200 rounded-xl pl-4 pr-14 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 resize-none min-h-[5.5rem] max-h-40 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
+                                            rows="2"></textarea>
+                                        <button type="button" @click="sendOperatorMessage()"
+                                            :disabled="chatIsBotActive() || !operatorInput.trim()"
+                                            class="absolute right-3 bottom-3 min-h-[44px] min-w-[44px] inline-flex items-center justify-center p-2.5 bg-brand-600 text-white rounded-xl hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-sm shadow-brand-600/20 touch-manipulation active:opacity-90"
+                                            aria-label="Отправить сообщение клиенту">
+                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path>
+                                            </svg>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+
+                    <!-- Кабина оператора: контекст клиента, быстрые ответы, заметка -->
+                    <div x-show="activeChatPhone" x-cloak
+                        class="ds-chat-shell-detail hidden lg:flex w-72 xl:w-80 shrink-0 border-l border-gray-200 bg-gradient-to-b from-gray-50/95 to-slate-50/90 flex-col min-h-0 overflow-y-auto">
+                        <div class="p-4 border-b border-gray-100/80 shrink-0">
+                            <h3 class="text-[11px] font-bold text-gray-400 uppercase tracking-wider">О клиенте</h3>
+                        </div>
+                        {% set is_mobile = false %}
+                        {% include "admin/_customer_panel_inner.html" %}
+                    </div>
+
+                    <!-- Та же «кабина», но выезжающая панель на экранах < lg (данные те же, что и в колонке справа) -->
+                    <div x-show="activeChatPhone && chatMobileInfoOpen" x-cloak x-transition.opacity
+                        class="fixed inset-0 z-[60] lg:hidden flex justify-end"
+                        @keydown.escape.window="chatMobileInfoOpen = false">
+                        <div class="absolute inset-0 bg-black/40" @click="chatMobileInfoOpen = false" aria-hidden="true"></div>
+                        <div class="relative h-full w-full max-w-sm bg-gradient-to-b from-gray-50/98 to-slate-50/95 border-l border-gray-200 shadow-2xl flex flex-col min-h-0 overflow-y-auto overscroll-contain"
+                            @click.stop role="dialog" aria-modal="true" aria-labelledby="chat-mobile-info-title">
+                            <div class="sticky top-0 z-10 flex items-center justify-between gap-2 px-4 py-3 border-b border-gray-200 bg-white/95 backdrop-blur-sm shrink-0">
+                                <h3 id="chat-mobile-info-title" class="text-sm font-bold text-gray-800">О клиенте</h3>
+                                <button type="button" class="min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded-xl border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100"
+                                    @click="chatMobileInfoOpen = false" aria-label="Закрыть панель информации о клиенте">&times;</button>
+                            </div>
+                            {% set is_mobile = true %}
+                            {% include "admin/_customer_panel_inner.html" %}
+                        </div>
+                    </div>
+                    </div>
+                {% endcall %}
+            </div>
+

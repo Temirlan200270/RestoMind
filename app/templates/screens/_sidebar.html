@@ -1,0 +1,60 @@
+    <div x-show="sidebarOpen" x-cloak x-transition.opacity class="fixed inset-0 bg-black/40 z-40 md:hidden" @click="sidebarOpen = false" aria-hidden="true"></div>
+
+<!-- Боковое меню -->
+    <aside
+        class="w-64 bg-brand-900 text-white flex flex-col shrink-0 h-[100dvh] min-h-0 overflow-hidden border-r border-white/10 z-50 transition-transform duration-300 ease-out
+            fixed md:relative inset-y-0 left-0 max-w-[85vw]
+            md:translate-x-0"
+        :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'">
+        <div class="px-6 py-5 border-b border-white/10 flex items-center justify-between gap-2">
+            <div class="flex items-center gap-3 min-w-0">
+                <div class="w-10 h-10 rounded-xl bg-brand-500 flex items-center justify-center text-xl font-bold shrink-0">R</div>
+                <div class="min-w-0">
+                    <div class="font-bold text-lg leading-tight truncate" x-text="orgProfile?.name || 'RestoMind'"></div>
+                    <div class="text-xs text-blue-300 opacity-80">Панель управления</div>
+                </div>
+            </div>
+            <button type="button" class="md:hidden p-2 rounded-lg text-blue-200 hover:bg-white/10 shrink-0" @click="sidebarOpen = false" aria-label="Закрыть меню">&times;</button>
+        </div>
+
+        <nav class="admin-sidebar-scroll flex-1 min-h-0 overflow-y-auto px-3 py-4 space-y-4">
+            <template x-for="sec in navSections" :key="sec.id">
+                <div>
+                    <div class="px-2 mb-1.5 text-[10px] font-bold uppercase tracking-wider text-blue-300/80" x-text="sec.title"></div>
+                    <div class="space-y-1">
+                        <template x-for="item in navItems.filter(i => i.section === sec.id)" :key="item.id">
+                            <button
+                                @click="navigateToTab(item.id)"
+                                :class="currentTab === item.id
+                                    ? 'bg-white/15 text-white shadow-lg'
+                                    : 'text-blue-200 hover:bg-white/10 hover:text-white'"
+                                class="w-full flex items-center gap-3 px-4 min-h-[44px] py-3 rounded-xl transition-all duration-200 text-left relative"
+                            >
+                                <span x-html="item.icon" class="w-6 flex items-center justify-center flex-shrink-0 opacity-95"></span>
+                                <span x-text="item.label" class="font-medium text-sm"></span>
+                                <span x-show="item.id === 'chats' && unreadChats > 0"
+                                    class="absolute right-3 top-2 min-w-[1.25rem] h-5 px-1 bg-red-500 rounded-full text-[10px] font-bold flex items-center justify-center"
+                                    x-text="unreadChats"></span>
+                                <span x-show="item.id === 'orders' && ordersIikoErrorCount() > 0"
+                                    class="absolute right-3 top-2 min-w-[1.25rem] h-5 px-1 bg-rose-600 rounded-full text-[10px] font-bold flex items-center justify-center"
+                                    x-text="ordersIikoErrorCount()"></span>
+                                <span x-show="item.id === 'operator_queue' && (dashStats.failed_tasks_open || 0) > 0"
+                                    class="absolute right-3 top-2 min-w-[1.25rem] h-5 px-1 bg-red-500 rounded-full text-[10px] font-bold flex items-center justify-center"
+                                    x-text="dashStats.failed_tasks_open"></span>
+                                <span x-show="item.id === 'settings' && integrationErrorBadge() > 0"
+                                    class="absolute right-3 top-2 min-w-[1.25rem] h-5 px-1 bg-amber-500 rounded-full text-[10px] font-bold flex items-center justify-center"
+                                    x-text="integrationErrorBadge()"></span>
+                            </button>
+                        </template>
+                    </div>
+                </div>
+            </template>
+        </nav>
+
+        <div class="px-4 py-4 border-t border-white/10">
+            <div class="flex items-center gap-2 text-xs text-blue-300">
+                <span class="w-2 h-2 rounded-full shrink-0 ws-dot" :class="wsIndicatorClass()"></span>
+                <span x-text="wsIndicatorText()" class="leading-tight"></span>
+            </div>
+        </div>
+    </aside>

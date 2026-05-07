@@ -1,0 +1,209 @@
+            <!-- ========== ПОДКЛЮЧЕНИЯ ========== -->
+            <template x-if="currentTab === 'settings' && settingsTab === 'connections'">
+            <div class="fade-in w-full max-w-6xl mx-auto lg:flex lg:gap-8 lg:items-start">
+                {{ settings_tabs() }}
+                <div class="flex-1 min-w-0 space-y-6">
+                <div class="rm-card-surface p-6 mb-6">
+                    <h3 class="font-semibold text-lg text-gray-900 mb-1">Подключения</h3>
+                    <p class="text-sm text-gray-500 mb-6">Подключите кассу и WhatsApp. Синхронизация меню и наличия выполняется автоматически.</p>
+
+                    <div class="rounded-xl border border-slate-200 bg-slate-50/50 p-4 mb-6">
+                        <label class="flex items-start gap-3 cursor-pointer select-none">
+                            <input type="checkbox" class="mt-1 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                                :checked="integrationStatus.prepayment_enforced !== false"
+                                :disabled="orgPrepaymentEnforcedSaving"
+                                @change="onPrepaymentEnforcedToggle($event)">
+                            <div>
+                                <div class="text-sm font-semibold text-gray-900">Автоматическая предоплата по порогу суммы</div>
+                                <p class="text-xs text-gray-600 mt-1 leading-relaxed">Если выключено, бот не удерживает подтверждение заказа из‑за крупной суммы: оператор отмечает оплату вручную в карточке заказа (или приходит вебхук оплаты).</p>
+                            </div>
+                        </label>
+                    </div>
+
+                    <div class="rounded-xl border border-slate-200 bg-white p-4 mb-6">
+                        <label class="flex items-start gap-3 cursor-pointer select-none">
+                            <input type="checkbox" class="mt-1 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                                :checked="integrationStatus.auto_send_to_iiko_after_payment === true"
+                                :disabled="orgAutoIikoSaving"
+                                @change="onAutoSendIikoAfterPaymentToggle($event)">
+                            <div>
+                                <div class="text-sm font-semibold text-gray-900">Авто-печать на кухню после оплаты (iiko)</div>
+                                <p class="text-xs text-gray-600 mt-1 leading-relaxed">
+                                    При успешном вебхуке оплаты заказ автоматически подтверждается и отправляется в iiko (deliveries/create), без ручного шага «На кухню».
+                                    Уведомление в Telegram персоналу приходит так же, как при подтверждении заказа клиентом.
+                                </p>
+                            </div>
+                        </label>
+                    </div>
+
+                    <details class="hint-details rounded-xl border border-brand-100 bg-brand-50/40 p-4 mb-6" :open="!integrationStatus.iiko_configured">
+                        <summary class="cursor-pointer select-none list-none flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                                <h4 class="text-sm font-bold text-gray-900">iiko Cloud</h4>
+                                <p class="text-xs text-gray-600 mt-1" x-text="integrationStatus.iiko_configured ? 'Подключено. Откройте настройку, если меняете ключ или филиал.' : 'Подключите кассу, затем импортируйте меню.'"></p>
+                            </div>
+                            <span class="inline-flex min-h-[44px] items-center rounded-xl border border-brand-200 bg-white px-3 py-2 text-xs font-bold text-brand-800">
+                                Настроить
+                            </span>
+                        </summary>
+                        <div class="mt-4 border-t border-brand-100 pt-4">
+                        <p class="text-xs text-gray-600 mb-3">
+                            <strong class="text-gray-800">Два шага:</strong> сначала «Проверить» — ключ уходит на сервер только для проверки и
+                            <span class="font-semibold text-gray-800">не записывается в базу</span>.
+                            После появления списка филиалов нажмите «Сохранить и импортировать меню» — тогда ключ и организация сохраняются в БД этого заведения (и подтянется меню).
+                        </p>
+                        <div class="space-y-3 max-w-xl">
+                            <input type="password" autocomplete="off" x-model="iikoOnboardApiLogin" placeholder="Ключ iiko Cloud"
+                                class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm font-mono">
+                            <div class="flex flex-wrap gap-2">
+                                <button type="button" @click="iikoVerifyOnboard()" :disabled="iikoOnboardVerifyLoading"
+                                    class="px-4 py-2 rounded-xl bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 disabled:opacity-40">
+                                    <span x-show="!iikoOnboardVerifyLoading">Проверить (без сохранения)</span>
+                                    <span x-show="iikoOnboardVerifyLoading" x-cloak>Запрос…</span>
+                                </button>
+                            </div>
+                            <div x-show="iikoOnboardOrgs.length" x-cloak class="space-y-2">
+                                <label class="block text-[11px] font-semibold text-gray-500 uppercase">Филиал в iiko</label>
+                                <select x-model="iikoOnboardSelectedOrg" class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
+                                    <template x-for="o in iikoOnboardOrgs" :key="o.id">
+                                        <option :value="o.id" x-text="o.name + ' (' + o.id.slice(0,8) + '…)'"></option>
+                                    </template>
+                                </select>
+                                <input type="text" x-model="iikoOnboardTerminal" placeholder="ID терминальной группы (опционально)"
+                                    class="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs font-mono">
+                                <button type="button" @click="iikoCompleteOnboard()" :disabled="iikoOnboardSetupLoading"
+                                    class="px-4 py-2 rounded-xl bg-slate-800 text-white text-sm font-semibold hover:bg-slate-900 disabled:opacity-40">
+                                    <span x-show="!iikoOnboardSetupLoading">Сохранить и импортировать меню</span>
+                                    <span x-show="iikoOnboardSetupLoading" x-cloak>Импорт…</span>
+                                </button>
+                            </div>
+                            <p class="text-[10px] text-amber-800" x-show="integrationStatus.iiko_secrets_encrypt_ready === false">
+                                После шага «Сохранить и импортировать меню» ключ попадёт в БД. С шифрованием (APP_SECRETS_FERNET_KEY) — защищённо; без него — в открытом виде (как в старых инсталляциях). В поле ввода ключ снова не показываем — это нормально.
+                            </p>
+                            <p class="text-[10px] text-slate-600" x-show="integrationStatus.iiko_configured">
+                                iiko уже привязан к этому филиалу. Поле выше нужно только если меняете ключ или переподключаете другую организацию.
+                            </p>
+                        </div>
+                        </div>
+                    </details>
+
+                    <div class="space-y-5">
+                        <!-- iiko -->
+                        <div class="rm-card-surface p-6">
+                            <div class="flex items-start gap-3">
+                                <span class="mt-1.5 h-3 w-3 rounded-full shrink-0"
+                                    :class="integrationStoplistDotClass()"></span>
+                                <div class="flex-1 min-w-0">
+                                    <div class="font-medium text-gray-900">iiko Cloud</div>
+                                    <p class="text-sm text-gray-600 mt-1" x-text="integrationStoplistCaption()"></p>
+                                    <p class="text-xs text-red-600 mt-1 font-medium" x-show="integrationStatus.last_stoplist?.error && !integrationStatus.last_stoplist?.ok"
+                                        x-text="integrationStatus.last_stoplist?.error"></p>
+                                </div>
+                            </div>
+                            <div class="mt-3 flex flex-wrap items-center gap-2 pl-6">
+                                <span class="h-2 w-2 rounded-full shrink-0" :class="integrationStatus.iiko_configured ? 'bg-emerald-500' : 'bg-gray-300'"></span>
+                                <span class="text-xs text-gray-500" x-text="integrationStatus.iiko_configured ? 'Настроено для этого заведения' : 'Не настроено: подключите через мастер выше'"></span>
+                            </div>
+                            <div class="mt-2 pl-6 text-xs text-gray-500" x-show="integrationStatus.last_menu_sync?.at">
+                                Последняя синхронизация <strong>меню</strong>:
+                                <span x-text="integrationStatus.last_menu_sync?.ok ? 'успех' : 'ошибка'"></span>
+                                <span class="text-gray-400" x-text="' · ' + fmt.date(integrationStatus.last_menu_sync?.at)"></span>
+                            </div>
+                            <p class="text-xs text-red-600 mt-1 pl-6" x-show="integrationStatus.last_menu_sync?.error && !integrationStatus.last_menu_sync?.ok"
+                                x-text="integrationStatus.last_menu_sync?.error"></p>
+                        </div>
+
+                        <!-- WhatsApp -->
+                        <details class="hint-details rm-card-surface p-6">
+                            <summary class="cursor-pointer select-none list-none flex items-start gap-3">
+                                <span class="mt-1.5 h-3 w-3 rounded-full shrink-0"
+                                    :class="integrationStatus.whatsapp_configured ? 'bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.25)]' : 'bg-gray-300'"></span>
+                                <div class="min-w-0 flex-1">
+                                    <div class="flex flex-wrap items-center justify-between gap-2">
+                                        <div class="font-medium text-gray-900">WhatsApp (Meta)</div>
+                                        <span class="text-xs font-bold text-brand-700">Настроить</span>
+                                    </div>
+                                    <p class="text-sm text-gray-600 mt-1" x-text="integrationStatus.whatsapp_configured ? 'Токен и Phone Number ID заданы — исходящие сообщения включены.' : 'Задайте WHATSAPP_API_TOKEN и WHATSAPP_PHONE_NUMBER_ID для реальной отправки.'"></p>
+                                </div>
+                            </summary>
+                            <div class="mt-4 ml-6 rounded-xl border border-gray-200 bg-gray-50/50 p-4 text-sm text-gray-600">
+                                <p>Секреты WhatsApp задаются на сервере. Здесь проверьте callback URL и скопируйте его в кабинет Meta вместе с verify token.</p>
+                                <div class="mt-3 flex flex-wrap items-center gap-2">
+                                    <code class="flex-1 min-w-0 text-xs bg-white border border-gray-200 rounded-lg px-3 py-2 break-all" x-text="integrationStatus.webhook_url || 'URL появится после настройки публичного адреса сервера'"></code>
+                                    <button type="button" @click="copyWebhookUrl()" class="shrink-0 px-3 py-2 rounded-xl bg-brand-600 text-white text-xs font-semibold hover:bg-brand-700 min-h-[44px]">Копировать</button>
+                                </div>
+                                <p class="text-[10px] text-gray-400 mt-2" x-show="integrationStatus.whatsapp_verify_token_hint">Подсказка verify: <span class="font-mono" x-text="integrationStatus.whatsapp_verify_token_hint"></span></p>
+                            </div>
+                        </details>
+
+                        <!-- Telegram (оповещения персоналу) -->
+                        <details class="hint-details rm-card-surface p-6">
+                            <summary class="cursor-pointer select-none list-none flex items-start gap-3">
+                                <span class="mt-1.5 h-3 w-3 rounded-full shrink-0"
+                                    :class="integrationStatus.telegram_configured ? 'bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.25)]' : 'bg-gray-300'"></span>
+                                <div class="min-w-0 flex-1">
+                                    <div class="flex flex-wrap items-center justify-between gap-2">
+                                        <div class="font-medium text-gray-900">Telegram для команды</div>
+                                        <span class="text-xs font-bold text-brand-700">Настроить</span>
+                                    </div>
+                                    <p class="text-sm text-gray-600 mt-1" x-text="integrationStatus.telegram_configured ? 'Бот и чат для эскалаций настроены — SOS уходит персоналу.' : 'Укажите токен бота и чат в разделе «Профиль и логистика», чтобы получать эскалации.'"></p>
+                                </div>
+                            </summary>
+                            <div class="mt-4 ml-6 rounded-xl border border-gray-200 bg-gray-50/50 p-4 text-sm text-gray-600">
+                                <p>Токен бота и chat id хранятся в профиле ресторана. Откройте профиль, если нужно обновить канал уведомлений для команды.</p>
+                                <button type="button" @click="setSettingsTab('restaurant')" class="mt-3 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-800 hover:bg-gray-50 min-h-[44px]">
+                                    Открыть профиль
+                                </button>
+                            </div>
+                        </details>
+                    </div>
+
+                    <div class="mt-6 pt-6 border-t border-gray-100 flex flex-wrap gap-3 items-center">
+                        <button type="button" @click="syncIntegrationsNow()"
+                            :disabled="integrationSyncLoading || !integrationStatus.iiko_configured"
+                            class="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed shadow-sm shadow-brand-600/20">
+                            <span x-show="!integrationSyncLoading">Синхронизировать меню и стоп-листы сейчас</span>
+                            <span x-show="integrationSyncLoading" x-cloak>Синхронизация…</span>
+                        </button>
+                        <button type="button" @click="syncMenuOnlyFromEnv()"
+                            :disabled="integrationSyncLoading || !integrationStatus.iiko_configured"
+                            class="inline-flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold border border-gray-200 bg-white text-gray-800 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">
+                            Только меню (iiko → БД)
+                        </button>
+                        <details class="hint-details w-full mt-2 rounded-xl border border-gray-200/80 bg-gray-50/50 px-3 py-2">
+                            <summary class="cursor-pointer text-xs font-medium text-gray-600 select-none flex items-center gap-2">
+                                <svg class="w-3.5 h-3.5 text-gray-400 shrink-0 transition-transform duration-200 hint-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                                Чем отличаются кнопки синхронизации
+                            </summary>
+                            <p class="text-xs text-gray-500 mt-2 pl-5 border-l-2 border-gray-200 ml-0.5">Полная кнопка — меню + стоп-листы. «Только меню» — номенклатура и цены в <code class="bg-gray-100 px-1 rounded text-[10px]">menu_items</code> без запроса стоп-листов.</p>
+                        </details>
+                    </div>
+
+                    <div class="rm-card-nested p-4 mb-6">
+                        <h4 class="text-sm font-semibold text-gray-900 mb-1">Семантическое меню для ИИ</h4>
+                        <p class="text-xs text-gray-600 mb-3 leading-relaxed">Если на сервере включён <code class="text-[10px] bg-white px-1 rounded border border-gray-200">MENU_RAG_ENABLED</code>, после синхронизации каталога запустите индексацию эмбеддингов — иначе в промпте остаётся полный список позиций.</p>
+                        <button type="button" @click="reindexMenuEmbeddings()" :disabled="menuEmbeddingsReindexLoading"
+                            class="px-4 py-2.5 rounded-xl bg-slate-800 text-white text-sm font-semibold hover:bg-slate-900 disabled:opacity-40 min-h-[44px] rm-focusable">
+                            <span x-show="!menuEmbeddingsReindexLoading">Переиндексировать эмбеддинги меню</span>
+                            <span x-show="menuEmbeddingsReindexLoading" x-cloak>Индексация…</span>
+                        </button>
+                    </div>
+
+                    <div>
+                        <h4 class="text-sm font-semibold text-gray-900 mb-2">Журнал синхронизаций</h4>
+                        <div class="rounded-xl border border-gray-200 bg-white max-h-56 overflow-y-auto text-xs font-mono">
+                            <template x-for="(ev, ei) in integrationEvents" :key="ei">
+                                <div class="px-3 py-2 border-b border-gray-50 flex gap-2"
+                                    :class="ev.ok ? 'text-gray-700' : 'text-red-700 bg-red-50/50'">
+                                    <span class="text-gray-400 shrink-0" x-text="ev.created_at ? fmt.time(ev.created_at) : ''"></span>
+                                    <span class="flex-1 min-w-0 break-words" x-text="ev.message"></span>
+                                </div>
+                            </template>
+                            <p x-show="!integrationEvents.length" class="px-3 py-6 text-center text-gray-400">Событий пока нет — нажмите «Синхронизировать» или дождитесь фонового цикла стоп-листов</p>
+                        </div>
+                    </div>
+                </div>
+                </div>
+            </div>
+            </template>
+

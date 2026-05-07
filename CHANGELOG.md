@@ -8,7 +8,9 @@
 
 ### Добавлено
 
-- **Админка / UI (Phase U7):** опубликована спецификация дизайн-системы — [`docs/UI_DESIGN_SYSTEM.md`](docs/UI_DESIGN_SYSTEM.md) (принципы, токены `:root`, каталог макросов, IA, anti-patterns, гайд новой страницы, **врезки baseline-скринов** по разделам и настройкам, приёмка a11y + ссылка на Lighthouse); в [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) добавлен эпик **E-UI / Phases U1–U7**; в [`PARALLEL_AI_PLAN.md`](PARALLEL_AI_PLAN.md) — таблица **«Зоны UI»**; статусы U6/U7 в [`docs/UI_REDESIGN_PLAN.md`](docs/UI_REDESIGN_PLAN.md).
+- **P0 (стабильность/платформа):** `test_bot` переведён на 3 фазы (чтение → LLM без DB-сессии → запись); Telegram-уведомления переведены в fire-and-forget; экстренное закрытие ресторана (force-close) реализовано end-to-end (модель+миграция+API+UI); добавлен счётчик токенов (AiUsageLog + `_usage` в ответе ИИ + UI «Токены сегодня»); на мобильном дашборде статус работы и бейдж «⛔ Временно закрыто» видны на всех экранах.
+
+- **Админка / UI (Phase U7):** опубликована спецификация дизайн-системы — [`docs/UI_DESIGN_SYSTEM.md`](docs/UI_DESIGN_SYSTEM.md) (принципы, токены `:root`, каталог макросов, IA, anti-patterns, гайд новой страницы, **врезки baseline-скринов** по разделам и настройкам, приёмка a11y + ссылка на Lighthouse). Статусы задач ведём в [`docs/ROADMAP.md`](docs/ROADMAP.md).
 - **Админка / Lighthouse (Phase U6):** скрипт [`scripts/run_admin_lighthouse.mjs`](scripts/run_admin_lighthouse.mjs), команда **`npm run lh:admin`**; dev-зависимости `lighthouse`, `chrome-launcher`, `playwright` в [`package.json`](package.json); инструкция [`docs/ui/lighthouse/README.md`](docs/ui/lighthouse/README.md); полные JSON-отчёты в `docs/ui/lighthouse/reports/` — в [`.gitignore`](.gitignore); тест наличия артефактов [`tests/test_lighthouse_docs.py`](tests/test_lighthouse_docs.py).
 - **Админка / UI (Phase U6):** мобильные модалки `ds-modal-panel` — отступ `safe-area-inset-bottom`, визуальная «ручка» bottom-sheet, то же для `ds-drawer-panel`; сегменты и `ds-btn-sm/md` с минимальной высотой **44px**; [`admin.html`](app/templates/admin.html) — **45** интерактивных зон с `min-h-[44px]`; канбан: **`data-kanban-col`**, `role="region"`, `tabindex="0"`, обработчик **`@keydown` → `handleKanbanKeydown`**, табы вида заказов с **`role="tab"`**; [`_drawer.html`](app/templates/components/_drawer.html) — заголовок **`<h2 id="…-title">`** для **aria-labelledby**. Регрессия: `tests/test_ui_u6_a11y.py`. Пересобран [`app/static/css/admin.css`](app/static/css/admin.css) из [`src/css/admin-input.css`](src/css/admin-input.css).
 
@@ -34,10 +36,7 @@
 
 ### Изменено
 
-- **Документация:** [PARALLEL_AI_PLAN.md](PARALLEL_AI_PLAN.md) — таблица **sync-точек** (после PR E0.1, после E2.2.B / E2.3.B / E3 хвоста) и явные **запреты** до завершения E0.1; [docs/AI2_PARALLEL_PROMPT.md](docs/AI2_PARALLEL_PROMPT.md) — уточнение зоны `app/api/admin/`.
-- **Документация (ранее):** добавлен эпик **[§E0](IMPLEMENTATION_PLAN.md)** (техдолг: раскол админ-API, E0.1–E0.7); §11 и спринт A: приоритет **E0.1**, правила для пакета `app/api/admin/`.
-- **Документация (ранее):** [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md), [PARALLEL_AI_PLAN.md](PARALLEL_AI_PLAN.md), [docs/AI2_PARALLEL_PROMPT.md](docs/AI2_PARALLEL_PROMPT.md) — актуализация: E2.1.F и E2 (частично), E1 payload.bin, E3/E16; очередь E2.2.B → E2.2.F.
-- **Документация (ранее):** [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) (статусы E1/E3/E17, §E3 и `/ai-value`, порядок спринтов, §S2 CI), [plan.md](plan.md) (AI Value), [codebase.md](codebase.md), [README.md](README.md) — Super Admin аудит webhook, вкладка «Вклад ИИ», навигация «Ошибки»; ссылка на AI2 для параллельных агентов.
+- **Документация:** введён единый трекер задач/статусов — [`docs/ROADMAP.md`](docs/ROADMAP.md); правила агента — `.cursor/rules/restomind-ai.mdc` и `.cursor/rules/restomind-zones.mdc`.
 - **Документация:** актуализированы [codebase.md](codebase.md) (дерево `app/api/admin/`) и [README.md](README.md) (скрипты сборки CSS/линтинга админки из `package.json`).
 
 - **Доступы и блокировки:** `Organization.is_active=False` теперь блокирует вход staff в админку и игнорирует входящие WhatsApp webhooks для этого ресторана (без ретраев Meta).

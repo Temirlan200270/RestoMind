@@ -2,7 +2,7 @@
 
 AI-оператор для ресторана: принимает заказы и бронирует столики через WhatsApp, используя LLM (**OpenAI** по умолчанию; опционально **Gemini** через `AI_PROVIDER`) — structured output по схеме `AIBrainResponse`; голос — **Whisper**. Интегрируется с **iiko** для синхронизации меню и отправки заказов на кухню.
 
-Подробный список изменений и возможностей — в [CHANGELOG.md](CHANGELOG.md). Архитектура, соглашения по коду и идеи развития — в [plan.md](plan.md). **Дерево проекта и суть кодовой базы** — в [codebase.md](codebase.md).
+Подробный список изменений и возможностей — в [CHANGELOG.md](CHANGELOG.md). Правила разработки (инварианты) — в [docs/CONVENTIONS.md](docs/CONVENTIONS.md). **Дерево проекта и суть кодовой базы** — в [codebase.md](codebase.md).
 
 ## Возможности
 
@@ -120,7 +120,7 @@ curl -b cookies.txt -X POST http://localhost:8000/api/admin/test-bot \
 ```
 RestoMind/
 ├── app/
-│   ├── api/           # admin.py, webhooks.py, payment_webhook.py, superadmin.py
+│   ├── api/           # admin/ (пакет), webhooks.py, payment_webhook.py, superadmin.py
 │   ├── core/          # config, rate_limiter
 │   ├── db/            # models, session (async + Redis)
 │   ├── integrations/  # whatsapp, iiko, telegram, twilio…
@@ -134,7 +134,7 @@ RestoMind/
 ├── scripts/
 ├── .github/workflows/
 ├── codebase.md        # обзор репозитория для онбординга
-├── plan.md
+├── docs/CONVENTIONS.md
 ├── CHANGELOG.md
 ├── DEPLOY_*.md
 └── docs/
@@ -144,7 +144,7 @@ RestoMind/
 
 - `docs/UI_DESIGN_SYSTEM.md` — дизайн-система админки (компоненты, токены, a11y, Lighthouse).
 - `docs/ui/mobile-review/README.md` — mobile review (Playwright-скриншоты и план улучшений).
-- `docs/ADMIN_ARCH_CHECKLIST.md` — чек-лист архитектурного аудита админки (UI/WS/AI): что смотреть и как измерять проблемы.
+- `docs/ROADMAP.md` — единый список техдолга и задач (single source of truth).
 
 ## API (кратко)
 

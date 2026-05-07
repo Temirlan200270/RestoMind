@@ -32,4 +32,4 @@
 | `admin_analytics.png` | `#analytics` |
 | `admin_ai_value.png` | `#ai_value` |
 
-Тот же обход можно повторить вручную через Chrome DevTools MCP / Playwright MCP (см. [docs/UI_REDESIGN_PLAN.md](../../UI_REDESIGN_PLAN.md), Phase U0).
+Тот же обход можно повторить вручную через Chrome DevTools MCP / Playwright MCP (см. [`docs/UI_DESIGN_SYSTEM.md`](../../UI_DESIGN_SYSTEM.md) и `scripts/run_admin_lighthouse.mjs`).

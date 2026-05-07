@@ -35,7 +35,7 @@ npm run lh:admin
 | settings_technical | 37 | 98 | 96 |
 | settings_bot_test | 40 | 93 | 96 |
 
-**Интерпретация:** [UI_REDESIGN_PLAN.md](../UI_REDESIGN_PLAN.md) — на ключевых экранах ориентир: Accessibility ≥ 90, Performance ≥ 80, Best practices ≥ 90. Баллы зависят от данных БД и окружения.
+**Интерпретация:** целевые пороги и подход описаны в [`docs/UI_DESIGN_SYSTEM.md`](../UI_DESIGN_SYSTEM.md) (раздел про Lighthouse/a11y). Баллы зависят от данных БД и окружения.
 
 ## Текущий mobile baseline
 

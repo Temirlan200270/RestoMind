@@ -1,0 +1,445 @@
+            <!-- ========== ЗАКАЗЫ (по этапам + таблица) ========== -->
+            <div x-show="currentTab === 'orders'" x-cloak class="fade-in pb-20 md:pb-0">
+                <div class="md:hidden sticky top-0 z-20 -mx-4 mb-3 border-b border-gray-200/80 bg-gray-50/95 px-4 py-3 backdrop-blur">
+                    <div class="flex items-center gap-2">
+                        {% call segmented(extra_class='flex-1 border border-gray-200 bg-white') %}
+                        <div class="contents" role="tablist" aria-label="Вид заказов">
+                            <button type="button" @click="ordersView = 'kanban'; ordersPage = 1; loadOrders()"
+                                :class="ordersView === 'kanban' ? 'ds-segmented-active' : ''"
+                                class="flex-1 min-h-[44px] px-3 py-2 rounded-lg text-xs font-semibold"
+                                :aria-selected="ordersView === 'kanban' ? 'true' : 'false'" role="tab">
+                                По этапам
+                            </button>
+                            <button type="button" @click="ordersView = 'table'; ordersPage = 1; loadOrders()"
+                                :class="ordersView === 'table' ? 'ds-segmented-active' : ''"
+                                class="flex-1 min-h-[44px] px-3 py-2 rounded-lg text-xs font-semibold"
+                                :aria-selected="ordersView === 'table' ? 'true' : 'false'" role="tab">
+                                Список
+                            </button>
+                        </div>
+                        {% endcall %}
+                        <button type="button" @click="ordersMobileFiltersOpen = true"
+                            class="relative shrink-0 min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-700 shadow-sm"
+                            aria-label="Фильтры заказов">
+                            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h18M6 12h12M10 19h4"/></svg>
+                            <span x-show="activeOrderFiltersCount() > 0" x-cloak
+                                class="absolute -right-1 -top-1 min-w-[18px] h-[18px] rounded-full bg-brand-600 px-1 text-[10px] font-bold text-white"
+                                x-text="activeOrderFiltersCount()"></span>
+                        </button>
+                    </div>
+                </div>
+                <!-- Переключатель вида -->
+                <div class="hidden md:flex flex-wrap items-center justify-between gap-3 mb-5">
+                    {% call segmented(extra_class='border border-gray-200 bg-white') %}
+                    <div class="contents" role="tablist" aria-label="Вид заказов">
+                        <button type="button" @click="ordersView = 'kanban'"
+                            :class="ordersView === 'kanban' ? 'ds-segmented-active' : ''"
+                            class="min-h-[44px] px-4 py-2 rounded-lg text-sm font-medium transition"
+                            title="Черновик → Подтверждён → На кухне"
+                            :aria-selected="ordersView === 'kanban' ? 'true' : 'false'" role="tab">
+                            &#x1F4E6; По этапам
+                        </button>
+                        <button type="button" @click="ordersView = 'table'"
+                            :class="ordersView === 'table' ? 'ds-segmented-active' : ''"
+                            class="min-h-[44px] px-4 py-2 rounded-lg text-sm font-medium transition"
+                            title="Все заказы списком с фильтром по статусу"
+                            :aria-selected="ordersView === 'table' ? 'true' : 'false'" role="tab">
+                            &#x1F4CA; Список
+                        </button>
+                    </div>
+                    {% endcall %}
+                    <div class="flex items-center gap-2 flex-wrap justify-end">
+                        <button type="button" @click="openManualOrderModal()"
+                            class="min-h-[44px] text-sm font-semibold px-3 py-2 rounded-xl border border-brand-200 text-brand-800 bg-brand-50 hover:bg-brand-100 transition whitespace-nowrap">
+                            + Новый заказ (тест)
+                        </button>
+                        <select x-show="ordersView === 'table'" x-model="orderFilter" @change="ordersPage = 1; loadOrders()"
+                            class="text-sm border border-gray-200 rounded-xl px-3 py-2 bg-gray-50">
+                            <option value="">Все статусы</option>
+                            <option value="draft">Черновик</option>
+                            <option value="confirmed">Подтверждён</option>
+                            <option value="sending_to_iiko">Отправляется на кухню</option>
+                        <option value="sent_to_iiko">В iiko</option>
+                            <option value="completed">Завершён</option>
+                            <option value="cancelled">Отменён</option>
+                        </select>
+                    </div>
+                    </div>
+
+                <div x-show="!ordersKanbanHintDismissed" x-cloak
+                    class="hidden sm:flex mb-4 flex-wrap items-start justify-between gap-3 rounded-xl border border-sky-200 bg-sky-50/90 px-4 py-3 text-sm text-sky-950">
+                    <p class="flex-1 min-w-0 pr-2"><span class="font-semibold">Подсказка:</span> режим «По этапам» — канбан по статусам; «Список» — таблица с поиском и фильтром.</p>
+                    <button type="button" @click="dismissOrdersViewHint()"
+                        class="shrink-0 text-xs font-semibold text-sky-900 hover:underline min-h-[44px] px-2 rounded-lg rm-focusable">Скрыть навсегда</button>
+                </div>
+
+                <div x-show="ordersView === 'table'" x-cloak class="hidden md:block">
+                {% call card(extra_class='mb-5', padding_class='p-4 sm:p-5') %}
+                <div class="flex flex-wrap items-end gap-3">
+                    <div class="flex-1 min-w-[220px] max-w-md">
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Поиск</label>
+                        <input type="search" x-model="orderSearchQ" @input.debounce.400ms="ordersPage = 1; loadOrders()"
+                            placeholder="Телефон, имя или № заказа"
+                            class="w-full text-sm border border-gray-200 rounded-xl px-3 py-2 bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Сумма от</label>
+                        <input type="number" min="0" step="1" x-model="orderSumMin" @change="ordersPage = 1; loadOrders()"
+                            placeholder="—" inputmode="decimal"
+                            class="w-32 text-sm border border-gray-200 rounded-xl px-3 py-2 bg-gray-50">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">до</label>
+                        <input type="number" min="0" step="1" x-model="orderSumMax" @change="ordersPage = 1; loadOrders()"
+                            placeholder="—" inputmode="decimal"
+                            class="w-32 text-sm border border-gray-200 rounded-xl px-3 py-2 bg-gray-50">
+                    </div>
+                </div>
+                {% endcall %}
+                </div>
+                </div>
+
+                <div x-show="ordersMobileFiltersOpen" x-cloak x-transition.opacity
+                    class="fixed inset-0 z-[60] md:hidden"
+                    @keydown.escape.window="ordersMobileFiltersOpen = false">
+                    <div class="absolute inset-0 bg-slate-900/45" @click="ordersMobileFiltersOpen = false" aria-hidden="true"></div>
+                    <div class="ds-drawer-panel rm-mobile-sheet" role="dialog" aria-modal="true" aria-labelledby="orders-mobile-filters-title" @click.stop>
+                        <div class="flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-3">
+                            <div class="min-w-0">
+                                <h2 id="orders-mobile-filters-title" class="text-base font-bold text-gray-900">Фильтры</h2>
+                                <p class="text-xs text-gray-500">Поиск, статус и сумма заказа.</p>
+                            </div>
+                            <button type="button" @click="ordersMobileFiltersOpen = false"
+                                class="min-h-[44px] min-w-[44px] rounded-xl border border-gray-200 bg-gray-50 text-gray-700"
+                                aria-label="Закрыть фильтры">&times;</button>
+                        </div>
+                        <div class="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+                            <label class="block">
+                                <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">Поиск</span>
+                                <input type="search" x-model="orderSearchQ" @input.debounce.400ms="ordersPage = 1; loadOrders()"
+                                    placeholder="Телефон, имя или № заказа"
+                                    class="ds-input min-h-[48px]">
+                            </label>
+                            <label class="block">
+                                <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">Статус</span>
+                                <select x-model="orderFilter" @change="ordersPage = 1; loadOrders()" class="ds-input min-h-[48px]">
+                                    <option value="">Все статусы</option>
+                                    <option value="draft">Черновик</option>
+                                    <option value="confirmed">Подтверждён</option>
+                                    <option value="sending_to_iiko">Отправляется на кухню</option>
+                                    <option value="sent_to_iiko">В iiko</option>
+                                    <option value="completed">Завершён</option>
+                                    <option value="cancelled">Отменён</option>
+                                </select>
+                            </label>
+                            <div class="grid grid-cols-2 gap-3">
+                                <label class="block">
+                                    <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">Сумма от</span>
+                                    <input type="number" min="0" step="1" x-model="orderSumMin" @change="ordersPage = 1; loadOrders()"
+                                        inputmode="decimal" class="ds-input min-h-[48px]">
+                                </label>
+                                <label class="block">
+                                    <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">Сумма до</span>
+                                    <input type="number" min="0" step="1" x-model="orderSumMax" @change="ordersPage = 1; loadOrders()"
+                                        inputmode="decimal" class="ds-input min-h-[48px]">
+                                </label>
+                            </div>
+                            <div class="rounded-xl border border-sky-100 bg-sky-50 px-3 py-2 text-xs text-sky-900">
+                                «По этапам» показывает канбан, «Список» даёт поиск и пагинацию.
+                            </div>
+                        </div>
+                        <div class="rm-mobile-sheet-actions border-t border-gray-100 bg-white px-4 py-3">
+                            <button type="button" @click="resetOrderFilters()"
+                                class="min-h-[44px] rounded-xl border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700">
+                                Сбросить
+                            </button>
+                            <button type="button" @click="applyMobileOrderFilters()"
+                                class="min-h-[44px] flex-1 rounded-xl bg-brand-600 px-4 text-sm font-semibold text-white">
+                                Показать
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div x-show="ordersLoadError" x-cloak
+                    class="mb-4 rounded-xl border border-red-200 bg-red-50 text-red-800 px-4 py-3 text-sm">
+                    <div class="flex items-start gap-3">
+                        <div class="font-semibold">Ошибка загрузки заказов</div>
+                        <div class="flex-1" x-text="ordersLoadError"></div>
+                        <button type="button" class="text-red-900/70 hover:text-red-900 underline"
+                            @click="ordersLoadError = ''">
+                            скрыть
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Доска по этапам: на узких экранах — горизонтальный snap-скролл колонок; стрелки ←/→ — между колонками (handleKanbanKeydown) -->
+                <div x-show="ordersView === 'kanban'" @keydown="handleKanbanKeydown($event)" class="flex lg:grid lg:grid-cols-6 gap-4 lg:gap-5 overflow-x-auto snap-x snap-mandatory lg:overflow-visible lg:snap-none pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 touch-pan-x outline-none" tabindex="-1">
+                    <!-- DRAFT -->
+                    <div data-kanban-col tabindex="0" role="region" aria-label="Колонка: черновики заказов" class="bg-gray-100/50 rounded-2xl p-4 shrink-0 w-[min(85vw,22rem)] lg:w-auto snap-center outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2">
+                        <div class="flex items-center gap-2 mb-4">
+                            <div class="w-3 h-3 rounded-full bg-gray-400"></div>
+                            <h3 class="font-semibold text-gray-700 text-sm">Черновики</h3>
+                            <span class="ml-auto text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full font-medium"
+                                x-text="kanbanDraft.length"></span>
+                        </div>
+                        <div class="space-y-3 min-h-[100px]"
+                            @dragover.prevent="$event.dataTransfer.dropEffect='move'"
+                            @drop.prevent="kanbanDrop($event, 'draft')">
+                            <template x-for="order in kanbanDraftVisible" :key="order.id">
+                                {{ order_card_kanban('draft', 'bg-white shadow-sm border border-gray-100') }}
+                                {{ iiko_error('order', 'mt-3') }}
+                            </template>
+                            <div x-show="ordersLoading && kanbanDraft.length === 0" x-cloak class="text-center py-8 px-2 text-gray-400 text-xs">Загрузка…</div>
+                            <div x-show="kanbanDraft.length === 0 && !ordersLoading" class="text-center py-8 px-2 text-gray-500 text-xs space-y-3">
+                                <p>Черновики появятся, когда гость начнёт заказ в чате.</p>
+                                <button type="button" @click="navigateToTab('chats')"
+                                    class="min-h-[44px] px-3 py-2 rounded-xl bg-white text-brand-700 text-xs font-bold ring-1 ring-brand-200 hover:bg-brand-50">Написать боту в WhatsApp</button>
+                            </div>
+                            <button type="button" x-show="kanbanDraftVisible.length < kanbanDraft.length" @click="kanbanShowMore('draft')"
+                                class="w-full min-h-[44px] rounded-xl bg-white text-xs font-semibold text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50">Показать ещё 20</button>
+                        </div>
+                    </div>
+
+                    <!-- CONFIRMED -->
+                    <div data-kanban-col tabindex="0" role="region" aria-label="Колонка: подтверждённые заказы" class="bg-blue-50/50 rounded-2xl p-4 shrink-0 w-[min(85vw,22rem)] lg:w-auto snap-center outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2">
+                        <div class="flex items-center gap-2 mb-4">
+                            <div class="w-3 h-3 rounded-full bg-blue-500"></div>
+                            <h3 class="font-semibold text-blue-700 text-sm">Подтверждены</h3>
+                            <span class="ml-auto text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full font-medium"
+                                x-text="kanbanConfirmed.length"></span>
+                        </div>
+                        <div class="space-y-3 min-h-[100px]"
+                            @dragover.prevent="$event.dataTransfer.dropEffect='move'"
+                            @drop.prevent="kanbanDrop($event, 'confirmed')">
+                            <template x-for="order in kanbanConfirmedVisible" :key="order.id">
+                                {{ order_card_kanban('confirmed', 'bg-white shadow-sm border border-blue-100') }}
+                                {{ iiko_error('order', 'mt-3') }}
+                            </template>
+                            <div x-show="ordersLoading && kanbanConfirmed.length === 0" x-cloak class="text-center py-8 px-2 text-gray-400 text-xs">Загрузка…</div>
+                            <div x-show="kanbanConfirmed.length === 0 && !ordersLoading" class="text-center py-8 px-2 text-gray-500 text-xs space-y-3">
+                                <p>После оплаты/подтверждения в WhatsApp заказ попадёт сюда.</p>
+                                <button type="button" @click="navigateToTab('chats')"
+                                    class="min-h-[44px] px-3 py-2 rounded-xl bg-white text-brand-700 text-xs font-bold ring-1 ring-brand-200 hover:bg-brand-50">Открыть диалоги</button>
+                            </div>
+                            <button type="button" x-show="kanbanConfirmedVisible.length < kanbanConfirmed.length" @click="kanbanShowMore('confirmed')"
+                                class="w-full min-h-[44px] rounded-xl bg-white text-xs font-semibold text-blue-700 ring-1 ring-blue-200 hover:bg-blue-50">Показать ещё 20</button>
+                        </div>
+                    </div>
+
+                    <!-- SENT_TO_IIKO -->
+                    <div data-kanban-col tabindex="0" role="region" aria-label="Колонка: на кухне" class="bg-emerald-50/50 rounded-2xl p-4 shrink-0 w-[min(85vw,22rem)] lg:w-auto snap-center outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2">
+                        <div class="flex items-center gap-2 mb-4">
+                            <div class="w-3 h-3 rounded-full bg-emerald-500"></div>
+                            <h3 class="font-semibold text-emerald-700 text-sm">На кухне</h3>
+                            <span class="ml-auto text-xs bg-emerald-100 text-emerald-600 px-2 py-0.5 rounded-full font-medium"
+                                x-text="kanbanSent.length"></span>
+                        </div>
+                        <div class="space-y-3 min-h-[100px]"
+                            @dragover.prevent="$event.dataTransfer.dropEffect='move'"
+                            @drop.prevent="kanbanDrop($event, 'sent_to_iiko')">
+                            <template x-for="order in kanbanSentVisible" :key="order.id">
+                                {{ order_card_kanban('sent', 'bg-white shadow-sm border border-emerald-100') }}
+                                {{ iiko_error('order', 'mt-3') }}
+                            </template>
+                            <div x-show="ordersLoading && kanbanSent.length === 0" x-cloak class="text-center py-8 px-2 text-gray-400 text-xs">Загрузка…</div>
+                            <div x-show="kanbanSent.length === 0 && !ordersLoading" class="text-center py-8 px-2 text-gray-500 text-xs space-y-3">
+                                <p>Сюда попадают заказы, уже отправленные на кухню (iiko).</p>
+                                <button type="button" @click="navigateToTab('chats')"
+                                    class="min-h-[44px] px-3 py-2 rounded-xl bg-white text-emerald-800 text-xs font-bold ring-1 ring-emerald-200 hover:bg-emerald-50">Проверить в чате</button>
+                            </div>
+                            <button type="button" x-show="kanbanSentVisible.length < kanbanSent.length" @click="kanbanShowMore('sent_to_iiko')"
+                                class="w-full min-h-[44px] rounded-xl bg-white text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200 hover:bg-emerald-50">Показать ещё 20</button>
+                        </div>
+                    </div>
+
+                    <!-- IN_TRANSIT -->
+                    <div data-kanban-col tabindex="0" role="region" aria-label="Колонка: в пути" class="bg-sky-50/50 rounded-2xl p-4 shrink-0 w-[min(85vw,22rem)] lg:w-auto snap-center outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2">
+                        <div class="flex items-center gap-2 mb-4">
+                            <div class="w-3 h-3 rounded-full bg-sky-500"></div>
+                            <h3 class="font-semibold text-sky-700 text-sm">В пути</h3>
+                            <span class="ml-auto text-xs bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full font-medium"
+                                x-text="kanbanInTransit.length"></span>
+                        </div>
+                        <div class="space-y-3 min-h-[100px]"
+                            @dragover.prevent="$event.dataTransfer.dropEffect='move'"
+                            @drop.prevent="kanbanDrop($event, 'in_transit')">
+                            <template x-for="order in kanbanInTransitVisible" :key="order.id">
+                                {{ order_card_kanban('in-transit', 'bg-white shadow-sm border border-sky-100') }}
+                                {{ iiko_error('order', 'mt-3') }}
+                            </template>
+                            <div x-show="ordersLoading && kanbanInTransit.length === 0" x-cloak class="text-center py-8 px-2 text-gray-400 text-xs">Загрузка…</div>
+                            <div x-show="kanbanInTransit.length === 0 && !ordersLoading" class="text-center py-8 px-2 text-gray-500 text-xs">Заказы появятся после ручного переноса из кухни.</div>
+                            <button type="button" x-show="kanbanInTransitVisible.length < kanbanInTransit.length" @click="kanbanShowMore('in_transit')"
+                                class="w-full min-h-[44px] rounded-xl bg-white text-xs font-semibold text-sky-700 ring-1 ring-sky-200 hover:bg-sky-50">Показать ещё 20</button>
+                        </div>
+                    </div>
+
+                    <!-- WAITING_PICKUP -->
+                    <div data-kanban-col tabindex="0" role="region" aria-label="Колонка: ожидает выдачи" class="bg-amber-50/50 rounded-2xl p-4 shrink-0 w-[min(85vw,22rem)] lg:w-auto snap-center outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2">
+                        <div class="flex items-center gap-2 mb-4">
+                            <div class="w-3 h-3 rounded-full bg-amber-500"></div>
+                            <h3 class="font-semibold text-amber-700 text-sm">Ожидает выдачи</h3>
+                            <span class="ml-auto text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium"
+                                x-text="kanbanWaitingPickup.length"></span>
+                        </div>
+                        <div class="space-y-3 min-h-[100px]"
+                            @dragover.prevent="$event.dataTransfer.dropEffect='move'"
+                            @drop.prevent="kanbanDrop($event, 'waiting_pickup')">
+                            <template x-for="order in kanbanWaitingPickupVisible" :key="order.id">
+                                {{ order_card_kanban('waiting-pickup', 'bg-white shadow-sm border border-amber-100') }}
+                                {{ iiko_error('order', 'mt-3') }}
+                            </template>
+                            <div x-show="ordersLoading && kanbanWaitingPickup.length === 0" x-cloak class="text-center py-8 px-2 text-gray-400 text-xs">Загрузка…</div>
+                            <div x-show="kanbanWaitingPickup.length === 0 && !ordersLoading" class="text-center py-8 px-2 text-gray-500 text-xs">Готовые к выдаче заказы будут здесь.</div>
+                            <button type="button" x-show="kanbanWaitingPickupVisible.length < kanbanWaitingPickup.length" @click="kanbanShowMore('waiting_pickup')"
+                                class="w-full min-h-[44px] rounded-xl bg-white text-xs font-semibold text-amber-700 ring-1 ring-amber-200 hover:bg-amber-50">Показать ещё 20</button>
+                        </div>
+                    </div>
+
+                    <!-- COMPLETED -->
+                    <div data-kanban-col tabindex="0" role="region" aria-label="Колонка: завершённые заказы" class="bg-emerald-50/40 rounded-2xl p-4 shrink-0 w-[min(85vw,22rem)] lg:w-auto snap-center outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2">
+                        <div class="flex items-center gap-2 mb-4">
+                            <div class="w-3 h-3 rounded-full bg-emerald-700"></div>
+                            <h3 class="font-semibold text-emerald-800 text-sm">Завершён</h3>
+                            <span class="ml-auto text-xs bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-medium"
+                                x-text="kanbanCompleted.length"></span>
+                        </div>
+                        <div class="space-y-3 min-h-[100px]"
+                            @dragover.prevent="$event.dataTransfer.dropEffect='move'"
+                            @drop.prevent="kanbanDrop($event, 'completed')">
+                            <template x-for="order in kanbanCompletedVisible" :key="order.id">
+                                {{ order_card_kanban('completed', 'bg-white shadow-sm border border-emerald-100') }}
+                                {{ iiko_error('order', 'mt-3') }}
+                            </template>
+                            <div x-show="ordersLoading && kanbanCompleted.length === 0" x-cloak class="text-center py-8 px-2 text-gray-400 text-xs">Загрузка…</div>
+                            <div x-show="kanbanCompleted.length === 0 && !ordersLoading" class="text-center py-8 px-2 text-gray-500 text-xs">Закрытые заказы появятся после финального переноса.</div>
+                            <button type="button" x-show="kanbanCompletedVisible.length < kanbanCompleted.length" @click="kanbanShowMore('completed')"
+                                class="w-full min-h-[44px] rounded-xl bg-white text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200 hover:bg-emerald-50">Показать ещё 20</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Таблица заказов -->
+                <div x-show="ordersView === 'table'" x-cloak>
+                {% call card(extra_class='', padding_class='p-0') %}
+                <div>
+                    <div class="hidden md:block">
+                        {% set orders_table_header %}
+                                    <tr class="text-left text-gray-500 border-b border-gray-100">
+                                        <th class="px-5 pb-3 pt-4 font-medium">
+                                            <button type="button" @click.stop="toggleOrdersSort('id')" class="inline-flex items-center gap-1 hover:text-brand-600">ID <span class="text-brand-600" x-text="sortArrow(ordersSort.column, 'id', ordersSort.dir)"></span></button>
+                                        </th>
+                                        <th class="px-5 pb-3 pt-4 font-medium min-w-[10rem]">
+                                            <button type="button" @click.stop="toggleOrdersSort('client')" class="inline-flex items-center gap-1 hover:text-brand-600">Клиент <span class="text-brand-600" x-text="sortArrow(ordersSort.column, 'client', ordersSort.dir)"></span></button>
+                                        </th>
+                                        <th class="px-5 pb-3 pt-4 font-medium">
+                                            <button type="button" @click.stop="toggleOrdersSort('order_type')" class="inline-flex items-center gap-1 hover:text-brand-600">Тип <span class="text-brand-600" x-text="sortArrow(ordersSort.column, 'order_type', ordersSort.dir)"></span></button>
+                                        </th>
+                                        <th class="px-5 pb-3 pt-4 font-medium">
+                                            <button type="button" @click.stop="toggleOrdersSort('items')" class="inline-flex items-center gap-1 hover:text-brand-600">Позиции <span class="text-brand-600" x-text="sortArrow(ordersSort.column, 'items', ordersSort.dir)"></span></button>
+                                        </th>
+                                        <th class="px-5 pb-3 pt-4 font-medium">
+                                            <button type="button" @click.stop="toggleOrdersSort('total')" class="inline-flex items-center gap-1 hover:text-brand-600">Сумма <span class="text-brand-600" x-text="sortArrow(ordersSort.column, 'total', ordersSort.dir)"></span></button>
+                                        </th>
+                                        <th class="px-5 pb-3 pt-4 font-medium">
+                                            <button type="button" @click.stop="toggleOrdersSort('status')" class="inline-flex items-center gap-1 hover:text-brand-600">Статус <span class="text-brand-600" x-text="sortArrow(ordersSort.column, 'status', ordersSort.dir)"></span></button>
+                                        </th>
+                                        <th class="px-5 pb-3 pt-4 font-medium">
+                                            <button type="button" @click.stop="toggleOrdersSort('date')" class="inline-flex items-center gap-1 hover:text-brand-600">Дата <span class="text-brand-600" x-text="sortArrow(ordersSort.column, 'date', ordersSort.dir)"></span></button>
+                                        </th>
+                                    </tr>
+                        {% endset %}
+                        {% call table_frame(header_html=orders_table_header) %}
+                                <template x-for="order in ordersTableSorted" :key="order.id">
+                                    <tr class="border-b border-gray-50 hover:bg-blue-50/30 cursor-pointer transition"
+                                        :class="order.iiko_last_error ? 'bg-rose-50/70 hover:bg-rose-50' : ''"
+                                        @click="openOrderDetails(order)">
+                                        <td class="px-5 py-4 font-semibold text-brand-600" x-text="'#' + order.id"></td>
+                                        <td class="px-5 py-4">
+                                            <div class="font-mono text-sm text-gray-900" x-text="order.user_phone || '—'"></div>
+                                            <div class="text-xs text-gray-500 truncate max-w-[14rem]" x-show="order.user_name" x-text="order.user_name"></div>
+                                        </td>
+                                        <td class="px-5 py-4">
+                                            <div class="flex flex-wrap gap-1 items-center">
+                                                <span x-show="order.order_type" class="inline-block text-[10px] font-black px-2 py-0.5 rounded-lg bg-indigo-50 text-indigo-800 border border-indigo-100" x-text="orderTypeBadge(order)"></span>
+                                                <span x-show="orderHasUpsell(order)" class="inline-block text-[9px] font-black px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200" title="Бот сделал допродажу">UPSELL</span>
+                                                <span x-show="!order.order_type && !orderHasUpsell(order)" class="text-gray-300">—</span>
+                                            </div>
+                                        </td>
+                                        <td class="px-5 py-4">
+                                            <span x-text="order.items_count != null ? order.items_count : (order.items?.items?.length || 0)" class="text-gray-600"></span>
+                                            <span class="text-gray-400">поз.</span>
+                                        </td>
+                                        <td class="px-5 py-4 font-semibold" x-text="fmt.money(order.total_price)"></td>
+                                        <td class="px-5 py-4">
+                                            {{ order_status_badge("order") }}
+                                            {{ iiko_error('order', 'mt-2') }}
+                                        </td>
+                                        <td class="px-5 py-4 text-gray-500" x-text="fmt.date(order.created_at)"></td>
+                                    </tr>
+                                </template>
+                                <tr x-show="ordersLoading && orders.length === 0" x-cloak>
+                                    <td colspan="7" class="py-12 px-4 text-center text-gray-400">
+                                        Загрузка заказов…
+                                    </td>
+                                </tr>
+                                <tr x-show="orders.length === 0 && !ordersLoading">
+                                    <td colspan="7" class="py-12 px-4 text-center text-gray-500">
+                                        <div class="text-4xl mb-2" aria-hidden="true">&#x1F4E6;</div>
+                                        <p class="text-sm font-semibold text-gray-800">Тут будут ваши заказы</p>
+                                        <p class="text-xs mt-2 max-w-md mx-auto">Напишите боту в WhatsApp как клиент — оформите заказ, и он появится в этом списке.</p>
+                                        <button type="button" @click="navigateToTab('chats')"
+                                            class="mt-4 min-h-[44px] px-4 py-2 rounded-xl text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700">Открыть диалоги</button>
+                                    </td>
+                                </tr>
+                        {% endcall %}
+                    </div>
+                    <div class="md:hidden divide-y divide-gray-100">
+                        <template x-for="order in ordersTableSorted" :key="'mob-' + order.id">
+                            {{ order_card_mobile("order") }}
+                        </template>
+                    </div>
+                    <div class="md:hidden px-4 py-12 text-center border-t border-gray-100 bg-gray-50/40" x-show="ordersLoading && orders.length === 0" x-cloak>
+                        <p class="text-sm text-gray-400">Загрузка заказов…</p>
+                    </div>
+                    <div class="md:hidden px-4 py-12 text-center border-t border-gray-100 bg-gray-50/40" x-show="orders.length === 0 && !ordersLoading" x-cloak>
+                        <div class="text-4xl mb-2" aria-hidden="true">&#x1F4E6;</div>
+                        <p class="text-sm font-semibold text-gray-800">Тут будут ваши заказы</p>
+                        <p class="text-xs text-gray-500 mt-2 max-w-xs mx-auto">Напишите боту в WhatsApp — проверьте сценарий заказа с телефона.</p>
+                        <button type="button" @click="navigateToTab('chats')"
+                            class="mt-4 min-h-[44px] w-full max-w-xs mx-auto px-4 py-2.5 rounded-xl text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700">Открыть диалоги</button>
+                    </div>
+
+                    <!-- Stripe-style pagination -->
+                    <div class="px-5 py-4 border-t border-gray-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                        <div class="text-xs text-gray-500">
+                            Всего: <span class="font-semibold tabular-nums text-gray-700" x-text="ordersTotal"></span>
+                            <span class="mx-2 text-gray-300">•</span>
+                            Стр. <span class="font-semibold tabular-nums text-gray-700" x-text="ordersPage"></span>
+                            из <span class="font-semibold tabular-nums text-gray-700" x-text="ordersPages"></span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <button type="button" @click="ordersPrevPage()"
+                                :disabled="ordersPage <= 1"
+                                class="min-h-[44px] px-4 rounded-xl bg-white border border-gray-200 text-gray-700 text-sm font-semibold hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition">
+                                Назад
+                            </button>
+                            <button type="button" @click="ordersNextPage()"
+                                :disabled="ordersPage >= ordersPages"
+                                class="min-h-[44px] px-4 rounded-xl bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed transition shadow-sm shadow-brand-600/20">
+                                Вперёд
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                {% endcall %}
+                </div>
+                <button type="button" @click="openManualOrderModal()"
+                    class="md:hidden fixed right-4 z-40 inline-flex min-h-[52px] min-w-[52px] items-center justify-center rounded-2xl bg-brand-600 px-4 text-sm font-bold text-white shadow-xl shadow-brand-600/25"
+                    style="bottom: calc(4.25rem + env(safe-area-inset-bottom, 0px));"
+                    aria-label="Новый заказ">
+                    + <span class="ml-1">Заказ</span>
+                </button>
+            </div>
+

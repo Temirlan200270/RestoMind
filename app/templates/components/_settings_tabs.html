@@ -14,7 +14,7 @@
       <option value="bot_test">Бот / ИИ</option>
       <option value="team">Команда</option>
       <option value="health">Состояние</option>
-      <option value="technical">Данные и безопасность</option>
+      <option value="technical">Экспорт</option>
     </select>
   </div>
   {% if desktop_nav %}
@@ -40,7 +40,7 @@
       Допродажи
     </button>
     <button type="button" @click="setSettingsTab('bot_test')"
-      :class="settingsTab === 'bot_test' ? 'bg-emerald-700 text-white shadow-sm' : 'text-emerald-800 hover:bg-emerald-50 border border-transparent hover:border-emerald-200'"
+      :class="settingsTab === 'bot_test' ? 'bg-brand-600 text-white shadow-sm' : 'text-brand-600 hover:bg-brand-50 border border-transparent hover:border-brand-200'"
       class="w-full text-left px-4 py-2.5 rounded-xl text-sm font-semibold transition min-h-[44px]">
       Бот / ИИ
     </button>
@@ -56,15 +56,15 @@
     </button>
     <button type="button" @click="setSettingsTab('technical')"
       :class="settingsTab === 'technical' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-700 hover:bg-slate-50 border border-transparent hover:border-slate-200'"
-      class="w-full text-left px-4 py-2.5 rounded-xl text-sm font-semibold transition min-h-[44px]">
-      Данные и безопасность
+      class="w-full text-left px-4 py-2.5 rounded-xl text-sm font-semibold transition min-h-[44px]"
+      x-text="isSuperadmin ? 'Данные и безопасность' : 'Экспорт'">
     </button>
   </nav>
   {% endif %}
-  <div x-show="settingsTab === 'technical'" x-cloak class="mt-3 rounded-2xl border border-amber-200 bg-amber-50/70 px-4 py-3 text-sm text-amber-900 {% if desktop_nav %}lg:col-span-full lg:hidden{% endif %}">
+  <div x-show="settingsTab === 'technical' && isSuperadmin" x-cloak class="mt-3 rounded-2xl border border-amber-200 bg-amber-50/70 px-4 py-3 text-sm text-amber-900 {% if desktop_nav %}lg:col-span-full lg:hidden{% endif %}">
     Здесь — расширенные действия. Используйте только если точно понимаете последствия.
   </div>
-  <div x-show="settingsTab === 'bot_test'" x-cloak class="mt-3 rounded-2xl border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-sm text-emerald-900 {% if desktop_nav %}lg:col-span-full lg:hidden{% endif %}">
+  <div x-show="settingsTab === 'bot_test'" x-cloak class="mt-3 rounded-2xl border border-sky-200 bg-sky-50/70 px-4 py-3 text-sm text-sky-900 {% if desktop_nav %}lg:col-span-full lg:hidden{% endif %}">
     Безопасная песочница: сообщения уходят в ИИ, операционные данные и гостевые чаты не затрагиваются.
   </div>
 </div>
