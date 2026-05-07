@@ -4259,9 +4259,19 @@ function adminMixinWebSocketEvents() {
                 clearTimeout(this._wsReconnectTimer);
                 this._wsReconnectTimer = null;
             }
+            const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+            const url = `${proto}://${location.host}/api/admin/ws?token=${encodeURIComponent(this.wsToken)}`;
+
             // Не держим два сокета одновременно — иначе события (order_updated/new_message) будут дублироваться.
+            // Но и не "стреляем себе в ногу": если уже есть CONNECTING/OPEN на тот же токен,
+            // повторный вызов connectWebSocket() не должен закрывать рукопожатие (Edge/Chrome
+            // показывают "WebSocket is closed before the connection is established").
             try {
                 const rs0 = this.ws?.readyState;
+                const sameToken = (this._wsTokenInUse && this._wsTokenInUse === this.wsToken);
+                if (sameToken && (rs0 === WebSocket.OPEN || rs0 === WebSocket.CONNECTING)) {
+                    return;
+                }
                 if (rs0 === WebSocket.OPEN || rs0 === WebSocket.CONNECTING) {
                     this.ws.onopen = null;
                     this.ws.onclose = null;
@@ -4270,8 +4280,7 @@ function adminMixinWebSocketEvents() {
                     this.ws.close();
                 }
             } catch (_e) { /* noop */ }
-            const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-            const url = `${proto}://${location.host}/api/admin/ws?token=${encodeURIComponent(this.wsToken)}`;
+            this._wsTokenInUse = this.wsToken;
 
             try {
                 this.ws = new WebSocket(url);
