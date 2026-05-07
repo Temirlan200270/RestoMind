@@ -654,6 +654,16 @@ async def deep_health_check() -> dict:
 
 @app.get("/", response_class=HTMLResponse, tags=["Admin Panel"])
 @app.get("/admin", response_class=HTMLResponse, tags=["Admin Panel"])
+@app.get("/dashboard", response_class=HTMLResponse, tags=["Admin Panel"])
+@app.get("/analytics", response_class=HTMLResponse, tags=["Admin Panel"])
+@app.get("/ai_value", response_class=HTMLResponse, tags=["Admin Panel"])
+@app.get("/incidents", response_class=HTMLResponse, tags=["Admin Panel"])
+@app.get("/orders", response_class=HTMLResponse, tags=["Admin Panel"])
+@app.get("/operator_queue", response_class=HTMLResponse, tags=["Admin Panel"])
+@app.get("/bookings", response_class=HTMLResponse, tags=["Admin Panel"])
+@app.get("/chats", response_class=HTMLResponse, tags=["Admin Panel"])
+@app.get("/menu", response_class=HTMLResponse, tags=["Admin Panel"])
+@app.get("/settings", response_class=HTMLResponse, tags=["Admin Panel"])
 async def admin_page(request: Request) -> HTMLResponse:
     """Главная страница — админ-панель."""
     git_sha = (os.environ.get("RENDER_GIT_COMMIT") or os.environ.get("GIT_COMMIT") or "").strip()

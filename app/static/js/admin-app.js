@@ -4824,7 +4824,8 @@ function adminMixinLiveChat() {
 
         _pushAdminHash() {
             if (!this.authenticated || this._applyingHashFromBrowser) return;
-            const path = window.location.pathname || '/admin';
+            const p = window.location.pathname || '/admin';
+            const path = (p === '/' || p === '/admin') ? p : '/admin';
             let frag = 'dashboard';
             if (this.currentTab === 'settings') {
                 const st = (this.settingsTab || 'restaurant').trim();
