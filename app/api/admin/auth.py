@@ -338,7 +338,7 @@ async def _admin_auth_me_payload(request: Request, db: AsyncSession) -> dict[str
 async def admin_me(request: Request, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """Проверка сессии и перевыпуск ws_token для переподключения."""
     if not request.session.get("admin_ok"):
-        raise HTTPException(status_code=401, detail="Не авторизован")
+        return {"authenticated": False}
     return await _admin_auth_me_payload(request, db)
 
 

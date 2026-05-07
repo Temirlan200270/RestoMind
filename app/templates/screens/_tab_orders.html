@@ -187,8 +187,10 @@
                             @dragover.prevent="$event.dataTransfer.dropEffect='move'"
                             @drop.prevent="kanbanDrop($event, 'draft')">
                             <template x-for="order in kanbanDraftVisible" :key="order.id">
+                                <div>
                                 {{ order_card_kanban('draft', 'bg-white shadow-sm border border-gray-100') }}
                                 {{ iiko_error('order', 'mt-3') }}
+                                </div>
                             </template>
                             <div x-show="ordersLoading && kanbanDraft.length === 0" x-cloak class="text-center py-8 px-2 text-gray-400 text-xs">Загрузка…</div>
                             <div x-show="kanbanDraft.length === 0 && !ordersLoading" class="text-center py-8 px-2 text-gray-500 text-xs space-y-3">
@@ -213,8 +215,10 @@
                             @dragover.prevent="$event.dataTransfer.dropEffect='move'"
                             @drop.prevent="kanbanDrop($event, 'confirmed')">
                             <template x-for="order in kanbanConfirmedVisible" :key="order.id">
+                                <div>
                                 {{ order_card_kanban('confirmed', 'bg-white shadow-sm border border-blue-100') }}
                                 {{ iiko_error('order', 'mt-3') }}
+                                </div>
                             </template>
                             <div x-show="ordersLoading && kanbanConfirmed.length === 0" x-cloak class="text-center py-8 px-2 text-gray-400 text-xs">Загрузка…</div>
                             <div x-show="kanbanConfirmed.length === 0 && !ordersLoading" class="text-center py-8 px-2 text-gray-500 text-xs space-y-3">

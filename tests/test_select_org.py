@@ -9,6 +9,16 @@ from app.db.models import Organization, StaffRole, StaffUser, Tenant
 
 
 @pytest.mark.asyncio
+async def test_auth_me_guest_returns_unauthenticated_payload(asgi_memory_client):
+    ac, _sf = asgi_memory_client
+
+    me = await ac.get("/api/admin/auth/me")
+
+    assert me.status_code == 200
+    assert me.json() == {"authenticated": False}
+
+
+@pytest.mark.asyncio
 async def test_select_org_rejects_foreign_tenant(asgi_memory_client):
     ac, sf = asgi_memory_client
     async with sf() as db:

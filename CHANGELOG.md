@@ -9,6 +9,7 @@
 ### Добавлено
 
 - **Админка / UI-документация:** добавлена карта UI-слоя [`docs/UI_MAP.md`](docs/UI_MAP.md): layout, screens, components/macros, client logic и текущие контракты для дальнейших правок.
+- **Админка / доступы:** добавлены опциональные env-креды `SUPERADMIN_USERNAME`/`SUPERADMIN_PASSWORD` для legacy-входа с `is_superadmin=true` (быстрый доступ к `/superadmin` без StaffUser); подпись WS-токена завязана на `SESSION_SECRET`.
 
 - **P0 (стабильность/платформа):** `test_bot` переведён на 3 фазы (чтение → LLM без DB-сессии → запись); Telegram-уведомления переведены в fire-and-forget; экстренное закрытие ресторана (force-close) реализовано end-to-end (модель+миграция+API+UI); добавлен счётчик токенов (AiUsageLog + `_usage` в ответе ИИ + UI «Токены сегодня»); на мобильном дашборде статус работы и бейдж «⛔ Временно закрыто» видны на всех экранах.
 

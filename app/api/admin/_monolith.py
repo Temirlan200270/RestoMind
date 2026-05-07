@@ -426,7 +426,7 @@ async def _admin_auth_me_payload(request: Request, db: AsyncSession) -> dict[str
 async def admin_me(request: Request, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """Проверка сессии и перевыпуск ws_token для переподключения."""
     if not request.session.get("admin_ok"):
-        raise HTTPException(status_code=401, detail="Не авторизован")
+        return {"authenticated": False}
     return await _admin_auth_me_payload(request, db)
 
 
@@ -5132,11 +5132,29 @@ async def roi_today_summary(request: Request, db: AsyncSession = Depends(get_db)
     org = await db.get(Organization, org_id)
     now_utc = datetime.now(tz=timezone.utc)
     today_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
-    metrics = await aggregate_org_window(db, org_id, today_start, now_utc)
     cur = (getattr(org, "currency", None) or "KZT") if org is not None else "KZT"
-    narrative = build_today_narrative_ru(metrics, str(cur))
     tz = (getattr(org, "timezone", None) or "UTC") if org is not None else "UTC"
-    achievements = await build_achievements_week(db, org_id, str(tz))
+    try:
+        metrics = await aggregate_org_window(db, org_id, today_start, now_utc)
+    except Exception:
+        logger.exception("Failed to build ROI metrics org=%s", org_id)
+        metrics = {
+            "orders_count": 0,
+            "revenue": 0,
+            "upsell_offers": 0,
+            "upsell_accepts": 0,
+            "upsell_revenue": 0,
+            "active_guests": 0,
+            "ai_messages": 0,
+            "ai_time_saved_minutes": 0,
+            "help_events": 0,
+        }
+    narrative = build_today_narrative_ru(metrics, str(cur))
+    try:
+        achievements = await build_achievements_week(db, org_id, str(tz))
+    except Exception:
+        logger.exception("Failed to build ROI achievements org=%s", org_id)
+        achievements = []
     return {
         "narrative": narrative,
         "metrics": metrics,

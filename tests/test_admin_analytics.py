@@ -5,6 +5,7 @@ from fastapi import Response
 import pytest
 
 from app.api.admin import analytics
+from app.api.admin import _monolith as admin_api
 from app.db.models import Order, Organization, User
 
 
@@ -61,3 +62,22 @@ async def test_admin_analytics_runs_with_orders(db_session):
     assert out["current"]["revenue"] == 5200.0
     assert isinstance(out["menu_engineering"], list)
     assert isinstance(out["delivery_geo"], list)
+
+
+@pytest.mark.asyncio
+async def test_roi_today_returns_safe_payload_when_aggregation_fails(db_session, monkeypatch):
+    org = Organization(name="ROI Org", slug="roi-org")
+    db_session.add(org)
+    await db_session.flush()
+
+    async def _boom(*_args, **_kwargs):
+        raise RuntimeError("broken aggregate")
+
+    monkeypatch.setattr(admin_api, "aggregate_org_window", _boom)
+
+    out = await admin_api.roi_today_summary(DummyRequest(int(org.id)), db_session)
+
+    assert out["metrics"]["orders_count"] == 0
+    assert out["metrics"]["revenue"] == 0
+    assert out["achievements"] == []
+    assert isinstance(out["narrative"], str)

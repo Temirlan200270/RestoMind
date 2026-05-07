@@ -16,12 +16,12 @@ function adminEnsureChartJs() {
             return;
         }
         const script = document.createElement('script');
-        script.src = 'https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js';
+        script.src = '/static/vendor/chart.umd.min.js';
         script.async = true;
         script.defer = true;
         script.dataset.adminChartjs = 'true';
         script.onload = () => resolve(window.Chart);
-        script.onerror = () => reject(new Error('Chart.js failed to load'));
+        script.onerror = () => reject(new Error('Chart.js failed to load from local vendor'));
         document.head.appendChild(script);
     });
     return adminChartJsLoadPromise;
@@ -2794,6 +2794,11 @@ function adminMixinAuthKnowledge() {
                 const res = await this.apiFetch('/api/admin/auth/me');
                 if (res.ok) {
                     const data = await res.json();
+                    if (!data?.authenticated) {
+                        this.authenticated = false;
+                        this.wsToken = '';
+                        return;
+                    }
                     const me = this.normalizeMePayload(data);
                     this.userData = me;
                     this.syncBrandingDraftFromUser();
@@ -3169,6 +3174,7 @@ function adminMixinAuthKnowledge() {
             const res = await this.apiFetch('/api/admin/auth/me');
             if (!res.ok) return;
             const data = await res.json();
+            if (!data?.authenticated) return;
             const me = this.normalizeMePayload(data);
             this.userData = me;
             this.wsToken = me.ws_token;
