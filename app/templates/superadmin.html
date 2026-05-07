@@ -399,7 +399,8 @@ function superAdminPage() {
             admin_password: '',
         },
         async init() {
-            await this.guard();
+            const ok = await this.guard();
+            if (!ok) return;
             await Promise.all([this.loadRequests(), this.loadOrganizations(), this.loadWebhookEvents()]);
         },
         fmtDate(iso) {
@@ -438,8 +439,10 @@ function superAdminPage() {
         async guard() {
             try {
                 await this.api('/api/superadmin/me');
+                return true;
             } catch (e) {
                 this.error = e.message || 'Нет доступа к Super Admin';
+                return false;
             }
         },
         setToast(msg) {

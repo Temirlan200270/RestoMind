@@ -11,7 +11,7 @@
 {% from "components/_tabs.html" import tabs_pills %}
 {% from "components/_app_shell.html" import chat_shell_layout %}
 <!DOCTYPE html>
-<html lang="ru" x-data="adminApp()" x-init="init()" @keydown.window="handleGlobalKeydown($event)">
+<html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -20,7 +20,8 @@
     <script defer src="/static/js/admin-app.js?v={{ asset_ver }}"></script>
     <script defer src="/static/vendor/alpine-3.min.js?v={{ asset_ver }}"></script>
 </head>
-<body class="admin-root bg-gray-50 min-h-screen font-sans text-gray-800">
+<body class="admin-root bg-gray-50 min-h-screen font-sans text-gray-800"
+    x-data="adminApp()" x-init="init()" @keydown.window="handleGlobalKeydown($event)">
 
 {# Auth gate #}
 {% include "screens/_login.html" %}

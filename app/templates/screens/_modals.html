@@ -623,6 +623,25 @@
                                     class="w-full mt-2 py-3.5 rounded-xl text-white font-bold text-sm tracking-wide bg-emerald-600 hover:bg-emerald-700 shadow-sm shadow-emerald-600/20 transition">
                                     <span x-text="selectedOrder?.iiko_last_error ? 'Повторить отправку в iiko' : 'Подтвердить и печать в iiko'"></span>
                                 </button>
+                                <div class="mt-4 pt-4 border-t border-gray-200/80">
+                                    <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Ручное управление статусом</label>
+                                    <select
+                                        class="w-full rounded-xl border border-gray-200 bg-white px-3 py-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                                        :value="selectedOrder?.status || ''"
+                                        @change="selectedOrder && patchOrderStatus(selectedOrder.id, $event.target.value)"
+                                    >
+                                        <option value="draft">Черновик</option>
+                                        <option value="confirmed">Подтверждён</option>
+                                        <option value="sent_to_iiko">На кухне (в iiko)</option>
+                                        <option value="in_transit">В пути (Доставка)</option>
+                                        <option value="waiting_pickup">Ожидает выдачи (Самовывоз)</option>
+                                        <option value="completed">Завершён</option>
+                                        <option value="cancelled">Отменён</option>
+                                    </select>
+                                    <p class="text-[11px] text-gray-500 mt-2">
+                                        На мобильных устройствах перетаскивание в канбане недоступно — смените статус здесь.
+                                    </p>
+                                </div>
                                 <div x-show="selectedOrder?.items?.order_meta?.iiko_last_send && selectedOrder?.status === 'sent_to_iiko'"
                                     class="mt-2 rounded-xl border border-emerald-200 bg-emerald-50/90 px-3 py-2 text-xs text-emerald-900">
                                     <p class="font-semibold">Заказ принят iiko Cloud</p>

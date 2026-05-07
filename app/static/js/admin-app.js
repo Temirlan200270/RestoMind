@@ -334,6 +334,10 @@ function defaultPackagingRuleForm() {
 /** Поля состояния (вкладки, сущности, UI) */
 function adminMixinState() {
     return {
+        // Кэш сортировки заказов (чтобы не фризить UI на каждом reactive-триггере)
+        _ordersSortedSig: '',
+        _ordersSortedCache: [],
+
         // Авторизация
         authenticated: false,
         loginUsername: '',
@@ -1009,7 +1013,17 @@ function adminMixinMenuOrdersUi() {
 
         /** Таблица заказов: сортировка по колонкам на клиенте. */
         get ordersTableSorted() {
-            const list = [...(this.orders || [])];
+            const raw = this.orders || [];
+            const sig = [
+                raw.length,
+                this.ordersSort.column,
+                this.ordersSort.dir,
+                this._ordersLoadSeq,
+            ].join('\u0001');
+            if (this._ordersSortedSig === sig && Array.isArray(this._ordersSortedCache)) return this._ordersSortedCache;
+            this._ordersSortedSig = sig;
+
+            const list = [...raw];
             const col = this.ordersSort.column;
             const dir = this.ordersSort.dir === 'asc' ? 1 : -1;
             const num = (o) => {
@@ -1059,7 +1073,19 @@ function adminMixinMenuOrdersUi() {
                 if (va > vb) return dir;
                 return 0;
             });
-            return list;
+            this._ordersSortedCache = list;
+            return this._ordersSortedCache;
+        },
+
+        async showUiAlert(message, title = 'Внимание') {
+            const t = String(title || 'Внимание');
+            const m = String(message || '');
+            return this.openUiConfirm({
+                title: t,
+                message: m,
+                showCancel: false,
+                confirmText: 'Понятно',
+            });
         },
 
         ensureAi2NavItems() {
@@ -1097,6 +1123,25 @@ function adminMixinMenuOrdersUi() {
             }
 
             await this.checkSession();
+
+            // AudioContext unlock: браузеры блокируют звук до user gesture.
+            // Разблокируем по первому клику/тапу, затем можно безопасно играть уведомления.
+            try {
+                this._audioUnlocked = false;
+                window.addEventListener(
+                    'pointerdown',
+                    () => {
+                        this._audioUnlocked = true;
+                        try {
+                            const ctx = this._audioCtx;
+                            if (ctx && ctx.state === 'suspended' && typeof ctx.resume === 'function') {
+                                void ctx.resume();
+                            }
+                        } catch (_e) { /* ignore */ }
+                    },
+                    { once: true, passive: true },
+                );
+            } catch (_e) { /* ignore */ }
 
             // Стоп-лист: держим производный список в явном состоянии (не getter),
             // чтобы Alpine гарантированно перерисовывал сетку при поиске/обновлении данных.
@@ -3391,13 +3436,14 @@ function adminMixinAuthKnowledge() {
 
         async logoutAdmin() {
             try {
+                // Сбрасываем флаг до закрытия сокета, чтобы onclose не планировал реконнект.
+                this.authenticated = false;
                 if (this.ws) {
                     this.ws.close();
                     this.ws = null;
                 }
                 await this.apiFetch('/api/admin/auth/logout', { method: 'POST' });
             } catch { /* ignore */ }
-            this.authenticated = false;
             this.wsToken = '';
             this._adminHashWatchInstalled = false;
             this.wsChannelReady = false;
@@ -4662,6 +4708,7 @@ function adminMixinWebSocketEvents() {
             this._stopChatPolling();
             // Fallback-refresh каждые 20 с, пока WS не готов или после долгого обрыва.
             this._chatPollTimer = setInterval(() => {
+                if (!this.authenticated) return;
                 if (!this.wsChannelReady && this.currentTab === 'chats') {
                     void this.loadChatList(false);
                 }
@@ -4681,6 +4728,7 @@ function adminMixinWebSocketEvents() {
                 const Ctx = window.AudioContext || window.webkitAudioContext;
                 this._audioCtx = this._audioCtx || new Ctx();
                 const ctx = this._audioCtx;
+                if (ctx && ctx.state === 'suspended' && !this._audioUnlocked) return;
                 const osc = ctx.createOscillator();
                 const gain = ctx.createGain();
                 osc.type = type;
@@ -5417,7 +5465,9 @@ function adminMixinDataChartsSettings() {
                     await this.loadBookings();
                 } else if (this.currentTab === 'menu') {
                     if (this.menuView === 'stoplist') {
-                        await Promise.all([this.loadMenu(), this.loadStopList(), this.loadIntegrationStatus()]);
+                        // loadStopList() уже тянет полный список меню и синхронизирует this.menuItems.
+                        // Двойной вызов loadMenu() создаёт гонки и лишнюю нагрузку.
+                        await Promise.all([this.loadStopList(), this.loadIntegrationStatus()]);
                     } else {
                         await this.loadMenu();
                     }
