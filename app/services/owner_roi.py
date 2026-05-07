@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 
 from app.core.config import settings
 from app.db.models import ChatLog, FailedTask, Order, OrderStatus, Organization, User
+from app.services.timezones import zoneinfo_or_default
 from app.services.intelligence_analytics import (
     list_recommendation_events,
     menu_engineering_rows,
@@ -204,7 +205,7 @@ def build_today_narrative_ru(metrics: dict[str, Any], currency: str) -> str:
 
 def _previous_week_bounds_local(org_tz: str) -> tuple[datetime, datetime]:
     """Пн 00:00 … Вс 23:59:59 предыдущей календарной недели в зоне org."""
-    zi = ZoneInfo((org_tz or "UTC").strip() or "UTC")
+    zi = zoneinfo_or_default(org_tz, default="Asia/Almaty").zone
     now = datetime.now(zi)
     this_monday = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
     last_monday = this_monday - timedelta(days=7)
@@ -248,7 +249,7 @@ async def build_achievements_week(
     org_tz: str,
 ) -> list[dict[str, str]]:
     """3–4 коротких bullet'а по прошлым 7 суткам (локальные даты для подписи дня)."""
-    zi = ZoneInfo((org_tz or "UTC").strip() or "UTC")
+    zi = zoneinfo_or_default(org_tz, default="Asia/Almaty").zone
     now_local = datetime.now(zi)
     end_local = now_local.replace(hour=23, minute=59, second=59, microsecond=999999)
     start_local = (end_local - timedelta(days=7)).replace(hour=0, minute=0, second=0, microsecond=0)

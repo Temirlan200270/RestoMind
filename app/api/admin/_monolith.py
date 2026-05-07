@@ -120,6 +120,7 @@ from app.services.intelligence_analytics import (
 )
 from app.services.owner_roi import aggregate_org_window, build_achievements_week, build_today_narrative_ru
 from app.services.readiness import build_admin_readiness_payload
+from app.services.timezones import normalize_timezone_name
 from app.api.webhooks import _normalize_phone_e164
 
 from .deps import (
@@ -2520,7 +2521,9 @@ async def patch_organization_profile(
             raise HTTPException(status_code=400, detail="Название не должно быть пустым")
         org.name = nm
     if body.timezone is not None:
-        org.timezone = (body.timezone or "").strip() or org.timezone
+        tz_in = (body.timezone or "").strip()
+        if tz_in:
+            org.timezone = normalize_timezone_name(tz_in, default=(org.timezone or "Asia/Almaty"))
     if body.currency is not None:
         org.currency = (body.currency or "").strip().upper() or org.currency
     if body.whatsapp_phone_number_id is not None:

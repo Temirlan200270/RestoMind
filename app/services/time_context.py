@@ -9,6 +9,8 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.services.timezones import zoneinfo_or_default
+
 
 _WEEKDAYS_RU: dict[int, str] = {
     0: "понедельник",
@@ -96,13 +98,9 @@ def parse_schedule_json(schedule_json: dict[str, Any] | None) -> OrganizationSch
 
 
 def build_org_current_time(timezone_name: str | None) -> OrgCurrentTime:
-    tz_in = (timezone_name or "").strip()
-    tz = DEFAULT_ORG_TIMEZONE if not tz_in or tz_in.upper() == "UTC" else tz_in
-    try:
-        z = ZoneInfo(tz)
-    except Exception:
-        tz = DEFAULT_ORG_TIMEZONE
-        z = ZoneInfo(DEFAULT_ORG_TIMEZONE)
+    norm = zoneinfo_or_default(timezone_name, default=DEFAULT_ORG_TIMEZONE)
+    tz = norm.name
+    z = norm.zone
     now = datetime.now(tz=z)
     wd = _WEEKDAYS_RU.get(int(now.weekday()), "—")
     return OrgCurrentTime(
@@ -157,13 +155,9 @@ def check_operational_status(
     force_closed_until: datetime | None = None,
     force_closed_reason: str = "",
 ) -> OperationalStatus:
-    tz_in = (timezone_name or "").strip()
-    tz = DEFAULT_ORG_TIMEZONE if not tz_in or tz_in.upper() == "UTC" else tz_in
-    try:
-        z = ZoneInfo(tz)
-    except Exception:
-        tz = DEFAULT_ORG_TIMEZONE
-        z = ZoneInfo(DEFAULT_ORG_TIMEZONE)
+    norm = zoneinfo_or_default(timezone_name, default=DEFAULT_ORG_TIMEZONE)
+    tz = norm.name
+    z = norm.zone
     now_utc = now if now is not None else datetime.now(tz=ZoneInfo("UTC"))
     now_local = now_utc.astimezone(z)
 
