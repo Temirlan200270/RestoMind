@@ -141,6 +141,34 @@ if (typeof window !== 'undefined') {
     window.adminLogger = adminLogger;
 }
 
+// Глобальная диагностика: иногда вкладка "не грузится" из-за исключения/промиса,
+// но пользователь не видит консоль (фильтры/группы/скрытый уровень).
+// Эти хендлеры гарантированно выводят ошибку через error-level.
+if (typeof window !== 'undefined') {
+    try {
+        window.addEventListener('error', (ev) => {
+            try {
+                const msg = ev?.message || 'Unknown error';
+                const src = ev?.filename || '';
+                const line = ev?.lineno || '';
+                const col = ev?.colno || '';
+                adminLogger.error('[global] error', `${msg} @ ${src}:${line}:${col}`, ev?.error || ev);
+            } catch (_e) {
+                adminLogger.error('[global] error', ev);
+            }
+        });
+        window.addEventListener('unhandledrejection', (ev) => {
+            try {
+                adminLogger.error('[global] unhandledrejection', ev?.reason || ev);
+            } catch (_e) {
+                adminLogger.error('[global] unhandledrejection');
+            }
+        });
+        // Один "маяк", чтобы точно понять: консоль работает, уровень логов не silent.
+        adminLogger.info('[admin] app boot', { logLevel: adminLogger._level });
+    } catch (_e) { /* ignore */ }
+}
+
 /** Форматирование вне Alpine — без лишних замыканий в шаблоне; единый символ ₸. */
 const adminFormat = {
     /** Число с разделителями, без символа валюты (для подписей Chart.js и сборки строк). */
@@ -2675,6 +2703,13 @@ function adminMixinAuthKnowledge() {
         async apiJsonResponse(url, fetchOpts = {}) {
             const res = await this.apiFetch(url, fetchOpts);
             const data = await res.json().catch(() => ({}));
+            // Диагностика "вкладка пустая": если API вернул не-2xx, логируем URL+статус.
+            // Уровень warn виден по умолчанию.
+            if (!res.ok) {
+                try {
+                    adminLogger.warn('[api]', String(url), res.status, data);
+                } catch (_e) { /* ignore */ }
+            }
             return { ok: res.ok, status: res.status, data, res };
         },
 
