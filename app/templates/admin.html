@@ -22,17 +22,18 @@
 </head>
 <body class="admin-root bg-gray-50 min-h-screen font-sans text-gray-800">
 
+{# Auth gate #}
 {% include "screens/_login.html" %}
 
 <!-- ========== ПРИЛОЖЕНИЕ (после входа): вся высота — 100dvh, без calc; алерт в потоке — чат сжимается ========== -->
 <div x-show="authenticated" x-cloak class="flex h-[100dvh] min-h-0 w-full overflow-hidden bg-gray-50 relative">
 
-
+    {# Navigation shell #}
     {% include "screens/_sidebar.html" %}
-
 
     <!-- Правая колонка: шапка + алерт (shrink-0) + область контента (flex-1 min-h-0) -->
     <main class="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
+        {# Global chrome #}
         {% include "screens/_header.html" %}
 
         {% include "screens/_system_banner.html" %}
@@ -44,8 +45,9 @@
             class="flex-1 min-h-0"
             :class="currentTab === 'chats'
                 ? 'flex flex-col overflow-hidden px-0 md:px-6 pb-0 md:pb-6'
-                : 'overflow-y-auto overflow-x-hidden min-w-0 px-4 sm:px-6 md:px-8 py-4 md:py-6 pb-20 md:pb-6'"
+            : 'overflow-y-auto overflow-x-hidden min-w-0 px-4 sm:px-6 md:px-8 py-4 md:py-6 pb-20 md:pb-6'"
         >
+            {# Primary sections #}
             {% include "screens/_tab_dashboard.html" %}
             {% include "screens/_tab_incidents.html" %}
             {% include "screens/_tab_ai_value.html" %}
@@ -55,22 +57,27 @@
             {% include "screens/_tab_bookings.html" %}
             {% include "screens/_tab_chats.html" %}
             {% include "screens/_tab_menu.html" %}
+
+            {# Settings sections #}
             {% include "screens/_tab_settings_connections.html" %}
             {% include "screens/_tab_settings_branding.html" %}
             {% include "screens/_tab_settings_restaurant.html" %}
             {% include "screens/_tab_settings_smart_sales.html" %}
-            {% include "screens/_modal_packaging_create.html" %}
             {% include "screens/_tab_settings_health.html" %}
             {% include "screens/_tab_settings_technical.html" %}
             {% include "screens/_tab_settings_bot_test.html" %}
             {% include "screens/_tab_settings_team.html" %}
+
+            {# Screen-local overlays #}
+            {% include "screens/_modal_packaging_create.html" %}
         </div>
 
+        {# Mobile navigation #}
         {% include "screens/_bottom_nav.html" %}
 
     </main>
 
-
+    {# Global overlays #}
     {% include "screens/_modals.html" %}
 
 

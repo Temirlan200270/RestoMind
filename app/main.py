@@ -263,6 +263,7 @@ async def _apply_sqlite_startup_schema_patches() -> None:
         "ALTER TABLE users ADD COLUMN current_state VARCHAR(50) DEFAULT 'chatting'",
         "ALTER TABLE users ADD COLUMN current_pending_order_id INTEGER",
         "ALTER TABLE users ADD COLUMN current_pending_booking_id INTEGER",
+        "ALTER TABLE users ADD COLUMN meta_json TEXT",
     ):
         try:
             async with async_engine.begin() as conn:
@@ -285,6 +286,7 @@ async def _apply_sqlite_startup_schema_patches() -> None:
         "ALTER TABLE menu_items ADD COLUMN ingredients_summary TEXT DEFAULT ''",
         "ALTER TABLE menu_items ADD COLUMN dietary_tags TEXT DEFAULT ''",
         "ALTER TABLE menu_items ADD COLUMN upsell_pairs TEXT DEFAULT ''",
+        "ALTER TABLE menu_items ADD COLUMN embedding BLOB",
     ):
         try:
             async with async_engine.begin() as conn:
@@ -311,6 +313,8 @@ async def _apply_sqlite_startup_schema_patches() -> None:
         "ALTER TABLE organizations ADD COLUMN iiko_terminal_group_id VARCHAR(255) DEFAULT ''",
         "ALTER TABLE organizations ADD COLUMN is_demo INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE organizations ADD COLUMN schedule_json TEXT",
+        "ALTER TABLE organizations ADD COLUMN force_closed_until TIMESTAMP",
+        "ALTER TABLE organizations ADD COLUMN force_closed_reason TEXT DEFAULT ''",
     ):
         try:
             async with async_engine.begin() as conn:

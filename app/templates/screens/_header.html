@@ -65,9 +65,12 @@
                                 <template x-if="(userData?.available_organizations || []).length <= 1">
                                     <div class="text-xs font-semibold text-gray-700 truncate" x-text="orgProfile?.name || '—'"></div>
                                 </template>
-                                <div class="text-[9px] text-gray-400 uppercase font-bold tracking-tight" x-show="userData?.tenant?.name" x-text="userData.tenant.name"></div>
+                                <div class="text-[9px] text-gray-400 uppercase font-bold tracking-tight" x-show="userData?.tenant?.name" x-text="userData?.tenant?.name || ''"></div>
                             </div>
-                            <div class="text-[10px] text-gray-400 tabular-nums shrink-0" x-show="orgProfile?.organization_id" x-text="'ID ' + orgProfile.organization_id"></div>
+                            <div class="text-[10px] text-gray-400 tabular-nums shrink-0"
+                                x-show="(settingsEnv?.app_debug || isSuperadmin) && orgProfile?.organization_id"
+                                x-cloak
+                                x-text="'ID ' + orgProfile.organization_id"></div>
                             <span x-show="isDemoSession" x-cloak class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-100 text-violet-800 border border-violet-200 shrink-0">Демо</span>
                         </div>
                         <div class="flex items-center gap-2 min-w-0">
@@ -105,7 +108,7 @@
                             x-show="authenticated && (setupStatus.score ?? 100) < 100"
                             x-cloak
                             @click="openSetupChecklist()"
-                            class="mt-2 inline-flex max-w-full items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100">
+                            class="mt-2 inline-flex min-h-[44px] max-w-full items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900 hover:bg-amber-100">
                             <span class="h-2 w-2 rounded-full bg-amber-500"></span>
                             <span class="tabular-nums" x-text="'Готовность ' + (setupStatus.score ?? 0) + '%'"></span>
                             <span class="text-amber-800/70 tabular-nums" x-text="setupDoneCount() + '/' + setupTotalCount()"></span>

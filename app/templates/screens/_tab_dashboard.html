@@ -56,12 +56,12 @@
                     <div class="flex flex-wrap items-center justify-end gap-2 text-xs -mt-2 mb-2">
                             <span x-show="attentionSummaryLoading" class="text-slate-400">Обновляем…</span>
                             <span x-show="!attentionSummaryLoading && attentionSummary" x-cloak class="font-semibold tabular-nums text-slate-700">
-                                Открыто: <span x-text="attentionSummary.total_open ?? 0"></span>
+                                Открыто: <span x-text="attentionSummary?.total_open ?? 0"></span>
                             </span>
                     </div>
                     <div x-show="attentionSummaryLoading && !attentionSummary" class="mt-4 h-14 rounded-xl bg-slate-100 animate-pulse"></div>
                     <div class="mt-4 flex flex-wrap gap-2" x-show="Array.isArray(attentionSummary?.hero_actions) && attentionSummary.hero_actions.length" x-cloak>
-                        <template x-for="a in (attentionSummary.hero_actions || [])" :key="a.id || a.label">
+                        <template x-for="a in (attentionSummary?.hero_actions || [])" :key="a.id || a.label">
                             <button type="button"
                                 @click="heroAttentionGo(a.target)"
                                 class="min-h-[44px] px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold border transition shadow-sm"
@@ -70,7 +70,7 @@
                             </button>
                         </template>
                     </div>
-                    <p x-show="!attentionSummaryLoading && attentionSummary && !(attentionSummary.hero_actions || []).length"
+                    <p x-show="!attentionSummaryLoading && attentionSummary && !(attentionSummary?.hero_actions || []).length"
                         x-cloak class="mt-4 text-sm text-slate-600">
                         Нет открытых задач по мониторингу — можно продолжать работу.
                     </p>
@@ -84,14 +84,14 @@
                     </div>
                     <div x-show="dashRoiLoading && !dashRoiSummary" class="h-20 rounded-xl bg-slate-100 animate-pulse"></div>
                     <div x-show="dashRoiSummary" x-cloak class="space-y-4">
-                        <p class="text-base sm:text-lg text-slate-800 leading-relaxed" x-text="dashRoiSummary.narrative || ''"></p>
+                        <p class="text-base sm:text-lg text-slate-800 leading-relaxed" x-text="dashRoiSummary?.narrative || ''"></p>
                         <div class="grid gap-3 sm:grid-cols-2" x-show="dashRoiSummary && dashRoiSummary.metrics">
                             <div class="flex items-start gap-3 rounded-2xl bg-amber-50/95 ring-1 ring-amber-200/70 px-4 py-3">
                                 <span class="text-2xl leading-none shrink-0" aria-hidden="true">⚡️</span>
                                 <div class="min-w-0">
                                     <p class="text-[11px] font-bold uppercase tracking-wide text-amber-900/75">Сэкономлено времени</p>
                                     <p class="text-xl sm:text-2xl font-black text-amber-950 tabular-nums mt-0.5"
-                                        x-text="(dashRoiSummary.metrics.ai_time_saved_minutes || 0) >= 60 ? (Math.round((dashRoiSummary.metrics.ai_time_saved_minutes / 60) * 10) / 10) + ' ч' : Math.round(dashRoiSummary.metrics.ai_time_saved_minutes || 0) + ' мин'"></p>
+                                        x-text="((dashRoiSummary?.metrics?.ai_time_saved_minutes || 0) >= 60) ? (Math.round(((dashRoiSummary?.metrics?.ai_time_saved_minutes || 0) / 60) * 10) / 10) + ' ч' : Math.round(dashRoiSummary?.metrics?.ai_time_saved_minutes || 0) + ' мин'"></p>
                                     <p class="text-[11px] text-amber-900/80 mt-1 leading-snug">Ответы ИИ в чате × ~1,5 мин — как если бы оператор печатал вручную.</p>
                                 </div>
                             </div>
@@ -99,7 +99,7 @@
                                 <span class="text-2xl leading-none shrink-0" aria-hidden="true">📈</span>
                                 <div class="min-w-0">
                                     <p class="text-[11px] font-bold uppercase tracking-wide text-emerald-900/75">Допродажи через ИИ</p>
-                                    <p class="text-xl sm:text-2xl font-black text-emerald-950 tabular-nums mt-0.5" x-text="fmt.money(dashRoiSummary.metrics.upsell_revenue || 0)"></p>
+                                    <p class="text-xl sm:text-2xl font-black text-emerald-950 tabular-nums mt-0.5" x-text="fmt.money(dashRoiSummary?.metrics?.upsell_revenue || 0)"></p>
                                     <p class="text-[11px] text-emerald-900/80 mt-1 leading-snug">Сумма принятых советов бота в заказах за сегодня (UTC).</p>
                                 </div>
                             </div>
