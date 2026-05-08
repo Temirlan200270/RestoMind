@@ -6,8 +6,13 @@
 
 ## [Unreleased] — 2026-03-20
 
+### Исправлено
+
+- **Админка:** вкладка «Меню» — один общий корень вместо двух соседей внутри `template x-if` (Alpine требует один child); блок «Аналитика» вложен в разметку «Дашборд»; в `loadTabData` нормализация устаревшего `currentTab === 'analytics'` → дашборд + под-таб.
+
 ### Добавлено
 
+- **Админка / диагностика:** маркеры `data-rm-tab-surface` для «Меню», аналитики дашборда и «Профиль и логистика»; после `loadTabData` вызывается `_auditActiveTabSurface` — в консоль через `adminLogger.error` (нет узла в DOM) или `adminLogger.warn` (узел есть, но не виден); успех — только на уровне `debug` (`?admin_log=debug`). Регрессия: [`tests/test_admin_tab_surface_audit.py`](tests/test_admin_tab_surface_audit.py).
 - **AI Operations / Intelligence:** добавлены durable `SystemEvent`, `OperationalInsight`, `RestaurantStateSnapshot`, `IntelligenceConversation`/`IntelligenceMessage`, API `/api/admin/intelligence/*`, вкладки `AI-аналитик` и `Digital Twin`, MVP-аналитика по выручке/заказам/отменам и симулятор операторской нагрузки. Документация: [`docs/AI_OPERATIONS.md`](docs/AI_OPERATIONS.md), [`docs/EVENT_ARCHITECTURE.md`](docs/EVENT_ARCHITECTURE.md).
 
 - **Админка / UI-документация:** добавлена карта UI-слоя [`docs/UI_MAP.md`](docs/UI_MAP.md): layout, screens, components/macros, client logic и текущие контракты для дальнейших правок.

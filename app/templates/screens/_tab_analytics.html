@@ -1,5 +1,5 @@
             <!-- ========== АНАЛИТИКА ========== -->
-            <div x-show="currentTab === 'dashboard' && dashboardTab === 'analytics'" x-cloak class="fade-in">
+            <div x-show="dashboardTab === 'analytics'" x-cloak class="fade-in" data-rm-tab-surface="dashboard-analytics">
                 {% set analytics_header_actions %}
                 <button type="button" @click="analyticsHelpOpen = true"
                     class="ds-btn ds-btn-secondary ds-btn-sm min-h-9 min-w-9 p-0"

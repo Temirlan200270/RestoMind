@@ -169,6 +169,45 @@ if (typeof window !== 'undefined') {
     } catch (_e) { /* ignore */ }
 }
 
+/**
+ * Видим ли узел в layout (после Alpine x-show / Tailwind): размер, display, opacity.
+ * @param {Element | null | undefined} el
+ * @returns {boolean}
+ */
+function adminIsDomElementVisible(el) {
+    if (!el || typeof el.getBoundingClientRect !== 'function') return false;
+    try {
+        const r = el.getBoundingClientRect();
+        if (!Number.isFinite(r.width) || !Number.isFinite(r.height) || r.width < 2 || r.height < 2) {
+            return false;
+        }
+        const st = window.getComputedStyle(el);
+        if (st.display === 'none' || st.visibility === 'hidden' || st.opacity === '0') return false;
+        return true;
+    } catch (_e) {
+        return false;
+    }
+}
+
+/**
+ * Какой `data-rm-tab-surface` должен быть виден для текущего состояния (регрессии «пустой экран»).
+ * @param {{ currentTab: string, dashboardTab: string, settingsTab: string }} ctx
+ * @returns {{ key: string, selector: string } | null}
+ */
+function adminTabSurfaceAuditTarget(ctx) {
+    const ct = ctx && ctx.currentTab;
+    const dt = ctx && ctx.dashboardTab;
+    const st = ctx && ctx.settingsTab;
+    if (ct === 'menu') return { key: 'menu', selector: '[data-rm-tab-surface="menu"]' };
+    if (ct === 'dashboard' && dt === 'analytics') {
+        return { key: 'dashboard:analytics', selector: '[data-rm-tab-surface="dashboard-analytics"]' };
+    }
+    if (ct === 'settings' && st === 'restaurant') {
+        return { key: 'settings:restaurant', selector: '[data-rm-tab-surface="settings-restaurant"]' };
+    }
+    return null;
+}
+
 /** Форматирование вне Alpine — без лишних замыканий в шаблоне; единый символ ₸. */
 const adminFormat = {
     /** Число с разделителями, без символа валюты (для подписей Chart.js и сборки строк). */
@@ -5600,6 +5639,11 @@ function adminMixinDataChartsSettings() {
     return {
         // ─── Data Loading ────────────────────────────
         async loadTabData() {
+            // Старые клиенты/закладки могли держать currentTab === 'analytics' до P1.5.0 — без нормализации блок аналитики не показывался.
+            if (this.currentTab === 'analytics') {
+                this.currentTab = 'dashboard';
+                this.dashboardTab = 'analytics';
+            }
             // Legacy ids → Settings tabs (backward compatibility for old sidebar/hash links)
             const legacySettingsMap = {
                 integrations: 'connections',
@@ -5728,10 +5772,52 @@ function adminMixinDataChartsSettings() {
                     this._paintAnalyticsChartAfterLayout();
                 }
                 this._resizeVisibleCharts(tab);
+                this._auditActiveTabSurface('afterLoadTabData');
             }, 100);
             [150, 400, 800].forEach((ms) => {
                 setTimeout(() => this._resizeVisibleCharts(tab), ms);
             });
+        },
+
+        /**
+         * Диагностика «вкладка выбрана, а контент не на экране»: пишем в adminLogger только при сбое.
+         * Включить подробные логи: `?admin_log=debug` или `localStorage.restomind_admin_log=debug`.
+         */
+        _auditActiveTabSurface(reason) {
+            if (!this.authenticated) return;
+            const target = adminTabSurfaceAuditTarget({
+                currentTab: this.currentTab,
+                dashboardTab: this.dashboardTab,
+                settingsTab: this.settingsTab,
+            });
+            if (!target) return;
+            const el = document.querySelector(target.selector);
+            const payload = {
+                reason: reason || 'audit',
+                surface: target.key,
+                selector: target.selector,
+                currentTab: this.currentTab,
+                dashboardTab: this.dashboardTab,
+                settingsTab: this.settingsTab,
+                tabDataLoading: !!this.tabDataLoading,
+            };
+            if (!el) {
+                adminLogger.error('[admin] tab surface DOM missing', payload);
+                return;
+            }
+            if (!adminIsDomElementVisible(el)) {
+                const r = el.getBoundingClientRect();
+                const cs = window.getComputedStyle(el);
+                adminLogger.warn('[admin] tab surface not visible', {
+                    ...payload,
+                    rect: { w: r.width, h: r.height, top: r.top, left: r.left },
+                    display: cs.display,
+                    visibility: cs.visibility,
+                    opacity: cs.opacity,
+                });
+                return;
+            }
+            adminLogger.debug('[admin] tab surface ok', payload);
         },
 
         isMobileViewport() {

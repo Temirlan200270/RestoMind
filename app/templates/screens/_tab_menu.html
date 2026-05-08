@@ -1,5 +1,6 @@
             <!-- ========== МЕНЮ (каталог + стоп-лист) ========== -->
-            <template x-if="currentTab === 'menu'">
+            {# Один корневой узел: у Alpine x-if на template должен быть ровно один child — иначе вкладка «Меню» могла не монтироваться. #}
+            <div x-show="currentTab === 'menu'" x-cloak class="min-w-0" data-rm-tab-surface="menu">
             <div class="fade-in pb-24 min-w-0 max-w-full">
                 <div x-show="menuLoadError" x-cloak class="mb-4 text-sm text-red-800 bg-red-50 border border-red-100 rounded-xl px-4 py-3 flex items-start gap-2">
                     <span class="shrink-0 mt-0.5" aria-hidden="true">&#x26A0;&#xFE0F;</span>
@@ -455,5 +456,5 @@
                     </div>
                 </div>
             </div>
-            </template>
+            </div>
 
