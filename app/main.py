@@ -670,9 +670,28 @@ async def deep_health_check() -> dict:
 @app.get("/settings", response_class=HTMLResponse, tags=["Admin Panel"])
 async def admin_page(request: Request) -> HTMLResponse:
     """Главная страница — админ-панель."""
-    git_sha = (os.environ.get("RENDER_GIT_COMMIT") or os.environ.get("GIT_COMMIT") or "").strip()
-    sha7 = git_sha[:7] if git_sha else ""
-    asset_ver = settings.app_version + (f"-{sha7}" if sha7 else "")
+    def _asset_ver() -> str:
+        """
+        Версия ассетов для cache-busting.
+        На Render иногда нет RENDER_GIT_COMMIT → добавляем mtime статических файлов,
+        чтобы после деплоя не оставался кэш старого JS/CSS (ломает навигацию/IA).
+        """
+        git_sha_local = (os.environ.get("RENDER_GIT_COMMIT") or os.environ.get("GIT_COMMIT") or "").strip()
+        sha7_local = git_sha_local[:7] if git_sha_local else ""
+        if sha7_local:
+            return settings.app_version + f"-{sha7_local}"
+        try:
+            # Берём "самый новый" mtime из ключевых статик-файлов админки.
+            # Это меняется при любом обновлении JS/CSS и надёжно сбрасывает кэш.
+            base_dir = Path(__file__).resolve().parent
+            js_p = base_dir / "static" / "js" / "admin-app.js"
+            css_p = base_dir / "static" / "css" / "admin.css"
+            mt = int(max(js_p.stat().st_mtime, css_p.stat().st_mtime))
+            return settings.app_version + f"-m{mt}"
+        except Exception:
+            return settings.app_version
+
+    asset_ver = _asset_ver()
     response = templates.TemplateResponse(
         request,
         "admin.html",
@@ -695,9 +714,20 @@ async def admin_components_storybook(request: Request) -> HTMLResponse:
 
         raise HTTPException(status_code=404, detail="Not Found")
 
+    # Используем ту же схему cache-busting, что и /admin.
     git_sha = (os.environ.get("RENDER_GIT_COMMIT") or os.environ.get("GIT_COMMIT") or "").strip()
     sha7 = git_sha[:7] if git_sha else ""
-    asset_ver = settings.app_version + (f"-{sha7}" if sha7 else "")
+    if sha7:
+        asset_ver = settings.app_version + f"-{sha7}"
+    else:
+        try:
+            base_dir = Path(__file__).resolve().parent
+            js_p = base_dir / "static" / "js" / "admin-app.js"
+            css_p = base_dir / "static" / "css" / "admin.css"
+            mt = int(max(js_p.stat().st_mtime, css_p.stat().st_mtime))
+            asset_ver = settings.app_version + f"-m{mt}"
+        except Exception:
+            asset_ver = settings.app_version
     response = templates.TemplateResponse(
         request,
         "_components_storybook.html",
@@ -734,7 +764,17 @@ async def superadmin_page(request: Request) -> HTMLResponse:
     """Панель владельца платформы (доступ проверяется API-эндпоинтами)."""
     git_sha = (os.environ.get("RENDER_GIT_COMMIT") or os.environ.get("GIT_COMMIT") or "").strip()
     sha7 = git_sha[:7] if git_sha else ""
-    asset_ver = settings.app_version + (f"-{sha7}" if sha7 else "")
+    if sha7:
+        asset_ver = settings.app_version + f"-{sha7}"
+    else:
+        try:
+            base_dir = Path(__file__).resolve().parent
+            js_p = base_dir / "static" / "js" / "admin-app.js"
+            css_p = base_dir / "static" / "css" / "admin.css"
+            mt = int(max(js_p.stat().st_mtime, css_p.stat().st_mtime))
+            asset_ver = settings.app_version + f"-m{mt}"
+        except Exception:
+            asset_ver = settings.app_version
     response = templates.TemplateResponse(
         request,
         "superadmin.html",

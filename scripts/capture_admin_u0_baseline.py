@@ -98,6 +98,17 @@ def _capture(base: str, *, allow_demo_login: bool) -> None:
     admin_user = (os.environ.get("ADMIN_USERNAME") or "admin").strip()
     admin_pass = (os.environ.get("ADMIN_PASSWORD") or "").strip()
 
+    def _dismiss_modal_if_any(page) -> None:
+        # Иногда после логина всплывает uiConfirm «Готово…» и закрывает интерфейс на скринах.
+        # Для baseline нам важно видеть UI, поэтому мягко закрываем, если модалка есть.
+        try:
+            btn = page.get_by_role("button", name="Понятно")
+            if btn.is_visible(timeout=1200):
+                btn.click(timeout=2000)
+                page.wait_for_timeout(300)
+        except Exception:
+            return
+
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(viewport={"width": 1440, "height": 900})
@@ -122,6 +133,7 @@ def _capture(base: str, *, allow_demo_login: bool) -> None:
 
         page.wait_for_timeout(3500)
         sidebar.wait_for(state="visible", timeout=120_000)
+        _dismiss_modal_if_any(page)
 
         OUT_DIR.mkdir(parents=True, exist_ok=True)
         # Чтобы baseline не “смешивался” с предыдущими прогоном: удаляем только файлы,
@@ -138,6 +150,7 @@ def _capture(base: str, *, allow_demo_login: bool) -> None:
         for fname, frag in SHOTS:
             page.goto(f"{base}/admin#{frag}", wait_until="domcontentloaded", timeout=120_000)
             page.wait_for_timeout(2800)
+            _dismiss_modal_if_any(page)
             target = OUT_DIR / fname
             page.screenshot(path=str(target), full_page=False)
             print("OK", fname)
