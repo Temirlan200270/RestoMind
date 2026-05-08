@@ -8,6 +8,8 @@
 
 ### Добавлено
 
+- **AI Operations / Intelligence:** добавлены durable `SystemEvent`, `OperationalInsight`, `RestaurantStateSnapshot`, `IntelligenceConversation`/`IntelligenceMessage`, API `/api/admin/intelligence/*`, вкладки `AI-аналитик` и `Digital Twin`, MVP-аналитика по выручке/заказам/отменам и симулятор операторской нагрузки. Документация: [`docs/AI_OPERATIONS.md`](docs/AI_OPERATIONS.md), [`docs/EVENT_ARCHITECTURE.md`](docs/EVENT_ARCHITECTURE.md).
+
 - **Админка / UI-документация:** добавлена карта UI-слоя [`docs/UI_MAP.md`](docs/UI_MAP.md): layout, screens, components/macros, client logic и текущие контракты для дальнейших правок.
 - **Админка / доступы:** добавлены опциональные env-креды `SUPERADMIN_USERNAME`/`SUPERADMIN_PASSWORD` для legacy-входа с `is_superadmin=true` (быстрый доступ к `/superadmin` без StaffUser); подпись WS-токена завязана на `SESSION_SECRET`.
 
@@ -18,6 +20,11 @@
 - **Админка / UI (Phase U6):** мобильные модалки `ds-modal-panel` — отступ `safe-area-inset-bottom`, визуальная «ручка» bottom-sheet, то же для `ds-drawer-panel`; сегменты и `ds-btn-sm/md` с минимальной высотой **44px**; [`admin.html`](app/templates/admin.html) — **45** интерактивных зон с `min-h-[44px]`; канбан: **`data-kanban-col`**, `role="region"`, `tabindex="0"`, обработчик **`@keydown` → `handleKanbanKeydown`**, табы вида заказов с **`role="tab"`**; [`_drawer.html`](app/templates/components/_drawer.html) — заголовок **`<h2 id="…-title">`** для **aria-labelledby**. Регрессия: `tests/test_ui_u6_a11y.py`. Пересобран [`app/static/css/admin.css`](app/static/css/admin.css) из [`src/css/admin-input.css`](src/css/admin-input.css).
 
 ### Изменено
+
+- **P0 (стабильность):** OpenAI transient‑ошибки (`RateLimitError | APIConnectionError | APITimeoutError | APIError 429/5xx`) после внутренних ретраев поднимают `TransientAiError` в [`app/services/ai_engine/openai_p.py`](app/services/ai_engine/openai_p.py); диспетчер [`app/services/ai_brain.py`](app/services/ai_brain.py) пробрасывает его наверх (`raise_on_transient=True`), retry‑цикл `_enqueue_processing` в [`app/api/webhooks.py`](app/api/webhooks.py) (3 попытки, exp back‑off) делает повтор вместо «успешной» эскалации. Аналог в `gemini_p.py`.
+- **P0 (UI / заказы):** `loadOrders` в [`app/static/js/admin-app.js`](app/static/js/admin-app.js) теперь устойчив к гонке REST↔WebSocket — seq‑guard (`_ordersLoadSeq` отбрасывает устаревшие ответы) + merge по `row_version` (REST не перетирает более свежие WS‑данные).
+- **Админка / UI (split admin.html):** [`app/templates/admin.html`](app/templates/admin.html) сокращён до ~75 строк и собирается из 27 экранов в [`app/templates/screens/`](app/templates/screens/) через `{% include %}` (login, sidebar, header, banners, табы дашборда/заказов/брони/чатов/меню/incidents/intelligence/digital_twin/ai_value/analytics/operator_queue, 8 экранов настроек, modals, bottom_nav). Поведение Alpine/DOM не менялось; ленивый DOM (`x-if`/mount‑on‑demand) — отдельным шагом.
+- **Документация / UX дорожка:** в [`docs/ROADMAP.md`](docs/ROADMAP.md) добавлен раздел **🟠 P1.5: UX Density & AI Trust** (Compact Kanban, tenant color stripe, right context panel в чатах, AI Confidence badge, AI Snooze с таймером, bulk‑actions в стоп‑листе, skeletons + relative time, переснятие baseline‑скринов); в [`docs/UI_DESIGN_SYSTEM.md`](docs/UI_DESIGN_SYSTEM.md) — две новые секции: «Density modes» (Normal vs Compact для канбана/таблиц/списков) и «AI in UI» (визуальный язык ИИ: цвет, бейдж источника, confidence, snooze, realtime pulse).
 
 - **Админка / UI (Phase U5 — полная миграция):** дашборд (ROI, «Ценность ИИ», «Требуют внимания», быстрые действия, сегментированный выбор метрики графика), вкладка **Аналитика** (`section_header`, `segmented`, `card` для KPI и блоков), **Заказы** (переключатель канбан/таблица через `segmented`), **Вклад ИИ** (период через `segmented`, KPI через `kpi_card` / `card`), **Помощь клиентам** (KPI, фильтры `ds-input`, таблица в `card`), карточки **Бронирования** (`ds-card`), модалки заказа / тестового заказа / брони на паттерн `ds-modal-backdrop` + `ds-modal-panel`. Файл: [`app/templates/admin.html`](app/templates/admin.html).
 
@@ -252,3 +259,4 @@
 - Аналитика на уровне SQL
 - Bulk load при синхронизации из iiko
 - Pub/Sub вместо polling в админке
+

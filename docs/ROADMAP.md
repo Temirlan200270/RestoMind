@@ -16,13 +16,15 @@
 - [x] **Счётчик токенов (полный стек):** `AiUsageLog` + upsert индекс `(organization_id, day)`; `_usage` в `AIBrainResponse`; заполнение в `openai_p.py`; fire-and-forget upsert; UI «Токены сегодня».
 - [x] **Dashboard mobile: статус работы на всех экранах:** 🟢/🟡/⚫️ + красный бейдж «⛔ Временно закрыто» при force-close (клик ведёт в настройки).
 
-- [ ] **Data leak меню между организациями:** `load_available_menu()` должен фильтровать по `organization_id` (и call-sites обязаны передавать org). См. `problems.md` (старое): `app/services/order_logic.py:197`, `app/api/webhooks.py`, `app/api/admin/_monolith.py`, `app/services/intent_router.py`.
-- [ ] **WhatsApp inbound dedupe durable handoff:** не ставить Redis-preclaim раньше durable записи в БД; фиксировать `done/failed` статус в БД (идемпотентность не должна “терять” сообщение при падении процесса). См. `app/api/webhooks.py`, `app/services/whatsapp_idempotency.py`.
-- [ ] **OpenAI timeout masking → retry:** таймауты/RateLimit должны приводить к `TransientAiError` (или эквиваленту), чтобы очередь/вебхук делал retry, а не “успешно” эскалировал. См. `app/services/ai_brain.py`.
-- [ ] **Source of Truth для dialog state:** durable state пишем в БД в основной транзакции, Redis обновляем **после commit** (cache-only). Убрать best-effort `_db_sync()` в отдельной сессии. См. `app/services/dialog_mgr.py`, `app/api/webhooks.py`.
+- [ ] **Data leak меню между организациями (частично):** все продакшен‑callers уже передают `organization_id` ([`app/services/intent_router.py:418`](app/services/intent_router.py), [`app/api/admin/_monolith.py:1563`](app/api/admin/_monolith.py), [`app/api/admin/_monolith.py:6010`](app/api/admin/_monolith.py), [`app/api/admin/test_bot.py:99`](app/api/admin/test_bot.py), [`app/services/context_engine.py:43`](app/services/context_engine.py)), но сама сигнатура [`load_available_menu`](app/services/order_logic.py) всё ещё `organization_id: int | None = None` — забыть аргумент можно. Осталось: убрать дефолт `None` (или `raise ValueError` при `None`), выпилить ветку «legacy `MenuItem.organization_id IS NULL`» (бэкфил на default org), починить тесты `tests/test_order_logic.py` / `tests/test_intent_phase18.py` / `tests/regression/test_upsell_anti_repeat.py`, добавить регресс «зов без org → ошибка».
+- [ ] **WhatsApp inbound dedupe durable handoff (частично):** `done/failed` уже фиксируются в БД ([`app/services/whatsapp_idempotency.py`](app/services/whatsapp_idempotency.py): `try_start_whatsapp_inbound_in_db`, `mark_whatsapp_inbound_done`, `mark_whatsapp_inbound_failed`; вызовы и `db.commit()` в [`app/api/webhooks.py:781,802,827`](app/api/webhooks.py)); reclaim по `failed`/stale 15 мин работает. Осталось: убрать ранний Redis‑preclaim в [`app/api/webhooks.py:1587`](app/api/webhooks.py) — он стоит ДО DB‑claim и при падении между шагами теряет сообщение. Redis оставить как кэш‑чек после коммита `done`.
+- [x] **OpenAI timeout masking → retry:** transient‑ошибки (`RateLimitError | APIConnectionError | APITimeoutError | APIError 429/5xx`) превращаются в `TransientAiError` в [`app/services/ai_engine/openai_p.py:267-271`](app/services/ai_engine/openai_p.py); диспетчер [`app/services/ai_brain.py:247`](app/services/ai_brain.py) пробрасывает их (`raise_on_transient=True` по умолчанию); внешний цикл `_enqueue_processing` ([`app/api/webhooks.py:790-813`](app/api/webhooks.py), `MAX_RETRIES=3`, exp back‑off) делает повтор. Аналогично в `gemini_p.py`.
+- [ ] **Source of Truth для dialog state (частично):** главный путь `process_message` уже DB‑first ([`app/api/webhooks.py:1177-1255`](app/api/webhooks.py): `update_user_session_fields_in_db` в той же транзакции → `db.commit()` → `set_user_state`/`set_pending_*` в Redis); best‑effort `_db_sync()` в отдельной сессии удалён. Осталось: ещё 4 точки делают только Redis без зеркала в БД — [`app/api/webhooks.py:699`](app/api/webhooks.py) (после prepay alert), [`:712`](app/api/webhooks.py) (вход в CONFIRMING_ORDER), [`:983-984`](app/api/webhooks.py) и [`:1021-1022`](app/api/webhooks.py) (CONFIRMING_* → CHATTING). Поможет helper `transition_state(db, redis, ...)` чтобы не дублировать «commit → cache».
 - [ ] **Operator outbound: отправка наружу только после фиксации ChatLog:** сначала записать `ChatLog(delivery_status='sending')` + commit, потом отправить в WhatsApp, потом обновить `provider_message_id`/статус. См. `app/api/admin/_monolith.py` (старое).
-- [ ] **UI: race-condition в заказах (REST vs WS):** `loadOrders()` не должен перетирать более свежие WS-данные; merge по `row_version`/seq и отмена устаревших запросов. См. `app/static/js/admin-app.js`.
-- [ ] **Admin UI refactor (без смены поведения):** разнести `app/templates/admin.html` на Jinja `{% include %}` по крупным блокам/экранам (`app/templates/screens/*`) без изменения Alpine/DOM; затем отдельным шагом — “ленивый DOM” (`x-if`/mount-on-demand) для performance.
+- [x] **UI: race-condition в заказах (REST vs WS):** в [`app/static/js/admin-app.js:6159-6210`](app/static/js/admin-app.js) реализован seq‑guard (`_ordersLoadSeq` отбрасывает устаревшие ответы REST) и merge по `row_version` (REST не перетирает более свежие WS‑данные).
+- [ ] **Admin UI refactor (split done, lazy DOM pending):**
+  - [x] Первая фаза — статичный split: [`app/templates/admin.html`](app/templates/admin.html) сократился до ~75 строк и собирается из 27 экранов в [`app/templates/screens/`](app/templates/screens/) через `{% include %}` (login, sidebar, header, banners, 11 табов, 8 экранов настроек, modals, bottom_nav).
+  - [ ] Вторая фаза — «ленивый DOM»: обернуть тяжёлые табы (`_tab_chats.html`, `_tab_orders.html`, `_tab_settings_*`) в `x-if="currentTab === '...'"`/mount‑on‑demand; снять метрики через `npm run lh:admin` до/после.
 
 ## 🟡 P1: Ближайший спринт (Core SaaS)
 
@@ -30,6 +32,20 @@
 - [ ] **E2.2 Branding (backend):** `Tenant.brand_*` + `GET/PATCH /api/admin/branding` + `POST /api/admin/branding/logo` (UI уже готов/частично готов).
 - [ ] **E2.3 Billing (минимум):** `Tenant.plan_status`, `billing_usage`, ежедневный rollup; блокировка login/вебхуков при `suspended`.
 - [ ] **E5 ARQ-only:** убрать fallback на `BackgroundTasks` в `app/services/task_queue.py`, worker как обязательная часть прода.
+
+## 🟠 P1.5: UX Density & AI Trust
+
+> Источник: внешний UX-аудит (2026‑05). Сюда попало только то, что прошло наш фильтр «реально не сделано и осмысленно для оператора в час пик». Архитектура (Jinja + Alpine + Tailwind + WS) не меняется, на React/HTMX не переходим. Дизайн-система — `docs/UI_DESIGN_SYSTEM.md` секции «Density modes» и «AI in UI».
+
+- [ ] **Compact Kanban (high-density)**: переключатель **Normal / Compact** на канбане заказов; в Compact — карточки одной строкой (название, сумма, телефон‑last4, статус‑точка), теги типа способа доставки/оплаты — иконками, без фоновых плашек. Хранить выбор в `localStorage` пер‑пользователя. Цель: ≥ 8 заказов в колонке без скролла на 1440px против текущих 2–3. Файлы: [`_tab_orders.html`](app/templates/screens/_tab_orders.html), [`admin-app.js`](app/static/js/admin-app.js) (новый флаг `kanbanDensity`), `src/css/admin-input.css` (`ds-kanban-card--compact`).
+- [ ] **Tenant color stripe**: тонкая полоса (`2–3px`) сверху хедера и/или сайдбара, цвет — `Organization.brand_color_hex`. Визуальный якорь для владельцев сети. Делается переменной `--tenant-accent` в [`admin-brand-tokens.js`](app/static/js/admin-brand-tokens.js) и `box-shadow: inset 0 2px 0 var(--tenant-accent)` на шапке. Отдельный кейс — экран‑заглушка при свитче филиала (`POST /api/admin/auth/select-org`): прежнюю шапку гасить до прихода нового брендинга, чтобы оператор не отправил заказ «не в тот ресторан».
+- [ ] **Right Context Panel в чатах**: третья колонка справа от переписки в [`_tab_chats.html`](app/templates/screens/_tab_chats.html) — профиль гостя (имя, телефон, кол‑во заказов, средний чек/LTV), активный черновик/pending‑заказ, активная бронь, последняя эскалация. Данные уже доступны через существующие эндпоинты `/api/admin/orders`, `/api/admin/bookings` + `User.meta_json`; на фронте — секция в `_app_shell` без отдельного API. На `<lg` — выезжает как drawer.
+- [ ] **AI Confidence на заказе**: если `validate_order` нашёл позиции через fuzzy (`difflib < 0.8`) или адрес не верифицирован — карточка/строка заказа подсвечивается жёлтым бордером + бейдж `AI сомневается, проверьте`. Для этого вернуть наружу из [`order_logic.py`](app/services/order_logic.py) флаг `low_confidence` (или массив проблемных полей) и сохранять его в `order_meta.confidence`. UI — новый `_status_badge` вариант `warning-soft`.
+- [ ] **AI Snooze with timer**: в чате/диалоге заменить голую кнопку «оператор» на меню «Отключить ИИ на 30 мин / 2 ч / до завтра / навсегда». Backend — поле `User.ai_snoozed_until: datetime | null` (миграция, фильтр в `intent_router`); UI — выпадашка из шапки чата + индикатор «🟣 ИИ выключен до 19:30». По истечении — авто‑возврат к ИИ без действия оператора.
+- [ ] **Bulk‑actions в стоп‑листе**: чекбоксы у позиций + sticky‑панель действий внизу таблицы (`В стоп / Снять со стопа / Сменить категорию`). На мобильном — long‑press → multi‑select. Текущая API уже умеет `PATCH /api/admin/menu/{id}` поштучно — добавить батч `POST /api/admin/menu/bulk-stoplist`. Файл UI: [`_tab_menu.html`](app/templates/screens/_tab_menu.html).
+- [ ] **Skeletons + relative time**: заменить прогресс‑полоски на skeleton‑строки на тяжёлых вкладках (заказы/аналитика/чаты) через существующий [`_skeleton.html`](app/templates/components/_skeleton.html); добавить `fmt.timeAgo(date)` («3 мин назад») и применить в живых лентах (заказы, чаты, инциденты), оставив абсолютное время в tooltip.
+
+- [ ] **Refresh `docs/ui/baseline/` и `docs/ui/mobile-review/`**: текущие PNG сделаны до Phase U5–U7 и не отражают `ds-card`/`ds-modal-panel`/Compact‑контролы. План: переснять серию через [`scripts/run_admin_lighthouse.mjs`](scripts/run_admin_lighthouse.mjs)/Playwright **или** через MCP `playwright`/`chrome-devtools`; старые скрины переложить в `docs/ui/baseline/2025_q4/` (архив с README — дата + последний коммит); в [`docs/UI_DESIGN_SYSTEM.md`](docs/UI_DESIGN_SYSTEM.md) обновить врезки. После — внешние UX‑ревью перестанут судить по устаревшему UI.
 
 ## 🟢 P2: Развитие (Growth)
 
@@ -45,3 +61,19 @@
 - [ ] **E12 RAG по меню:** семантический поиск для больших каталогов.
 - [ ] **BI по iiko:** продажи по времени суток и автоподстройка upsell.
 
+
+## P4: AI Operations / Intelligence
+
+- [x] **Restaurant Intelligence MVP:** admin `AI-аналитик` tab + `POST /api/admin/intelligence/query` for revenue/orders questions.
+- [x] **Unified analytics/event pipeline foundation:** durable `SystemEvent` stream and `emit_system_event()`.
+- [x] **AI auto-insights MVP:** `OperationalInsight` with admin-visible revenue/order/cancellation insights.
+- [x] **Restaurant state snapshots:** `RestaurantStateSnapshot` and `GET /api/admin/intelligence/digital-twin`.
+- [x] **Digital Twin MVP:** separate admin tab and operator-capacity simulation engine.
+- [ ] Predictive analytics: demand, cancellations, overload forecasting.
+- [ ] SLA monitor: response-time degradation detection.
+- [ ] Operator efficiency analytics.
+- [ ] AI incident detection: abnormal spikes, failures, stop-list impact.
+- [ ] AI business recommendations: upsell/menu/operator optimization.
+- [ ] Voice AI operator: realtime Twilio Media Streams / OpenAI Realtime or LiveKit.
+- [ ] Payment links: provider abstraction for creating payment URLs, not only webhook intake.
+- [ ] Multi-tenant security audit: verify `organization_id` isolation across all services/queries.

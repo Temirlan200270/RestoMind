@@ -36,6 +36,7 @@ RestoMind/
 │   │   ├── webhooks.py            # Meta WhatsApp: verify + входящие → обработка сообщений
 │   │   ├── payment_webhook.py     # внешние провайдеры оплаты (Bearer/HMAC)
 │   │   └── superadmin.py          # организации, заявки, аудит payment-webhook-events, модерация
+│   │   └── admin/intelligence.py  # Restaurant Intelligence + Digital Twin API
 │   │
 │   ├── core/                      # config, rate_limiter, пароли, константы ИИ
 │   ├── db/
@@ -63,6 +64,8 @@ RestoMind/
 │   │   ├── events.py              # Pub/Sub для WS админки
 │   │   ├── notification_router.py # Telegram «SOS», уведомления
 │   │   ├── payment_*.py           # уведомление гостя, webhook-адаптеры, автопечать в iiko после оплаты
+│   │   ├── intelligence.py        # revenue/orders analytics, insights, digital twin snapshots/simulation
+│   │   ├── system_events.py       # durable domain events for analytics/audit/AI ops
 │   │   ├── integration_health.py / readiness.py   # диагностика интеграций
 │   │   ├── tenant_scope.py        # ограничения запросов по organization_id
 │   │   └── …                      # booking, analytics, стоп-листы, sales strategy, retention и др.

@@ -9,6 +9,11 @@
   - `320×640`
   - `390×844`
   - `412×915`
+ - **Файлы скриншотов (актуальный набор)**:
+   - `320_dashboard.png`, `320_orders.png`, `320_chats.png`, `320_menu.png`, `320_settings_restaurant.png`
+   - `390_dashboard.png`, `390_orders.png`, `390_chats.png`, `390_menu.png`, `390_settings_restaurant.png`
+   - `412_dashboard.png`, `412_orders.png`, `412_chats.png`, `412_menu.png`, `412_settings_restaurant.png`
+   - `after_320_orders.png`, `after_320_orders_filters.png`, `after_320_chats_list.png`, `after_320_chat_open.png`
 
 ## Итог (коротко)
 
@@ -94,7 +99,7 @@
 
 - Обновить/добавить Playwright mobile screenshots в `docs/ui/mobile-review/`.
 - Запустить Lighthouse mobile через `scripts/run_admin_lighthouse.mjs`.
-- **Примечание**: сейчас `docs/ui/lighthouse/summary.json` отсутствует — свежий числовой mobile-аудит не сохранён.
+  - Артефакты Lighthouse: `docs/ui/lighthouse/summary.json` и таблица в `docs/ui/lighthouse/README.md`.
 
 ## Рекомендация
 

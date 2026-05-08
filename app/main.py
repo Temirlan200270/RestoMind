@@ -23,6 +23,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.api.admin import auth_router as admin_auth_router
 from app.api.admin import router as admin_router
 from app.api.admin import ws_router as admin_ws_router
+from app.api.admin.intelligence import router as admin_intelligence_router
 from app.api.payment_webhook import router as payment_webhook_router
 from app.api.superadmin import router as superadmin_router
 from app.api.webhooks import router as webhooks_router
@@ -584,6 +585,7 @@ app.include_router(webhooks_router, prefix="/api")
 app.include_router(payment_webhook_router, prefix="/api")
 app.include_router(admin_auth_router, prefix="/api")
 app.include_router(admin_router, prefix="/api")
+app.include_router(admin_intelligence_router, prefix="/api")
 app.include_router(admin_ws_router, prefix="/api")
 app.include_router(superadmin_router, prefix="/api")
 
@@ -657,6 +659,8 @@ async def deep_health_check() -> dict:
 @app.get("/dashboard", response_class=HTMLResponse, tags=["Admin Panel"])
 @app.get("/analytics", response_class=HTMLResponse, tags=["Admin Panel"])
 @app.get("/ai_value", response_class=HTMLResponse, tags=["Admin Panel"])
+@app.get("/intelligence", response_class=HTMLResponse, tags=["Admin Panel"])
+@app.get("/digital_twin", response_class=HTMLResponse, tags=["Admin Panel"])
 @app.get("/incidents", response_class=HTMLResponse, tags=["Admin Panel"])
 @app.get("/orders", response_class=HTMLResponse, tags=["Admin Panel"])
 @app.get("/operator_queue", response_class=HTMLResponse, tags=["Admin Panel"])

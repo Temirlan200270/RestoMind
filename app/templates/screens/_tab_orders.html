@@ -49,6 +49,24 @@
                     </div>
                     {% endcall %}
                     <div class="flex items-center gap-2 flex-wrap justify-end">
+                        <div x-show="ordersView === 'kanban'" x-cloak>
+                            {% call segmented(extra_class='border border-gray-200 bg-white') %}
+                            <div class="contents" role="tablist" aria-label="Kanban density">
+                                <button type="button" @click="setKanbanDensity('normal')"
+                                    :class="kanbanDensity === 'normal' ? 'ds-segmented-active' : ''"
+                                    class="min-h-[44px] px-3 py-2 rounded-lg text-sm font-medium transition"
+                                    :aria-selected="kanbanDensity === 'normal' ? 'true' : 'false'" role="tab">
+                                    Normal
+                                </button>
+                                <button type="button" @click="setKanbanDensity('compact')"
+                                    :class="kanbanDensity === 'compact' ? 'ds-segmented-active' : ''"
+                                    class="min-h-[44px] px-3 py-2 rounded-lg text-sm font-medium transition"
+                                    :aria-selected="kanbanDensity === 'compact' ? 'true' : 'false'" role="tab">
+                                    Compact
+                                </button>
+                            </div>
+                            {% endcall %}
+                        </div>
                         <button type="button" @click="openManualOrderModal()"
                             class="min-h-[44px] text-sm font-semibold px-3 py-2 rounded-xl border border-brand-200 text-brand-800 bg-brand-50 hover:bg-brand-100 transition whitespace-nowrap">
                             + Новый заказ (тест)
@@ -173,7 +191,7 @@
                 </div>
 
                 <!-- Доска по этапам: на узких экранах — горизонтальный snap-скролл колонок; стрелки ←/→ — между колонками (handleKanbanKeydown) -->
-                <div x-show="ordersView === 'kanban'" @keydown="handleKanbanKeydown($event)" class="flex lg:grid lg:grid-cols-6 gap-4 lg:gap-5 overflow-x-auto snap-x snap-mandatory lg:overflow-visible lg:snap-none pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 touch-pan-x outline-none" tabindex="-1">
+                <div x-show="ordersView === 'kanban'" @keydown="handleKanbanKeydown($event)" :class="kanbanCompactEnabled() ? 'rm-kanban-board--compact' : ''" class="flex lg:grid lg:grid-cols-6 gap-4 lg:gap-5 overflow-x-auto snap-x snap-mandatory lg:overflow-visible lg:snap-none pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 touch-pan-x outline-none" tabindex="-1">
                     <!-- DRAFT -->
                     <div data-kanban-col tabindex="0" role="region" aria-label="Колонка: черновики заказов" class="bg-gray-100/50 rounded-2xl p-4 shrink-0 w-[min(85vw,22rem)] lg:w-auto snap-center outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2">
                         <div class="flex items-center gap-2 mb-4">

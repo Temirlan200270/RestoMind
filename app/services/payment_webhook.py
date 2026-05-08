@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Order, PaymentEvent
 from app.core.config import settings
+from app.services.system_events import emit_system_event
 
 PaymentWebhookStatus = Literal["paid", "failed"]
 
@@ -95,6 +96,16 @@ async def apply_payment_webhook(
         order.payment_provider = prov
         order.external_payment_id = ext_id
         order.payment_amount_captured = amt
+        await emit_system_event(
+            db,
+            organization_id=int(organization_id),
+            event_type="payment_completed",
+            source="payment_webhook",
+            entity_type="order",
+            entity_id=order.id,
+            idempotency_key=f"payment_completed:{prov}:{payment_id}",
+            payload={"order_id": order.id, "provider": prov, "payment_id": payment_id, "amount": amt},
+        )
         await db.flush()
         pe_id = await db.scalar(
             select(PaymentEvent.id).where(
@@ -131,6 +142,16 @@ async def apply_payment_webhook(
             "payment_event_id": None,
         }
     await db.flush()
+    await emit_system_event(
+        db,
+        organization_id=int(organization_id),
+        event_type="payment_failed",
+        source="payment_webhook",
+        entity_type="order",
+        entity_id=order.id,
+        idempotency_key=f"payment_failed:{prov}:{payment_id}",
+        payload={"order_id": order.id, "provider": prov, "payment_id": payment_id, "amount": amount},
+    )
     pe_id_f = await db.scalar(
         select(PaymentEvent.id).where(
             PaymentEvent.order_id == order.id,

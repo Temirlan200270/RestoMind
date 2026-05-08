@@ -83,6 +83,25 @@
                                     <span>Раздел: </span><span class="ml-1" x-text="menuCategoryFilter"></span>
                                 </span>
                             </div>
+
+                            <!-- Sticky-ряд категорий на узких экранах (горизонтальный скролл) -->
+                            <div class="md:hidden -mx-1 px-1 overflow-x-auto pb-1" x-show="menuCategories.length > 0" x-cloak>
+                                <div class="flex flex-nowrap gap-2">
+                                    <button type="button" @click="menuCategoryFilter = ''"
+                                        :class="menuCategoryFilter === '' ? 'bg-brand-600 text-white shadow-md border-brand-600' : 'bg-white text-gray-600 border-gray-200 hover:border-brand-300'"
+                                        class="min-h-[34px] px-3 py-1.5 rounded-full border text-xs font-semibold transition shrink-0">
+                                        Все
+                                    </button>
+                                    <template x-for="cat in menuCategories" :key="'msticky-' + cat">
+                                        <button type="button" @click="menuCategoryFilter = cat"
+                                            :class="menuCategoryFilter === cat ? 'bg-brand-600 text-white shadow-md border-brand-600' : 'bg-white text-gray-600 border-gray-200 hover:border-brand-300'"
+                                            class="min-h-[34px] px-3 py-1.5 rounded-full border text-xs font-semibold transition inline-flex items-center shrink-0">
+                                            <span x-text="cat"></span>
+                                            <span class="ml-1.5 opacity-50 tabular-nums text-[10px]" x-text="getMenuCategoryCount(cat)"></span>
+                                        </button>
+                                    </template>
+                                </div>
+                            </div>
                             <div x-show="menuCategoryChipsOpen && menuCategories.length > 0" x-cloak
                                 class="space-y-2 max-h-[min(18vh,132px)] overflow-y-auto overscroll-contain min-h-0 -mx-1 px-1 pb-1 lg:max-h-[132px] touch-pan-y md:overflow-visible md:max-h-none md:touch-pan-y md:touch-none">
                                 <div class="flex items-center justify-end">
@@ -208,7 +227,7 @@
                                                 >В стопе</span>
                                             </div>
                                             <span class="text-lg font-extrabold tabular-nums shrink-0"
-                                                :class="Number(item.price || 0) <= 0 ? 'text-amber-700' : 'text-brand-700'"
+                                                :class="Number(item.price || 0) <= 0 ? 'text-red-600' : 'text-brand-700'"
                                                 x-text="fmt.money(item.price)"></span>
                                         </div>
                                         <div class="font-semibold text-gray-900 text-sm leading-snug group-hover:text-brand-800 transition mt-1" x-text="item.name"></div>
@@ -314,7 +333,9 @@
                         <div class="bg-white/80 rounded-2xl border border-red-100/70 p-4 shadow-sm hover:shadow-md transition flex flex-col">
                             <div class="flex justify-between items-start gap-2 mb-2">
                                 <span class="text-[10px] uppercase font-bold text-red-700 bg-red-50 px-2 py-0.5 rounded-md">Стоп</span>
-                                <span class="text-lg font-extrabold text-brand-700 tabular-nums shrink-0" x-text="fmt.money(item.price)"></span>
+                                <span class="text-lg font-extrabold tabular-nums shrink-0"
+                                    :class="Number(item.price || 0) <= 0 ? 'text-red-600' : 'text-brand-700'"
+                                    x-text="fmt.money(item.price)"></span>
                             </div>
                             <div class="font-semibold text-gray-900 text-sm leading-snug flex-1" x-text="item.name"></div>
                             <div class="text-[11px] text-gray-500 mt-1" x-text="item.category"></div>

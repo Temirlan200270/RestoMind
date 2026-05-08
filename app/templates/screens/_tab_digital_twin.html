@@ -1,0 +1,88 @@
+<div x-show="currentTab === 'digital_twin'" x-cloak class="fade-in space-y-5 pb-16">
+    <div class="grid gap-3 md:grid-cols-4">
+        <div class="rounded-lg border border-gray-200 bg-white p-4">
+            <div class="text-xs font-semibold uppercase text-gray-500">Активные заказы</div>
+            <div class="mt-2 text-2xl font-bold text-gray-900" x-text="digitalTwin.snapshot.active_orders || 0"></div>
+        </div>
+        <div class="rounded-lg border border-gray-200 bg-white p-4">
+            <div class="text-xs font-semibold uppercase text-gray-500">Очередь</div>
+            <div class="mt-2 text-2xl font-bold text-gray-900" x-text="digitalTwin.snapshot.queue_size || 0"></div>
+        </div>
+        <div class="rounded-lg border border-gray-200 bg-white p-4">
+            <div class="text-xs font-semibold uppercase text-gray-500">Нагрузка операторов</div>
+            <div class="mt-2 text-2xl font-bold text-gray-900" x-text="`${digitalTwin.snapshot.operator_load || 0}%`"></div>
+        </div>
+        <div class="rounded-lg border border-gray-200 bg-white p-4">
+            <div class="text-xs font-semibold uppercase text-gray-500">Нагрузка кухни</div>
+            <div class="mt-2 text-2xl font-bold text-gray-900" x-text="`${digitalTwin.snapshot.kitchen_load || 0}%`"></div>
+        </div>
+    </div>
+
+    <div class="grid gap-5 xl:grid-cols-[420px_minmax(0,1fr)]">
+        <section class="rounded-lg border border-gray-200 bg-white p-4 md:p-5">
+            <div class="flex items-start justify-between gap-3">
+                <div>
+                    <h2 class="text-lg font-semibold text-gray-900">Симуляция</h2>
+                    <p class="mt-1 text-sm text-gray-500">Оценка нагрузки без ML: очереди, операторы, отмены и потерянная выручка.</p>
+                </div>
+                <button type="button" class="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50" @click="loadDigitalTwin()">Обновить</button>
+            </div>
+
+            <div class="mt-4 space-y-3">
+                <label class="block">
+                    <span class="text-xs font-semibold uppercase text-gray-500">Заказов в час</span>
+                    <input type="number" min="0" max="500" class="mt-1 min-h-[44px] w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" x-model.number="digitalTwinSim.orders_per_hour">
+                </label>
+                <label class="block">
+                    <span class="text-xs font-semibold uppercase text-gray-500">Операторов</span>
+                    <input type="number" min="1" max="100" class="mt-1 min-h-[44px] w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" x-model.number="digitalTwinSim.operators">
+                </label>
+                <label class="block">
+                    <span class="text-xs font-semibold uppercase text-gray-500">Средний чек</span>
+                    <input type="number" min="0" class="mt-1 min-h-[44px] w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" x-model.number="digitalTwinSim.avg_check">
+                </label>
+                <button type="button" class="min-h-[44px] w-full rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60" :disabled="digitalTwinSimLoading" @click="runDigitalTwinSimulation()">
+                    Рассчитать
+                </button>
+            </div>
+        </section>
+
+        <section class="rounded-lg border border-gray-200 bg-white p-4 md:p-5">
+            <h2 class="text-lg font-semibold text-gray-900">Прогноз сценария</h2>
+            <template x-if="digitalTwinSimResult">
+                <div class="mt-4 grid gap-3 md:grid-cols-3">
+                    <div class="rounded-lg bg-gray-50 p-4">
+                        <div class="text-xs font-semibold uppercase text-gray-500">Загрузка</div>
+                        <div class="mt-2 text-xl font-bold text-gray-900" x-text="`${digitalTwinSimResult.load_pct}%`"></div>
+                    </div>
+                    <div class="rounded-lg bg-gray-50 p-4">
+                        <div class="text-xs font-semibold uppercase text-gray-500">Ожидание</div>
+                        <div class="mt-2 text-xl font-bold text-gray-900" x-text="`${digitalTwinSimResult.expected_wait_min} мин`"></div>
+                    </div>
+                    <div class="rounded-lg bg-gray-50 p-4">
+                        <div class="text-xs font-semibold uppercase text-gray-500">Потеря выручки</div>
+                        <div class="mt-2 text-xl font-bold text-gray-900" x-text="fmtMoney(digitalTwinSimResult.lost_revenue || 0)"></div>
+                    </div>
+                </div>
+            </template>
+            <template x-if="!digitalTwinSimResult">
+                <div class="mt-4 rounded-lg bg-gray-50 p-4 text-sm text-gray-500">Введите сценарий и нажмите расчет.</div>
+            </template>
+
+            <div class="mt-5 grid gap-3 md:grid-cols-3">
+                <div class="rounded-lg border border-gray-200 p-4">
+                    <div class="text-xs font-semibold uppercase text-gray-500">Черновики</div>
+                    <div class="mt-2 text-xl font-bold text-gray-900" x-text="digitalTwin.snapshot.draft_orders || 0"></div>
+                </div>
+                <div class="rounded-lg border border-gray-200 p-4">
+                    <div class="text-xs font-semibold uppercase text-gray-500">Подтверждены</div>
+                    <div class="mt-2 text-xl font-bold text-gray-900" x-text="digitalTwin.snapshot.confirmed_orders || 0"></div>
+                </div>
+                <div class="rounded-lg border border-gray-200 p-4">
+                    <div class="text-xs font-semibold uppercase text-gray-500">Стоп-лист</div>
+                    <div class="mt-2 text-xl font-bold text-gray-900" x-text="digitalTwin.snapshot.stoplist_count || 0"></div>
+                </div>
+            </div>
+        </section>
+    </div>
+</div>

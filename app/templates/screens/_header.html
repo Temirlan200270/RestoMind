@@ -13,7 +13,9 @@
                         : settingsTab === 'technical' ? (isSuperadmin ? 'Данные' : 'Экспорт')
                         : settingsTab === 'bot_test' ? 'Бот / ИИ'
                         : 'Настройки')
-                      : (navItems.find(i => i.id === currentTab)?.label || 'RestoMind')">
+                      : (currentTab === 'menu'
+                        ? (menuView === 'stoplist' ? 'Меню: Стоп' : 'Меню')
+                        : (navItems.find(i => i.id === currentTab)?.label || 'RestoMind'))">
                 </h1>
                 <!-- Статус работы заведения -->
                 <span x-show="orgProfile && orgProfile.operational_label" x-cloak
@@ -87,7 +89,9 @@
                                     : settingsTab === 'technical' ? (isSuperadmin ? 'Данные и безопасность' : 'Экспорт')
                                     : settingsTab === 'bot_test' ? 'Бот / ИИ'
                                     : 'Настройки')
-                                  : (navItems.find(i => i.id === currentTab)?.label)"></h1>
+                                  : (currentTab === 'menu'
+                                    ? (menuView === 'stoplist' ? 'Меню: Стоп-лист' : 'Меню')
+                                    : (navItems.find(i => i.id === currentTab)?.label))"></h1>
                             <button type="button" @click="openGlobalSearch()"
                                 class="md:hidden shrink-0 min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 hover:bg-gray-50"
                                 title="Быстрый поиск (Ctrl+K)" aria-label="Поиск по заказам и чатам">
@@ -179,8 +183,20 @@
                     <template x-if="currentTab === 'menu'">
                         <div class="shrink-0">
                             {% call tabs_pills() %}
-                            <button type="button" :class="menuView === 'catalog' ? 'ds-segmented-active' : ''" @click="setMenuView('catalog')">Каталог</button>
-                            <button type="button" :class="menuView === 'stoplist' ? 'ds-segmented-active' : ''" @click="setMenuView('stoplist')">Стоп лист</button>
+                            <button type="button"
+                                :class="menuView === 'catalog' ? 'ds-segmented-active' : ''"
+                                @click="setMenuView('catalog')"
+                                aria-label="Каталог">
+                                <span class="hidden lg:inline">Каталог</span>
+                                <span class="lg:hidden">Кат.</span>
+                            </button>
+                            <button type="button"
+                                :class="menuView === 'stoplist' ? 'ds-segmented-active' : ''"
+                                @click="setMenuView('stoplist')"
+                                aria-label="Стоп-лист">
+                                <span class="hidden lg:inline">Стоп-лист</span>
+                                <span class="lg:hidden">Стоп</span>
+                            </button>
                             {% endcall %}
                         </div>
                     </template>

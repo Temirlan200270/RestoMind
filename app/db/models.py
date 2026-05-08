@@ -16,6 +16,7 @@ from sqlalchemy import (
     JSON,
     LargeBinary,
     Numeric,
+    Index,
     String,
     Text,
     Time,
@@ -848,6 +849,118 @@ class PaymentEvent(Base):
 
     def __repr__(self) -> str:
         return f"<PaymentEvent id={self.id} order={self.order_id} type={self.event_type}>"
+
+
+class SystemEvent(Base):
+    """Durable domain event stream for analytics, AI intelligence, audit, and future automation."""
+
+    __tablename__ = "system_events"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_system_event_idempotency_key"),
+        Index("ix_system_events_org_created", "organization_id", "created_at"),
+        Index("ix_system_events_org_type_created", "organization_id", "event_type", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id"), nullable=False, index=True,
+    )
+    event_type: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    source: Mapped[str] = mapped_column(String(80), nullable=False, default="app", server_default="app")
+    entity_type: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    entity_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    payload_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    def __repr__(self) -> str:
+        return f"<SystemEvent id={self.id} org={self.organization_id} type={self.event_type}>"
+
+
+class OperationalInsight(Base):
+    """Generated restaurant intelligence insight shown in the admin panel."""
+
+    __tablename__ = "operational_insights"
+    __table_args__ = (
+        Index("ix_operational_insights_org_status_created", "organization_id", "status", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id"), nullable=False, index=True,
+    )
+    insight_type: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    severity: Mapped[str] = mapped_column(String(20), nullable=False, default="info", server_default="info")
+    title: Mapped[str] = mapped_column(String(240), nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    payload_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="new", server_default="new", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<OperationalInsight id={self.id} org={self.organization_id} severity={self.severity}>"
+
+
+class RestaurantStateSnapshot(Base):
+    """Point-in-time operational state used by the Digital Twin and simulations."""
+
+    __tablename__ = "restaurant_state_snapshots"
+    __table_args__ = (
+        Index("ix_restaurant_state_snapshots_org_created", "organization_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id"), nullable=False, index=True,
+    )
+    active_orders: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    draft_orders: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    confirmed_orders: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    cancelled_today: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    revenue_today: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0, server_default="0")
+    avg_check_today: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0, server_default="0")
+    queue_size: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    operator_load: Mapped[float] = mapped_column(Numeric(8, 2), nullable=False, default=0, server_default="0")
+    kitchen_load: Mapped[float] = mapped_column(Numeric(8, 2), nullable=False, default=0, server_default="0")
+    stoplist_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    payload_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    def __repr__(self) -> str:
+        return f"<RestaurantStateSnapshot id={self.id} org={self.organization_id}>"
+
+
+class IntelligenceConversation(Base):
+    """Saved owner/manager Q&A thread for follow-up intelligence questions."""
+
+    __tablename__ = "intelligence_conversations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id"), nullable=False, index=True,
+    )
+    title: Mapped[str] = mapped_column(String(240), nullable=False, default="", server_default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class IntelligenceMessage(Base):
+    """Saved intelligence message for audit and later follow-up context."""
+
+    __tablename__ = "intelligence_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    conversation_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("intelligence_conversations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id"), nullable=False, index=True,
+    )
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    payload_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
 
 class IntegrationHealth(Base):

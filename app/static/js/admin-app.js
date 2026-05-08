@@ -279,7 +279,7 @@ function adminParseLocationHash() {
 
 /** Допустимые верхнеуровневые вкладки (id из navItems). */
 const ADMIN_TOP_TAB_IDS = new Set([
-    'dashboard', 'analytics', 'ai_value', 'incidents', 'orders', 'operator_queue', 'bookings', 'chats', 'menu', 'settings',
+    'dashboard', 'analytics', 'ai_value', 'intelligence', 'digital_twin', 'incidents', 'orders', 'operator_queue', 'bookings', 'chats', 'menu', 'settings',
 ]);
 
 /** Начальное состояние GET /integrations/status — чтобы Alpine не падал на undefined до первой загрузки. */
@@ -479,8 +479,12 @@ function adminMixinState() {
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25A2.25 2.25 0 018.25 10.5H6A2.25 2.25 0 013.75 8.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z"/></svg>' },
             { id: 'analytics', section: 'overview', label: 'Аналитика', desc: 'Выручка, средний чек, динамика продаж',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/></svg>' },
+            { id: 'intelligence', section: 'overview', label: 'AI-аналитик', desc: 'Выручка, заказы, отмены и авто-инсайты',
+              icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 3.75h4.5m-7.5 4.5h10.5m-12 4.5h13.5m-15 4.5h7.5m2.25 0h6M7.5 21h9a2.25 2.25 0 002.25-2.25V5.25A2.25 2.25 0 0016.5 3h-9a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21z"/></svg>' },
             { id: 'orders', section: 'operations', label: 'Заказы', desc: 'По этапам (черновик → подтверждён → кухня) или общий список',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z"/></svg>' },
+            { id: 'digital_twin', section: 'operations', label: 'Digital Twin', desc: 'Состояние ресторана и симуляция нагрузки',
+              icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 6.75l8.25-4.5 8.25 4.5v10.5l-8.25 4.5-8.25-4.5V6.75zM12 12l8.25-5.25M12 12v9.75M12 12L3.75 6.75"/></svg>' },
             { id: 'operator_queue', section: 'operations', label: 'Помощь клиентам', desc: 'Обращения, где нужен человек (цель — «пусто»)',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>' },
             { id: 'bookings', section: 'operations', label: 'Бронирования', desc: 'Столики и резервации',
@@ -589,6 +593,7 @@ function adminMixinState() {
 
         // Заказы
         ordersView: 'kanban',
+        kanbanDensity: 'normal',
         /** Подсказка режима заказов (канбан / таблица), скрывается через localStorage */
         ordersKanbanHintDismissed:
             typeof localStorage !== 'undefined' &&
@@ -620,6 +625,23 @@ function adminMixinState() {
         aiValueLoading: false,
         aiValueData: null,
         aiValueSource: '',
+        intelligenceLoading: false,
+        intelligenceAsking: false,
+        intelligenceQuestion: '',
+        intelligenceAnswer: '',
+        intelligenceConversationId: null,
+        intelligenceData: { summary: null, insights: [], snapshot: null },
+        intelligenceQuickQuestions: [
+            'Почему сегодня меньше заказов?',
+            'Почему упала выручка?',
+            'Что с отменами сегодня?',
+            'Сравни сегодня со вчера',
+        ],
+        digitalTwinLoading: false,
+        digitalTwin: { snapshot: {} },
+        digitalTwinSim: { orders_per_hour: 30, operators: 2, avg_check: 5000, base_cancel_rate_pct: 5 },
+        digitalTwinSimLoading: false,
+        digitalTwinSimResult: null,
         incidents: {
             groups: [],
             summary: { critical: 0, warning: 0, info: 0, restricted: 0 },
@@ -1117,6 +1139,10 @@ function adminMixinMenuOrdersUi() {
                 this.menuToolbarExpanded = m;
                 // Mobile-first: заказы без горизонтального скролла (канбан — для больших экранов).
                 this.ordersView = m ? (this.ordersView || 'kanban') : 'table';
+                const savedKanbanDensity = localStorage.getItem('rm_kanban_density_v1');
+                if (savedKanbanDensity === 'compact' || savedKanbanDensity === 'normal') {
+                    this.kanbanDensity = savedKanbanDensity;
+                }
             } catch (_e) {
                 this.menuCategoryChipsOpen = true;
                 this.menuToolbarExpanded = true;
@@ -1611,6 +1637,62 @@ function adminMixinMenuOrdersUi() {
                 c += ' ring-2 ring-amber-400 ring-offset-2 ring-offset-white border-amber-400';
             }
             return c;
+        },
+
+        setKanbanDensity(mode) {
+            const next = mode === 'compact' ? 'compact' : 'normal';
+            this.kanbanDensity = next;
+            try {
+                localStorage.setItem('rm_kanban_density_v1', next);
+            } catch (_e) {}
+        },
+
+        kanbanCompactEnabled() {
+            try {
+                return this.ordersView === 'kanban' &&
+                    this.kanbanDensity === 'compact' &&
+                    window.matchMedia('(min-width: 768px)').matches;
+            } catch (_e) {
+                return this.ordersView === 'kanban' && this.kanbanDensity === 'compact';
+            }
+        },
+
+        orderPhoneLast4(order) {
+            const phone = String(order?.user_phone || '').replace(/\D/g, '');
+            return phone ? phone.slice(-4) : '----';
+        },
+
+        orderStatusDotClass(order) {
+            const status = order?.status || '';
+            if (status === 'draft') return 'bg-gray-400';
+            if (status === 'confirmed') return 'bg-blue-500';
+            if (status === 'sent_to_iiko') return 'bg-emerald-500';
+            if (status === 'in_transit') return 'bg-sky-500';
+            if (status === 'waiting_pickup') return 'bg-amber-500';
+            if (status === 'completed') return 'bg-emerald-700';
+            if (status === 'cancelled') return 'bg-red-500';
+            return 'bg-gray-300';
+        },
+
+        orderTypeCompactLabel(order) {
+            const m = { delivery: 'D', pickup: 'P', hall: 'H' };
+            return m[order?.order_type] || '-';
+        },
+
+        paymentMethodCompactLabel(order) {
+            const pd = order?.items?.order_meta?.payment_details;
+            if (pd && pd.type === 'mixed') return '+';
+            const pm = order?.payment_method || 'cash';
+            const m = { cash: '$', card: 'C', remote: 'L' };
+            return m[pm] || '?';
+        },
+
+        orderCompactTitle(order) {
+            const items = order?.items?.items || [];
+            const first = items[0]?.name || '';
+            if (first && items.length > 1) return `${first} +${items.length - 1}`;
+            if (first) return first;
+            return `${items.length || 0} позиций`;
         },
 
         orderTypeBadge(order) {
@@ -2770,6 +2852,11 @@ function adminMixinAuthKnowledge() {
             this.chatMobileInfoOpen = false;
             this.chatMessages = [];
             this.analyticsData = {};
+            this.intelligenceData = { summary: null, insights: [], snapshot: null };
+            this.intelligenceAnswer = '';
+            this.intelligenceConversationId = null;
+            this.digitalTwin = { snapshot: {} };
+            this.digitalTwinSimResult = null;
             this.dashStats = {
                 daily_series: [],
                 today_revenue: 0,
@@ -5454,6 +5541,10 @@ function adminMixinDataChartsSettings() {
                     }, 1200);
                 } else if (this.currentTab === 'analytics') {
                     await this.loadAnalytics();
+                } else if (this.currentTab === 'intelligence') {
+                    await this.loadIntelligence();
+                } else if (this.currentTab === 'digital_twin') {
+                    await this.loadDigitalTwin();
                 } else if (this.currentTab === 'ai_value') {
                     await this.loadAiValue();
                 } else if (this.currentTab === 'incidents') {
@@ -5711,6 +5802,118 @@ function adminMixinDataChartsSettings() {
                 adminLogger.error('[admin] loadAiValue', e);
             } finally {
                 this.aiValueLoading = false;
+            }
+        },
+
+        fmtMoney(v) {
+            return adminFormat.money(v);
+        },
+
+        trendClass(pct) {
+            const n = Number(pct);
+            if (!Number.isFinite(n) || n === 0) return 'text-gray-500';
+            return n > 0 ? 'text-emerald-600' : 'text-rose-600';
+        },
+
+        insightBorderClass(severity) {
+            const s = String(severity || 'info');
+            if (s === 'critical') return 'border-rose-200 bg-rose-50';
+            if (s === 'warning') return 'border-amber-200 bg-amber-50';
+            return 'border-blue-100 bg-blue-50';
+        },
+
+        async loadIntelligence() {
+            this.intelligenceLoading = true;
+            try {
+                const { ok, data } = await this.apiJsonResponse('/api/admin/intelligence/overview');
+                if (!ok) return;
+                this.intelligenceData = {
+                    summary: data.summary || null,
+                    insights: Array.isArray(data.insights) ? data.insights : [],
+                    snapshot: data.snapshot || null,
+                };
+                if (this.intelligenceData.summary?.current?.avg_check) {
+                    this.digitalTwinSim.avg_check = Number(this.intelligenceData.summary.current.avg_check) || this.digitalTwinSim.avg_check;
+                }
+            } catch (e) {
+                adminLogger.error('[admin] loadIntelligence', e);
+            } finally {
+                this.intelligenceLoading = false;
+            }
+        },
+
+        async askIntelligence(question = null) {
+            const q = String(question || this.intelligenceQuestion || '').trim();
+            if (!q) return;
+            this.intelligenceQuestion = q;
+            this.intelligenceAsking = true;
+            try {
+                const { ok, data } = await this.apiJsonResponse('/api/admin/intelligence/query', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        question: q,
+                        conversation_id: this.intelligenceConversationId,
+                    }),
+                });
+                if (!ok) return;
+                this.intelligenceAnswer = data.answer || '';
+                this.intelligenceConversationId = data.conversation_id || this.intelligenceConversationId;
+                if (data.summary) {
+                    this.intelligenceData.summary = data.summary;
+                }
+            } catch (e) {
+                adminLogger.error('[admin] askIntelligence', e);
+            } finally {
+                this.intelligenceAsking = false;
+            }
+        },
+
+        async updateInsightStatus(id, status) {
+            if (!id) return;
+            const { ok } = await this.apiJsonResponse(`/api/admin/intelligence/insights/${id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status }),
+            });
+            if (ok) {
+                this.intelligenceData.insights = (this.intelligenceData.insights || []).filter((x) => x.id !== id);
+            }
+        },
+
+        async loadDigitalTwin() {
+            this.digitalTwinLoading = true;
+            try {
+                const { ok, data } = await this.apiJsonResponse('/api/admin/intelligence/digital-twin');
+                if (!ok) return;
+                this.digitalTwin = { snapshot: data.snapshot || {} };
+                if (data.snapshot?.avg_check_today) {
+                    this.digitalTwinSim.avg_check = Number(data.snapshot.avg_check_today) || this.digitalTwinSim.avg_check;
+                }
+                const todayOrders = Number(data.snapshot?.payload?.today_orders || 0);
+                if (todayOrders > 0) {
+                    this.digitalTwinSim.orders_per_hour = Math.max(1, Math.round(todayOrders / 8));
+                }
+            } catch (e) {
+                adminLogger.error('[admin] loadDigitalTwin', e);
+            } finally {
+                this.digitalTwinLoading = false;
+            }
+        },
+
+        async runDigitalTwinSimulation() {
+            this.digitalTwinSimLoading = true;
+            try {
+                const { ok, data } = await this.apiJsonResponse('/api/admin/intelligence/simulate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.digitalTwinSim),
+                });
+                if (ok) this.digitalTwinSimResult = data.result || null;
+            } catch (e) {
+                adminLogger.error('[admin] runDigitalTwinSimulation', e);
+            } finally {
+                this.digitalTwinSimLoading = false;
             }
         },
 

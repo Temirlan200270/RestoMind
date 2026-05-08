@@ -30,6 +30,7 @@ from app.schemas.ai_schemas import AIBrainResponse, PaymentSplit
 from app.services.dialog_mgr import UserState
 from app.services.upsell_utils import record_upsell_rejections_on_user
 from app.services.prepayment_legal import append_prepayment_legal_disclaimer
+from app.services.system_events import emit_system_event
 from app.services.order_logic import (
     ValidatedOrder,
     applied_order_action_ids_from_items_json,
@@ -661,6 +662,17 @@ async def _handle_order(
             row_version=1,
         )
         db.add(order)
+        await db.flush()
+        await emit_system_event(
+            db,
+            organization_id=int(organization_id),
+            event_type="order_created",
+            source="intent_router",
+            entity_type="order",
+            entity_id=order.id,
+            idempotency_key=f"order_created:{order.id}",
+            payload={"order_id": order.id, "status": order.status, "total_price": float(order.total_price or 0)},
+        )
 
     body_text = format_whatsapp_order_card(items_json, validated.summary_text)
     reply_core = _sanitize_reply_before_order_card(ai_response.reply_text)
@@ -870,6 +882,17 @@ async def confirm_order(db: AsyncSession, order_id: int) -> Order | None:
                 return None
         order.status = OrderStatus.CONFIRMED
         await db.flush()
+        if order.organization_id:
+            await emit_system_event(
+                db,
+                organization_id=int(order.organization_id),
+                event_type="order_confirmed",
+                source="intent_router",
+                entity_type="order",
+                entity_id=order.id,
+                idempotency_key=f"order_confirmed:{order.id}",
+                payload={"order_id": order.id, "total_price": float(order.total_price or 0)},
+            )
         await sync_recommendation_events_for_order(db, order)
         logger.info("Заказ #%d подтверждён клиентом", order_id)
     return order
@@ -919,6 +942,17 @@ async def cancel_order(db: AsyncSession, order_id: int) -> Order | None:
         if order.booking_id:
             await cancel_booking(db, order.booking_id)
         await db.flush()
+        if order.organization_id:
+            await emit_system_event(
+                db,
+                organization_id=int(order.organization_id),
+                event_type="order_cancelled",
+                source="intent_router",
+                entity_type="order",
+                entity_id=order.id,
+                idempotency_key=f"order_cancelled:{order.id}",
+                payload={"order_id": order.id, "total_price": float(order.total_price or 0)},
+            )
         logger.info("Заказ #%d отменён клиентом", order_id)
     return order
 
