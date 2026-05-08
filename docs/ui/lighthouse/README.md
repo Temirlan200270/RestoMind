@@ -17,25 +17,25 @@ npm run lh:admin
 
 ---
 
-## Сводка (сгенерировано 2026-05-05T14:27:15.984Z)
+## Сводка (сгенерировано 2026-05-08T14:52:31.793Z)
 
-База: `http://127.0.0.1:9892` · профиль: **mobile**
+База: `http://127.0.0.1:8000` · профиль: **mobile**
 
 | Экран | Performance | Accessibility | Best practices |
 |--------|------------:|--------------:|---------------:|
-| dashboard | 21 | 100 | 96 |
-| orders | 30 | 96 | 93 |
-| menu | 39 | 94 | 96 |
-| settings_restaurant | 41 | 100 | 96 |
-| settings_branding | 38 | 100 | 96 |
-| settings_connections | 40 | 98 | 96 |
-| settings_smart_sales | 44 | 93 | 96 |
-| settings_team | 37 | 93 | 96 |
-| settings_health | 13 | 98 | 96 |
-| settings_technical | 37 | 98 | 96 |
-| settings_bot_test | 40 | 93 | 96 |
+| dashboard | 35 | 93 | 100 |
+| orders | 21 | 96 | 96 |
+| menu | 36 | 100 | 100 |
+| settings_restaurant | 34 | 100 | 100 |
+| settings_branding | 37 | 100 | 100 |
+| settings_connections | 37 | 100 | 100 |
+| settings_smart_sales | 37 | 93 | 100 |
+| settings_team | 33 | 93 | 96 |
+| settings_health | 28 | 98 | 100 |
+| settings_technical | 32 | 98 | 96 |
+| settings_bot_test | 27 | 93 | 100 |
 
-**Интерпретация:** целевые пороги и подход описаны в [`docs/UI_DESIGN_SYSTEM.md`](../UI_DESIGN_SYSTEM.md) (раздел про Lighthouse/a11y). Баллы зависят от данных БД и окружения.
+**Интерпретация:** [UI_DESIGN_SYSTEM.md](../UI_DESIGN_SYSTEM.md) — целевые пороги и подход (a11y/Lighthouse). Баллы зависят от данных БД и окружения.
 
 ## Текущий mobile baseline
 

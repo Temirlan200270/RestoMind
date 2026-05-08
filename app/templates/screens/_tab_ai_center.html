@@ -1,0 +1,24 @@
+            <!-- ========== ИИ-АНАЛИТИКА ========== -->
+            <div x-show="currentTab === 'ai_center'" x-cloak class="fade-in space-y-4 mb-2">
+                <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3">
+                    {{ section_header('ИИ-аналитика', subtitle='Вклад ИИ, инсайты и нагрузка — без потери контекста.', extra_class='!mb-0') }}
+                    <div class="w-full lg:w-auto min-w-0 overflow-x-auto">
+                        {% call segmented(extra_class='border border-slate-200 bg-white shrink-0 inline-flex max-w-full') %}
+                        <div class="contents" role="tablist" aria-label="ИИ-аналитика">
+                            <button type="button"
+                                class="min-h-[44px] px-3 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap"
+                                :class="aiCenterTab === 'value' ? 'ds-segmented-active' : ''"
+                                @click="navigateToTab('ai_center', { aiCenterTab: 'value' })">Вклад ИИ</button>
+                            <button type="button"
+                                class="min-h-[44px] px-3 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap"
+                                :class="aiCenterTab === 'insights' ? 'ds-segmented-active' : ''"
+                                @click="navigateToTab('ai_center', { aiCenterTab: 'insights' })">Инсайты</button>
+                            <button type="button"
+                                class="min-h-[44px] px-3 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap"
+                                :class="aiCenterTab === 'load' ? 'ds-segmented-active' : ''"
+                                @click="navigateToTab('ai_center', { aiCenterTab: 'load' })">Нагрузка</button>
+                        </div>
+                        {% endcall %}
+                    </div>
+                </div>
+            </div>

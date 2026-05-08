@@ -38,9 +38,9 @@
                                 <span x-show="item.id === 'orders' && ordersIikoErrorCount() > 0"
                                     class="absolute right-3 top-2 min-w-[1.25rem] h-5 px-1 bg-rose-600 rounded-full text-[10px] font-bold flex items-center justify-center"
                                     x-text="ordersIikoErrorCount()"></span>
-                                <span x-show="item.id === 'operator_queue' && (dashStats.failed_tasks_open || 0) > 0"
+                                <span x-show="item.id === 'inbox' && inboxTotalOpen() > 0"
                                     class="absolute right-3 top-2 min-w-[1.25rem] h-5 px-1 bg-red-500 rounded-full text-[10px] font-bold flex items-center justify-center"
-                                    x-text="dashStats.failed_tasks_open"></span>
+                                    x-text="inboxTotalOpen()"></span>
                                 <span x-show="item.id === 'settings' && integrationErrorBadge() > 0"
                                     class="absolute right-3 top-2 min-w-[1.25rem] h-5 px-1 bg-amber-500 rounded-full text-[10px] font-bold flex items-center justify-center"
                                     x-text="integrationErrorBadge()"></span>

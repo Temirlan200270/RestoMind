@@ -1,85 +1,85 @@
 {
-  "generatedAt": "2026-05-05T14:27:15.984Z",
-  "baseUrl": "http://127.0.0.1:9892",
+  "generatedAt": "2026-05-08T14:52:31.793Z",
+  "baseUrl": "http://127.0.0.1:8000",
   "formFactor": "mobile",
   "cookieAuth": true,
   "pages": [
     {
       "id": "dashboard",
-      "url": "http://127.0.0.1:9892/admin#dashboard",
-      "performance": 21,
-      "accessibility": 100,
-      "bestPractices": 96
+      "url": "http://127.0.0.1:8000/admin#dashboard",
+      "performance": 35,
+      "accessibility": 93,
+      "bestPractices": 100
     },
     {
       "id": "orders",
-      "url": "http://127.0.0.1:9892/admin#orders",
-      "performance": 30,
+      "url": "http://127.0.0.1:8000/admin#orders",
+      "performance": 21,
       "accessibility": 96,
-      "bestPractices": 93
+      "bestPractices": 96
     },
     {
       "id": "menu",
-      "url": "http://127.0.0.1:9892/admin#menu",
-      "performance": 39,
-      "accessibility": 94,
-      "bestPractices": 96
+      "url": "http://127.0.0.1:8000/admin#menu",
+      "performance": 36,
+      "accessibility": 100,
+      "bestPractices": 100
     },
     {
       "id": "settings_restaurant",
-      "url": "http://127.0.0.1:9892/admin#settings/restaurant",
-      "performance": 41,
+      "url": "http://127.0.0.1:8000/admin#settings/restaurant",
+      "performance": 34,
       "accessibility": 100,
-      "bestPractices": 96
+      "bestPractices": 100
     },
     {
       "id": "settings_branding",
-      "url": "http://127.0.0.1:9892/admin#settings/branding",
-      "performance": 38,
+      "url": "http://127.0.0.1:8000/admin#settings/branding",
+      "performance": 37,
       "accessibility": 100,
-      "bestPractices": 96
+      "bestPractices": 100
     },
     {
       "id": "settings_connections",
-      "url": "http://127.0.0.1:9892/admin#settings/connections",
-      "performance": 40,
-      "accessibility": 98,
-      "bestPractices": 96
+      "url": "http://127.0.0.1:8000/admin#settings/connections",
+      "performance": 37,
+      "accessibility": 100,
+      "bestPractices": 100
     },
     {
       "id": "settings_smart_sales",
-      "url": "http://127.0.0.1:9892/admin#settings/smart_sales",
-      "performance": 44,
+      "url": "http://127.0.0.1:8000/admin#settings/smart_sales",
+      "performance": 37,
       "accessibility": 93,
-      "bestPractices": 96
+      "bestPractices": 100
     },
     {
       "id": "settings_team",
-      "url": "http://127.0.0.1:9892/admin#settings/team",
-      "performance": 37,
+      "url": "http://127.0.0.1:8000/admin#settings/team",
+      "performance": 33,
       "accessibility": 93,
       "bestPractices": 96
     },
     {
       "id": "settings_health",
-      "url": "http://127.0.0.1:9892/admin#settings/health",
-      "performance": 13,
+      "url": "http://127.0.0.1:8000/admin#settings/health",
+      "performance": 28,
       "accessibility": 98,
-      "bestPractices": 96
+      "bestPractices": 100
     },
     {
       "id": "settings_technical",
-      "url": "http://127.0.0.1:9892/admin#settings/technical",
-      "performance": 37,
+      "url": "http://127.0.0.1:8000/admin#settings/technical",
+      "performance": 32,
       "accessibility": 98,
       "bestPractices": 96
     },
     {
       "id": "settings_bot_test",
-      "url": "http://127.0.0.1:9892/admin#settings/bot_test",
-      "performance": 40,
+      "url": "http://127.0.0.1:8000/admin#settings/bot_test",
+      "performance": 27,
       "accessibility": 93,
-      "bestPractices": 96
+      "bestPractices": 100
     }
   ]
 }

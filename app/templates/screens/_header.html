@@ -15,7 +15,10 @@
                         : 'Настройки')
                       : (currentTab === 'menu'
                         ? (menuView === 'stoplist' ? 'Меню: Стоп' : 'Меню')
-                        : (navItems.find(i => i.id === currentTab)?.label || 'RestoMind'))">
+                        : (currentTab === 'dashboard' && dashboardTab === 'analytics' ? 'Аналитика'
+                        : currentTab === 'inbox' ? (inboxTab === 'system' ? 'Системные' : 'От клиентов')
+                        : currentTab === 'ai_center' ? (aiCenterTab === 'insights' ? 'Инсайты' : aiCenterTab === 'load' ? 'Нагрузка' : 'Вклад ИИ')
+                        : (navItems.find(i => i.id === currentTab)?.label || 'RestoMind')))">
                 </h1>
                 <!-- Статус работы заведения -->
                 <span x-show="orgProfile && orgProfile.operational_label" x-cloak
@@ -91,7 +94,10 @@
                                     : 'Настройки')
                                   : (currentTab === 'menu'
                                     ? (menuView === 'stoplist' ? 'Меню: Стоп-лист' : 'Меню')
-                                    : (navItems.find(i => i.id === currentTab)?.label))"></h1>
+                                    : (currentTab === 'dashboard' && dashboardTab === 'analytics' ? 'Аналитика'
+                                    : currentTab === 'inbox' ? (inboxTab === 'system' ? 'Требует внимания · системные' : 'Требует внимания · от клиентов')
+                                    : currentTab === 'ai_center' ? (aiCenterTab === 'insights' ? 'ИИ-аналитика · инсайты' : aiCenterTab === 'load' ? 'ИИ-аналитика · нагрузка' : 'ИИ-аналитика · вклад ИИ')
+                                    : (navItems.find(i => i.id === currentTab)?.label)))"></h1>
                             <button type="button" @click="openGlobalSearch()"
                                 class="md:hidden shrink-0 min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 hover:bg-gray-50"
                                 title="Быстрый поиск (Ctrl+K)" aria-label="Поиск по заказам и чатам">
@@ -109,7 +115,10 @@
                                 : settingsTab === 'technical' ? (isSuperadmin ? 'Экспорт, ретеншн и опасная зона' : 'Скачать данные заказов и чатов в CSV')
                                 : settingsTab === 'bot_test' ? 'Проверка ответов ИИ без влияния на гостей'
                                 : '')
-                              : (navItems.find(i => i.id === currentTab)?.desc)"></p>
+                              : (currentTab === 'dashboard' && dashboardTab === 'analytics' ? 'Выручка, средний чек, динамика продаж'
+                              : currentTab === 'inbox' ? (inboxTab === 'system' ? 'Инциденты и системное здоровье' : 'Очередь помощи и нерешённые обращения')
+                              : currentTab === 'ai_center' ? (aiCenterTab === 'insights' ? 'Выручка, заказы, отмены и авто-инсайты' : aiCenterTab === 'load' ? 'Состояние ресторана и симуляция нагрузки' : 'Допродажи, экономия времени и вклад ассистента')
+                              : (navItems.find(i => i.id === currentTab)?.desc))"></p>
                         <button type="button"
                             x-show="authenticated && (setupStatus.score ?? 100) < 100"
                             x-cloak

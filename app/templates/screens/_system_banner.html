@@ -23,7 +23,7 @@
                 </div>
                 <div class="flex items-center gap-2 shrink-0">
                     <button type="button"
-                        @click="navigateToTab('incidents')"
+                        @click="navigateToTab('inbox', { inboxTab: 'system' })"
                         class="text-xs font-semibold px-3 py-1 rounded-lg border transition min-h-[32px]"
                         :class="(attentionSummary?.summary?.critical || 0) > 0
                             ? 'bg-red-100 border-red-300 text-red-800 hover:bg-red-200'

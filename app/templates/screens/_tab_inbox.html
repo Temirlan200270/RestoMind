@@ -1,0 +1,20 @@
+            <!-- ========== ТРЕБУЕТ ВНИМАНИЯ (inbox) ========== -->
+            <div x-show="currentTab === 'inbox'" x-cloak class="fade-in space-y-4">
+                <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+                    {{ section_header('Требует внимания', subtitle='Обращения гостей и системные сигналы — в одном месте.', extra_class='!mb-0') }}
+                    <div class="w-full sm:w-auto min-w-0">
+                        {% call segmented(extra_class='border border-slate-200 bg-white w-full sm:w-auto shrink-0') %}
+                        <div class="contents" role="tablist" aria-label="Требует внимания">
+                            <button type="button"
+                                class="min-h-[44px] flex-1 sm:flex-none px-3 py-2 rounded-lg text-sm font-semibold transition"
+                                :class="inboxTab === 'clients' ? 'ds-segmented-active' : ''"
+                                @click="navigateToTab('inbox', { inboxTab: 'clients' })">От клиентов</button>
+                            <button type="button"
+                                class="min-h-[44px] flex-1 sm:flex-none px-3 py-2 rounded-lg text-sm font-semibold transition"
+                                :class="inboxTab === 'system' ? 'ds-segmented-active' : ''"
+                                @click="navigateToTab('inbox', { inboxTab: 'system' })">Системные</button>
+                        </div>
+                        {% endcall %}
+                    </div>
+                </div>
+            </div>

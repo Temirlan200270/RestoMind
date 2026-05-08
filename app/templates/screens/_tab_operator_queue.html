@@ -1,5 +1,5 @@
             <!-- ========== ПОМОЩЬ КЛИЕНТАМ (Inbox Zero) ========== -->
-            <div x-show="currentTab === 'operator_queue'" x-cloak class="fade-in">
+            <div x-show="currentTab === 'inbox' && inboxTab === 'clients'" x-cloak class="fade-in">
                 {% set op_q_open %}
                     <div class="flex items-center gap-4">
                         <div class="text-4xl font-black tabular-nums shrink-0" style="color: var(--color-text);" x-text="dashStats.failed_tasks_open ?? 0"></div>

@@ -224,32 +224,35 @@ const adminFormat = {
 
 /**
  * Фрагмент админки в location.hash.
- * Примеры: #dashboard, #chats?phone=7705…, #settings/connections (как в ссылках из Telegram).
- * @returns {{ tab: string | null, settingsTab: string | null, phone: string | null }}
+ * Примеры: #dashboard, #chats?phone=7705…, #settings/connections, #inbox?tab=system, #dashboard?tab=analytics.
+ * @returns {{ tab: string | null, settingsTab: string | null, phone: string | null, menuView: string | null, inboxTab: string | null, dashboardTab: string | null, aiCenterTab: string | null }}
  */
 function adminParseLocationHash() {
+    const empty = { tab: null, settingsTab: null, phone: null, menuView: null, inboxTab: null, dashboardTab: null, aiCenterTab: null };
     const raw = String(window.location.hash || '').replace(/^#/, '').trim();
-    if (!raw) return { tab: null, settingsTab: null, phone: null, menuView: null };
+    if (!raw) return { ...empty };
     const q = raw.indexOf('?');
     const path = (q >= 0 ? raw.slice(0, q) : raw).trim();
     const qs = q >= 0 ? raw.slice(q + 1) : '';
     let phone = null;
     let menuView = null;
+    let subTab = '';
     try {
         const sp = new URLSearchParams(qs);
         const p = (sp.get('phone') || '').trim();
         phone = p || null;
         const mv = (sp.get('view') || '').trim().toLowerCase();
         if (mv === 'stoplist' || mv === 'catalog') menuView = mv;
+        subTab = (sp.get('tab') || '').trim().toLowerCase();
     } catch (_e) {
         phone = null;
     }
     if (path.startsWith('settings/')) {
         const st = path.slice('settings/'.length).trim();
-        return { tab: 'settings', settingsTab: st || 'restaurant', phone: null, menuView: null };
+        return { ...empty, tab: 'settings', settingsTab: st || 'restaurant' };
     }
     if (path === 'settings') {
-        return { tab: 'settings', settingsTab: null, phone: null, menuView: null };
+        return { ...empty, tab: 'settings' };
     }
     const legacyToSettings = {
         integrations: 'connections',
@@ -260,26 +263,64 @@ function adminParseLocationHash() {
         test: 'bot_test',
     };
     if (legacyToSettings[path]) {
-        return { tab: 'settings', settingsTab: legacyToSettings[path], phone: null, menuView: null };
+        return { ...empty, tab: 'settings', settingsTab: legacyToSettings[path] };
     }
     /** Legacy #stoplist → меню, вкладка стоп-листа */
     if (path === 'stoplist') {
-        return { tab: 'menu', settingsTab: null, phone: null, menuView: 'stoplist' };
+        return { ...empty, tab: 'menu', menuView: 'stoplist' };
     }
     if (path === 'menu') {
         return {
+            ...empty,
             tab: 'menu',
-            settingsTab: null,
-            phone: null,
             menuView: menuView || 'catalog',
         };
     }
-    return { tab: path || null, settingsTab: null, phone, menuView };
+
+    /** P1.5.0: старые верхние вкладки → inbox / dashboard / ai_center */
+    const legacyTop = {
+        operator_queue: { tab: 'inbox', inboxTab: 'clients' },
+        errors: { tab: 'inbox', inboxTab: 'clients' },
+        incidents: { tab: 'inbox', inboxTab: 'system' },
+        analytics: { tab: 'dashboard', dashboardTab: 'analytics' },
+        ai_value: { tab: 'ai_center', aiCenterTab: 'value' },
+        intelligence: { tab: 'ai_center', aiCenterTab: 'insights' },
+        digital_twin: { tab: 'ai_center', aiCenterTab: 'load' },
+    };
+    if (legacyTop[path]) {
+        const L = legacyTop[path];
+        return {
+            ...empty,
+            tab: L.tab,
+            phone,
+            inboxTab: L.inboxTab ?? null,
+            dashboardTab: L.dashboardTab ?? null,
+            aiCenterTab: L.aiCenterTab ?? null,
+        };
+    }
+
+    if (path === 'inbox') {
+        const it = subTab === 'system' ? 'system' : 'clients';
+        return { ...empty, tab: 'inbox', phone, inboxTab: it };
+    }
+    if (path === 'dashboard') {
+        const dt = subTab === 'analytics' ? 'analytics' : 'overview';
+        return { ...empty, tab: 'dashboard', phone, dashboardTab: dt };
+    }
+    if (path === 'ai_center') {
+        let ac = 'value';
+        if (subTab === 'insights') ac = 'insights';
+        else if (subTab === 'load') ac = 'load';
+        else if (subTab === 'value') ac = 'value';
+        return { ...empty, tab: 'ai_center', phone, aiCenterTab: ac };
+    }
+
+    return { ...empty, tab: path || null, phone };
 }
 
 /** Допустимые верхнеуровневые вкладки (id из navItems). */
 const ADMIN_TOP_TAB_IDS = new Set([
-    'dashboard', 'analytics', 'ai_value', 'intelligence', 'digital_twin', 'incidents', 'orders', 'operator_queue', 'bookings', 'chats', 'menu', 'settings',
+    'dashboard', 'inbox', 'ai_center', 'orders', 'bookings', 'chats', 'menu', 'settings',
 ]);
 
 /** Начальное состояние GET /integrations/status — чтобы Alpine не падал на undefined до первой загрузки. */
@@ -466,34 +507,35 @@ function adminMixinState() {
         analyticsDailyDataRev: 0,
         /** Заголовки секций сайдбара (один x-for в шаблоне). */
         navSections: [
-            { id: 'overview', title: 'Обзор' },
             { id: 'operations', title: 'Операции' },
-            { id: 'settings', title: 'Управление' },
+            { id: 'management', title: 'Управление' },
         ],
+        /** Под-табы «Требует внимания»: клиенты vs системные инциденты (P1.5.0). */
+        inboxTab: 'clients',
+        /** Под-табы дашборда: главная vs аналитика (P1.5.0). */
+        dashboardTab: 'overview',
+        /** Под-табы ИИ-центра: вклад / инсайты / нагрузка (P1.5.0). */
+        aiCenterTab: 'value',
         /** Вкладка внутри Settings (Stripe-like). */
         settingsTab: 'restaurant', // restaurant | branding | connections | smart_sales | team | …
         orgProfileDirty: false,
         brandingDirty: false,
         navItems: [
-            { id: 'dashboard', section: 'overview', label: 'Дашборд', desc: 'Общая статистика и последние заказы',
-              icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25A2.25 2.25 0 018.25 10.5H6A2.25 2.25 0 013.75 8.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z"/></svg>' },
-            { id: 'analytics', section: 'overview', label: 'Аналитика', desc: 'Выручка, средний чек, динамика продаж',
-              icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/></svg>' },
-            { id: 'intelligence', section: 'overview', label: 'AI-аналитик', desc: 'Выручка, заказы, отмены и авто-инсайты',
-              icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 3.75h4.5m-7.5 4.5h10.5m-12 4.5h13.5m-15 4.5h7.5m2.25 0h6M7.5 21h9a2.25 2.25 0 002.25-2.25V5.25A2.25 2.25 0 0016.5 3h-9a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21z"/></svg>' },
+            { id: 'inbox', section: 'operations', label: 'Требует внимания', desc: 'Очередь помощи и системные инциденты',
+              icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>' },
             { id: 'orders', section: 'operations', label: 'Заказы', desc: 'По этапам (черновик → подтверждён → кухня) или общий список',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z"/></svg>' },
-            { id: 'digital_twin', section: 'operations', label: 'Digital Twin', desc: 'Состояние ресторана и симуляция нагрузки',
-              icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 6.75l8.25-4.5 8.25 4.5v10.5l-8.25 4.5-8.25-4.5V6.75zM12 12l8.25-5.25M12 12v9.75M12 12L3.75 6.75"/></svg>' },
-            { id: 'operator_queue', section: 'operations', label: 'Помощь клиентам', desc: 'Обращения, где нужен человек (цель — «пусто»)',
-              icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>' },
-            { id: 'bookings', section: 'operations', label: 'Бронирования', desc: 'Столики и резервации',
-              icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/></svg>' },
             { id: 'chats', section: 'operations', label: 'Диалоги', desc: 'Сообщения и ответы клиентам',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 01-.825-.242m9.345-8.334a21.05 21.05 0 00-1.889-2.403 19.7 19.7 0 00-1.6-1.562c-.642-.522-1.397-.957-2.23-1.25C16.247 1.872 14.747 1.5 12 1.5c-2.747 0-4.247.372-5.63.99-.833.293-1.588.728-2.23 1.25-.563.459-1.082 1-1.6 1.562A21.05 21.05 0 003.75 8.511"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5.25 8.511c-.884.284-1.5 1.128-1.5 2.097v4.286c0 1.136.847 2.1 1.98 2.193.34.027.68.052 1.02.072v3.091l3-3a11.63 11.63 0 014.02-.163 2.115 2.115 0 001.825-.242M9.378 5.378A21.05 21.05 0 0018.72 3.728"/></svg>' },
-            { id: 'menu', section: 'operations', label: 'Меню', desc: 'Каталог и стоп-лист',
+            { id: 'bookings', section: 'operations', label: 'Бронирования', desc: 'Столики и резервации',
+              icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/></svg>' },
+            { id: 'dashboard', section: 'management', label: 'Дашборд', desc: 'Общая статистика и последние заказы',
+              icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25A2.25 2.25 0 018.25 10.5H6A2.25 2.25 0 013.75 8.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z"/></svg>' },
+            { id: 'ai_center', section: 'management', label: 'ИИ-аналитика', desc: 'Вклад ИИ, инсайты и нагрузка',
+              icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 3.75h4.5m-7.5 4.5h10.5m-12 4.5h13.5m-15 4.5h7.5m2.25 0h6M7.5 21h9a2.25 2.25 0 002.25-2.25V5.25A2.25 2.25 0 0016.5 3h-9a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21z"/></svg>' },
+            { id: 'menu', section: 'management', label: 'Меню', desc: 'Каталог и стоп-лист',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8.25v-1.5m0 1.5c-1.355 0-2.697.056-4.024.166C6.845 8.51 6 9.473 6 10.608v2.513m6-4.871c1.355 0 2.697.055 4.024.165C17.155 8.51 18 9.473 18 10.608v2.513m-3 4.73v-1.59c0-.532-.21-1.042-.586-1.418L12 13.5m-3 4.73c.55.47 1.27.73 2 .73h6c.73 0 1.45-.26 2-.73m-8-4.73V10.6c0-1.12.856-2.08 2.09-2.19.64-.09 1.29-.14 1.91-.14m5 6.37v1.59c0 1.632-.875 3.11-2.25 3.89"/></svg>' },
-            { id: 'settings', section: 'settings', label: 'Настройки', desc: 'Ресторан, подключения, продажи, команда',
+            { id: 'settings', section: 'management', label: 'Настройки', desc: 'Ресторан, подключения, продажи, команда',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>' },
         ],
 
@@ -1110,23 +1152,10 @@ function adminMixinMenuOrdersUi() {
             });
         },
 
-        ensureAi2NavItems() {
-            if (!this.navItems.some((x) => x.id === 'ai_value')) {
-                const analyticsIdx = this.navItems.findIndex((x) => x.id === 'analytics');
-                const item = {
-                    id: 'ai_value',
-                    section: 'overview',
-                    label: 'Вклад ИИ',
-                    desc: 'Допродажи, экономия времени и вклад ассистента',
-                    icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/></svg>',
-                };
-                this.navItems.splice(analyticsIdx >= 0 ? analyticsIdx + 1 : 1, 0, item);
-            }
-            // 'errors' tab merged into 'operator_queue' — не добавляем отдельный пункт
-        },
+        /** Раньше добавляли «Вклад ИИ» динамически — после P1.5.0 пункты фиксированы в navItems. */
+        ensureAi2NavItems() {},
 
         async init() {
-            this.ensureAi2NavItems();
             const today = new Date();
             const weekAgo = new Date(today);
             weekAgo.setDate(weekAgo.getDate() - 7);
@@ -1218,11 +1247,11 @@ function adminMixinMenuOrdersUi() {
          */
         _resizeVisibleCharts(tab) {
             try {
-                if (tab === 'dashboard' && charts.dashboard) {
+                if (tab === 'dashboard' && this.dashboardTab === 'overview' && charts.dashboard) {
                     charts.dashboard.resize();
                     charts.dashboard.update('none');
                 }
-                if (tab === 'analytics' && charts.analytics) {
+                if (tab === 'dashboard' && this.dashboardTab === 'analytics' && charts.analytics) {
                     charts.analytics.resize();
                     charts.analytics.update('none');
                 }
@@ -1446,6 +1475,11 @@ function adminMixinMenuOrdersUi() {
             const a = this.attentionSummary;
             if (a && typeof a.total_open === 'number') return Number(a.total_open);
             return Number(this.incidents?.total_open || 0);
+        },
+
+        /** Бейдж пункта «Требует внимания»: открытые задачи помощи + открытые инциденты. */
+        inboxTotalOpen() {
+            return Number(this.dashStats?.failed_tasks_open || 0) + this.incidentsTotalOpen();
         },
 
         incidentSummaryCount(key) {
@@ -4551,7 +4585,7 @@ function adminMixinWebSocketEvents() {
                     type,
                     `${st === 'failed' ? 'Сбой доставки' : 'Статус'} · ${data.phone || ''} · #${data.chat_log_id || ''}`,
                 );
-                if (this.currentTab === 'dashboard') {
+                if (this.currentTab === 'dashboard' && this.dashboardTab === 'overview') {
                     void this.loadDashActivity();
                 }
             } else if (type === 'new_message') {
@@ -4560,7 +4594,7 @@ function adminMixinWebSocketEvents() {
                     type,
                     `${data.role === 'user' ? 'Клиент' : (data.role === 'operator' ? 'Оператор' : 'Бот')} · ${data.phone || ''}`,
                 );
-                if (this.currentTab === 'dashboard') {
+                if (this.currentTab === 'dashboard' && this.dashboardTab === 'overview') {
                     // Редко, но полезно: лента событий должна быть “живой”.
                     void this.loadDashActivity();
                 }
@@ -4571,7 +4605,7 @@ function adminMixinWebSocketEvents() {
                     type,
                     `Заказ #${data.order_id} → ${data.status} · ${data.phone || ''}`,
                 );
-                if (this.currentTab === 'dashboard') {
+                if (this.currentTab === 'dashboard' && this.dashboardTab === 'overview') {
                     void this.loadDashActivity();
                 }
             } else if (type === 'order_deleted') {
@@ -4591,13 +4625,13 @@ function adminMixinWebSocketEvents() {
                     this.selectedOrder = null;
                 }
                 this.scheduleDashStatsRefreshDebounced();
-                if (this.currentTab === 'dashboard') {
+                if (this.currentTab === 'dashboard' && this.dashboardTab === 'overview') {
                     void this.loadDashActivity();
                 }
             } else if (type === 'human_needed') {
                 this.onHumanNeeded(data);
                 this._pushDashLiveFeed(type, `Нужен оператор · ${data.phone || ''}`);
-                if (this.currentTab === 'dashboard') {
+                if (this.currentTab === 'dashboard' && this.dashboardTab === 'overview') {
                     void this.loadDashActivity();
                 }
             } else if (type === 'state_changed') {
@@ -4922,6 +4956,15 @@ function adminMixinLiveChat() {
                 frag = ph ? `chats?phone=${encodeURIComponent(ph)}` : 'chats';
             } else if (this.currentTab === 'menu') {
                 frag = this.menuView === 'stoplist' ? 'menu?view=stoplist' : 'menu';
+            } else if (this.currentTab === 'inbox') {
+                frag = this.inboxTab === 'system' ? 'inbox?tab=system' : 'inbox';
+            } else if (this.currentTab === 'dashboard') {
+                frag = this.dashboardTab === 'analytics' ? 'dashboard?tab=analytics' : 'dashboard';
+            } else if (this.currentTab === 'ai_center') {
+                const ac = this.aiCenterTab || 'value';
+                if (ac === 'insights') frag = 'ai_center?tab=insights';
+                else if (ac === 'load') frag = 'ai_center?tab=load';
+                else frag = 'ai_center';
             } else if (ADMIN_TOP_TAB_IDS.has(this.currentTab)) {
                 frag = this.currentTab;
             }
@@ -4957,6 +5000,15 @@ function adminMixinLiveChat() {
                 });
                 this.$watch('menuView', () => {
                     if (this.currentTab === 'menu') this._schedulePushAdminHash();
+                });
+                this.$watch('inboxTab', () => {
+                    if (this.currentTab === 'inbox') this._schedulePushAdminHash();
+                });
+                this.$watch('dashboardTab', () => {
+                    if (this.currentTab === 'dashboard') this._schedulePushAdminHash();
+                });
+                this.$watch('aiCenterTab', () => {
+                    if (this.currentTab === 'ai_center') this._schedulePushAdminHash();
                 });
             } catch (_e) { /* ignore */ }
         },
@@ -5012,6 +5064,33 @@ function adminMixinLiveChat() {
             if (tabId === 'menu' && (o.menuView === 'stoplist' || o.menuView === 'catalog')) {
                 this.menuView = o.menuView;
             }
+            if (tabId === 'inbox') {
+                if (typeof o.inboxTab === 'string' && o.inboxTab.trim()) {
+                    this.inboxTab = o.inboxTab.trim() === 'system' ? 'system' : 'clients';
+                } else {
+                    this.inboxTab = 'clients';
+                }
+            }
+            if (tabId === 'dashboard') {
+                if (typeof o.dashboardTab === 'string' && o.dashboardTab.trim()) {
+                    this.dashboardTab = o.dashboardTab.trim() === 'analytics' ? 'analytics' : 'overview';
+                } else {
+                    this.dashboardTab = 'overview';
+                }
+            }
+            if (tabId === 'ai_center') {
+                if (typeof o.aiCenterTab === 'string' && o.aiCenterTab.trim()) {
+                    const a = o.aiCenterTab.trim();
+                    if (a === 'insights') this.aiCenterTab = 'insights';
+                    else if (a === 'load') this.aiCenterTab = 'load';
+                    else this.aiCenterTab = 'value';
+                } else {
+                    this.aiCenterTab = 'value';
+                }
+            }
+            if (tabId !== 'inbox') this.inboxTab = 'clients';
+            if (tabId !== 'dashboard') this.dashboardTab = 'overview';
+            if (tabId !== 'ai_center') this.aiCenterTab = 'value';
             this.sidebarOpen = false;
             void this.loadTabData();
             this._schedulePushAdminHash();
@@ -5041,6 +5120,7 @@ function adminMixinLiveChat() {
             }
             if (!ADMIN_TOP_TAB_IDS.has(tab)) {
                 this.currentTab = 'dashboard';
+                this.dashboardTab = 'overview';
                 return;
             }
             this.currentTab = tab;
@@ -5049,6 +5129,24 @@ function adminMixinLiveChat() {
                 this.menuView = mv === 'stoplist' || mv === 'catalog' ? mv : 'catalog';
             } else if (tab !== 'menu') {
                 this.menuView = 'catalog';
+            }
+            if (tab === 'inbox') {
+                this.inboxTab = parsed?.inboxTab === 'system' ? 'system' : 'clients';
+            } else {
+                this.inboxTab = 'clients';
+            }
+            if (tab === 'dashboard') {
+                this.dashboardTab = parsed?.dashboardTab === 'analytics' ? 'analytics' : 'overview';
+            } else {
+                this.dashboardTab = 'overview';
+            }
+            if (tab === 'ai_center') {
+                const ac = parsed?.aiCenterTab;
+                if (ac === 'insights') this.aiCenterTab = 'insights';
+                else if (ac === 'load') this.aiCenterTab = 'load';
+                else this.aiCenterTab = 'value';
+            } else {
+                this.aiCenterTab = 'value';
             }
             if (tab === 'chats' && phone) this._pendingHashChatPhone = phone;
         },
@@ -5516,8 +5614,11 @@ function adminMixinDataChartsSettings() {
                 this.currentTab = 'settings';
                 this.settingsTab = legacyTab;
             }
-            // 'errors' merged into 'operator_queue'
-            if (this.currentTab === 'errors') this.currentTab = 'operator_queue';
+            // Legacy #errors / старый tab id → inbox (P1.5.0)
+            if (this.currentTab === 'errors' || this.currentTab === 'operator_queue') {
+                this.currentTab = 'inbox';
+                this.inboxTab = 'clients';
+            }
             if (this.currentTab !== 'chats') {
                 this.chatMobileInfoOpen = false;
                 this.activeChatPhone = '';
@@ -5531,28 +5632,34 @@ function adminMixinDataChartsSettings() {
             this.tabDataLoading = true;
             try {
                 if (this.currentTab === 'dashboard') {
-                    await Promise.all([
-                        this.loadDashStats(),
-                        this.loadAttentionSummary(),
-                    ]);
-                    this.deferIdleWork(async () => {
-                        if (this.currentTab !== 'dashboard') return;
-                        await Promise.all([this.loadDashRoiSummary(), this.loadDashActivity()]);
-                    }, 1200);
-                } else if (this.currentTab === 'analytics') {
-                    await this.loadAnalytics();
-                } else if (this.currentTab === 'intelligence') {
-                    await this.loadIntelligence();
-                } else if (this.currentTab === 'digital_twin') {
-                    await this.loadDigitalTwin();
-                } else if (this.currentTab === 'ai_value') {
-                    await this.loadAiValue();
-                } else if (this.currentTab === 'incidents') {
-                    await this.loadIncidents();
+                    if (this.dashboardTab === 'analytics') {
+                        await this.loadAnalytics();
+                    } else {
+                        await Promise.all([
+                            this.loadDashStats(),
+                            this.loadAttentionSummary(),
+                        ]);
+                        this.deferIdleWork(async () => {
+                            if (this.currentTab !== 'dashboard' || this.dashboardTab !== 'overview') return;
+                            await Promise.all([this.loadDashRoiSummary(), this.loadDashActivity()]);
+                        }, 1200);
+                    }
+                } else if (this.currentTab === 'ai_center') {
+                    if (this.aiCenterTab === 'insights') {
+                        await this.loadIntelligence();
+                    } else if (this.aiCenterTab === 'load') {
+                        await this.loadDigitalTwin();
+                    } else {
+                        await this.loadAiValue();
+                    }
+                } else if (this.currentTab === 'inbox') {
+                    if (this.inboxTab === 'system') {
+                        await this.loadIncidents();
+                    } else {
+                        await Promise.all([this.loadFailedTasks(), this.loadDashStats()]);
+                    }
                 } else if (this.currentTab === 'orders') {
                     await this.loadOrders();
-                } else if (this.currentTab === 'operator_queue' || this.currentTab === 'errors') {
-                    await Promise.all([this.loadFailedTasks(), this.loadDashStats()]);
                 } else if (this.currentTab === 'bookings') {
                     await this.loadBookings();
                 } else if (this.currentTab === 'menu') {
@@ -5595,15 +5702,17 @@ function adminMixinDataChartsSettings() {
                 adminLogger.error(e);
                 void this.showUiAlert('Не удалось загрузить данные вкладки. Проверьте сеть и обновите страницу.', 'Ошибка');
             }
-            if (this.currentTab !== 'dashboard') {
+            const dashOverviewVisible = this.currentTab === 'dashboard' && this.dashboardTab === 'overview';
+            if (!dashOverviewVisible) {
                 if (this._dashboardChartObserver) {
                     try { this._dashboardChartObserver.disconnect(); } catch (_e) { /* ignore */ }
                     this._dashboardChartObserver = null;
                 }
                 adminDestroyDashboardChart();
             }
-            if (this.currentTab !== 'analytics') adminDestroyAnalyticsMainChart();
-            if (this.currentTab !== 'analytics') {
+            const dashAnalyticsVisible = this.currentTab === 'dashboard' && this.dashboardTab === 'analytics';
+            if (!dashAnalyticsVisible) adminDestroyAnalyticsMainChart();
+            if (!dashAnalyticsVisible) {
                 this._destroyAnalyticsSparklines();
             }
             this.tabDataLoading = false;
@@ -5612,11 +5721,10 @@ function adminMixinDataChartsSettings() {
             const tab = this.currentTab;
             setTimeout(() => {
                 if (this.currentTab !== tab) return;
-                if (tab === 'dashboard') {
+                if (tab === 'dashboard' && this.dashboardTab === 'overview') {
                     this.armDashboardChartLazyRender();
                 }
-                // Одна отрисовка аналитики после layout (loadAnalytics только грузит данные).
-                if (tab === 'analytics') {
+                if (tab === 'dashboard' && this.dashboardTab === 'analytics') {
                     this._paintAnalyticsChartAfterLayout();
                 }
                 this._resizeVisibleCharts(tab);
@@ -6088,6 +6196,30 @@ function adminMixinDataChartsSettings() {
                 setTimeout(() => this.selectChat(phone), 80);
                 return;
             }
+            if (tab === 'incidents') {
+                this.navigateToTab('inbox', { inboxTab: 'system' });
+                return;
+            }
+            if (tab === 'operator_queue' || tab === 'errors') {
+                this.navigateToTab('inbox', { inboxTab: 'clients' });
+                return;
+            }
+            if (tab === 'analytics') {
+                this.navigateToTab('dashboard', { dashboardTab: 'analytics' });
+                return;
+            }
+            if (tab === 'ai_value') {
+                this.navigateToTab('ai_center', { aiCenterTab: 'value' });
+                return;
+            }
+            if (tab === 'intelligence') {
+                this.navigateToTab('ai_center', { aiCenterTab: 'insights' });
+                return;
+            }
+            if (tab === 'digital_twin') {
+                this.navigateToTab('ai_center', { aiCenterTab: 'load' });
+                return;
+            }
             this.navigateToTab(tab);
         },
 
@@ -6130,7 +6262,7 @@ function adminMixinDataChartsSettings() {
         },
 
         armDashboardChartLazyRender() {
-            if (this.currentTab !== 'dashboard' || charts.dashboard) return;
+            if (this.currentTab !== 'dashboard' || this.dashboardTab !== 'overview' || charts.dashboard) return;
             // На mobile график ниже первого решения владельца; не грузим Chart.js в initial render.
             if (this.isMobileViewport()) return;
             const canvas = document.getElementById('dashboardHeroChart');
@@ -6155,7 +6287,7 @@ function adminMixinDataChartsSettings() {
         /** После изменения заказов: перерисовать мини-график, если открыт дашборд. */
         async syncDashboardChartIfVisible() {
             await this.$nextTick();
-            if (this.currentTab === 'dashboard') {
+            if (this.currentTab === 'dashboard' && this.dashboardTab === 'overview') {
                 if (charts.dashboard) {
                     await this.scheduleDashboardChartRender();
                 } else {
@@ -7133,7 +7265,7 @@ function adminMixinDataChartsSettings() {
             await this.loadAnalytics();
             await this.$nextTick();
             setTimeout(() => {
-                if (this.currentTab !== 'analytics') return;
+                if (this.currentTab !== 'dashboard' || this.dashboardTab !== 'analytics') return;
                 this._paintAnalyticsChartAfterLayout();
             }, 100);
         },
@@ -7347,7 +7479,7 @@ function adminMixinDataChartsSettings() {
 
         /** Плавная area-линия с градиентом под кривой (премиум-дашборд). */
         async renderDashboardMiniChart() {
-            if (this.currentTab !== 'dashboard') return;
+            if (this.currentTab !== 'dashboard' || this.dashboardTab !== 'overview') return;
             const canvas = document.getElementById('dashboardHeroChart');
             if (!canvas) return;
             const series = this.dashStats.daily_series || [];

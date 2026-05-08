@@ -1,5 +1,18 @@
             <!-- ========== ДАШБОРД ========== -->
             <div x-show="currentTab === 'dashboard'" x-cloak class="fade-in space-y-6">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                    {% call segmented(extra_class='border border-gray-200 bg-white shrink-0') %}
+                    <div class="contents" role="tablist" aria-label="Дашборд">
+                        <button type="button" class="min-h-[44px] px-3 py-2 rounded-lg text-sm font-semibold transition"
+                            :class="dashboardTab === 'overview' ? 'ds-segmented-active' : ''"
+                            @click="navigateToTab('dashboard', { dashboardTab: 'overview' })">Главная</button>
+                        <button type="button" class="min-h-[44px] px-3 py-2 rounded-lg text-sm font-semibold transition"
+                            :class="dashboardTab === 'analytics' ? 'ds-segmented-active' : ''"
+                            @click="navigateToTab('dashboard', { dashboardTab: 'analytics' })">Аналитика</button>
+                    </div>
+                    {% endcall %}
+                </div>
+                <div x-show="dashboardTab === 'overview'" x-cloak class="space-y-6">
                 <div class="flex flex-wrap items-end justify-between gap-4">
                     <div class="min-w-0 flex-1">
                         {{ section_header('Главная', subtitle='Выручка, вклад ИИ и время команды.', extra_class='!mb-0') }}
@@ -18,19 +31,19 @@
                     </div>
                     <div class="hidden sm:flex flex-wrap items-center gap-2">
                         <button type="button" class="ds-btn ds-btn-secondary ds-btn-md"
-                            @click="navigateToTab('analytics')">Подробная аналитика</button>
+                            @click="navigateToTab('dashboard', { dashboardTab: 'analytics' })">Подробная аналитика</button>
                     </div>
                 </div>
 
                 <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
                     <button type="button" class="text-left rounded-2xl bg-white ring-1 ring-slate-200/80 shadow-sm px-4 py-3 min-h-[96px]"
-                        @click="navigateToTab('analytics')">
+                        @click="navigateToTab('dashboard', { dashboardTab: 'analytics' })">
                         <div class="text-[11px] font-bold uppercase text-slate-500">Выручка сегодня</div>
                         <div class="mt-2 text-xl font-black text-slate-950 tabular-nums" x-text="fmt.money(dashStats.today_revenue || 0)"></div>
                         <div class="mt-1 text-[11px] text-slate-500"><span x-text="dashStats.today_orders || 0"></span> заказов</div>
                     </button>
                     <button type="button" class="text-left rounded-2xl bg-violet-50 ring-1 ring-violet-200/80 shadow-sm px-4 py-3 min-h-[96px]"
-                        @click="navigateToTab('ai_value')">
+                        @click="navigateToTab('ai_center', { aiCenterTab: 'value' })">
                         <div class="text-[11px] font-bold uppercase text-violet-900/75">Вклад ИИ</div>
                         <div class="mt-2 text-xl font-black text-violet-950 tabular-nums" x-text="fmt.money(dashStats.ai_revenue_today ?? dashStats.upsell_revenue_today ?? 0)"></div>
                         <div class="mt-1 text-[11px] font-semibold text-violet-800">Открыть вклад ИИ</div>
@@ -281,7 +294,7 @@
                         {% call card(title='Быстрые действия', padding_class='p-5', extra_class='!bg-slate-50 !ring-slate-900/5') %}
                             <div class="mt-1 grid grid-cols-1 gap-2">
                                 <button type="button" class="min-h-[44px] w-full rounded-xl px-4 py-2 text-sm font-semibold bg-white text-slate-900 ring-1 ring-slate-900/10 hover:bg-slate-50 transition text-left"
-                                    @click="navigateToTab('operator_queue')">
+                                    @click="navigateToTab('inbox', { inboxTab: 'clients' })">
                                     Помощь клиентам <span class="tabular-nums text-slate-500" x-text="'(' + (dashStats.failed_tasks_open ?? 0) + ')'"></span>
                                 </button>
                                 <button type="button" class="min-h-[44px] w-full rounded-xl px-4 py-2 text-sm font-semibold bg-white text-slate-900 ring-1 ring-slate-900/10 hover:bg-slate-50 transition text-left"
@@ -295,7 +308,7 @@
                 {% call card(title='Требуют внимания', padding_class='p-5', extra_class='!bg-amber-50/80 !border !border-amber-100 !ring-amber-200/40') %}
                     <ul class="text-sm text-amber-900/90 space-y-1.5 list-disc list-inside">
                         <li x-show="(dashStats.failed_tasks_open || 0) > 0">
-                            Помощь клиентам: <button type="button" class="underline font-medium" @click="navigateToTab('operator_queue')">открыть</button>
+                            Помощь клиентам: <button type="button" class="underline font-medium" @click="navigateToTab('inbox', { inboxTab: 'clients' })">открыть</button>
                             (<span x-text="dashStats.failed_tasks_open"></span>)
                         </li>
                         <li x-show="(dashStats.iiko_errors_today || 0) > 0">
@@ -346,5 +359,5 @@
                     </div>
                 {% endcall %}
                 </div><!-- /hidden sm:block последние заказы -->
-            </div>
+                </div><!-- /overview (dashboardTab) -->
             </div><!-- /dashboard tab -->
