@@ -461,6 +461,27 @@ async def _chat_log_retention_loop() -> None:
             logger.error("Ошибка ретеншна chat_logs: %s", exc, exc_info=True)
 
 
+async def _payment_expiry_loop() -> None:
+    """Фоновая задача: каждые 10 мин помечает просроченные PaymentTransaction как expired."""
+    from app.services.payment_expiry import expire_stale_payment_transactions
+
+    while True:
+        try:
+            await asyncio.sleep(600)
+        except asyncio.CancelledError:
+            break
+        try:
+            async with async_session_factory() as db:
+                count = await expire_stale_payment_transactions(db)
+                await db.commit()
+                if count:
+                    logger.info("Payment expiry: %d транзакций помечено expired", count)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.error("Ошибка payment_expiry_loop: %s", exc, exc_info=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
@@ -546,10 +567,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     stop_list_task = asyncio.create_task(_stop_list_sync_loop())
     chat_retention_task = asyncio.create_task(_chat_log_retention_loop())
+    payment_expiry_task = asyncio.create_task(_payment_expiry_loop())
 
     yield
 
-    for bg in (stop_list_task, chat_retention_task):
+    for bg in (stop_list_task, chat_retention_task, payment_expiry_task):
         bg.cancel()
         try:
             await bg

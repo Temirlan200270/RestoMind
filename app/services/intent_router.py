@@ -712,12 +712,32 @@ async def _handle_order(
         next_state = UserState.CHATTING
         log_hint = "уточняем время самовывоза"
     elif requires_big_order_prepay:
-        reply += (
-            "\n\n"
-            f"💳 Сумма заказа от **{int(settings.order_prepayment_threshold_kzt):,}** ₸ — "
-            "нужна **предоплата** (полная или частичная). Оператор пришлёт реквизиты или ссылку. "
-            "После оплаты вы сможете подтвердить заказ ответом «Да»."
-        )
+        payment_url: str | None = None
+        if org_row is not None:
+            try:
+                from app.services.payment_initiation import initiate_payment, NoPaymentConfigError
+                tx = await initiate_payment(db, order=order, org=org_row)
+                payment_url = tx.payment_url
+            except NoPaymentConfigError:
+                pass  # провайдер не настроен — оператор пришлёт ссылку вручную
+            except Exception as _pay_exc:
+                logger.warning("initiate_payment failed for order=%s: %s", order.id, _pay_exc)
+
+        if payment_url:
+            reply += (
+                "\n\n"
+                f"💳 Сумма заказа от **{int(settings.order_prepayment_threshold_kzt):,}** ₸ — "
+                "нужна **предоплата**. Оплатите по ссылке:\n"
+                f"👉 {payment_url}\n\n"
+                "После оплаты вы сможете подтвердить заказ ответом «Да»."
+            )
+        else:
+            reply += (
+                "\n\n"
+                f"💳 Сумма заказа от **{int(settings.order_prepayment_threshold_kzt):,}** ₸ — "
+                "нужна **предоплата** (полная или частичная). Оператор пришлёт реквизиты или ссылку. "
+                "После оплаты вы сможете подтвердить заказ ответом «Да»."
+            )
         next_state = UserState.CHATTING
         log_hint = "ожидание предоплаты (крупный заказ)"
     else:

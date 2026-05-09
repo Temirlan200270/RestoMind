@@ -621,6 +621,9 @@ function adminMixinState() {
             is_kitchen_open: false,
         },
         scheduleEditorOpen: false,
+        /** Платёжные конфиги: { freedom_pay: {...}, kaspi: {...}, ... } */
+        paymentConfigs: {},
+        paymentConfigsLoaded: false,
         scheduleEditorFallbackUsed: false,
         scheduleEditor: {},
         scheduleDayRows: [
@@ -3951,6 +3954,19 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                 void this.showUiAlert('Ошибка сети. Проверьте соединение.', 'Ошибка');
             } finally {
                 this.packagingPreviewLoading = false;
+            }
+        },
+
+        async loadPaymentConfigs() {
+            if (this.paymentConfigsLoaded) return;
+            try {
+                const { data } = await this.apiJsonResponse('/api/admin/organization/payment-config');
+                const map = {};
+                (data.items || []).forEach(item => { map[item.provider] = item; });
+                this.paymentConfigs = map;
+                this.paymentConfigsLoaded = true;
+            } catch (e) {
+                adminLogger.error('[admin] loadPaymentConfigs', e);
             }
         },
 
