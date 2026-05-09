@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from typing import Literal
 
 from sqlalchemy import select
@@ -12,7 +13,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Order, PaymentEvent
+from app.db.models import Order, PaymentEvent, PaymentTransaction, PaymentTxStatus
 from app.core.config import settings
 from app.services.system_events import emit_system_event
 
@@ -96,6 +97,20 @@ async def apply_payment_webhook(
         order.payment_provider = prov
         order.external_payment_id = ext_id
         order.payment_amount_captured = amt
+
+        from datetime import timezone as _tz
+        await _upsert_payment_transaction(
+            db,
+            order_id=order.id,
+            organization_id=int(organization_id),
+            provider=prov,
+            provider_payment_id=ext_id,
+            status=PaymentTxStatus.PAID.value,
+            amount=amt,
+            currency="KZT",
+            paid_at=datetime.now(_tz.utc),
+        )
+
         await emit_system_event(
             db,
             organization_id=int(organization_id),
@@ -141,6 +156,20 @@ async def apply_payment_webhook(
             "prepayment_status": order.prepayment_status,
             "payment_event_id": None,
         }
+
+    # Фиксируем failed в PaymentTransaction
+    await _upsert_payment_transaction(
+        db,
+        order_id=order.id,
+        organization_id=int(organization_id),
+        provider=_normalize_provider_slug(provider),
+        provider_payment_id=(payment_id or "").strip()[:200] or None,
+        status=PaymentTxStatus.FAILED.value,
+        amount=float(amount) if amount is not None else float(order.total_price or 0),
+        currency="KZT",
+        failure_reason="webhook_failed",
+    )
+
     await db.flush()
     await emit_system_event(
         db,
@@ -165,3 +194,52 @@ async def apply_payment_webhook(
         "prepayment_status": order.prepayment_status,
         "payment_event_id": int(pe_id_f) if pe_id_f is not None else None,
     }
+
+
+async def _upsert_payment_transaction(
+    db: AsyncSession,
+    *,
+    order_id: int,
+    organization_id: int,
+    provider: str,
+    provider_payment_id: str | None,
+    status: str,
+    amount: float,
+    currency: str = "KZT",
+    paid_at: "datetime | None" = None,
+    failure_reason: str | None = None,
+) -> None:
+    """
+    Обновляет существующую pending-транзакцию для заказа или создаёт новую.
+    Приоритет: найти pending запись с тем же провайдером → обновить.
+    Если нет — создать новую (webhook пришёл без initiation, прямой вебхук).
+    """
+    import uuid
+
+    existing = await db.scalar(
+        select(PaymentTransaction).where(
+            PaymentTransaction.order_id == order_id,
+            PaymentTransaction.provider == provider,
+            PaymentTransaction.status == PaymentTxStatus.PENDING.value,
+        ).order_by(PaymentTransaction.id.desc()).limit(1)
+    )
+
+    if existing is not None:
+        existing.status = status
+        existing.provider_payment_id = provider_payment_id or existing.provider_payment_id
+        existing.paid_at = paid_at
+        existing.failure_reason = failure_reason
+    else:
+        tx = PaymentTransaction(
+            organization_id=organization_id,
+            order_id=order_id,
+            provider=provider,
+            provider_payment_id=provider_payment_id,
+            status=status,
+            amount=amount,
+            currency=currency,
+            idempotency_key=f"wh:{provider}:{provider_payment_id or order_id}:{uuid.uuid4().hex[:8]}",
+            paid_at=paid_at,
+            failure_reason=failure_reason,
+        )
+        db.add(tx)
