@@ -713,10 +713,25 @@ async def list_orders(
     result = await db.execute(query)
     rows = result.all()
 
+    # Batch-загрузка последних PaymentTransaction для найденных заказов
+    from app.db.models import PaymentTransaction as _PTx
+    _order_ids = [o.id for o, _, _ in rows]
+    _tx_map: dict[int, _PTx] = {}
+    if _order_ids:
+        _txs = await db.scalars(
+            select(_PTx)
+            .where(_PTx.order_id.in_(_order_ids))
+            .order_by(_PTx.order_id, _PTx.id.desc())
+        )
+        for _tx in _txs:
+            if _tx.order_id not in _tx_map:
+                _tx_map[_tx.order_id] = _tx
+
     out: list[dict] = []
     for o, phone, user_name in rows:
         items_json = o.items_json
         meta = order_meta_from_items_json(items_json if isinstance(items_json, dict) else None)
+        _ltx = _tx_map.get(o.id)
         out.append(
             {
                 "id": o.id,
@@ -748,6 +763,17 @@ async def list_orders(
                 "payment_split_warning": _check_mixed_payment_split(
                     items_json if isinstance(items_json, dict) else None, float(o.total_price),
                 ),
+                "latest_payment_tx": {
+                    "id": _ltx.id,
+                    "provider": _ltx.provider,
+                    "status": _ltx.status,
+                    "amount": float(_ltx.amount),
+                    "currency": _ltx.currency,
+                    "payment_url": _ltx.payment_url,
+                    "expires_at": _ltx.expires_at.isoformat() if _ltx.expires_at else None,
+                    "paid_at": _ltx.paid_at.isoformat() if _ltx.paid_at else None,
+                    "failure_reason": _ltx.failure_reason,
+                } if _ltx else None,
             }
         )
 

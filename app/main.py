@@ -462,8 +462,9 @@ async def _chat_log_retention_loop() -> None:
 
 
 async def _payment_expiry_loop() -> None:
-    """Фоновая задача: каждые 10 мин помечает просроченные PaymentTransaction как expired."""
+    """Каждые 10 мин: expired + WhatsApp re-initiation reminder для клиентов."""
     from app.services.payment_expiry import expire_stale_payment_transactions
+    from app.services.payment_reminder import send_payment_reminders_for_expired
 
     while True:
         try:
@@ -472,10 +473,14 @@ async def _payment_expiry_loop() -> None:
             break
         try:
             async with async_session_factory() as db:
-                count = await expire_stale_payment_transactions(db)
+                expired = await expire_stale_payment_transactions(db)
                 await db.commit()
-                if count:
-                    logger.info("Payment expiry: %d транзакций помечено expired", count)
+
+            if expired:
+                logger.info("Payment expiry: %d транзакций expired, запускаем reminders", len(expired))
+                sent = await send_payment_reminders_for_expired(expired, async_session_factory)
+                if sent:
+                    logger.info("Payment reminders отправлено: %d", sent)
         except asyncio.CancelledError:
             raise
         except Exception as exc:

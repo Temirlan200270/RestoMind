@@ -4,7 +4,7 @@
 Запускать периодически (раз в 5–15 минут):
     await expire_stale_payment_transactions(db)
 
-После expire — emit SystemEvent("payment_expired"), чтобы бот мог предложить новую ссылку.
+После expire — emit SystemEvent("payment_expired") + вернуть список для reminder-а.
 """
 
 from __future__ import annotations
@@ -21,11 +21,11 @@ from app.services.system_events import emit_system_event
 logger = logging.getLogger(__name__)
 
 
-async def expire_stale_payment_transactions(db: AsyncSession) -> int:
+async def expire_stale_payment_transactions(db: AsyncSession) -> list[PaymentTransaction]:
     """
-    Переводит все pending-транзакции с просроченным expires_at в статус expired.
+    Переводит pending-транзакции с просроченным expires_at в статус expired.
 
-    Возвращает количество обновлённых записей.
+    Возвращает список обновлённых транзакций (для последующего reminder-а).
     """
     now = datetime.now(timezone.utc)
 
@@ -39,7 +39,7 @@ async def expire_stale_payment_transactions(db: AsyncSession) -> int:
     expired_list = list(expired_rows)
 
     if not expired_list:
-        return 0
+        return []
 
     tx_ids = [tx.id for tx in expired_list]
 
@@ -71,4 +71,5 @@ async def expire_stale_payment_transactions(db: AsyncSession) -> int:
 
     await db.flush()
     logger.info("Expired %d payment transaction(s)", len(tx_ids))
-    return len(tx_ids)
+    return expired_list
+
