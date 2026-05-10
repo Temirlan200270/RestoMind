@@ -31,12 +31,13 @@ async def bulk_menu_stoplist(
     org_id = admin_org_from_session(request)
     failed: list[dict[str, Any]] = []
     updated = 0
+    unique_item_ids = list(dict.fromkeys(int(item_id) for item_id in body.item_ids))
 
-    for item_id in body.item_ids:
+    for item_id in unique_item_ids:
         try:
-            item = await _menu_item_in_org(db, int(item_id), org_id)
+            item = await _menu_item_in_org(db, item_id, org_id)
         except HTTPException:
-            failed.append({"id": int(item_id), "error": "not_found"})
+            failed.append({"id": item_id, "error": "not_found"})
             continue
 
         if body.action == "stop":

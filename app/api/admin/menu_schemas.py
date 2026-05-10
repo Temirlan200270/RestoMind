@@ -79,7 +79,7 @@ class MenuBulkStoplistBody(BaseModel):
     """Массовые действия по стоп-листу / разделу."""
 
     action: Literal["stop", "unstop", "set_category"]
-    item_ids: list[int] = Field(..., min_length=1)
+    item_ids: list[int] = Field(..., min_length=1, max_length=200)
     category: str | None = Field(
         None,
         max_length=100,

@@ -88,8 +88,8 @@ from app.services.menu_sync import sync_menu_from_iiko, sync_stop_lists
 from app.services.org_iiko import resolve_org_iiko_credentials
 from app.services.tenant_scope import (
     available_organizations_for_admin_session,
-    branding_placeholder_e21,
     organization_id_allowed_for_admin_session,
+    resolve_branding_for_session,
     resolve_tenant_summary_for_session,
 )
 from app.services.knowledge_context import load_knowledge_context_block
@@ -144,6 +144,8 @@ from .deps import (
     require_staff_admin,
     require_superadmin,
 )
+from .branding import branding_router
+from .knowledge import knowledge_router
 from .menu_bulk import menu_bulk_router
 from .menu_schemas import (
     ClearMenuBody,
@@ -399,7 +401,11 @@ async def _admin_auth_me_payload(request: Request, db: AsyncSession) -> dict[str
         staff=staff_me,
         active_organization_id=int(oid),
     )
-    branding = branding_placeholder_e21()
+    branding = await resolve_branding_for_session(
+        db,
+        staff=staff_me,
+        active_organization_id=int(oid),
+    )
 
     staff_id_val: int | None = int(sid) if sid is not None else None
     email_out = str(user)
@@ -489,6 +495,8 @@ router = APIRouter(
 )
 
 router.include_router(menu_bulk_router)
+router.include_router(knowledge_router)
+router.include_router(branding_router)
 
 
 # WebSocket без cookie-сессии (браузер ограничен) — только подписанный токен
@@ -667,8 +675,22 @@ async def list_orders(
 ) -> dict:
     """Список заказов с пагинацией; телефон/имя — из связанного пользователя (WhatsApp)."""
     org_id = admin_org_from_session(request)
+    # P1.5: число исходящих в WhatsApp с delivery_status=failed в окне ±1 ч от created_at заказа (тот же user_id).
+    failed_wa_near_order = (
+        select(func.count(ChatLog.id))
+        .where(
+            ChatLog.user_id == Order.user_id,
+            ChatLog.organization_id == org_id,
+            ChatLog.role != "user",
+            func.lower(func.coalesce(ChatLog.delivery_status, "")) == "failed",
+            ChatLog.created_at >= Order.created_at - timedelta(hours=1),
+            ChatLog.created_at <= Order.created_at + timedelta(hours=1),
+        )
+        .correlate(Order)
+        .scalar_subquery()
+    )
     base_query = (
-        select(Order, User.phone, User.name)
+        select(Order, User.phone, User.name, failed_wa_near_order)
         .join(User, Order.user_id == User.id)
         .options(joinedload(Order.booking))
         .where(
@@ -737,7 +759,7 @@ async def list_orders(
                 _tx_map[_tx.order_id] = _tx
 
     out: list[dict] = []
-    for o, phone, user_name in rows:
+    for o, phone, user_name, failed_wa_cnt in rows:
         items_json = o.items_json
         meta = order_meta_from_items_json(items_json if isinstance(items_json, dict) else None)
         _ltx = _tx_map.get(o.id)
@@ -772,6 +794,7 @@ async def list_orders(
                 "payment_split_warning": _check_mixed_payment_split(
                     items_json if isinstance(items_json, dict) else None, float(o.total_price),
                 ),
+                "failed_whatsapp_near_order": int(failed_wa_cnt or 0),
                 "latest_payment_tx": {
                     "id": _ltx.id,
                     "provider": _ltx.provider,
@@ -3436,6 +3459,7 @@ async def customer_summary(
             "is_blocked": False,
             "ai_paused": False,
             "operator_note": "",
+            "last_escalation": None,
         }
 
     not_cancelled = Order.status != OrderStatus.CANCELLED.value
@@ -3461,6 +3485,27 @@ async def customer_summary(
     total_spent = float(rev[1] or 0)
     avg_check = (total_spent / rev_count) if rev_count else 0.0
 
+    esc_res = await db.execute(
+        select(EscalationEvent)
+        .where(
+            EscalationEvent.phone == user.phone,
+            or_(
+                EscalationEvent.organization_id == org_id,
+                EscalationEvent.organization_id.is_(None),
+            ),
+        )
+        .order_by(EscalationEvent.created_at.desc())
+        .limit(1),
+    )
+    esc_row = esc_res.scalars().first()
+    last_escalation = None
+    if esc_row is not None:
+        last_escalation = {
+            "created_at": esc_row.created_at.isoformat() if esc_row.created_at else None,
+            "reason": (esc_row.reason or "")[:500],
+            "user_message": (esc_row.user_message or "")[:500],
+        }
+
     return {
         "user_exists": True,
         "phone": user.phone,
@@ -3472,6 +3517,7 @@ async def customer_summary(
         "is_blocked": not user.is_active,
         "ai_paused": bool(getattr(user, "ai_paused", False)),
         "operator_note": user.operator_note or "",
+        "last_escalation": last_escalation,
     }
 
 
@@ -3721,158 +3767,7 @@ async def delete_menu_item(
 
 
 # ─── База знаний (FAQ заведения для промпта LLM / OpenAI) ──────
-
-
-def _knowledge_item_dict(row: KnowledgeItem) -> dict:
-    return {
-        "id": row.id,
-        "organization_id": row.organization_id,
-        "knowledge_kind": getattr(row, "knowledge_kind", None) or "facility",
-        "category": row.category or "",
-        "question": row.question,
-        "answer": row.answer,
-        "is_active": row.is_active,
-        "sort_order": row.sort_order,
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
-    }
-
-
-class KnowledgeItemCreateBody(BaseModel):
-    category: str = Field(default="", max_length=120)
-    question: str = Field(..., min_length=1, max_length=500)
-    answer: str = Field(..., min_length=1, max_length=50_000)
-    is_active: bool = True
-    sort_order: int = Field(0, ge=-10_000, le=10_000)
-    organization_id: int | None = Field(
-        None,
-        description="Игнорируется: запись создаётся в филиале текущей сессии (multi-tenant).",
-    )
-    knowledge_kind: str = Field(
-        "facility",
-        description="facility — справочник заведения; persona — тон и характер бота",
-    )
-
-
-class KnowledgeItemPatchBody(BaseModel):
-    category: str | None = Field(None, max_length=120)
-    question: str | None = Field(None, min_length=1, max_length=500)
-    answer: str | None = Field(None, min_length=1, max_length=50_000)
-    is_active: bool | None = None
-    sort_order: int | None = Field(None, ge=-10_000, le=10_000)
-    organization_id: int | None = None
-    knowledge_kind: str | None = Field(None, description="facility | persona")
-
-
-@router.get("/knowledge")
-async def list_knowledge_items(
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    active_only: bool = Query(False, description="Только is_active=true"),
-) -> dict:
-    """Список записей базы знаний для админки."""
-    org_id = admin_org_from_session(request)
-    q = (
-        select(KnowledgeItem)
-        .where(_knowledge_tenant_clause(org_id))
-        .order_by(KnowledgeItem.sort_order, KnowledgeItem.id)
-    )
-    if active_only:
-        q = q.where(KnowledgeItem.is_active.is_(True))
-    result = await db.execute(q)
-    rows = list(result.scalars().all())
-    return {"items": [_knowledge_item_dict(r) for r in rows]}
-
-
-@router.post("/knowledge")
-async def create_knowledge_item(
-    request: Request,
-    body: KnowledgeItemCreateBody,
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    org_id = admin_org_from_session(request)
-    kk_raw = (body.knowledge_kind or "facility").strip().lower()
-    kk = "persona" if kk_raw == "persona" else "facility"
-    row = KnowledgeItem(
-        organization_id=org_id,
-        knowledge_kind=kk[:32],
-        category=(body.category or "").strip(),
-        question=body.question.strip(),
-        answer=body.answer.strip(),
-        is_active=body.is_active,
-        sort_order=body.sort_order,
-    )
-    db.add(row)
-    await db.flush()
-    return {"ok": True, "item": _knowledge_item_dict(row)}
-
-
-@router.patch("/knowledge/{item_id}")
-async def patch_knowledge_item(
-    request: Request,
-    item_id: int,
-    body: KnowledgeItemPatchBody,
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    org_id = admin_org_from_session(request)
-    row = await db.get(KnowledgeItem, item_id)
-    if row is None:
-        raise HTTPException(status_code=404, detail="Запись не найдена")
-    if row.organization_id is None and org_id != int(settings.default_organization_id):
-        raise HTTPException(status_code=404, detail="Запись не найдена")
-    if row.organization_id is not None and int(row.organization_id) != org_id:
-        raise HTTPException(status_code=404, detail="Запись не найдена")
-    data = body.model_dump(exclude_unset=True)
-    # Запрет переноса записи между филиалами через PATCH.
-    data.pop("organization_id", None)
-    if "category" in data and data["category"] is not None:
-        data["category"] = data["category"].strip()
-    if "question" in data and data["question"] is not None:
-        data["question"] = data["question"].strip()
-    if "answer" in data and data["answer"] is not None:
-        data["answer"] = data["answer"].strip()
-    if "knowledge_kind" in data and data["knowledge_kind"] is not None:
-        kk = str(data["knowledge_kind"]).strip().lower()
-        data["knowledge_kind"] = kk if kk == "persona" else "facility"
-    for key, value in data.items():
-        setattr(row, key, value)
-    await db.flush()
-    return {"ok": True, "item": _knowledge_item_dict(row)}
-
-
-@router.delete("/knowledge/{item_id}")
-async def delete_knowledge_item(
-    request: Request,
-    item_id: int,
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    return await _delete_knowledge_item_impl(request, item_id, db)
-
-
-@router.post("/knowledge/{item_id}/delete")
-async def delete_knowledge_item_post(
-    request: Request,
-    item_id: int,
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    """
-    То же, что DELETE /knowledge/{id}: часть хостингов/прокси режет метод DELETE.
-    """
-    return await _delete_knowledge_item_impl(request, item_id, db)
-
-
-async def _delete_knowledge_item_impl(request: Request, item_id: int, db: AsyncSession) -> dict:
-    org_id = admin_org_from_session(request)
-    row = await db.get(KnowledgeItem, item_id)
-    if row is None:
-        raise HTTPException(status_code=404, detail="Запись не найдена")
-    if row.organization_id is None and org_id != int(settings.default_organization_id):
-        raise HTTPException(status_code=404, detail="Запись не найдена")
-    if row.organization_id is not None and int(row.organization_id) != org_id:
-        raise HTTPException(status_code=404, detail="Запись не найдена")
-    await db.execute(sql_delete(KnowledgeItem).where(KnowledgeItem.id == item_id))
-    await db.flush()
-    return {"ok": True, "id": item_id}
+# E0.1: вынесено в `app/api/admin/knowledge.py` (router подключается выше).
 
 
 @router.post("/menu/sync")

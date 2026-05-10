@@ -1,4 +1,7 @@
 {# Общий внутренний контент панели «О клиенте» (desktop + mobile). #}
+{% from "components/_chat_guest_context.html" import chat_guest_context_block %}
+
+{{ chat_guest_context_block() }}
 
 <div x-show="customerSummaryLoading" class="text-xs text-gray-400">Загрузка…</div>
 <div x-show="!customerSummaryLoading && customerSummary.is_blocked" class="mt-2 text-xs font-semibold text-red-700 bg-red-50 border border-red-100 rounded-lg px-2 py-1.5">

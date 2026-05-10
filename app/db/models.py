@@ -42,6 +42,15 @@ class Tenant(Base):
     plan: Mapped[str] = mapped_column(
         String(64), default="standard", server_default="standard", comment="Тарифный план (продуктовый)",
     )
+    brand_name: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, comment="Кастомное название бренда в шапке админки",
+    )
+    brand_color_hex: Mapped[str | None] = mapped_column(
+        String(9), nullable=True, comment="HEX цвета акцента (#RRGGBB), валидируется на бэкенде",
+    )
+    brand_logo_url: Mapped[str | None] = mapped_column(
+        String(512), nullable=True, comment="Публичный URL логотипа (POST /branding/logo заполняет)",
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     def __repr__(self) -> str:

@@ -464,3 +464,8 @@ aside.bg-brand-900 nav.admin-sidebar-scroll::-webkit-scrollbar-thumb:hover {
     background-size: 220% 100%;
     animation: rm-skeleton-shimmer 1.15s ease-in-out infinite;
 }
+
+/* p15:tour — плавное перемещение «прожектора» coach-marks */
+.admin-root .ds-p15-tour-hole {
+    transition: top 0.18s ease, left 0.18s ease, width 0.18s ease, height 0.18s ease;
+}

@@ -861,7 +861,30 @@ function adminMixinState() {
             is_blocked: false,
             ai_paused: false,
             operator_note: '',
+            last_escalation: null,
         },
+        // p15:context — заказы/брони гостя для правой колонки чата (GET /orders?q, /bookings?q).
+        guestContextLoading: false,
+        guestContext: {
+            activeOrder: null,
+            activeBooking: null,
+        },
+        // p15:delete-modal — кастомное подтверждение удаления заказа.
+        orderDeleteModalOpen: false,
+        orderDeleteSubmitting: false,
+        orderDeleteIds: [],
+        orderDeleteRows: [],
+        orderDeleteReason: '',
+        orderDeleteAck: false,
+        orderDeleteDelayReady: false,
+        orderDeleteSource: '',
+        _orderDeleteDelayTimer: null,
+        _p15TourOnResize: null,
+        // p15:tour — coach-marks (localStorage per staff email).
+        p15TourActive: false,
+        p15TourStepIndex: 0,
+        p15TourRect: { top: 0, left: 0, width: 0, height: 0 },
+        p15TourPopoverStyle: '',
         cannedResponses: [
             { label: 'Адрес', text: 'Подскажите, пожалуйста: забор самовывозом или доставка? Адрес ресторана: [уточните].' },
             { label: 'Задержка', text: 'Приносим извинения — сейчас высокая загрузка. Время ожидания может увеличиться на 15–20 минут. Спасибо за понимание!' },
@@ -1640,6 +1663,24 @@ function adminMixinMenuOrdersUi() {
             return `${h} ч в ${lab}`;
         },
 
+        // p15:failed — счётчик из API list_orders (±1 ч от created_at заказа).
+        orderFailedWhatsappCount(order) {
+            const n = Number(order?.failed_whatsapp_near_order);
+            return Number.isFinite(n) && n > 0 ? n : 0;
+        },
+
+        goToGuestChatForOrder(order) {
+            const ph = (order?.user_phone || '').trim();
+            if (!ph) {
+                void this.showUiAlert('У заказа нет телефона гостя.', 'Чат');
+                return;
+            }
+            this.showOrderModal = false;
+            this.orderCompositionOpen = false;
+            this.navigateToTab('chats');
+            setTimeout(() => this.selectChat(ph), 80);
+        },
+
         orderAwaitingOrderPrepay(order) {
             const meta = order?.items?.order_meta;
             return !!(meta && meta.requires_order_prepayment && (order.prepayment_status || '') === 'pending');
@@ -2323,46 +2364,58 @@ function adminMixinMenuOrdersUi() {
             await this.confirmAndDeleteOrders([Number(o.id)], 'modal');
         },
 
-        /** Подтверждение + удаление заказа(ов). Одна модалка с чекбоксом — меньше «confirmation fatigue», но всё ещё требует осознанного клика. */
+        // p15:delete-modal — превью + задержка кнопки вместо общего uiConfirm.
         async confirmAndDeleteOrders(ids, source) {
             const clean = [...new Set((ids || []).map((x) => Number(x)).filter((n) => Number.isFinite(n) && n > 0))].sort((a, b) => a - b);
             if (!clean.length) return;
-            const src = source || '';
-            let message;
-            let confirmText;
-            let title;
-            if (clean.length === 1) {
-                title = 'Удалить заказ?';
-                const id = clean[0];
-                const o = this.selectedOrder && Number(this.selectedOrder.id) === id ? this.selectedOrder : null;
-                const lines = [`Заказ #${id} будет удалён из базы безвозвратно — пропадёт из списков, карточек гостя и аналитики.`];
-                if (o) {
-                    const bits = [];
-                    if (o.total_price) bits.push(this.fmt.money(o.total_price));
-                    if (o.user_phone) bits.push(o.user_phone);
-                    if (o.created_at) bits.push(this.fmt.date(o.created_at));
-                    if (bits.length) lines.push(bits.join(' · '));
-                }
-                message = lines.join('\n\n');
-                confirmText = 'Удалить заказ';
-            } else {
-                title = 'Удалить заказы?';
-                message = `Безвозвратно удалятся ${clean.length} заказов: ${clean.map((i) => '#' + i).join(', ')}. Данные уйдут из списков и аналитики.`;
-                confirmText = `Удалить заказы (${clean.length})`;
+            this.openOrderDeleteModal(clean, source || '');
+        },
+
+        openOrderDeleteModal(ids, source) {
+            const clean = [...new Set((ids || []).map((x) => Number(x)).filter((n) => Number.isFinite(n) && n > 0))].sort((a, b) => a - b);
+            if (!clean.length) return;
+            if (this._orderDeleteDelayTimer) {
+                clearTimeout(this._orderDeleteDelayTimer);
+                this._orderDeleteDelayTimer = null;
             }
-            const r = await this.openUiConfirm({
-                title,
-                message,
-                danger: true,
-                confirmText,
-                cancelText: 'Отмена',
-                requireAck: true,
-                ackLabel: clean.length === 1
-                    ? 'Я понимаю, что заказ нельзя будет восстановить'
-                    : 'Я понимаю, что эти заказы нельзя будет восстановить',
+            this.orderDeleteModalOpen = true;
+            this.orderDeleteSubmitting = false;
+            this.orderDeleteIds = clean;
+            this.orderDeleteSource = source || '';
+            this.orderDeleteReason = '';
+            this.orderDeleteAck = false;
+            this.orderDeleteDelayReady = false;
+            this.orderDeleteRows = clean.map((id) => {
+                const o = (this.orders || []).find((x) => Number(x.id) === id)
+                    || (this.selectedOrder && Number(this.selectedOrder.id) === id ? this.selectedOrder : null);
+                return { id, o };
             });
-            if (!r.ok) return;
-            await this._executeOrderDeleteDirect(clean, src);
+            this._orderDeleteDelayTimer = setTimeout(() => {
+                this._orderDeleteDelayTimer = null;
+                this.orderDeleteDelayReady = true;
+            }, 1000);
+        },
+
+        closeOrderDeleteModal() {
+            if (this.orderDeleteSubmitting) return;
+            this.orderDeleteModalOpen = false;
+            if (this._orderDeleteDelayTimer) {
+                clearTimeout(this._orderDeleteDelayTimer);
+                this._orderDeleteDelayTimer = null;
+            }
+            this.orderDeleteDelayReady = false;
+        },
+
+        async submitOrderDeleteModal() {
+            if (!this.orderDeleteAck || !this.orderDeleteDelayReady || this.orderDeleteSubmitting) return;
+            if (!this.orderDeleteIds.length) return;
+            this.orderDeleteSubmitting = true;
+            try {
+                await this._executeOrderDeleteDirect(this.orderDeleteIds, this.orderDeleteSource || '');
+            } finally {
+                this.orderDeleteSubmitting = false;
+                this.closeOrderDeleteModal();
+            }
         },
 
         async _executeOrderDeleteDirect(ids, src) {
@@ -2466,6 +2519,16 @@ function adminMixinSearchBookings() {
             }
             if (e.key !== 'Escape') return;
             /** Закрытие оверлеев сверху вниз (одна Esc — один слой). */
+            if (this.p15TourActive) {
+                e.preventDefault();
+                this.p15TourSkip();
+                return;
+            }
+            if (this.orderDeleteModalOpen && !this.orderDeleteSubmitting) {
+                e.preventDefault();
+                this.closeOrderDeleteModal();
+                return;
+            }
             if (this.uiConfirmOpen) {
                 e.preventDefault();
                 this.uiConfirmCancel();
@@ -3112,6 +3175,7 @@ function adminMixinAuthKnowledge() {
                     await this.loadIntegrationStatus();
                     await this.loadChatList();
                     await this._consumePendingHashChatPhone();
+                    this.$nextTick(() => this.maybeStartP15CoachTour());
                 } else {
                     this.authenticated = false;
                     this.wsToken = '';
@@ -3169,6 +3233,7 @@ function adminMixinAuthKnowledge() {
                 await this.loadIntegrationStatus();
                 await this.loadChatList();
                 await this._consumePendingHashChatPhone();
+                this.$nextTick(() => this.maybeStartP15CoachTour());
             } catch {
                 this.loginError = 'Не удалось связаться с сервером';
             } finally {
@@ -5177,11 +5242,6 @@ function adminMixinLiveChat() {
             } catch (_e) { /* ignore */ }
         },
 
-        /**
-         * Навигация по верхнему меню (и из кода): синхронизирует hash и грузит данные.
-         * @param {string} tabId
-         * @param {{ settingsTab?: string }} [opts]
-         */
         /** Невыполненные шаги готовности (подсказки в шапке). */
         setupIncompleteSteps() {
             return (this.setupStatus.steps || []).filter((s) => s && !s.done);
@@ -5214,6 +5274,11 @@ function adminMixinLiveChat() {
             this.navigateToTab('settings', { settingsTab: 'connections' });
         },
 
+        /**
+         * Навигация по верхнему меню (и из кода): синхронизирует hash и грузит данные.
+         * @param {string} tabId
+         * @param {{ settingsTab?: string }} [opts]
+         */
         navigateToTab(tabId, opts) {
             const o = opts && typeof opts === 'object' ? opts : {};
             this.currentTab = tabId;
@@ -5258,6 +5323,132 @@ function adminMixinLiveChat() {
             this.sidebarOpen = false;
             void this.loadTabData();
             this._schedulePushAdminHash();
+        },
+
+        // p15:tour — coach-marks по ключевым разделам (localStorage; `?first_run=1` принудительно).
+        p15TourStorageKey() {
+            const em = (this.userData && this.userData.email) ? String(this.userData.email).toLowerCase() : 'anon';
+            return `rm_p15_admin_tour_v1::${em}`;
+        },
+
+        p15TourSteps() {
+            return [
+                { id: 'inbox', tab: 'inbox', settingsTab: null, selector: '[data-p15-tour="inbox"]', title: 'Входящие', text: 'Очередь от клиентов и системные инциденты — проверяйте в начале смены.' },
+                { id: 'orders', tab: 'orders', settingsTab: null, selector: '[data-p15-tour="orders"]', title: 'Заказы', text: 'Канбан и карточки: статусы, кухня, оплата и доставка в WhatsApp.' },
+                { id: 'bot', tab: 'settings', settingsTab: 'bot_test', selector: '[data-p15-tour="settings-bot"]', title: 'Бот / ИИ', text: 'Песочница для проверки ответов и сценариев без влияния на гостей.' },
+                { id: 'brand', tab: 'settings', settingsTab: 'branding', selector: '[data-p15-tour="settings-brand"]', title: 'Бренд', text: 'Название и цвет сети — визуальный якорь в шапке и сайдбаре.' },
+                { id: 'knowledge', tab: 'settings', settingsTab: 'restaurant', selector: '[data-p15-tour="settings-knowledge"]', title: 'База знаний', text: 'Факты о заведении для бота: режим, парковка, банкеты и т.д.' },
+            ];
+        },
+
+        maybeStartP15CoachTour() {
+            if (!this.authenticated || this.isDemoSession) return;
+            let force = false;
+            try {
+                const p = new URLSearchParams(window.location.search || '');
+                force = p.get('first_run') === '1';
+            } catch (_e) { /* ignore */ }
+            let done = false;
+            try {
+                done = window.localStorage.getItem(this.p15TourStorageKey()) === '1';
+            } catch (_e) { /* ignore */ }
+            if (!force && done) return;
+            if (this._p15TourOnResize) {
+                try { window.removeEventListener('resize', this._p15TourOnResize); } catch (_e2) { /* ignore */ }
+            }
+            this._p15TourOnResize = () => {
+                if (!this.p15TourActive) return;
+                this.refreshP15TourAnchor();
+            };
+            try {
+                window.addEventListener('resize', this._p15TourOnResize, { passive: true });
+            } catch (_e) { /* ignore */ }
+            this.p15TourStepIndex = 0;
+            this.p15TourActive = true;
+            this.$nextTick(() => this.refreshP15TourAnchor());
+        },
+
+        refreshP15TourAnchor() {
+            if (!this.p15TourActive) return;
+            const steps = this.p15TourSteps();
+            const step = steps[this.p15TourStepIndex];
+            if (!step) return;
+            if (step.tab === 'settings' && step.settingsTab) {
+                this.navigateToTab('settings', { settingsTab: step.settingsTab });
+            } else if (this.currentTab !== step.tab) {
+                this.navigateToTab(step.tab);
+            } else if (step.settingsTab && this.settingsTab !== step.settingsTab) {
+                this.setSettingsTab(step.settingsTab);
+            }
+            const layout = () => {
+                const el = document.querySelector(step.selector);
+                if (el && typeof el.getBoundingClientRect === 'function') {
+                    const r = el.getBoundingClientRect();
+                    const pad = 8;
+                    this.p15TourRect = {
+                        top: r.top - pad,
+                        left: r.left - pad,
+                        width: r.width + pad * 2,
+                        height: r.height + pad * 2,
+                    };
+                    let top = r.bottom + 12;
+                    let left = r.left;
+                    if (top + 220 > window.innerHeight) {
+                        top = Math.max(12, r.top - 200);
+                    }
+                    left = Math.min(window.innerWidth - 320, Math.max(12, left));
+                    this.p15TourPopoverStyle = `top:${Math.round(top)}px;left:${Math.round(left)}px;`;
+                } else {
+                    this.p15TourRect = { top: 80, left: 80, width: 120, height: 48 };
+                    this.p15TourPopoverStyle = 'top:120px;left:16px;';
+                }
+            };
+            this.$nextTick(() => {
+                requestAnimationFrame(() => setTimeout(layout, 60));
+            });
+        },
+
+        p15TourNext() {
+            const steps = this.p15TourSteps();
+            if (this.p15TourStepIndex + 1 >= steps.length) {
+                this.finishP15CoachTour();
+                return;
+            }
+            this.p15TourStepIndex += 1;
+            const next = steps[this.p15TourStepIndex];
+            if (next && next.id === 'knowledge') {
+                this.$nextTick(() => {
+                    try {
+                        document.getElementById('settings-restaurant-knowledge')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    } catch (_e) { /* ignore */ }
+                    setTimeout(() => this.refreshP15TourAnchor(), 450);
+                });
+                return;
+            }
+            this.refreshP15TourAnchor();
+        },
+
+        p15TourSkip() {
+            this.finishP15CoachTour();
+        },
+
+        finishP15CoachTour() {
+            this.p15TourActive = false;
+            this.p15TourStepIndex = 0;
+            try {
+                window.localStorage.setItem(this.p15TourStorageKey(), '1');
+            } catch (_e) { /* ignore */ }
+            if (this._p15TourOnResize) {
+                try { window.removeEventListener('resize', this._p15TourOnResize); } catch (_e2) { /* ignore */ }
+                this._p15TourOnResize = null;
+            }
+            try {
+                const u = new URL(window.location.href);
+                if (u.searchParams.get('first_run') === '1') {
+                    u.searchParams.delete('first_run');
+                    window.history.replaceState({}, '', `${u.pathname}${u.search}${u.hash}`);
+                }
+            } catch (_e) { /* ignore */ }
         },
 
         setMenuView(view) {
@@ -5498,7 +5689,10 @@ function adminMixinLiveChat() {
                 is_blocked: false,
                 ai_paused: false,
                 operator_note: '',
+                last_escalation: null,
             };
+            this.guestContext = { activeOrder: null, activeBooking: null };
+            this.guestContextLoading = true;
 
             const chatIdx = this.chatList.findIndex(c => c.phone === phone);
             if (chatIdx >= 0) {
@@ -5601,6 +5795,7 @@ function adminMixinLiveChat() {
         async loadCustomerSummary(phone) {
             if (!phone?.trim()) {
                 this.customerSummaryLoading = false;
+                this.guestContextLoading = false;
                 return;
             }
             const key = phone.trim();
@@ -5622,6 +5817,9 @@ function adminMixinLiveChat() {
                         is_blocked: !!data.is_blocked,
                         ai_paused: !!data.ai_paused,
                         operator_note: data.operator_note ?? '',
+                        last_escalation: data.last_escalation && typeof data.last_escalation === 'object'
+                            ? data.last_escalation
+                            : null,
                     };
                 }
             } catch (e) {
@@ -5631,6 +5829,99 @@ function adminMixinLiveChat() {
                     this.customerSummaryLoading = false;
                 }
             }
+            await this.loadGuestContextOrdersBookings(key);
+        },
+
+        // p15:context
+        async loadGuestContextOrdersBookings(phone) {
+            const key = (phone || '').trim();
+            if (!key) {
+                this.guestContextLoading = false;
+                this.guestContext = { activeOrder: null, activeBooking: null };
+                return;
+            }
+            if (this.activeChatPhone?.trim() !== key) return;
+            this.guestContextLoading = true;
+            try {
+                const qo = new URLSearchParams({ q: key, size: '40', page: '1' });
+                const qb = new URLSearchParams({ q: key, limit: '40' });
+                const [ro, rb] = await Promise.all([
+                    this.apiFetch(`/api/admin/orders?${qo.toString()}`),
+                    this.apiFetch(`/api/admin/bookings?${qb.toString()}`),
+                ]);
+                if (this.activeChatPhone?.trim() !== key) return;
+                let orders = [];
+                let bookings = [];
+                if (ro.ok) {
+                    const d = await ro.json();
+                    orders = Array.isArray(d.items) ? d.items : (d.orders || []);
+                }
+                if (rb.ok) {
+                    const d = await rb.json();
+                    bookings = d.bookings || [];
+                }
+                this.guestContext = {
+                    activeOrder: this._pickActiveGuestOrder(orders),
+                    activeBooking: this._pickActiveGuestBooking(bookings),
+                };
+            } catch (e) {
+                adminLogger.error('loadGuestContextOrdersBookings', e);
+                this.guestContext = { activeOrder: null, activeBooking: null };
+            } finally {
+                if (this.activeChatPhone?.trim() === key) {
+                    this.guestContextLoading = false;
+                }
+            }
+        },
+
+        _pickActiveGuestOrder(orders) {
+            const st = new Set(['draft', 'confirmed', 'sending_to_iiko']);
+            const rows = (orders || []).filter((o) => o && st.has(String(o.status || '')));
+            if (!rows.length) return null;
+            rows.sort((a, b) => {
+                const ta = Date.parse(a.created_at || '') || 0;
+                const tb = Date.parse(b.created_at || '') || 0;
+                return tb - ta;
+            });
+            return rows[0];
+        },
+
+        _pickActiveGuestBooking(bookings) {
+            if (!bookings?.length) return null;
+            const open = bookings.filter((b) => !['cancelled'].includes(String(b.status || '').toLowerCase()));
+            if (!open.length) return null;
+            const withDt = open.map((b) => {
+                const t = Date.parse(`${b.date || ''}T${String(b.time || '').slice(0, 8)}`);
+                return { b, t: Number.isFinite(t) ? t : 0 };
+            }).filter((x) => x.t > 0);
+            if (!withDt.length) return open[0];
+            const now = Date.now();
+            const future = withDt.filter((x) => x.t >= now - 3600000).sort((a, c) => a.t - c.t);
+            if (future.length) return future[0].b;
+            withDt.sort((a, c) => c.t - a.t);
+            return withDt[0].b;
+        },
+
+        openGuestContextOrder(o) {
+            if (!o?.id) return;
+            const id = Number(o.id);
+            this.navigateToTab('orders');
+            this.$nextTick(() => {
+                const found = (this.orders || []).find((x) => Number(x.id) === id);
+                this.openOrderDetails(found || o);
+            });
+        },
+
+        openGuestContextBooking(b) {
+            if (!b?.id) return;
+            this.navigateToTab('bookings');
+            this.$nextTick(async () => {
+                await this.loadTabData();
+                const found = (this.bookings || []).find((x) => Number(x.id) === Number(b.id));
+                if (!found) {
+                    this.flashToast('Обновите список броней или откройте по №' + b.id, 'info', 4000);
+                }
+            });
         },
 
         async saveCustomerNote() {
@@ -7578,6 +7869,7 @@ function adminMixinDataChartsSettings() {
 
             const ctx = canvas.getContext('2d');
             adminDestroyAnalyticsMainChart();
+            const chartFont = adminChartJsCommonFont();
 
             const labels = daily.map((d) => {
                 const dd = adminFormat._parseDateInput(d.date);
@@ -7694,13 +7986,13 @@ function adminMixinDataChartsSettings() {
                                 beginAtZero: true,
                                 ticks: {
                                     callback: (v) => adminFormat.moneyAmount(v) + ' ₸',
-                                    font: { size: 11 },
+                                    font: chartFont,
                                     color: '#64748b',
                                 },
                                 grid: { color: 'rgba(15, 23, 42, 0.06)', borderDash: [4, 4] },
                             },
                             x: {
-                                ticks: { font: { size: 11 }, color: '#64748b' },
+                                ticks: { font: chartFont, color: '#64748b' },
                                 grid: { display: false },
                             },
                         },
@@ -7783,6 +8075,7 @@ function adminMixinDataChartsSettings() {
 
             const ctx = canvas.getContext('2d');
             adminDestroyDashboardChart();
+            const chartFont = adminChartJsCommonFont();
 
             const labels = series.map((d) => {
                 const dt = new Date(d.date + 'T12:00:00Z');
@@ -7883,14 +8176,14 @@ function adminMixinDataChartsSettings() {
                         x: {
                             grid: { display: false },
                             border: { display: false },
-                            ticks: { font: { size: 11 }, maxRotation: 0 },
+                            ticks: { font: chartFont, maxRotation: 0 },
                         },
                         y: {
                             beginAtZero: true,
                             grid: { color: 'rgba(226, 232, 240, 0.9)' },
                             border: { display: false },
                             ticks: {
-                                font: { size: 11 },
+                                font: chartFont,
                                 callback: (v) => (isMoney
                                     ? adminFormat.moneyAmount(v)
                                     : v),
