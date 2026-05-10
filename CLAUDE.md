@@ -10,10 +10,13 @@ AI-оператор для ресторана: WhatsApp → LLM → заказы
 - **README.md** — продукт, быстрый старт, переменные окружения, вход в админку
 - **codebase.md** — карта репозитория, где какая логика живёт
 - **docs/CONVENTIONS.md** — инварианты разработки (контракт): async-first, idempotency, versioning, “Redis ≠ source of truth”
-- **docs/ROADMAP.md** — **единственный** трекер задач/статусов (P0–P3); по завершению: `[x]` в ROADMAP + запись в `CHANGELOG.md`
+- **docs/ROADMAP.md** — **единственный** трекер задач/статусов (P0–P4); по завершению: `[x]` в ROADMAP + запись в `CHANGELOG.md`
 - **CHANGELOG.md** — история изменений (дописывать в `## [Unreleased]`)
 - **docs/sprints/** — временные мини‑родмапы/чеклисты на 1–2 недели (оперативка; после спринта удалять/вплавлять; статусы задач всё равно только в `docs/ROADMAP.md`)
 - **docs/UI_DESIGN_SYSTEM.md** — при правке UI: компоненты `ds-*`, токены, a11y, Lighthouse
+- **docs/UI_MAP.md** — карта `admin.html` / `screens/*` / макросов и `admin-app.js`
+- **docs/AI_TOOLS_SETUP.md** — настройка Cursor / Claude Code / MCP под этот репозиторий
+- **docs/AI_OPERATIONS.md** / **docs/EVENT_ARCHITECTURE.md** — Intelligence, события, инсайты
 
 ## Жёсткие запреты
 1. **Миграции** — никогда не редактировать уже применённые файлы в `alembic/versions/`; новая миграция только по явному запросу.

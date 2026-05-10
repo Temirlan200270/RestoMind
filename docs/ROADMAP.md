@@ -55,7 +55,7 @@
 
 ## 🟢 P2: Развитие (Growth)
 
-- [x] **E1 хвост (платежи):** HMAC-SHA256 верификация для Freedom Pay и Kaspi Pay (`payment_providers/freedom_pay.py`, `kaspi.py`); per-org `payment_config_json` (миграция `20260509_payment_cfg`). Остаток: реальные реквизиты заголовков подписи по докам провайдеров + UI настройки per-org ключей + `E14` генерация ссылок.
+- [x] **E1 хвост (платежи):** HMAC-SHA256/MD5 верификация для Freedom Pay (`freedom_pay.py` — MD5 pg_sig + FreedomPayInitiator) и Kaspi Pay (`kaspi.py` — HMAC-SHA256, `sha256=` prefix); per-org `payment_config_json` (миграции `20260509_payment_tx_config` + `20260510_org_pay_cfg_json`); UI CRUD в настройках (`_tab_settings_restaurant.html`, `_tab_settings_connections.html`). Остаток: уточнить заголовки подписи по актуальным докам провайдеров + `E14` генерация ссылок на оплату.
 - [ ] **E14 авто‑ссылка на оплату:** генерация ссылок в `intent_router` для предоплаты.
 - [ ] **E8 WhatsApp интерактив:** кнопки Meta templates + (опционально) картинка‑чек.
 - [ ] **Telegram оператор‑бот:** управление диалогами из Telegram (эскалации/ответы/уведомления). _Wishlist Темира #12._

@@ -141,11 +141,23 @@ RestoMind/
 └── docs/
 ```
 
-Полезные UI-доки:
+Полезные документы:
 
-- `docs/UI_DESIGN_SYSTEM.md` — дизайн-система админки (компоненты, токены, a11y, Lighthouse).
-- `docs/ui/mobile-review/README.md` — mobile review (Playwright-скриншоты и план улучшений).
-- `docs/ROADMAP.md` — единый список техдолга и задач (single source of truth).
+| Документ | Назначение |
+|----------|------------|
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Единый трекер задач и техдолга (P0–P4), индекс wishlist |
+| [CHANGELOG.md](CHANGELOG.md) | Журнал изменений |
+| [docs/CONVENTIONS.md](docs/CONVENTIONS.md) | Инварианты разработки + §8 шаблоны Jinja (`_tab_*`) и миграции/SQLite |
+| [docs/UI_DESIGN_SYSTEM.md](docs/UI_DESIGN_SYSTEM.md) | Дизайн-система админки (`ds-*`, a11y, Lighthouse) |
+| [docs/UI_MAP.md](docs/UI_MAP.md) | Карта экранов и компонентов админки |
+| [docs/AI_TOOLS_SETUP.md](docs/AI_TOOLS_SETUP.md) | Cursor / Claude Code / MCP |
+| [docs/AI_OPERATIONS.md](docs/AI_OPERATIONS.md) | Intelligence, инсайты, операционные сценарии |
+| [docs/EVENT_ARCHITECTURE.md](docs/EVENT_ARCHITECTURE.md) | Durable-события и аналитический пайплайн |
+| [docs/ui/mobile-review/README.md](docs/ui/mobile-review/README.md) | Mobile review (Playwright-скриншоты) |
+| [docs/ui/lighthouse/README.md](docs/ui/lighthouse/README.md) | Lighthouse для админки (`npm run lh:admin`) |
+| [docs/SUPERADMIN_GUIDE.md](docs/SUPERADMIN_GUIDE.md) | Панель superadmin |
+| [docs/SUPABASE_MIGRATION.md](docs/SUPABASE_MIGRATION.md) | Миграция БД на Supabase |
+| [docs/WHATSAPP_PHASE13_TEMPLATES.md](docs/WHATSAPP_PHASE13_TEMPLATES.md) | Шаблоны WhatsApp (Meta) |
 
 ## API (кратко)
 

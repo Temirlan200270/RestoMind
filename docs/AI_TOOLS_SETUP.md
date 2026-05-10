@@ -18,9 +18,14 @@ RestoMind/
 │       └── ui-redesign.mdc       # globs: app/templates/**, app/static/** — UI-правила
 ├── CLAUDE.md (опционально)    # специфика Claude Code
 ├── docs/
-│   ├── ROADMAP.md             # единственный трекер задач/статусов
+│   ├── ROADMAP.md             # единственный трекер задач/статусов (P0–P4)
+│   ├── CONVENTIONS.md         # инварианты + §8 шаблоны Jinja / миграции
 │   ├── sprints/               # временные мини‑родмапы/чеклисты по спринтам
 │   ├── UI_DESIGN_SYSTEM.md    # спецификация UI и компонентов
+│   ├── UI_MAP.md              # карта админ UI (screens + компоненты)
+│   ├── AI_OPERATIONS.md       # Intelligence / операционка
+│   ├── EVENT_ARCHITECTURE.md  # durable SystemEvent
+│   ├── WHATSAPP_PHASE13_TEMPLATES.md
 │   └── AI_TOOLS_SETUP.md      # этот файл
 └── CHANGELOG.md               # история (агенты дописывают в [Unreleased])
 ```
@@ -71,6 +76,7 @@ Cursor подхватывает их сам — отдельно ничего д
 - **Drag-drop** скрина в окно чата — Cursor понимает изображения с конца 2024.
 - **Через MCP** — агент сам открывает страницу через Chrome DevTools MCP и делает скрин. Удобнее для итерации.
 - **Baseline** — лежат в `docs/ui/baseline/*.png` (создаются в Phase U0 плана редизайна).
+- **Mobile review (авто)** — `python scripts/capture_admin_mobile_review.py`: несколько viewport, вывод в `docs/ui/mobile-review/`. Перед запуском подними админку локально или задай `MOBILE_REVIEW_BASE_URL` (см. шапку скрипта).
 
 ---
 

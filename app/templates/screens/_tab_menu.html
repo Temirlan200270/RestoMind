@@ -8,19 +8,31 @@
                 </div>
 
                 <div x-show="menuView === 'catalog'" x-cloak>
-                <div class="sticky top-0 z-10 -mx-4 sm:-mx-6 md:-mx-8 px-4 sm:px-6 md:px-8 py-3 mb-5 bg-gray-50/95 backdrop-blur-md border-b border-gray-200/80 min-w-0 max-w-full overflow-x-clip">
-                    <div class="rounded-2xl border border-gray-200 bg-white/95 shadow-sm ring-1 ring-slate-900/5 p-3 sm:p-4 min-w-0">
-                        <div class="flex flex-col gap-3 min-w-0">
-                            <div class="flex flex-col xl:flex-row xl:items-center gap-3 min-w-0">
-                                <div class="relative flex-1 min-w-[220px]">
+                <div class="sticky top-0 z-10 -mx-4 sm:-mx-6 md:-mx-8 px-4 sm:px-6 md:px-8 py-3 mb-5 bg-white/95 backdrop-blur-md border-b border-gray-200/80 min-w-0 max-w-full overflow-x-clip">
+                        <div class="flex flex-col gap-2.5 min-w-0">
+                            <!-- ─── Row 1: поиск + статистика + кнопки ─── -->
+                            <div class="flex flex-wrap xl:flex-nowrap items-center gap-2 min-w-0">
+                                <div class="relative flex-1 min-w-[180px]">
                                     <span class="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" aria-hidden="true">
                                         <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m21 21-4.35-4.35M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15z"/></svg>
                                     </span>
                                     <input type="search" x-model.debounce.300ms="menuSearchQuery" placeholder="Поиск по названию, описанию или разделу..."
-                                        class="w-full min-h-[44px] pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 bg-white text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+                                        class="w-full min-h-[44px] pl-10 pr-4 py-2 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent">
                                 </div>
+                                <!-- Статистика: счётчики inline с поиском -->
+                                <button type="button" @click="menuStockFilter = 'all'"
+                                    class="shrink-0 inline-flex min-h-[34px] items-center rounded-full border border-gray-200 bg-slate-50 px-3 text-xs font-bold text-slate-700 transition hover:bg-white tabular-nums"
+                                    :class="menuStockFilter === 'all' ? 'ring-2 ring-brand-200 text-brand-700 bg-white' : ''">
+                                    <span x-text="menuFilteredItems.length"></span><span class="ml-1 font-semibold">поз.</span>
+                                </button>
+                                <button type="button" x-show="menuStopCount > 0" x-cloak @click="menuStockFilter = 'out'; menuCategoryFilter = ''"
+                                    class="shrink-0 inline-flex min-h-[34px] items-center rounded-full border border-red-100 bg-red-50 px-3 text-xs font-bold text-red-700 transition hover:bg-red-100 tabular-nums"
+                                    :class="menuStockFilter === 'out' ? 'ring-2 ring-red-200' : ''">
+                                    <span x-text="menuStopCount"></span><span class="ml-1 font-semibold">в стопе</span>
+                                </button>
+                                <!-- Мобильный toggle кнопок -->
                                 <button type="button"
-                                    class="lg:hidden shrink-0 min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-600 shadow-sm hover:bg-gray-50"
+                                    class="lg:hidden shrink-0 min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
                                     @click="menuToolbarExpanded = !menuToolbarExpanded"
                                     :aria-expanded="menuToolbarExpanded"
                                     :class="menuToolbarExpanded ? 'ring-2 ring-brand-400 border-brand-300 bg-brand-50/50' : ''"
@@ -36,7 +48,7 @@
                                     </button>
                                     <button type="button" @click="toggleMenuBulkMode()"
                                         :class="menuBulkMode ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-gray-200 hover:border-brand-300 hover:bg-slate-50'"
-                                        class="inline-flex min-h-[44px] items-center justify-center rounded-xl border px-4 py-2 text-sm font-semibold shadow-sm transition">
+                                        class="inline-flex min-h-[44px] items-center justify-center rounded-xl border px-4 py-2 text-sm font-semibold transition">
                                         <span x-text="menuBulkMode ? 'Отменить выбор' : 'Выбрать'"></span>
                                     </button>
                                     <button type="button" x-show="menuBulkMode && menuFilteredItems.length > 0" x-cloak @click="menuBulkSelectFiltered()"
@@ -45,29 +57,20 @@
                                     </button>
                                     <button type="button" x-show="isSuperadmin && menuItems.length > 0" x-cloak :disabled="menuClearLoading"
                                         @click="clearAllMenuFromDb()"
-                                        class="inline-flex min-h-[44px] items-center rounded-xl border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50 shadow-sm transition disabled:opacity-50">
+                                        class="inline-flex min-h-[44px] items-center rounded-xl border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50 transition disabled:opacity-50">
                                         <span x-show="!menuClearLoading">Очистить</span>
                                         <span x-show="menuClearLoading" x-cloak>Удаление...</span>
                                     </button>
                                     <select x-model="menuStockFilter"
-                                        class="text-sm min-h-[44px] border border-gray-200 rounded-xl px-3 py-2 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 w-full min-[420px]:w-auto">
+                                        class="text-sm min-h-[44px] border border-gray-200 rounded-xl px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 w-full min-[420px]:w-auto">
                                         <option value="all">Все статусы</option>
                                         <option value="in">Только в наличии</option>
                                         <option value="out">Нет в наличии</option>
                                     </select>
                                 </div>
                             </div>
+                            <!-- ─── Row 2: категории + toggle ─── -->
                             <div class="flex flex-wrap items-center gap-2 text-xs">
-                                <button type="button" @click="menuStockFilter = 'all'"
-                                    class="inline-flex min-h-[34px] items-center rounded-full border border-gray-200 bg-slate-50 px-3 font-bold text-slate-700 transition hover:bg-white tabular-nums"
-                                    :class="menuStockFilter === 'all' ? 'ring-2 ring-brand-200 text-brand-700 bg-white' : ''">
-                                    <span x-text="menuFilteredItems.length"></span><span class="ml-1 font-semibold">поз.</span>
-                                </button>
-                                <button type="button" x-show="menuStopCount > 0" x-cloak @click="menuStockFilter = 'out'; menuCategoryFilter = ''"
-                                    class="inline-flex min-h-[34px] items-center rounded-full border border-red-100 bg-red-50 px-3 font-bold text-red-700 transition hover:bg-red-100 tabular-nums"
-                                    :class="menuStockFilter === 'out' ? 'ring-2 ring-red-200' : ''">
-                                    <span x-text="menuStopCount"></span><span class="ml-1 font-semibold">в стопе</span>
-                                </button>
                                 <template x-if="menuHasActiveFilters()">
                                     <button type="button" @click="resetMenuFilters()"
                                         class="inline-flex min-h-[34px] items-center rounded-full border border-amber-200 bg-amber-50 px-3 font-semibold text-amber-900 hover:bg-amber-100">
@@ -120,7 +123,6 @@
                                 </template>
                             </div>
                         </div>
-                    </div>
                 </div>
 
                 <div x-show="menuItems.length === 0" class="text-center py-16 text-gray-400">

@@ -15,26 +15,36 @@
 
 ## Screens
 
-Все основные вкладки живут в `app/templates/screens/` и обычно переключаются через `currentTab`.
+Все экраны подключаются из `app/templates/admin.html` через `{% include "screens/…" %}`. Верхнеуровневые вкладки задаются в `admin-app.js` (`navItems`: `inbox`, `orders`, `chats`, `bookings`, `dashboard`, `ai_center`, `menu`, `settings`). Старые hash-URL (`#operator_queue`, `#incidents`, `#analytics`, …) редиректятся в JS на новые.
 
-- `_tab_dashboard.html` — главная: KPI, быстрые переходы, ROI, график, события, последние заказы.
-- `_tab_analytics.html` — аналитика: период, KPI, графики, menu engineering, география, топы и дневная разбивка.
-- `_tab_ai_value.html` — вклад ИИ: вклад в выручку, экономия времени, качество подсказок.
-- `_tab_orders.html` — заказы: канбан, таблица, фильтры, bulk/drag сценарии.
-- `_tab_operator_queue.html` — очередь оператора/помощь клиентам.
-- `_tab_incidents.html` — инциденты и задачи, требующие внимания.
+### Операции (`section: operations`)
+
+- `_tab_inbox.html` — **«Требует внимания»**: под-табы «От клиентов» / «Системные» (объединяет сценарии бывших отдельных экранов очереди и инцидентов, P1.5.0).
+- `_tab_orders.html` — заказы: канбан / список, фильтры, DnD, модалка заказа.
+- `_tab_chats.html` — диалоги: список, лента, панель клиента (mobile drawer).
 - `_tab_bookings.html` — бронирования.
-- `_tab_chats.html` — живые переписки через `chat_shell_layout`.
-- `_tab_menu.html` — каталог товаров, стоп-лист, фильтры, категории, карточки позиций, modal edit.
-- `_tab_settings_connections.html` — интеграции: iiko, WhatsApp, Telegram, sync/status.
-- `_tab_settings_branding.html` — бренд в панели: название, цвет, логотип, preview.
-- `_tab_settings_restaurant.html` — профиль ресторана, график, база знаний, force-close, упаковка.
+
+### Управление (`section: management`)
+
+- `_tab_dashboard.html` — дашборд: KPI, ROI, график, лента; под-таб **`dashboardTab`** `overview` | `analytics`; блок аналитики — `{% include "screens/_tab_analytics.html" %}` внутри этого файла (отдельного пункта в сайдбаре нет).
+- `_tab_ai_center.html` — **«ИИ-аналитика»**: под-табы `aiCenterTab` `value` | `insights` | `load` (вклад ИИ, operational insights, Digital Twin / нагрузка). В DOM по-прежнему лежат `_tab_ai_value.html`, `_tab_intelligence.html`, `_tab_digital_twin.html` для совместимости и редиректов — новая навигация ведёт в `ai_center`.
+- `_tab_menu.html` — меню и стоп-лист.
+
+### Настройки (`currentTab === 'settings'` + `settingsTab`)
+
+- `_tab_settings_restaurant.html` — профиль, расписание, база знаний, force-close, упаковка.
+- `_tab_settings_branding.html` — брендинг шапки.
+- `_tab_settings_connections.html` — интеграции (iiko, WhatsApp, Telegram).
 - `_tab_settings_smart_sales.html` — правила допродаж.
-- `_tab_settings_health.html` — проверки окружения и готовность сервиса.
-- `_tab_settings_technical.html` — экспорт, retention, опасные зоны, технические действия.
-- `_tab_settings_bot_test.html` — лаборатория бота/ИИ.
 - `_tab_settings_team.html` — команда и роли.
-- `_modal_packaging_create.html` — модалка создания/редактирования правила упаковки.
+- `_tab_settings_health.html` — проверки окружения.
+- `_tab_settings_technical.html` — экспорт, retention, опасные действия.
+- `_tab_settings_bot_test.html` — лаборатория бота / тестовый чат.
+
+### Прочее
+
+- `_tab_operator_queue.html`, `_tab_incidents.html` — оставлены в шаблоне для плавных редиректов со старых hash; основной UX — `_tab_inbox.html`.
+- `_modal_packaging_create.html` — модалка правила упаковки.
 
 ## Components And Macros
 

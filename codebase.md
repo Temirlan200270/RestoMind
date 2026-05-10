@@ -27,16 +27,18 @@ RestoMind/
 │   ├── worker.py                  # фоновый воркер ARQ (очереди; если включено)
 │   │
 │   ├── api/                       # HTTP-слой: тонкие хендлеры → services
-│   │   ├── admin/                 # админка API (пакет): auth, WS, test-bot + временный монолит роутов
+│   │   ├── admin/                 # админка API (пакет)
+│   │   │   ├── __init__.py        # агрегирует роутеры (совместимый импорт `from app.api.admin import …`)
 │   │   │   ├── auth.py            # /api/admin/auth/* (cookie-сессия, demo-login, request-access, select-org)
 │   │   │   ├── ws.py              # /api/admin/ws?token=... (live-события)
 │   │   │   ├── test_bot.py        # /api/admin/test-bot (ручное тестирование диалога)
+│   │   │   ├── intelligence.py    # Restaurant Intelligence + Digital Twin API
+│   │   │   ├── schemas.py         # общие Pydantic-схемы для admin API
 │   │   │   ├── deps.py            # зависимости: сессия, tenant-scope, guards
 │   │   │   └── _monolith.py       # временно: остальной admin API до завершения раскола E0.1
 │   │   ├── webhooks.py            # Meta WhatsApp: verify + входящие → обработка сообщений
 │   │   ├── payment_webhook.py     # внешние провайдеры оплаты (Bearer/HMAC)
 │   │   └── superadmin.py          # организации, заявки, аудит payment-webhook-events, модерация
-│   │   └── admin/intelligence.py  # Restaurant Intelligence + Digital Twin API
 │   │
 │   ├── core/                      # config, rate_limiter, пароли, константы ИИ
 │   ├── db/
@@ -70,14 +72,14 @@ RestoMind/
 │   │   ├── tenant_scope.py        # ограничения запросов по organization_id
 │   │   └── …                      # booking, analytics, стоп-листы, sales strategy, retention и др.
 │   │
-│   ├── templates/                 # Jinja2: admin.html, superadmin, onboarding, компоненты
+│   ├── templates/                 # Jinja2: admin.html (скелет + include), screens/*, components/*, superadmin, onboarding
 │   └── static/
 │       ├── js/admin-app.js        # основная логика админ UI (Alpine)
 │       └── css/admin.css
 │
 ├── alembic/                       # миграции PostgreSQL (Alembic)
 ├── tests/                         # pytest-asyncio; интеграционные и модульные тесты
-├── scripts/                       # утилиты: sync_menu_from_iiko, grant_superadmin, диагностика iiko
+├── scripts/                       # sync_menu_from_iiko, grant_superadmin, capture_admin_mobile_review.py, run_admin_lighthouse.mjs, …
 │
 ├── .github/workflows/
 │   ├── ci.yml                     # push: pytest + импорт приложения
@@ -94,7 +96,7 @@ RestoMind/
 ├── CHANGELOG.md
 ├── DEPLOY_RENDER.md
 ├── DEPLOY_GUIDE.md
-├── docs/                          # SUPABASE_MIGRATION, VERCEL, UPGRADE_TRACKER, …
+├── docs/                          # ROADMAP, CONVENTIONS, UI_DESIGN_SYSTEM, UI_MAP, AI_OPERATIONS, EVENT_ARCHITECTURE, …
 ├── requirements.txt
 ├── pytest.ini
 ├── seed.py                        # локальный полный сброс/демо-данные (осторожно)
@@ -134,3 +136,7 @@ python -m pytest tests/ -v
 | [CHANGELOG.md](CHANGELOG.md) | История версий |
 | [DEPLOY_RENDER.md](DEPLOY_RENDER.md) / [DEPLOY_GUIDE.md](DEPLOY_GUIDE.md) | Продакшен |
 | [docs/SUPERADMIN_GUIDE.md](docs/SUPERADMIN_GUIDE.md) | Super Admin (владелец платформы): заявки/регистрация, управление ресторанами, аудит webhook, идеи улучшений |
+| [docs/UI_MAP.md](docs/UI_MAP.md) | Карта админ UI: `admin.html`, `screens/*`, компоненты, `admin-app.js` |
+| [docs/AI_TOOLS_SETUP.md](docs/AI_TOOLS_SETUP.md) | Настройка Cursor / Claude Code / MCP для работы над репо |
+| [docs/AI_OPERATIONS.md](docs/AI_OPERATIONS.md) | Restaurant Intelligence, события, инсайты (операционка) |
+| [docs/EVENT_ARCHITECTURE.md](docs/EVENT_ARCHITECTURE.md) | Durable `SystemEvent`, пайплайн аналитики |

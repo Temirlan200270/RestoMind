@@ -8,13 +8,24 @@
 
 ### Исправлено (2026-05-10)
 
-- **Платежи / безопасность:** `freedom_pay.py` — `verify()` теперь делает реальную HMAC-SHA256 проверку подписи (заголовки `X-Freedom-Pay-Signature` / `X-FreedomPay-Signature` / `X-Signature-256`); раньше возвращал `True` при любом запросе если env var был задан — критическая уязвимость (спуф оплат).
-- **Платежи / Kaspi:** `kaspi.py` — реализована HMAC-SHA256 верификация по заголовку `X-Kaspi-Signature`; заглушка, которая всегда возвращала `False`, заменена на рабочий адаптер с ключом из `KASPI_HMAC_SECRET`.
-- **Платежи / миграция:** создана миграция `20260509_payment_cfg` — колонка `organizations.payment_config_json` (JSON, nullable) для хранения per-org конфигурации провайдеров (Freedom Pay, Kaspi, CloudPayments). Секреты предполагается хранить Fernet-зашифрованными.
-- **Платежи / модель:** добавлено поле `Organization.payment_config_json` в ORM.
+- **Платежи / безопасность:** `freedom_pay.py` — `verify()` теперь делает реальную HMAC-SHA256 + MD5-подпись (стандарт Freedom Pay: `md5(script;sorted_params;secret)`); раньше возвращал `True` при любом запросе если env var был задан — критическая уязвимость. `kaspi.py` — HMAC-SHA256 верификация по заголовку `X-Kaspi-Signature` с поддержкой `sha256=` prefix; добавлен `FreedomPayInitiator` для создания платёжных сессий.
+- **Платежи / инфраструктура:** миграция `20260509_payment_tx_config` — таблицы `payment_transactions` + `organization_payment_configs`; миграция `20260510_org_pay_cfg_json` — колонка `organizations.payment_config_json` (JSON, nullable, per-org конфиг провайдеров). Поле добавлено в ORM-модель `Organization`.
+- **Платежи / SQLite-патч:** `app/main.py` `_apply_sqlite_startup_schema_patches()` — добавлен `ALTER TABLE organizations ADD COLUMN payment_config_json TEXT` для dev-окружений; отсутствие этого патча ломало login (SQLAlchemy генерирует `SELECT ... payment_config_json ...` при любом запросе к Organization).
+- **Настройки / layout:** `_tab_settings_restaurant.html` — лишний `</div>` (строка 621) закрывал `flex-1` content div до секции «Платёжные провайдеры»; на десктопе `lg:flex` платёжный блок отображался как отдельная колонка рядом с формой профиля. Исправлено перемещением закрывающего тега.
+- **Меню / дубли карточек:** `app/static/css/admin.css` пересобран (`npm run build:admin-css`) — классы `sm:hidden` и `hidden sm:flex` добавлены в скомпилированный CSS; dual-layout (мобильная строка + десктопная карточка) теперь работает корректно.
+- **Меню / шапка-toolbar:** убрана внутренняя карточка `rounded-2xl border shadow-sm` → плоская полоса `bg-white border-b` на всю ширину (не "обрывается" и не перекрывает контент как "остров" при скролле). Счётчики «поз.» и «в стопе» перенесены inline в строку поиска — toolbar сократился с 3 строк до 2.
+- **Меню / категории:** `_tab_menu.html` — удалены заголовки секций КУХНЯ/БАР и двойной x-if (>20 / ≤20); единый `flex-wrap gap-2 max-h-[120px] overflow-y-auto` с прокруткой колёсиком мыши.
+- **Меню / карточки:** убрана кнопка «Изменить» (вся карточка кликабельна); добавлена метка категории под названием блюда; dual-layout (mobile list-row / desktop card) для мобильной адаптации.
+
+### Добавлено (2026-05-10)
+
+- **Настройки / платёжные провайдеры:** `_tab_settings_connections.html` — раздел «Платёжные провайдеры» (Freedom Pay, Kaspi Pay, CloudPayments) с toggle включения, webhook URL и инструкцией по env-переменным. API: `PATCH /organization/payment-providers` (toggle) + `GET/PUT/DELETE /organization/payment-config/{provider}` (полный CRUD в `_tab_settings_restaurant.html`).
+- **Тесты / регрессии:** `tests/test_template_div_balance.py` — 3 теста: баланс `<div>` во всех screen-шаблонах, вложенность `#settings-restaurant-payment` внутри `flex-1`, целостность внешнего контейнера. `tests/test_admin_login_regression.py` — 3 теста: login с дефолтными кредами, доступность столбцов модели Organization в БД, получение ws_token после входа.
+- **Конвенции:** `docs/CONVENTIONS.md` §8 — «Инварианты Jinja2/HTML-шаблонов»: §8.1 баланс `<div>` в screen-файлах (почему лишний `</div>` = layout-баг на десктопе), §8.2 синхронизация модели и миграций (чеклист, исторический пример с login-регрессией).
 
 ### Документация
 
+- **Актуализация:** `codebase.md` — дерево `app/api/admin/` (`intelligence.py`, `schemas.py`, `__init__.py`); `docs/UI_MAP.md` — IA после P1.5.0 (`inbox`, `ai_center`, аналитика внутри дашборда, legacy-экраны); `README.md` — таблица ключевых документов в `docs/`; `CLAUDE.md` / `CODEX.md` — ссылки на UI_MAP, AI_TOOLS_SETUP, AI_OPERATIONS, EVENT_ARCHITECTURE и диапазон ROADMAP P0–P4; `docs/AI_TOOLS_SETUP.md` — расширенное дерево `docs/` и скрипт `scripts/capture_admin_mobile_review.py`.
 - **ROADMAP — Wishlist Темира (2026‑05):** в [`docs/ROADMAP.md`](docs/ROADMAP.md) добавлены недостающие задачи и индексный блок «📥 Wishlist Темира (2026‑05)» с матрицей done/partial/missing по 23 пунктам обратной связи (общий список + дополнительный для RestoMind). В **P1.5** добавлены: failed‑бейдж сообщений в карточке/модалке заказа (#3), кастомная модалка удаления заказа с превью (#10), onboarding / coach‑marks внутри админки (#15). В **P2** добавлены: ночные предзаказы + Telegram «на смене» + сводка для оператора (#20), горячая рассылка по клиентам + бонусная система (#19), авто‑сбор отзывов после заказа с роутингом 2GIS / админ (R3). В **P3** добавлены: авто‑рассылка из iiko по клиентам (R1), VIP‑кейс — отдельный сайт/мини‑приложение (R2), KPI‑центр официантов из iiko (R4). В **P4** существующие SLA monitor / operator efficiency / AI incident detection помечены как часть пункта #18.
 
 ### Исправлено
