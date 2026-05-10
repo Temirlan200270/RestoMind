@@ -1,4 +1,4 @@
-"""Отказ от допродажи не предлагается повторно (§E10)."""
+"""Отказ от допродажи не предлагается повторно (E10)."""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ async def test_rejected_upsell_iiko_excluded_from_db_rules(db_with_menu: AsyncSe
     )
     await db.flush()
 
-    menu = await load_available_menu(db)
+    menu = await load_available_menu(db, organization_id=1)
     items_json: dict = {
         "items": [
             {

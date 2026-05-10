@@ -6,6 +6,20 @@
 
 ## [Unreleased] — 2026-03-20
 
+### Добавлено (2026-05-11)
+
+- **Админка / P1.5 (фронт):** полоса филиала `--tenant-accent` (`admin-brand-tokens.js` → `restoMindApplyTenantAccent`, классы `ds-admin-tenant-stripe-header` / `ds-admin-tenant-stripe-sidebar`); при смене филиала гашение хрома до загрузки данных (`orgSwitchChromeDimmed`). Форматтеры `fmt.timeAgo` и `fmt.dateTime` для лент и списков (tooltip с абсолютным временем). Скелетоны на заказах, чатах, аналитике, ленте дашборда и inbox; анимация `.ds-skeleton-line`. Логин подтягивает черновик бренда через `syncBrandingDraftFromUser` после `userData`.
+- **Админка / меню (bulk-stoplist):** `POST /api/admin/menu/bulk-stoplist` — массово стоп / снять стоп / смена раздела (поле `category` — строка как в `menu_items.category`); ответ `{ ok, updated, failed[] }`; реализация в [`app/api/admin/menu_bulk.py`](app/api/admin/menu_bulk.py). Вкладка «Меню»: батч вместо N× PATCH; long‑press на карточке каталога (~520 ms) для multi‑select на мобильных; в [`admin-app.js`](app/static/js/admin-app.js) помечено `// bulk-stoplist`.
+- **Тесты:** `tests/test_admin_menu_bulk_stoplist.py`; регресс «вызов без org» для `load_available_menu` / `validate_order` в `tests/test_order_logic.py`.
+
+### Изменено (2026-05-11)
+
+- **Меню / изоляция филиалов:** [`load_available_menu`](app/services/order_logic.py) — обязательный `organization_id`, только `MenuItem.organization_id == org` (без смешения legacy NULL в этом пути); [`validate_order`](app/services/order_logic.py) и [`calculate_total_and_fees`](app/services/order_logic.py) требуют `organization_id` при загрузке меню из БД без готового списка позиций.
+
+### Документация (2026-05-11)
+
+- **Спринт / параллельная разработка:** `docs/sprints/2026-05-11__parallel-streams/` — пары потоков A∥C, A∥B, B→C (bulk-stoplist + черновик JSON), A∥C (dedupe + Compact Kanban), D после крупного UI; ссылки на файлы и DoD.
+
 ### Исправлено (2026-05-10)
 
 - **Платежи / безопасность:** `freedom_pay.py` — `verify()` теперь делает реальную HMAC-SHA256 + MD5-подпись (стандарт Freedom Pay: `md5(script;sorted_params;secret)`); раньше возвращал `True` при любом запросе если env var был задан — критическая уязвимость. `kaspi.py` — HMAC-SHA256 верификация по заголовку `X-Kaspi-Signature` с поддержкой `sha256=` prefix; добавлен `FreedomPayInitiator` для создания платёжных сессий.

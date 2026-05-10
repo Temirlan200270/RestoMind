@@ -151,6 +151,9 @@
                                     tabindex="0"
                                     @keydown.enter.prevent="openMenuEdit(item)"
                                     @keydown.space.prevent="openMenuEdit(item)"
+                                    @touchstart.passive="menuBulkTouchStart(item)"
+                                    @touchend="menuBulkTouchEnd()"
+                                    @touchcancel="menuBulkTouchEnd()"
                                     class="bg-white rounded-xl border hover:border-brand-200 hover:shadow-md transition group ring-1 ring-slate-900/5 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
                                     :class="menuBulkIsSelected(item.id) ? 'ring-2 ring-brand-500 border-brand-200 shadow-md' : 'border-gray-100'"
                                 >
@@ -218,11 +221,22 @@
                     <div class="text-sm font-medium">
                         Выбрано: <span class="tabular-nums font-bold text-brand-300" x-text="menuBulkSelectedIds.length"></span>
                     </div>
-                    <div class="flex flex-wrap gap-2">
+                    <div class="flex flex-wrap gap-2 items-center">
                         <button type="button" @click="menuBulkApplyAvailability(false)" :disabled="menuBulkSaving"
                             class="px-4 py-2 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-500 disabled:opacity-50 transition">В стоп</button>
                         <button type="button" @click="menuBulkApplyAvailability(true)" :disabled="menuBulkSaving"
                             class="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 transition">В продажу</button>
+                        <span x-show="menuCategories.length > 0" x-cloak class="flex flex-wrap items-center gap-2">
+                            <select x-model="menuBulkTargetCategory"
+                                class="text-xs min-h-[40px] rounded-xl border border-white/20 bg-white/10 text-white px-2 py-1.5 max-w-[200px]">
+                                <option value="">Раздел…</option>
+                                <template x-for="cat in menuCategories" :key="'bulk-bar-' + cat">
+                                    <option :value="cat" x-text="cat"></option>
+                                </template>
+                            </select>
+                            <button type="button" @click="menuBulkApplyCategory()" :disabled="menuBulkSaving"
+                                class="px-4 py-2 rounded-xl text-xs font-bold bg-brand-500 hover:bg-brand-400 disabled:opacity-50 transition">Сменить раздел</button>
+                        </span>
                         <button type="button" @click="menuBulkClearSelection()" :disabled="menuBulkSaving"
                             class="px-4 py-2 rounded-xl text-xs font-semibold bg-white/10 hover:bg-white/20 disabled:opacity-50">Снять выбор</button>
                     </div>

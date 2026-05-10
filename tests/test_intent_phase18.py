@@ -26,7 +26,7 @@ def _fee_kinds(items_json: dict) -> list[str]:
 @pytest.mark.asyncio
 async def test_route_intent_merge_updates_same_draft(db_with_menu: AsyncSession) -> None:
     phone = "+77009998877"
-    menu = await load_available_menu(db_with_menu)
+    menu = await load_available_menu(db_with_menu, organization_id=1)
 
     ai1 = AIBrainResponse(
         intent="order",
@@ -65,7 +65,7 @@ async def test_route_intent_merge_updates_same_draft(db_with_menu: AsyncSession)
 async def test_route_intent_saves_upsell_in_order_meta(db_with_menu: AsyncSession) -> None:
     """Рекомендация бота попадает в order_meta для админки."""
     phone = "+77008887766"
-    menu = await load_available_menu(db_with_menu)
+    menu = await load_available_menu(db_with_menu, organization_id=1)
     ai = AIBrainResponse(
         intent="order",
         reply_text="Добавил плов. К нему советую ачичук.",
@@ -96,7 +96,7 @@ async def test_route_intent_saves_upsell_in_order_meta(db_with_menu: AsyncSessio
 async def test_route_intent_upsell_trace_marks_accepted_on_follow_up(db_with_menu: AsyncSession) -> None:
     """§4.8: трасса не теряется между сообщениями; принятие фиксируется по offered_iiko_id."""
     phone = "+77007776655"
-    menu = await load_available_menu(db_with_menu)
+    menu = await load_available_menu(db_with_menu, organization_id=1)
     r1 = await route_intent(
         db_with_menu,
         phone,
@@ -155,7 +155,7 @@ async def test_route_intent_merge_chain_add_remove_set_quantity_recomputes_fees(
     (compute_fee_lines), а не из сырого JSON модели.
     """
     phone = "+77001112233"
-    menu = await load_available_menu(db_with_menu)
+    menu = await load_available_menu(db_with_menu, organization_id=1)
 
     r1 = await route_intent(
         db_with_menu,
@@ -238,7 +238,7 @@ async def test_route_intent_remove_plov_1kg_drops_plov_packaging_fee_lines(
 ) -> None:
     """После удаления плова 1 кг не остаётся строк упаковки tabak/foil для этой позиции."""
     phone = "+77002223344"
-    menu = await load_available_menu(db_with_menu)
+    menu = await load_available_menu(db_with_menu, organization_id=1)
 
     r1 = await route_intent(
         db_with_menu,
@@ -296,7 +296,7 @@ async def test_route_intent_remove_plov_1kg_drops_plov_packaging_fee_lines(
 async def test_route_intent_merge_skips_duplicate_explicit_action_id(db_with_menu: AsyncSession) -> None:
     """Повтор того же action_id на черновике не удваивает количество."""
     phone = "+77005554433"
-    menu = await load_available_menu(db_with_menu)
+    menu = await load_available_menu(db_with_menu, organization_id=1)
     await route_intent(
         db_with_menu,
         phone,
@@ -369,7 +369,7 @@ async def test_route_intent_merge_skips_duplicate_explicit_action_id(db_with_men
 async def test_route_intent_merge_skips_duplicate_synthetic_fingerprint(db_with_menu: AsyncSession) -> None:
     """Один и тот же inbound_message_id + те же дельты без action_id — вторая обработка no-op."""
     phone = "+77005554444"
-    menu = await load_available_menu(db_with_menu)
+    menu = await load_available_menu(db_with_menu, organization_id=1)
     await route_intent(
         db_with_menu,
         phone,

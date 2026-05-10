@@ -27,13 +27,28 @@ from app.services.order_logic import (
 
 
 @pytest.mark.asyncio
+async def test_load_available_menu_requires_organization_id(db_with_menu: AsyncSession) -> None:
+    """Вызов без organization_id — ошибка (нет «глобального» меню)."""
+    with pytest.raises(TypeError, match="organization_id"):
+        await load_available_menu(db_with_menu)  # type: ignore[call-arg]
+
+
+@pytest.mark.asyncio
+async def test_validate_order_requires_org_when_loading_from_db(db_with_menu: AsyncSession) -> None:
+    """validate_order с db и без menu_items требует organization_id."""
+    items = [OrderItem(name="Плов", quantity=1)]
+    with pytest.raises(ValueError, match="organization_id"):
+        await validate_order(items, db=db_with_menu)
+
+
+@pytest.mark.asyncio
 async def test_validate_known_items(db_with_menu: AsyncSession) -> None:
     """Все позиции есть в меню — заказ валиден."""
     items = [
         OrderItem(name="Плов", quantity=2),
         OrderItem(name="Капучино", quantity=1),
     ]
-    menu = await load_available_menu(db_with_menu)
+    menu = await load_available_menu(db_with_menu, organization_id=1)
     result = await validate_order(items, menu_items=menu)
 
     assert len(result.valid_items) == 2
@@ -48,7 +63,7 @@ async def test_validate_unknown_items(db_with_menu: AsyncSession) -> None:
         OrderItem(name="Плов", quantity=1),
         OrderItem(name="Единорог на гриле", quantity=1),
     ]
-    menu = await load_available_menu(db_with_menu)
+    menu = await load_available_menu(db_with_menu, organization_id=1)
     result = await validate_order(items, menu_items=menu)
 
     assert len(result.valid_items) == 1
@@ -58,7 +73,7 @@ async def test_validate_unknown_items(db_with_menu: AsyncSession) -> None:
 @pytest.mark.asyncio
 async def test_validate_empty_items(db_with_menu: AsyncSession) -> None:
     """Пустой список — нет ошибки, нет позиций."""
-    menu = await load_available_menu(db_with_menu)
+    menu = await load_available_menu(db_with_menu, organization_id=1)
     result = await validate_order([], menu_items=menu)
 
     assert result.valid_items == []
@@ -69,7 +84,7 @@ async def test_validate_empty_items(db_with_menu: AsyncSession) -> None:
 async def test_validate_fuzzy_match(db_with_menu: AsyncSession) -> None:
     """Fuzzy matching: 'капучинно' → 'Капучино'."""
     items = [OrderItem(name="капучинно", quantity=1)]
-    menu = await load_available_menu(db_with_menu)
+    menu = await load_available_menu(db_with_menu, organization_id=1)
     result = await validate_order(items, menu_items=menu)
 
     assert len(result.valid_items) == 1
@@ -80,7 +95,7 @@ async def test_validate_fuzzy_match(db_with_menu: AsyncSession) -> None:
 async def test_validate_iiko_id_preserved(db_with_menu: AsyncSession) -> None:
     """iiko_id из меню сохраняется в validated items."""
     items = [OrderItem(name="Лагман", quantity=1)]
-    menu = await load_available_menu(db_with_menu)
+    menu = await load_available_menu(db_with_menu, organization_id=1)
     result = await validate_order(items, menu_items=menu)
 
     assert result.valid_items[0]["iiko_id"] == "uuid-lagman"
@@ -90,7 +105,7 @@ async def test_validate_iiko_id_preserved(db_with_menu: AsyncSession) -> None:
 async def test_validate_exclude_ingredients(db_with_menu: AsyncSession) -> None:
     """exclude_ingredients сохраняются в валидированном заказе."""
     items = [OrderItem(name="Плов", quantity=1, exclude_ingredients=["лук", "морковь"])]
-    menu = await load_available_menu(db_with_menu)
+    menu = await load_available_menu(db_with_menu, organization_id=1)
     result = await validate_order(items, menu_items=menu)
 
     assert result.valid_items[0]["exclude_ingredients"] == ["лук", "морковь"]
@@ -104,7 +119,7 @@ async def test_validate_all_unknown_returns_empty(db_with_menu: AsyncSession) ->
         OrderItem(name="Жареный вулкан", quantity=1),
         OrderItem(name="Суп из радуги", quantity=2),
     ]
-    menu = await load_available_menu(db_with_menu)
+    menu = await load_available_menu(db_with_menu, organization_id=1)
     result = await validate_order(items, menu_items=menu)
 
     assert result.valid_items == []
@@ -115,7 +130,7 @@ async def test_validate_all_unknown_returns_empty(db_with_menu: AsyncSession) ->
 @pytest.mark.asyncio
 async def test_load_available_excludes_unavailable(db_with_menu: AsyncSession) -> None:
     """load_available_menu не возвращает позиции с is_available=False."""
-    menu = await load_available_menu(db_with_menu)
+    menu = await load_available_menu(db_with_menu, organization_id=1)
     names = [m.name for m in menu]
     assert "Маргарита" not in names
     assert "Плов" in names
@@ -124,7 +139,7 @@ async def test_load_available_excludes_unavailable(db_with_menu: AsyncSession) -
 @pytest.mark.asyncio
 async def test_build_menu_context(db_with_menu: AsyncSession) -> None:
     """build_menu_context формирует текст с ценами и iiko_id."""
-    menu = await load_available_menu(db_with_menu)
+    menu = await load_available_menu(db_with_menu, organization_id=1)
     context = build_menu_context(menu)
 
     assert "Плов" in context
@@ -141,7 +156,7 @@ async def test_build_menu_context_includes_tags(db_with_menu: AsyncSession) -> N
     plov.tags = "хит, к нему: Салат ачичук, чай"
     await db_with_menu.commit()
 
-    menu = await load_available_menu(db_with_menu)
+    menu = await load_available_menu(db_with_menu, organization_id=1)
     context = build_menu_context(menu)
     assert "теги:" in context
     assert "ачичук" in context.lower()
@@ -363,7 +378,7 @@ def test_merge_cart_actions_real_uuid_stub_then_enrich() -> None:
 @pytest.mark.asyncio
 async def test_calculate_total_and_fees_wraps_validate_and_finalize(db_with_menu: AsyncSession) -> None:
     """calculate_total_and_fees — обёртка validate_order + finalize_order_draft."""
-    menu = await load_available_menu(db_with_menu)
+    menu = await load_available_menu(db_with_menu, organization_id=1)
     food = [
         {
             "name": "Плов",

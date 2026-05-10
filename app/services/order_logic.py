@@ -199,24 +199,22 @@ class MenuEntry:
 async def load_available_menu(
     db: AsyncSession,
     *,
-    organization_id: int | None = None,
+    organization_id: int,
 ) -> list[MenuItem]:
     """
     Один запрос на весь цикл обработки — загрузка доступных позиций.
 
-    В multi-tenant режиме обязателен фильтр по organization_id, иначе это data leak меню между филиалами.
-    Для legacy-данных (MenuItem.organization_id IS NULL) разрешаем чтение только для default organization.
+    organization_id обязателен: без скоупа возможна утечка меню между филиалами.
     """
-    stmt = select(MenuItem).where(MenuItem.is_available.is_(True))
-    if organization_id is not None:
-        from app.core.config import settings
-
-        org_id = int(organization_id)
-        if org_id == int(settings.default_organization_id):
-            stmt = stmt.where(or_(MenuItem.organization_id == org_id, MenuItem.organization_id.is_(None)))
-        else:
-            stmt = stmt.where(MenuItem.organization_id == org_id)
-    stmt = stmt.order_by(MenuItem.category, MenuItem.name)
+    org_id = int(organization_id)
+    stmt = (
+        select(MenuItem)
+        .where(
+            MenuItem.is_available.is_(True),
+            MenuItem.organization_id == org_id,
+        )
+        .order_by(MenuItem.category, MenuItem.name)
+    )
     result = await db.execute(stmt)
     return list(result.scalars().all())
 
@@ -253,7 +251,9 @@ async def validate_order(
     или db-сессию для ленивой загрузки. Fallback на MOCK_MENU.
     """
     if menu_items is None and db is not None:
-        menu_items = await load_available_menu(db, organization_id=organization_id)
+        if organization_id is None:
+            raise ValueError("organization_id обязателен при загрузке меню из БД")
+        menu_items = await load_available_menu(db, organization_id=int(organization_id))
     menu_lookup = _build_menu_lookup(menu_items or [])
     menu_names = list(menu_lookup.keys())
 
@@ -745,7 +745,11 @@ async def calculate_total_and_fees(
         packaging_rules = await load_packaging_rules(db, oid)
     enriched = enrich_merged_items_from_menu(food_items, menu_items)
     order_items = draft_food_lines_to_order_items(enriched)
-    validated = await validate_order(order_items, menu_items=menu_items, db=db)
+    if menu_items is None and db is not None and organization_id is None:
+        raise ValueError("organization_id is required when menu_items is not provided")
+    validated = await validate_order(
+        order_items, menu_items=menu_items, db=db, organization_id=organization_id,
+    )
     pe = True
     if prepayment_enforced is not None:
         pe = bool(prepayment_enforced)

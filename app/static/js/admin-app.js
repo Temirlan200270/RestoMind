@@ -259,6 +259,38 @@ const adminFormat = {
         if (!d) return '';
         return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
     },
+    /** Абсолютная метка для title/tooltip. */
+    dateTime(iso) {
+        const d = this._parseDateInput(iso);
+        if (!d) return '';
+        return d.toLocaleString('ru-RU', {
+            day: '2-digit',
+            month: 'short',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+        });
+    },
+    /**
+     * Относительное время для лент (чаты, заказы, инциденты).
+     * Старше ~7 дней — показываем дату как в `date()`.
+     */
+    timeAgo(iso) {
+        const d = this._parseDateInput(iso);
+        if (!d) return '';
+        const sec = Math.round((Date.now() - d.getTime()) / 1000);
+        if (sec < 0) return this.time(iso);
+        if (sec < 45) return 'только что';
+        try {
+            const rtf = new Intl.RelativeTimeFormat('ru', { numeric: 'auto' });
+            if (sec < 3600) return rtf.format(-Math.floor(sec / 60), 'minute');
+            if (sec < 86400) return rtf.format(-Math.floor(sec / 3600), 'hour');
+            if (sec < 604800) return rtf.format(-Math.floor(sec / 86400), 'day');
+        } catch (_e) {
+            /* ignore */
+        }
+        return this.date(iso);
+    },
 };
 
 /**
@@ -663,6 +695,8 @@ function adminMixinState() {
         /** True после 404 на PATCH — показываем подсказку до появления API. */
         brandingApiUnavailable: false,
         orgProfileLoading: false,
+        /** Гасим хром при смене филиала, пока не подтянутся профиль и данные вкладок. */
+        orgSwitchChromeDimmed: false,
         orgProfileSaving: false,
         forceCloseOpen: false,
         forceCloseSaving: false,
@@ -848,6 +882,9 @@ function adminMixinState() {
         menuBulkMode: false,
         menuBulkSelectedIds: [],
         menuBulkSaving: false,
+        menuBulkTargetCategory: '',
+        menuBulkLongPressTimer: null,
+        menuBulkSuppressOpen: false,
         /** Полная очистка меню (POST /api/admin/menu/clear) */
         menuClearLoading: false,
         /** Чипы разделов: на узких экранах по умолчанию скрыты, чтобы не перекрывать карточки */
@@ -3008,6 +3045,7 @@ function adminMixinAuthKnowledge() {
 
         async selectOrganization(orgId) {
             if (!orgId || (this.orgProfile && orgId === this.orgProfile.id)) return;
+            this.orgSwitchChromeDimmed = true;
             this.aiValueLoading = true;
             try {
                 const { ok, status, data } = await this.apiJsonResponse('/api/admin/auth/select-org', {
@@ -3024,7 +3062,7 @@ function adminMixinAuthKnowledge() {
                 this.wsToken = me.ws_token;
                 this.staffRole = me.role;
                 this.isSuperadmin = me.is_superadmin;
-                
+
                 await this.loadOrgProfile();
                 this.connectWebSocket();
                 await this.loadTabData();
@@ -3035,6 +3073,7 @@ function adminMixinAuthKnowledge() {
                 adminLogger.error('[admin] selectOrganization', e);
             } finally {
                 this.aiValueLoading = false;
+                this.orgSwitchChromeDimmed = false;
             }
         },
 
@@ -3106,6 +3145,7 @@ function adminMixinAuthKnowledge() {
                 }
                 const me = this.normalizeMePayload(data);
                 this.userData = me;
+                this.syncBrandingDraftFromUser();
                 this.auth401AlertShown = false;
                 this.authenticated = true;
                 this.wsToken = me.ws_token;
@@ -3350,6 +3390,20 @@ function adminMixinAuthKnowledge() {
             try {
                 const el = this.$refs?.brandingLogoInput;
                 if (el) el.value = '';
+            } catch (_e) { /* ignore */ }
+            this.applyTenantBrandingDocument();
+        },
+
+        /** Синхронизирует `--tenant-accent` с `userData.branding` (после /auth/me и сохранения бренда). */
+        applyTenantBrandingDocument() {
+            try {
+                const raw = this.userData?.branding?.brand_color_hex;
+                const hx = this.normalizeBrandingColorHex(raw);
+                if (typeof window.restoMindApplyTenantAccent === 'function') {
+                    window.restoMindApplyTenantAccent(hx);
+                } else {
+                    document.documentElement.style.setProperty('--tenant-accent', hx);
+                }
             } catch (_e) { /* ignore */ }
         },
 
@@ -7183,6 +7237,10 @@ function adminMixinDataChartsSettings() {
 
         openMenuEdit(item) {
             if (!item || item.id == null) return;
+            if (this.menuBulkSuppressOpen) {
+                this.menuBulkSuppressOpen = false;
+                return;
+            }
             this.menuEditForm = {
                 id: item.id,
                 name: item.name || '',
@@ -7308,9 +7366,35 @@ function adminMixinDataChartsSettings() {
         },
 
         toggleMenuBulkMode() {
+            this.menuBulkTouchEnd();
             this.menuBulkMode = !this.menuBulkMode;
             if (!this.menuBulkMode) {
                 this.menuBulkSelectedIds = [];
+                this.menuBulkTargetCategory = '';
+            }
+        },
+
+        // bulk-stoplist: long-press на карточке → режим выбора + позиция (mobile)
+        menuBulkTouchStart(item) {
+            if (!item || item.id == null) return;
+            this.menuBulkTouchEnd();
+            this.menuBulkLongPressTimer = setTimeout(() => {
+                this.menuBulkLongPressTimer = null;
+                this.menuBulkSuppressOpen = true;
+                if (!this.menuBulkMode) this.toggleMenuBulkMode();
+                if (!this.menuBulkIsSelected(item.id)) this.menuBulkToggleId(item.id);
+                try {
+                    if (navigator.vibrate) navigator.vibrate(12);
+                } catch (_) {
+                    /* ignore */
+                }
+            }, 520);
+        },
+
+        menuBulkTouchEnd() {
+            if (this.menuBulkLongPressTimer) {
+                clearTimeout(this.menuBulkLongPressTimer);
+                this.menuBulkLongPressTimer = null;
             }
         },
 
@@ -7326,31 +7410,81 @@ function adminMixinDataChartsSettings() {
             this.menuBulkSelectedIds = [];
         },
 
+        // bulk-stoplist: POST /api/admin/menu/bulk-stoplist
         async menuBulkApplyAvailability(available) {
             const ids = [...this.menuBulkSelectedIds];
             if (!ids.length || this.menuBulkSaving) return;
             this.menuBulkSaving = true;
             try {
-                const results = await Promise.all(
-                    ids.map(async (id) => {
-                        const res = await this.apiFetch(`/api/admin/menu/${id}`, {
-                            method: 'PATCH',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ is_available: available }),
-                        });
-                        return res.ok;
-                    }),
-                );
+                const action = available ? 'unstop' : 'stop';
+                const { ok, data } = await this.apiJsonResponse('/api/admin/menu/bulk-stoplist', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action, item_ids: ids }),
+                });
                 await this.loadMenu();
                 this.menuBulkSelectedIds = [];
-                if (results.some((r) => !r)) {
-                    void this.showUiAlert('Часть позиций не обновилась — проверьте сеть или обновите страницу', 'Ошибка');
-                } else {
+                if (!ok) {
+                    void this.showUiAlert(
+                        typeof data.detail === 'string' ? data.detail : 'Не удалось обновить позиции',
+                        'Ошибка',
+                    );
+                    return;
+                }
+                const nFail = Array.isArray(data.failed) ? data.failed.length : 0;
+                const nOk = typeof data.updated === 'number' ? data.updated : 0;
+                if (nFail > 0) {
+                    void this.showUiAlert(
+                        `Обновлено: ${nOk}, пропущено (нет в филиале): ${nFail}`,
+                        'Частично',
+                    );
+                }
+                if (nOk > 0) {
                     this.flashToast(
                         available ? 'Выбранные позиции в продаже' : 'Выбранные позиции в стопе',
                         'success',
                         2800,
                     );
+                }
+            } catch {
+                void this.showUiAlert('Ошибка сети. Проверьте соединение.', 'Ошибка');
+            } finally {
+                this.menuBulkSaving = false;
+            }
+        },
+
+        // bulk-stoplist: смена раздела (строка category)
+        async menuBulkApplyCategory() {
+            const ids = [...this.menuBulkSelectedIds];
+            const cat = String(this.menuBulkTargetCategory || '').trim();
+            if (!ids.length || !cat || this.menuBulkSaving) return;
+            this.menuBulkSaving = true;
+            try {
+                const { ok, data } = await this.apiJsonResponse('/api/admin/menu/bulk-stoplist', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'set_category', item_ids: ids, category: cat }),
+                });
+                await this.loadMenu();
+                this.menuBulkSelectedIds = [];
+                this.menuBulkTargetCategory = '';
+                if (!ok) {
+                    void this.showUiAlert(
+                        typeof data.detail === 'string' ? data.detail : 'Не удалось сменить раздел',
+                        'Ошибка',
+                    );
+                    return;
+                }
+                const nFail = Array.isArray(data.failed) ? data.failed.length : 0;
+                const nOk = typeof data.updated === 'number' ? data.updated : 0;
+                if (nFail > 0) {
+                    void this.showUiAlert(
+                        `Перенесено: ${nOk}, пропущено: ${nFail}`,
+                        'Частично',
+                    );
+                }
+                if (nOk > 0) {
+                    this.flashToast('Раздел обновлён', 'success', 2600);
                 }
             } catch {
                 void this.showUiAlert('Ошибка сети. Проверьте соединение.', 'Ошибка');
