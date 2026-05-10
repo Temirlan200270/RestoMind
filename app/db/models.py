@@ -100,6 +100,15 @@ class Organization(Base):
         nullable=False,
         comment="После вебхука оплаты: подтвердить заказ и вызвать iiko deliveries/create без ручного шага",
     )
+    payment_config_json: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON,
+        nullable=True,
+        comment=(
+            "Per-org конфигурация платёжных провайдеров: "
+            "{provider: {enabled, webhook_secret_enc, extra_json}}. "
+            "Секреты хранятся в Fernet-зашифрованном виде (APP_SECRETS_FERNET_KEY)."
+        ),
+    )
     telegram_ops_chat_id: Mapped[str] = mapped_column(
         String(32), default="", server_default="", comment="Telegram chat_id для алертов персоналу (приоритет над глобальным env)",
     )

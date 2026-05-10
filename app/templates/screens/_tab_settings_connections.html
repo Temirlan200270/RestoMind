@@ -156,6 +156,156 @@
                                 </button>
                             </div>
                         </details>
+
+                        <!-- Платёжные провайдеры -->
+                        <div class="rm-card-surface p-6">
+                            <div class="mb-4">
+                                <h4 class="font-medium text-gray-900">Платёжные провайдеры</h4>
+                                <p class="text-sm text-gray-500 mt-1">Настройте интеграцию с платёжной системой — бот будет автоматически отправлять ссылки клиентам.</p>
+                            </div>
+                            <div class="space-y-2">
+
+                                <!-- Freedom Pay -->
+                                <details class="hint-details rounded-xl border border-gray-100 bg-gray-50/50">
+                                    <summary class="cursor-pointer select-none list-none flex items-center gap-3 p-4">
+                                        <span class="h-2.5 w-2.5 rounded-full shrink-0 transition-colors"
+                                            :class="integrationStatus.payment_providers?.freedom_pay?.enabled && integrationStatus.payment_providers?.freedom_pay?.secret_configured
+                                                ? 'bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.18)]'
+                                                : integrationStatus.payment_providers?.freedom_pay?.enabled
+                                                    ? 'bg-amber-400'
+                                                    : 'bg-gray-300'"></span>
+                                        <div class="flex-1 min-w-0">
+                                            <div class="flex flex-wrap items-center justify-between gap-2">
+                                                <span class="font-medium text-gray-900 text-sm">Freedom Pay</span>
+                                                <span class="text-xs font-bold text-brand-700">Настроить</span>
+                                            </div>
+                                            <p class="text-xs text-gray-500 mt-0.5"
+                                                x-text="integrationStatus.payment_providers?.freedom_pay?.enabled && integrationStatus.payment_providers?.freedom_pay?.secret_configured
+                                                    ? 'Включён · секрет задан в окружении'
+                                                    : integrationStatus.payment_providers?.freedom_pay?.enabled
+                                                        ? 'Включён · нужен FREEDOM_PAY_WEBHOOK_SECRET'
+                                                        : 'Отключён'"></p>
+                                        </div>
+                                    </summary>
+                                    <div class="px-4 pb-4 border-t border-gray-100 pt-3 space-y-3">
+                                        <label class="flex items-center gap-3 cursor-pointer select-none">
+                                            <input type="checkbox" class="rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                                                :checked="integrationStatus.payment_providers?.freedom_pay?.enabled"
+                                                :disabled="paymentProviderSaving === 'freedom_pay'"
+                                                @change="togglePaymentProvider('freedom_pay', $event.target.checked)">
+                                            <span class="text-sm font-semibold text-gray-900">Включить Freedom Pay</span>
+                                        </label>
+                                        <div>
+                                            <p class="text-xs text-gray-500 mb-1.5">Webhook URL для кабинета Freedom Pay:</p>
+                                            <div class="flex gap-2 items-center">
+                                                <code class="flex-1 min-w-0 text-xs bg-white border border-gray-200 rounded-lg px-3 py-2 break-all"
+                                                    x-text="paymentProviderWebhookUrl('freedom_pay')"></code>
+                                                <button type="button" @click="copyPaymentWebhookUrl('freedom_pay')"
+                                                    class="shrink-0 px-3 py-2 rounded-xl bg-brand-600 text-white text-xs font-semibold hover:bg-brand-700 min-h-[44px]">
+                                                    Копировать
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <p class="text-[11px] text-gray-400">Секрет подписи: переменная окружения <code class="bg-gray-100 px-1 rounded text-slate-700">FREEDOM_PAY_WEBHOOK_SECRET</code></p>
+                                    </div>
+                                </details>
+
+                                <!-- Kaspi Pay -->
+                                <details class="hint-details rounded-xl border border-gray-100 bg-gray-50/50">
+                                    <summary class="cursor-pointer select-none list-none flex items-center gap-3 p-4">
+                                        <span class="h-2.5 w-2.5 rounded-full shrink-0 transition-colors"
+                                            :class="integrationStatus.payment_providers?.kaspi?.enabled && integrationStatus.payment_providers?.kaspi?.secret_configured
+                                                ? 'bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.18)]'
+                                                : integrationStatus.payment_providers?.kaspi?.enabled
+                                                    ? 'bg-amber-400'
+                                                    : 'bg-gray-300'"></span>
+                                        <div class="flex-1 min-w-0">
+                                            <div class="flex flex-wrap items-center justify-between gap-2">
+                                                <span class="font-medium text-gray-900 text-sm">Kaspi Pay</span>
+                                                <span class="text-xs font-bold text-brand-700">Настроить</span>
+                                            </div>
+                                            <p class="text-xs text-gray-500 mt-0.5"
+                                                x-text="integrationStatus.payment_providers?.kaspi?.enabled && integrationStatus.payment_providers?.kaspi?.secret_configured
+                                                    ? 'Включён · секрет задан в окружении'
+                                                    : integrationStatus.payment_providers?.kaspi?.enabled
+                                                        ? 'Включён · нужен KASPI_HMAC_SECRET'
+                                                        : 'Отключён'"></p>
+                                        </div>
+                                    </summary>
+                                    <div class="px-4 pb-4 border-t border-gray-100 pt-3 space-y-3">
+                                        <label class="flex items-center gap-3 cursor-pointer select-none">
+                                            <input type="checkbox" class="rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                                                :checked="integrationStatus.payment_providers?.kaspi?.enabled"
+                                                :disabled="paymentProviderSaving === 'kaspi'"
+                                                @change="togglePaymentProvider('kaspi', $event.target.checked)">
+                                            <span class="text-sm font-semibold text-gray-900">Включить Kaspi Pay</span>
+                                        </label>
+                                        <div>
+                                            <p class="text-xs text-gray-500 mb-1.5">Webhook URL для кабинета Kaspi:</p>
+                                            <div class="flex gap-2 items-center">
+                                                <code class="flex-1 min-w-0 text-xs bg-white border border-gray-200 rounded-lg px-3 py-2 break-all"
+                                                    x-text="paymentProviderWebhookUrl('kaspi')"></code>
+                                                <button type="button" @click="copyPaymentWebhookUrl('kaspi')"
+                                                    class="shrink-0 px-3 py-2 rounded-xl bg-brand-600 text-white text-xs font-semibold hover:bg-brand-700 min-h-[44px]">
+                                                    Копировать
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <p class="text-[11px] text-gray-400">Секрет подписи: переменная окружения <code class="bg-gray-100 px-1 rounded text-slate-700">KASPI_HMAC_SECRET</code></p>
+                                    </div>
+                                </details>
+
+                                <!-- CloudPayments -->
+                                <details class="hint-details rounded-xl border border-gray-100 bg-gray-50/50">
+                                    <summary class="cursor-pointer select-none list-none flex items-center gap-3 p-4">
+                                        <span class="h-2.5 w-2.5 rounded-full shrink-0 transition-colors"
+                                            :class="integrationStatus.payment_providers?.cloudpayments?.enabled && integrationStatus.payment_providers?.cloudpayments?.secret_configured
+                                                ? 'bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.18)]'
+                                                : integrationStatus.payment_providers?.cloudpayments?.enabled
+                                                    ? 'bg-amber-400'
+                                                    : 'bg-gray-300'"></span>
+                                        <div class="flex-1 min-w-0">
+                                            <div class="flex flex-wrap items-center justify-between gap-2">
+                                                <span class="font-medium text-gray-900 text-sm">CloudPayments</span>
+                                                <span class="text-xs font-bold text-brand-700">Настроить</span>
+                                            </div>
+                                            <p class="text-xs text-gray-500 mt-0.5"
+                                                x-text="integrationStatus.payment_providers?.cloudpayments?.enabled && integrationStatus.payment_providers?.cloudpayments?.secret_configured
+                                                    ? 'Включён · секрет задан в окружении'
+                                                    : integrationStatus.payment_providers?.cloudpayments?.enabled
+                                                        ? 'Включён · нужен CLOUDPAYMENTS_API_SECRET'
+                                                        : 'Отключён'"></p>
+                                        </div>
+                                    </summary>
+                                    <div class="px-4 pb-4 border-t border-gray-100 pt-3 space-y-3">
+                                        <label class="flex items-center gap-3 cursor-pointer select-none">
+                                            <input type="checkbox" class="rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                                                :checked="integrationStatus.payment_providers?.cloudpayments?.enabled"
+                                                :disabled="paymentProviderSaving === 'cloudpayments'"
+                                                @change="togglePaymentProvider('cloudpayments', $event.target.checked)">
+                                            <span class="text-sm font-semibold text-gray-900">Включить CloudPayments</span>
+                                        </label>
+                                        <div>
+                                            <p class="text-xs text-gray-500 mb-1.5">Webhook URL для кабинета CloudPayments:</p>
+                                            <div class="flex gap-2 items-center">
+                                                <code class="flex-1 min-w-0 text-xs bg-white border border-gray-200 rounded-lg px-3 py-2 break-all"
+                                                    x-text="paymentProviderWebhookUrl('cloudpayments')"></code>
+                                                <button type="button" @click="copyPaymentWebhookUrl('cloudpayments')"
+                                                    class="shrink-0 px-3 py-2 rounded-xl bg-brand-600 text-white text-xs font-semibold hover:bg-brand-700 min-h-[44px]">
+                                                    Копировать
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <p class="text-[11px] text-gray-400">Секрет подписи: переменная окружения <code class="bg-gray-100 px-1 rounded text-slate-700">CLOUDPAYMENTS_API_SECRET</code></p>
+                                    </div>
+                                </details>
+
+                            </div>
+                            <p class="text-[11px] text-gray-400 mt-4" x-show="!integrationStatus.iiko_secrets_encrypt_ready">
+                                Для хранения секретов в зашифрованном виде задайте <code class="bg-gray-100 px-1 rounded text-slate-600">APP_SECRETS_FERNET_KEY</code> в переменных окружения.
+                            </p>
+                        </div>
+
                     </div>
 
                     <div class="mt-6 pt-6 border-t border-gray-100 flex flex-wrap gap-3 items-center">

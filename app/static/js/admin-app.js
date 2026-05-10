@@ -377,6 +377,11 @@ function defaultIntegrationStatus() {
         iiko_secrets_encrypt_ready: false,
         prepayment_enforced: true,
         auto_send_to_iiko_after_payment: false,
+        payment_providers: {
+            freedom_pay: { enabled: false, secret_configured: false },
+            kaspi: { enabled: false, secret_configured: false },
+            cloudpayments: { enabled: false, secret_configured: false },
+        },
     };
 }
 
@@ -518,6 +523,7 @@ function adminMixinState() {
         /** Филиал: автоматическая предоплата по порогу (см. PATCH /organization/prefs). */
         orgPrepaymentEnforcedSaving: false,
         orgAutoIikoSaving: false,
+        paymentProviderSaving: null,
 
         knowledgeItems: [],
         knowledgeLoading: false,
@@ -3676,6 +3682,7 @@ function adminMixinAuthKnowledge() {
             const {
                 last_stoplist: rawStop,
                 last_menu_sync: rawMenu,
+                payment_providers: rawPP,
                 ...rest
             } = d;
             const last_stoplist =
@@ -3686,11 +3693,20 @@ function adminMixinAuthKnowledge() {
                 rawMenu != null && typeof rawMenu === 'object'
                     ? { ...base.last_menu_sync, ...rawMenu }
                     : { ...base.last_menu_sync };
+            const payment_providers =
+                rawPP != null && typeof rawPP === 'object'
+                    ? {
+                        freedom_pay: { ...base.payment_providers.freedom_pay, ...(rawPP.freedom_pay || {}) },
+                        kaspi: { ...base.payment_providers.kaspi, ...(rawPP.kaspi || {}) },
+                        cloudpayments: { ...base.payment_providers.cloudpayments, ...(rawPP.cloudpayments || {}) },
+                    }
+                    : { ...base.payment_providers };
             this.integrationStatus = {
                 ...base,
                 ...rest,
                 last_stoplist,
                 last_menu_sync,
+                payment_providers,
             };
         },
 
@@ -3749,6 +3765,44 @@ function adminMixinAuthKnowledge() {
                 void this.showUiAlert('Ошибка сети', 'Ошибка');
             } finally {
                 this.orgAutoIikoSaving = false;
+            }
+        },
+
+        async togglePaymentProvider(slug, newEnabled) {
+            this.paymentProviderSaving = slug;
+            try {
+                const { ok, data } = await this.apiJsonResponse('/api/admin/organization/payment-providers', {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ provider: slug, enabled: newEnabled }),
+                });
+                if (!ok) {
+                    void this.showUiAlert(this.formatApiError(data.detail) || 'Не удалось сохранить', 'Ошибка');
+                    return;
+                }
+                const pp = { ...this.integrationStatus.payment_providers };
+                pp[slug] = { ...pp[slug], enabled: !!newEnabled };
+                this.mergeIntegrationStatus({ ...this.integrationStatus, payment_providers: pp });
+            } catch (e) {
+                adminLogger.error('[admin] togglePaymentProvider', e);
+                void this.showUiAlert('Ошибка сети', 'Ошибка');
+            } finally {
+                this.paymentProviderSaving = null;
+            }
+        },
+
+        paymentProviderWebhookUrl(slug) {
+            const base = (this.integrationStatus.webhook_url || '').replace('/api/whatsapp/webhook', '');
+            return base ? `${base}/api/webhooks/payment/providers/${slug}` : `/api/webhooks/payment/providers/${slug}`;
+        },
+
+        async copyPaymentWebhookUrl(slug) {
+            const url = this.paymentProviderWebhookUrl(slug);
+            try {
+                await navigator.clipboard.writeText(url);
+                void this.showUiAlert('URL скопирован', '');
+            } catch {
+                void this.showUiAlert(url, 'Webhook URL');
             }
         },
 

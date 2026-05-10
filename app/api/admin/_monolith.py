@@ -1818,6 +1818,21 @@ async def integrations_status(
     base["auto_send_to_iiko_after_payment"] = bool(
         getattr(org_row, "auto_send_to_iiko_after_payment", False),
     ) if org_row is not None else False
+
+    # Payment providers: per-org config + env-var availability
+    _pcj: dict = getattr(org_row, "payment_config_json", None) if org_row else None  # type: ignore[assignment]
+    _pcj = _pcj if isinstance(_pcj, dict) else {}
+    base["payment_providers"] = {
+        slug: {
+            "enabled": bool((_pcj.get(slug) or {}).get("enabled", False)),
+            "secret_configured": env_ok,
+        }
+        for slug, env_ok in (
+            ("freedom_pay", bool((settings.freedom_pay_webhook_secret or "").strip())),
+            ("kaspi", bool((settings.kaspi_webhook_hmac_secret or "").strip())),
+            ("cloudpayments", bool((settings.cloudpayments_api_secret or "").strip())),
+        )
+    }
     tg_token_ok = bool(str(settings.telegram_bot_token or "").strip())
     tg_global_chat_ok = bool(str(settings.telegram_admin_chat_id or "").strip())
     tg_org_chat_ok = bool(
@@ -2445,6 +2460,37 @@ async def get_organization_prefs(request: Request, db: AsyncSession = Depends(ge
         "prepayment_enforced": bool(getattr(org, "prepayment_enforced", True)),
         "auto_send_to_iiko_after_payment": bool(getattr(org, "auto_send_to_iiko_after_payment", False)),
     }
+
+
+_VALID_PAYMENT_PROVIDERS = frozenset({"freedom_pay", "kaspi", "cloudpayments"})
+
+
+class PaymentProviderToggleBody(BaseModel):
+    provider: str = Field(..., min_length=2, max_length=64)
+    enabled: bool
+
+
+@router.patch("/organization/payment-providers")
+async def patch_payment_provider_toggle(
+    request: Request,
+    body: PaymentProviderToggleBody,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Включить / отключить платёжный провайдер для этого заведения."""
+    slug = (body.provider or "").strip().lower()
+    if slug not in _VALID_PAYMENT_PROVIDERS:
+        raise HTTPException(status_code=400, detail=f"Unknown provider '{slug}'")
+    org_id = admin_org_from_session(request)
+    org = await db.get(Organization, org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    pcj: dict = dict(org.payment_config_json) if isinstance(org.payment_config_json, dict) else {}
+    prov_cfg: dict = dict(pcj.get(slug, {}))
+    prov_cfg["enabled"] = bool(body.enabled)
+    pcj[slug] = prov_cfg
+    org.payment_config_json = pcj
+    await db.commit()
+    return {"ok": True, "provider": slug, "enabled": bool(body.enabled)}
 
 
 @router.patch("/organization/prefs")

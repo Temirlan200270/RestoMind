@@ -47,21 +47,32 @@
 - [ ] **Bulk‑actions в стоп‑листе**: чекбоксы у позиций + sticky‑панель действий внизу таблицы (`В стоп / Снять со стопа / Сменить категорию`). На мобильном — long‑press → multi‑select. Текущая API уже умеет `PATCH /api/admin/menu/{id}` поштучно — добавить батч `POST /api/admin/menu/bulk-stoplist`. Файл UI: [`_tab_menu.html`](app/templates/screens/_tab_menu.html).
 - [ ] **Skeletons + relative time**: заменить прогресс‑полоски на skeleton‑строки на тяжёлых вкладках (заказы/аналитика/чаты) через существующий [`_skeleton.html`](app/templates/components/_skeleton.html); добавить `fmt.timeAgo(date)` («3 мин назад») и применить в живых лентах (заказы, чаты, инциденты), оставив абсолютное время в tooltip.
 
+- [ ] **Failed‑бейдж сообщений в карточке/модалке заказа** (Wishlist Темира #3): сейчас `delivery_status === 'failed'` подсвечивается только в `_tab_chats.html:206`. Нужно в [`_tab_orders.html`](app/templates/screens/_tab_orders.html) (карточка/модалка заказа) показывать индикатор «N сообщений не доставлено в WhatsApp» с переходом в диалог гостя. Источник — `chat_logs.delivery_status` за пользователя, в окне ±1 час от заказа; рядом с уже существующим `iiko_last_error`.
+- [ ] **Кастомная модалка удаления заказа с превью** (Wishlist Темира #10): отдельная `ds-modal-panel` для удаления — № заказа, сумма, клиент, тип/оплата, причина (опц.), кнопка с задержкой 1 c. Заменить вызов общего `uiConfirm` в `app/static/js/admin-app.js` (handlerы удаления заказа) на новую модалку. Цель — снизить шанс случайного удаления у оператора в час пик.
+- [ ] **Onboarding / coach‑marks внутри админки** (Wishlist Темира #15): первый вход (или `?first_run=1`) — пошаговая подсветка ключевых зон (Inbox, Orders, Settings → Бот/ИИ, Brand, Knowledge), хранение прогресса в `localStorage` пер‑пользователю + опционально в `User.meta_json.tour_completed_at`. Подсказки‑тултипы (`?` рядом с тяжёлыми полями) на основе уже существующих макросов; никаких новых JS‑либ. Публичная `onboarding.html` для регистрации остаётся как есть.
+
 - [ ] **Refresh `docs/ui/baseline/` и `docs/ui/mobile-review/`**: текущие PNG сделаны до Phase U5–U7 и не отражают `ds-card`/`ds-modal-panel`/Compact‑контролы. План: переснять серию через [`scripts/run_admin_lighthouse.mjs`](scripts/run_admin_lighthouse.mjs)/Playwright **или** через MCP `playwright`/`chrome-devtools`; старые скрины переложить в `docs/ui/baseline/2025_q4/` (архив с README — дата + последний коммит); в [`docs/UI_DESIGN_SYSTEM.md`](docs/UI_DESIGN_SYSTEM.md) обновить врезки. После — внешние UX‑ревью перестанут судить по устаревшему UI.
 
 ## 🟢 P2: Развитие (Growth)
 
-- [ ] **E1 хвост (платежи):** raw payload + полноценная верификация подписей для провайдеров (не ломая существующую идемпотентность).
+- [x] **E1 хвост (платежи):** HMAC-SHA256 верификация для Freedom Pay и Kaspi Pay (`payment_providers/freedom_pay.py`, `kaspi.py`); per-org `payment_config_json` (миграция `20260509_payment_cfg`). Остаток: реальные реквизиты заголовков подписи по докам провайдеров + UI настройки per-org ключей + `E14` генерация ссылок.
 - [ ] **E14 авто‑ссылка на оплату:** генерация ссылок в `intent_router` для предоплаты.
 - [ ] **E8 WhatsApp интерактив:** кнопки Meta templates + (опционально) картинка‑чек.
-- [ ] **Telegram оператор‑бот:** управление диалогами из Telegram (эскалации/ответы/уведомления).
+- [ ] **Telegram оператор‑бот:** управление диалогами из Telegram (эскалации/ответы/уведомления). _Wishlist Темира #12._
 - [x] **Экстренное закрытие ресторана:** причина + длительность паузы + корректное поведение вне рабочего времени.
+
+- [ ] **Ночные предзаказы + Telegram «на смене»** (Wishlist Темира #20): когда гость пишет вне рабочих часов (`time_context.py` уже умеет считать) — бот принимает заявку как **предзаказ** (не отправляя в iiko), кладёт в новую таблицу `night_preorders` (или `Order.kind='preorder'` + `scheduled_for`). Telegram оператор‑бот (см. выше) утром шлёт **сводку ночных предзаказов** в чат смены и ждёт кнопку «🟢 Я на смене» от оператора → после нажатия бот переключает все ночные предзаказы в обычный поток подтверждения. Супер‑админ получает алерт, если за N минут после открытия никто не нажал «на смене».
+- [ ] **Авто‑сбор отзывов после заказа** (Wishlist Темира R3): через N минут после `OrderStatus.COMPLETED` (или `SENT_TO_IIKO` + offset) — WhatsApp шаблон «Как вам всё прошло?» с кнопками 👍 / 👎. 👍 → ссылка на отзыв в **2GIS** (`Organization.review_url_2gis`), 👎 → запись `customer_feedback` + Telegram‑алерт владельцу/админу с цитатой и `phone_last4`. Никаких новых LLM‑вызовов, всё на template‑messages + `intent_router` post‑hook.
+- [ ] **Горячая рассылка по клиентам + бонусная система** (Wishlist Темира #19): целевая рассылка через WhatsApp template_messages по сегментам — «давно не заказывали (>30 дней)», «частые гости», «по событию» (день рождения, праздник). Отдельный экран в админке (черновик → preview → send), per‑org rate‑limit, opt‑out по `User.marketing_opt_out`, лог в `marketing_blasts` + per‑message статус доставки. Бонусная система — отдельная таблица `loyalty_balance` + начисление через webhook iiko или вручную; в WhatsApp бот умеет отвечать «у вас N баллов» через `intent: faq` enrichment. **Перед стартом** — юридическая проверка: WABA маркетинг‑правила Meta + Закон РК «О персональных данных».
 
 ## ⚪ P3: Бэклог и R&D
 
 - [ ] **E11 Strategy Engine:** вынести upsell-логику из промпта в Python‑правила.
 - [ ] **E12 RAG по меню:** семантический поиск для больших каталогов.
-- [ ] **BI по iiko:** продажи по времени суток и автоподстройка upsell.
+- [ ] **BI по iiko:** продажи по времени суток и автоподстройка upsell. _Wishlist Темира #16._
+- [ ] **Авто‑рассылка из iiko по клиентам** (Wishlist Темира R1): забирать клиентскую базу из iiko (телефоны, история заказов, сегменты), синхронизировать в `User`/`marketing_segment`, и далее через тот же канал рассылок (см. P2 «Горячая рассылка»). Зависимость: завершённый клиент iiko + соглашения по PII.
+- [ ] **VIP‑кейс: отдельный сайт/мини‑приложение для премиум‑заведений** (Wishlist Темира R2): white‑label фронт (отдельный поддомен per‑tenant) с меню, бронированием, личным кабинетом гостя. Архитектурно — отдельный Next.js/Astro фронт поверх существующего API; оценить ROI до начала реализации.
+- [ ] **KPI‑центр официантов из iiko** (Wishlist Темира R4): забирать из iiko персональные данные по заказам (`waiter_id`, средний чек, кол‑во гостей, отмены, время обслуживания, продажи по позициям) → агрегировать в `waiter_kpi_daily` → экран в админке с рейтингом, фильтром по дате/смене, экспорт. Совместим с пунктом «BI по iiko» — общий ETL.
 
 
 ## P4: AI Operations / Intelligence
@@ -72,10 +83,43 @@
 - [x] **Restaurant state snapshots:** `RestaurantStateSnapshot` and `GET /api/admin/intelligence/digital-twin`.
 - [x] **Digital Twin MVP:** separate admin tab and operator-capacity simulation engine.
 - [ ] Predictive analytics: demand, cancellations, overload forecasting.
-- [ ] SLA monitor: response-time degradation detection.
-- [ ] Operator efficiency analytics.
-- [ ] AI incident detection: abnormal spikes, failures, stop-list impact.
+- [ ] SLA monitor: response-time degradation detection. _Wishlist Темира #18 (часть)._
+- [ ] Operator efficiency analytics. _Wishlist Темира #18 (часть)._
+- [ ] AI incident detection: abnormal spikes, failures, stop-list impact. _Wishlist Темира #18 (часть)._
 - [ ] AI business recommendations: upsell/menu/operator optimization.
 - [ ] Voice AI operator: realtime Twilio Media Streams / OpenAI Realtime or LiveKit.
 - [ ] Payment links: provider abstraction for creating payment URLs, not only webhook intake.
 - [ ] Multi-tenant security audit: verify `organization_id` isolation across all services/queries.
+
+---
+
+## 📥 Wishlist Темира (2026-05) — индекс
+
+Список пожеланий из обратной связи Темира (общий список + дополнительный для RestoMind), сверенный с фактическим состоянием кода. Этот блок — **только индекс**: статусы и реальные задачи живут в P0–P4 выше, здесь просто карта «что есть / чего нет / куда класть».
+
+Легенда: ✅ done · ⚠️ partial · ❌ missing.
+
+| # | Пункт | Статус | Где в roadmap / коде |
+|---|---|---|---|
+| 1 | Меньше шума в админке | ⚠️ | IA collapse 4+4 ✅ (P1.5.0). Compact Kanban / tenant stripe / right context panel / AI confidence / AI snooze / bulk‑actions / skeletons + relative time — открыты в **P1.5** |
+| 2 | Понятные настройки + новый функционал | ✅ | 8 экранов настроек (`_tab_settings_*`), Phase U4 |
+| 3 | Видимый failed‑статус сообщений | ⚠️ | В чатах ✅ (`_tab_chats.html:206`); в заказах ❌ — задача в **P1.5** «Failed‑бейдж сообщений в карточке/модалке заказа» |
+| 4 | Кнопка «Выйти» + аутентификация | ✅ | `_header.html:220`, cookie‑session + `ws_token` |
+| 5 | Польза от бота для владельца | ✅ | «Вклад ИИ», AI Center, weekly digest (`owner_weekly_digest.py`) |
+| 6 | Раздел «Упаковка» | ✅ | Phase U4.5: `scope` item/category/order, миграция `20260507_ui_u45_packaging` |
+| 7 | Мобильная адаптация заказов | ⚠️ | snap‑scroll + 44px ✅ (Phase U6); Compact density — в **P1.5** «Compact Kanban» |
+| 10 | Модалка удаления заказа | ⚠️ | Только общий `uiConfirm`; кастомная модалка с превью — в **P1.5** |
+| 12 | Telegram‑бот оператора / push | ❌ | **P2** «Telegram оператор‑бот» |
+| 13 | Унификация под разные заведения | ✅ | `Organization`, `tenant_owner_id`, `select-org`, branding |
+| 14 | Рефакторинг админки | ⚠️ | split на `screens/` ✅; Lazy DOM и **E0.1** раскол `_monolith.py` — в **P0/P1** |
+| 15 | База знаний разделена + онбординг/туториал | ⚠️ | Профиль/знания разделены ✅; coach‑marks внутри админки — в **P1.5** «Onboarding / coach‑marks» |
+| 16 | AI‑анализ продаж по времени из iiko | ⚠️ | Restaurant Intelligence MVP ✅; «BI по iiko: продажи по времени суток» — в **P3** |
+| 17 | Эффективные токены, кэш, счётчик | ⚠️ | Счётчик токенов ✅ (P0); semantic‑кэш и оптимизация промптов — отдельной задачей не созданы (см. **P3** «E12 RAG по меню» как смежное) |
+| 18 | Анализ услуг общения | ⚠️ | AI Value метрики ✅; SLA monitor / operator efficiency / AI incident detection — в **P4** |
+| 19 | Горячая рассылка по клиентам + бонусы | ❌ | **P2** «Горячая рассылка по клиентам + бонусная система» |
+| 20 | Вне рабочее время + ночной предзаказ + Telegram «на смене» | ⚠️ | Force‑close ✅; полный сценарий ночных предзаказов и кнопки «на смене» — в **P2** «Ночные предзаказы + Telegram “на смене”» |
+| 21 | Экстренное закрытие ресторана | ✅ | `force_closed_until/reason` end‑to‑end (P0/P2) |
+| R1 | Авто‑рассылка из iiko по клиентам | ❌ | **P3** «Авто‑рассылка из iiko по клиентам» |
+| R2 | VIP сайт/приложение | ❌ | **P3** «VIP‑кейс: отдельный сайт/мини‑приложение» |
+| R3 | Авто‑сбор отзывов после заказа | ❌ | **P2** «Авто‑сбор отзывов после заказа» |
+| R4 | KPI‑центр официантов из iiko | ❌ | **P3** «KPI‑центр официантов из iiko» |
