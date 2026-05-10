@@ -4011,10 +4011,11 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
             }
         },
 
-        async loadPaymentConfigs() {
-            if (this.paymentConfigsLoaded) return;
+        async loadPaymentConfigs(force = false) {
+            if (this.paymentConfigsLoaded && !force) return;
             try {
-                const { data } = await this.apiJsonResponse('/api/admin/organization/payment-config');
+                const { ok, data } = await this.apiJsonResponse('/api/admin/organization/payment-config');
+                if (!ok) return;
                 const map = {};
                 (data.items || []).forEach(item => { map[item.provider] = item; });
                 this.paymentConfigs = map;
@@ -5935,6 +5936,9 @@ function adminMixinDataChartsSettings() {
             observe('settings-restaurant-packaging', async () => {
                 if (this.currentTab !== 'settings' || this.settingsTab !== 'restaurant') return;
                 await Promise.all([this.loadMenu(), this.loadPackagingRules()]);
+            });
+            observe('settings-restaurant-payment', async () => {
+                if (this.currentTab === 'settings' && this.settingsTab === 'restaurant') await this.loadPaymentConfigs();
             });
         },
 

@@ -638,7 +638,7 @@
                             <h3 class="text-xl font-bold text-gray-900">Платёжные провайдеры</h3>
                             <p class="text-sm text-gray-500 mt-1">Настройте интеграцию с платёжной системой — бот будет автоматически отправлять ссылки клиентам.</p>
                         </div>
-                        <button type="button" @click="loadPaymentConfigs()"
+                        <button type="button" @click="paymentConfigsLoaded = false; loadPaymentConfigs(true)"
                             class="px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm font-semibold hover:bg-gray-50 transition-colors">
                             Обновить
                         </button>
@@ -648,20 +648,22 @@
                     <template x-for="prov in ['freedom_pay', 'kaspi', 'cloudpayments']" :key="prov">
                         <div class="rm-card-surface p-5"
                             x-data="{
-                                get cfg() { return paymentConfigs[prov] || {}; },
+                                get cfg() { return this.paymentConfigs[prov] || {}; },
                                 form: { is_enabled: false, is_primary: false, merchant_id: '', api_key: '', secret_key: '', public_key: '', environment: 'production', callback_url: '', success_url: '' },
                                 saving: false, open: false,
                                 get label() { return { freedom_pay: 'Freedom Pay', kaspi: 'Kaspi Pay', cloudpayments: 'CloudPayments' }[prov] || prov; },
+                                _syncForm() {
+                                    const c = this.paymentConfigs[prov] || {};
+                                    this.form.is_enabled = c.is_enabled || false;
+                                    this.form.is_primary = c.is_primary || false;
+                                    this.form.merchant_id = c.merchant_id || '';
+                                    this.form.environment = (c.extra_config || {}).environment || 'production';
+                                    this.form.callback_url = (c.extra_config || {}).callback_url || '';
+                                    this.form.success_url = (c.extra_config || {}).success_url || '';
+                                },
                                 init() {
-                                    this.$watch('paymentConfigs', () => {
-                                        const c = this.paymentConfigs[prov] || {};
-                                        this.form.is_enabled = c.is_enabled || false;
-                                        this.form.is_primary = c.is_primary || false;
-                                        this.form.merchant_id = c.merchant_id || '';
-                                        this.form.environment = (c.extra_config || {}).environment || 'production';
-                                        this.form.callback_url = (c.extra_config || {}).callback_url || '';
-                                        this.form.success_url = (c.extra_config || {}).success_url || '';
-                                    });
+                                    this._syncForm();
+                                    this.$watch('paymentConfigs', () => this._syncForm());
                                 },
                                 async save() {
                                     this.saving = true;
@@ -672,24 +674,35 @@
                                             body: JSON.stringify({ provider: prov, ...this.form })
                                         });
                                         const d = await r.json();
-                                        if (d.ok) { paymentConfigs[prov] = d.item; showToast('Сохранено'); }
-                                        else showToast(d.detail || 'Ошибка', 'error');
-                                    } catch(e) { showToast('Ошибка сети', 'error'); }
+                                        if (d.ok) {
+                                            this.paymentConfigs = { ...this.paymentConfigs, [prov]: d.item };
+                                            void this.showUiAlert('Сохранено', '');
+                                        } else {
+                                            void this.showUiAlert(d.detail || 'Не удалось сохранить', 'Ошибка');
+                                        }
+                                    } catch(e) { void this.showUiAlert('Ошибка сети', 'Ошибка'); }
                                     this.saving = false;
                                 },
                                 async remove() {
                                     if (!confirm('Удалить конфигурацию ' + this.label + '?')) return;
-                                    const r = await fetch('/api/admin/organization/payment-config/' + prov, { method: 'DELETE' });
-                                    const d = await r.json();
-                                    if (d.ok) { delete paymentConfigs[prov]; paymentConfigs = {...paymentConfigs}; showToast('Удалено'); }
+                                    try {
+                                        const r = await fetch('/api/admin/organization/payment-config/' + prov, { method: 'DELETE' });
+                                        const d = await r.json();
+                                        if (d.ok) {
+                                            const updated = { ...this.paymentConfigs };
+                                            delete updated[prov];
+                                            this.paymentConfigs = updated;
+                                            void this.showUiAlert('Конфигурация удалена', '');
+                                        }
+                                    } catch(e) { void this.showUiAlert('Ошибка сети', 'Ошибка'); }
                                 }
                             }">
                             <div class="flex flex-wrap items-center justify-between gap-3">
                                 <div class="flex items-center gap-3">
                                     <span class="text-sm font-bold text-gray-900" x-text="label"></span>
-                                    <span x-show="cfg.is_primary" class="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Основной</span>
-                                    <span x-show="cfg.is_enabled && !cfg.is_primary" class="text-xs font-semibold px-2 py-0.5 rounded-full bg-sky-100 text-sky-700">Активен</span>
-                                    <span x-show="!cfg.is_enabled" class="text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">Отключён</span>
+                                    <span x-show="cfg.is_primary" x-cloak class="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Основной</span>
+                                    <span x-show="cfg.is_enabled && !cfg.is_primary" x-cloak class="text-xs font-semibold px-2 py-0.5 rounded-full bg-sky-100 text-sky-700">Активен</span>
+                                    <span x-show="!cfg.is_enabled" x-cloak class="text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">Отключён</span>
                                 </div>
                                 <button type="button" @click="open = !open"
                                     class="text-xs font-semibold px-3 py-1.5 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 transition-colors"
