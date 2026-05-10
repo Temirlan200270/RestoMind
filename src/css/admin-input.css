@@ -61,7 +61,7 @@
     }
     /* Segmented control (табы-пилюли) */
     .ds-segmented {
-        @apply inline-flex flex-wrap gap-1 rounded-xl bg-slate-100 p-1 ring-1 ring-slate-900/5;
+        @apply inline-flex flex-wrap gap-1 rounded-xl bg-slate-100 px-1 py-0.5 ring-1 ring-slate-900/5;
     }
     /* U6: touch target ≥ 44×44px (WCAG 2.5.5) */
     .ds-segmented > button {
