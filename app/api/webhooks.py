@@ -64,6 +64,7 @@ from app.services.dialog_mgr import (
     set_user_state,
     update_user_session_fields_in_db,
 )
+from app.services.ai_usage import schedule_log_ai_usage
 from app.services.events import publish_event
 from app.services.org_resolve import organization_id_for_whatsapp_value
 from app.services.intent_router import (
@@ -1149,6 +1150,7 @@ async def process_message(
             phone=phone,
             extra={"intent": ai_response.intent, "voice": had_voice},
         )
+        schedule_log_ai_usage(organization_id, getattr(ai_response, "_usage", None))
 
         # 3) DB: короткая мутация/запись результатов
         post_commit_state: UserState | None = None
