@@ -1,4 +1,7 @@
-"""Payment infrastructure: PaymentTransaction + OrganizationPaymentConfig + payment_config_json
+"""Payment infrastructure: PaymentTransaction + OrganizationPaymentConfig
+
+NOTE: payment_config_json добавлена отдельной миграцией 20260510_org_pay_cfg_json
+(эта миграция была уже применена в prod до того, как поле появилось в модели).
 
 Revision ID: 20260509_payment_tx_config
 Revises: 20260508_intelligence_ops
@@ -19,21 +22,6 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Per-org payment provider config (JSON blob на Organization, лёгкий доступ)
-    op.add_column(
-        "organizations",
-        sa.Column(
-            "payment_config_json",
-            sa.JSON(),
-            nullable=True,
-            comment=(
-                "Per-org конфигурация платёжных провайдеров: "
-                "{provider: {enabled, webhook_secret_enc, extra_json}}. "
-                "Секреты хранятся Fernet-зашифрованными."
-            ),
-        ),
-    )
-
     # Нормализованные конфиги провайдеров (API-ключи, секреты per-org)
     op.create_table(
         "organization_payment_configs",
@@ -124,4 +112,3 @@ def downgrade() -> None:
     op.drop_table("payment_transactions")
     op.drop_index("ix_org_payment_configs_org_id", "organization_payment_configs")
     op.drop_table("organization_payment_configs")
-    op.drop_column("organizations", "payment_config_json")
