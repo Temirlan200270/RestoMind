@@ -1,3 +1,4 @@
+            {% from "components/_skeleton.html" import skeleton %}
             <!-- ========== ТРЕБУЕТ ВНИМАНИЯ ========== -->
             <div x-show="currentTab === 'inbox' && inboxTab === 'system'" x-cloak class="fade-in space-y-5">
                 <div class="flex flex-wrap items-end justify-between gap-4">
@@ -6,8 +7,9 @@
                         <p class="text-sm text-slate-500 mt-0.5">Единая очередь ошибок по заказам, оплатам, WhatsApp и интеграциям.</p>
                     </div>
                     <div class="flex flex-wrap items-center gap-2">
-                        <span x-show="incidents.generated_at" x-cloak class="text-xs text-slate-400">
-                            <span>Обновлено </span><span x-text="fmt.time(incidents.generated_at)"></span>
+                        <span x-show="incidents.generated_at" x-cloak class="text-xs text-slate-400 tabular-nums"
+                            :title="fmt.dateTime(incidents.generated_at)">
+                            <span>Обновлено </span><span x-text="fmt.timeAgo(incidents.generated_at)"></span>
                         </span>
                         <button type="button" @click="loadIncidents()" :disabled="incidentsLoading"
                             class="min-h-[44px] px-3.5 py-2 rounded-xl text-sm font-semibold bg-white text-slate-800 ring-1 ring-slate-900/10 hover:bg-slate-50 disabled:opacity-50 transition">
@@ -36,9 +38,8 @@
                     </div>
                 </div>
 
-                <div x-show="incidentsLoading && !incidentsLoadedOnce" x-cloak class="rm-loading-line border border-slate-100 rounded-xl px-3 bg-white">
-                    <svg class="animate-spin h-4 w-4 text-brand-600 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                    <span>Загружаем очередь инцидентов…</span>
+                <div x-show="incidentsLoading && !incidentsLoadedOnce" x-cloak class="rounded-xl border border-slate-100 bg-white overflow-hidden">
+                    {{ skeleton(kind='line', rows=6, extra_class='!p-4') }}
                 </div>
 
                 <div x-show="!incidentsLoading && incidentsLoadedOnce && incidentsTotalOpen() === 0" x-cloak
@@ -86,7 +87,9 @@
                                                 <div class="text-xs text-slate-600 mt-1 line-clamp-2" x-text="item.detail || ''"></div>
                                                 <div class="text-[11px] text-slate-400 mt-1" x-show="incidentMetaText(item.meta)" x-text="incidentMetaText(item.meta)"></div>
                                             </div>
-                                            <div class="text-[11px] text-slate-400 tabular-nums shrink-0" x-show="item.created_at" x-text="fmt.date(item.created_at) + ' ' + fmt.time(item.created_at)"></div>
+                                            <div class="text-[11px] text-slate-400 tabular-nums shrink-0" x-show="item.created_at"
+                                                :title="fmt.dateTime(item.created_at)"
+                                                x-text="fmt.timeAgo(item.created_at)"></div>
                                         </div>
                                     </button>
                                 </template>

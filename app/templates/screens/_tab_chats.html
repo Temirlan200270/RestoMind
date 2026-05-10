@@ -1,3 +1,4 @@
+            {% from "components/_skeleton.html" import skeleton %}
             <!-- ========== ЖИВЫЕ ДИАЛОГИ: flex-1 min-h-0 внутри #admin-content-scroll — без calc, алерт сжимает область ========== -->
             <div x-show="currentTab === 'chats'" x-cloak class="fade-in flex flex-1 min-h-0 flex-col overflow-hidden md:pt-0">
                 {% call chat_shell_layout() %}
@@ -35,7 +36,9 @@
                                     <div class="flex-1 min-w-0">
                                         <div class="flex justify-between items-center gap-2 mb-0.5">
                                             <h4 class="text-sm font-semibold text-gray-900 truncate" x-text="chat.userName || chat.phone"></h4>
-                                            <span class="text-xs text-gray-400 shrink-0 tabular-nums" x-text="fmt.time(chat.lastAt)"></span>
+                                            <span class="text-xs text-gray-400 shrink-0 tabular-nums"
+                                                :title="fmt.dateTime(chat.lastAt)"
+                                                x-text="fmt.timeAgo(chat.lastAt)"></span>
                                         </div>
                                         <p class="text-xs text-gray-500 font-mono truncate opacity-80" x-text="chat.phone"></p>
                                         <p class="text-xs text-gray-500 truncate mt-0.5" x-text="chat.lastMessage || 'Нет сообщений'"></p>
@@ -55,8 +58,8 @@
                                 <p class="font-semibold text-gray-800">Диалоги появятся здесь</p>
                                 <p class="text-xs text-gray-500 max-w-xs mx-auto">Когда клиенты напишут боту в WhatsApp, переписки отобразятся в этом списке. Снизу можно открыть чат по номеру.</p>
                             </div>
-                            <div class="py-4 px-4" x-show="chatListLoading" x-cloak>
-                                <div class="h-10 rounded-xl bg-slate-100 animate-pulse"></div>
+                            <div class="py-2 px-2" x-show="chatListLoading" x-cloak>
+                                {{ skeleton(kind='line', rows=6, extra_class='!p-3') }}
                             </div>
                             <div class="py-3 px-4" x-show="!chatListLoading && chatListHasMore && !chatSearch.trim()" x-cloak>
                                 <button type="button" @click="loadMoreChats()"

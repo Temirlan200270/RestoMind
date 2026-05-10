@@ -15,7 +15,9 @@
     {{ order_status_badge(order_var) }}
   </td>
   <td class="py-3 font-semibold" x-text="fmt.money({{ order_var }}.total_price)"></td>
-  <td class="py-3 text-gray-500" x-text="fmt.date({{ order_var }}.created_at)"></td>
+  <td class="py-3 text-gray-500 tabular-nums"
+    :title="fmt.dateTime({{ order_var }}.created_at)"
+    x-text="fmt.timeAgo({{ order_var }}.created_at)"></td>
 </tr>
 {%- endmacro %}
 
@@ -38,7 +40,9 @@
         x-text="orderTypeBadge({{ order_var }})"></span>
       <span x-show="orderHasUpsell({{ order_var }})" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200"
         title="Upsell">UPSELL</span>
-      <span class="text-[10px] text-gray-400" x-text="fmt.date({{ order_var }}.created_at)"></span>
+      <span class="text-[10px] text-gray-400 tabular-nums"
+        :title="fmt.dateTime({{ order_var }}.created_at)"
+        x-text="fmt.timeAgo({{ order_var }}.created_at)"></span>
     </div>
     <p x-show="orderHasUpsell({{ order_var }})" class="text-[10px] font-semibold text-violet-700 tabular-nums mt-0.5">
       <span x-show="orderAiEfficiencyPct({{ order_var }}) != null" x-text="'ИИ в чеке: ' + orderAiEfficiencyPct({{ order_var }}) + '%'"></span>
@@ -63,7 +67,9 @@
   <div x-show="!kanbanCompactEnabled()">
   <div class="flex items-center justify-between mb-2">
     <span class="font-bold text-brand-600 text-sm" x-text="'#' + order.id"></span>
-    <span class="text-[10px] text-gray-400" x-text="fmt.time(order.created_at)"></span>
+    <span class="text-[10px] text-gray-400 tabular-nums"
+      :title="fmt.dateTime(order.created_at)"
+      x-text="fmt.timeAgo(order.created_at)"></span>
   </div>
   <div class="flex flex-wrap gap-1 mb-1 items-center">
     <span x-show="order.order_type" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-800 border border-indigo-100" x-text="orderTypeBadge(order)"></span>

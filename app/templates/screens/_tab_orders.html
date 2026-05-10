@@ -1,3 +1,4 @@
+            {% from "components/_skeleton.html" import skeleton %}
             <!-- ========== ЗАКАЗЫ (по этапам + таблица) ========== -->
             <div x-show="currentTab === 'orders'" x-cloak class="fade-in pb-20 md:pb-0">
                 <div class="md:hidden sticky top-0 z-20 -mx-4 mb-3 border-b border-gray-200/80 bg-gray-50/95 px-4 py-3 backdrop-blur">
@@ -209,7 +210,7 @@
                                 {{ iiko_error('order', 'mt-3') }}
                                 </div>
                             </template>
-                            <div x-show="ordersLoading && kanbanDraft.length === 0" x-cloak class="text-center py-8 px-2 text-gray-400 text-xs">Загрузка…</div>
+                            <div x-show="ordersLoading && kanbanDraft.length === 0" x-cloak class="py-4 px-1">{{ skeleton(kind='card', rows=4, extra_class='!p-2') }}</div>
                             <div x-show="kanbanDraft.length === 0 && !ordersLoading" class="text-center py-8 px-2 text-gray-500 text-xs space-y-3">
                                 <p>Черновики появятся, когда гость начнёт заказ в чате.</p>
                                 <button type="button" @click="navigateToTab('chats')"
@@ -237,7 +238,7 @@
                                 {{ iiko_error('order', 'mt-3') }}
                                 </div>
                             </template>
-                            <div x-show="ordersLoading && kanbanConfirmed.length === 0" x-cloak class="text-center py-8 px-2 text-gray-400 text-xs">Загрузка…</div>
+                            <div x-show="ordersLoading && kanbanConfirmed.length === 0" x-cloak class="py-4 px-1">{{ skeleton(kind='card', rows=4, extra_class='!p-2') }}</div>
                             <div x-show="kanbanConfirmed.length === 0 && !ordersLoading" class="text-center py-8 px-2 text-gray-500 text-xs space-y-3">
                                 <p>После оплаты/подтверждения в WhatsApp заказ попадёт сюда.</p>
                                 <button type="button" @click="navigateToTab('chats')"
@@ -263,7 +264,7 @@
                                 {{ order_card_kanban('sent', 'bg-white shadow-sm border border-emerald-100') }}
                                 {{ iiko_error('order', 'mt-3') }}
                             </template>
-                            <div x-show="ordersLoading && kanbanSent.length === 0" x-cloak class="text-center py-8 px-2 text-gray-400 text-xs">Загрузка…</div>
+                            <div x-show="ordersLoading && kanbanSent.length === 0" x-cloak class="py-4 px-1">{{ skeleton(kind='card', rows=4, extra_class='!p-2') }}</div>
                             <div x-show="kanbanSent.length === 0 && !ordersLoading" class="text-center py-8 px-2 text-gray-500 text-xs space-y-3">
                                 <p>Сюда попадают заказы, уже отправленные на кухню (iiko).</p>
                                 <button type="button" @click="navigateToTab('chats')"
@@ -289,7 +290,7 @@
                                 {{ order_card_kanban('in-transit', 'bg-white shadow-sm border border-sky-100') }}
                                 {{ iiko_error('order', 'mt-3') }}
                             </template>
-                            <div x-show="ordersLoading && kanbanInTransit.length === 0" x-cloak class="text-center py-8 px-2 text-gray-400 text-xs">Загрузка…</div>
+                            <div x-show="ordersLoading && kanbanInTransit.length === 0" x-cloak class="py-4 px-1">{{ skeleton(kind='card', rows=4, extra_class='!p-2') }}</div>
                             <div x-show="kanbanInTransit.length === 0 && !ordersLoading" class="text-center py-8 px-2 text-gray-500 text-xs">Заказы появятся после ручного переноса из кухни.</div>
                             <button type="button" x-show="kanbanInTransitVisible.length < kanbanInTransit.length" @click="kanbanShowMore('in_transit')"
                                 class="w-full min-h-[44px] rounded-xl bg-white text-xs font-semibold text-sky-700 ring-1 ring-sky-200 hover:bg-sky-50">Показать ещё 20</button>
@@ -311,7 +312,7 @@
                                 {{ order_card_kanban('waiting-pickup', 'bg-white shadow-sm border border-amber-100') }}
                                 {{ iiko_error('order', 'mt-3') }}
                             </template>
-                            <div x-show="ordersLoading && kanbanWaitingPickup.length === 0" x-cloak class="text-center py-8 px-2 text-gray-400 text-xs">Загрузка…</div>
+                            <div x-show="ordersLoading && kanbanWaitingPickup.length === 0" x-cloak class="py-4 px-1">{{ skeleton(kind='card', rows=4, extra_class='!p-2') }}</div>
                             <div x-show="kanbanWaitingPickup.length === 0 && !ordersLoading" class="text-center py-8 px-2 text-gray-500 text-xs">Готовые к выдаче заказы будут здесь.</div>
                             <button type="button" x-show="kanbanWaitingPickupVisible.length < kanbanWaitingPickup.length" @click="kanbanShowMore('waiting_pickup')"
                                 class="w-full min-h-[44px] rounded-xl bg-white text-xs font-semibold text-amber-700 ring-1 ring-amber-200 hover:bg-amber-50">Показать ещё 20</button>
@@ -333,7 +334,7 @@
                                 {{ order_card_kanban('completed', 'bg-white shadow-sm border border-emerald-100') }}
                                 {{ iiko_error('order', 'mt-3') }}
                             </template>
-                            <div x-show="ordersLoading && kanbanCompleted.length === 0" x-cloak class="text-center py-8 px-2 text-gray-400 text-xs">Загрузка…</div>
+                            <div x-show="ordersLoading && kanbanCompleted.length === 0" x-cloak class="py-4 px-1">{{ skeleton(kind='card', rows=4, extra_class='!p-2') }}</div>
                             <div x-show="kanbanCompleted.length === 0 && !ordersLoading" class="text-center py-8 px-2 text-gray-500 text-xs">Закрытые заказы появятся после финального переноса.</div>
                             <button type="button" x-show="kanbanCompletedVisible.length < kanbanCompleted.length" @click="kanbanShowMore('completed')"
                                 class="w-full min-h-[44px] rounded-xl bg-white text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200 hover:bg-emerald-50">Показать ещё 20</button>
@@ -397,13 +398,13 @@
                                             {{ order_status_badge("order") }}
                                             {{ iiko_error('order', 'mt-2') }}
                                         </td>
-                                        <td class="px-5 py-4 text-gray-500" x-text="fmt.date(order.created_at)"></td>
+                                        <td class="px-5 py-4 text-gray-500 tabular-nums"
+                                            :title="fmt.dateTime(order.created_at)"
+                                            x-text="fmt.timeAgo(order.created_at)"></td>
                                     </tr>
                                 </template>
                                 <tr x-show="ordersLoading && orders.length === 0" x-cloak>
-                                    <td colspan="7" class="py-12 px-4 text-center text-gray-400">
-                                        Загрузка заказов…
-                                    </td>
+                                    <td colspan="7" class="py-8 px-4">{{ skeleton(kind='table', rows=8, extra_class='!p-2') }}</td>
                                 </tr>
                                 <tr x-show="orders.length === 0 && !ordersLoading">
                                     <td colspan="7" class="py-12 px-4 text-center text-gray-500">
@@ -421,8 +422,8 @@
                             {{ order_card_mobile("order") }}
                         </template>
                     </div>
-                    <div class="md:hidden px-4 py-12 text-center border-t border-gray-100 bg-gray-50/40" x-show="ordersLoading && orders.length === 0" x-cloak>
-                        <p class="text-sm text-gray-400">Загрузка заказов…</p>
+                    <div class="md:hidden px-2 py-6 border-t border-gray-100 bg-gray-50/40" x-show="ordersLoading && orders.length === 0" x-cloak>
+                        {{ skeleton(kind='line', rows=8, extra_class='!p-3') }}
                     </div>
                     <div class="md:hidden px-4 py-12 text-center border-t border-gray-100 bg-gray-50/40" x-show="orders.length === 0 && !ordersLoading" x-cloak>
                         <div class="text-4xl mb-2" aria-hidden="true">&#x1F4E6;</div>

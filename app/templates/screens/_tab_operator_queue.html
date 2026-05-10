@@ -1,3 +1,4 @@
+            {% from "components/_skeleton.html" import skeleton %}
             <!-- ========== ПОМОЩЬ КЛИЕНТАМ (Inbox Zero) ========== -->
             <div x-show="currentTab === 'inbox' && inboxTab === 'clients'" x-cloak class="fade-in">
                 {% set op_q_open %}
@@ -40,7 +41,7 @@
                         class="ds-btn ds-btn-primary ds-btn-md">Обновить</button>
                 </div>
                 {% call card(padding_class='p-0', extra_class='overflow-hidden') %}
-                    <div x-show="failedTasksLoading" class="p-8 text-center text-gray-400 text-sm">Загрузка…</div>
+                    <div x-show="failedTasksLoading" class="p-6">{{ skeleton(kind='table', rows=8, extra_class='!p-2') }}</div>
                     <div x-show="!failedTasksLoading && failedTasks.length === 0" class="p-12 text-center text-gray-500">
                         <div class="text-5xl mb-3" aria-hidden="true">✅</div>
                         <div class="text-lg font-semibold text-gray-800">Inbox Zero</div>
@@ -61,7 +62,9 @@
                         <tbody>
                             <template x-for="t in failedTasks" :key="'ft-' + t.id">
                                 <tr class="border-b border-gray-50 hover:bg-gray-50/80 align-top">
-                                    <td class="px-4 py-3 text-gray-500 whitespace-nowrap" x-text="fmt.date(t.created_at)"></td>
+                                    <td class="px-4 py-3 text-gray-500 whitespace-nowrap tabular-nums"
+                                        :title="fmt.dateTime(t.created_at)"
+                                        x-text="fmt.timeAgo(t.created_at)"></td>
                                     <td class="px-4 py-3">
                                         <div class="font-mono text-xs text-gray-800" x-text="t.phone"></div>
                                     </td>

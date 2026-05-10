@@ -62,6 +62,7 @@ from app.services.dialog_mgr import (
     set_pending_booking,
     set_pending_order,
     set_user_state,
+    sync_user_dialog_state_to_db_then_redis,
     update_user_session_fields_in_db,
 )
 from app.services.ai_usage import schedule_log_ai_usage
@@ -85,8 +86,10 @@ from app.services.order_logic import (
 )
 from app.services.sales_strategy import build_sales_strategy, format_strategy_for_prompt
 from app.services.whatsapp_idempotency import (
+    cache_whatsapp_inbound_done_redis,
     mark_whatsapp_inbound_done,
     mark_whatsapp_inbound_failed,
+    redis_whatsapp_inbound_done_cache_hit,
     try_start_whatsapp_inbound_in_db,
 )
 from app.services.tts_edge import synthesize_speech_mp3
@@ -115,8 +118,6 @@ def _verify_whatsapp_hub_signature256(raw_body: bytes, signature_header: str | N
     return secrets.compare_digest(theirs, mac)
 
 router = APIRouter(prefix="/whatsapp", tags=["WhatsApp Webhook"])
-
-WHATSAPP_DEDUPE_TTL_SECONDS = 15 * 60
 
 # Twilio CallSid → From (E.164), если Redis выключен — только один инстанс
 _twilio_caller_memory: dict[str, str] = {}
@@ -161,36 +162,6 @@ async def _get_twilio_caller(call_sid: str) -> str:
         except Exception:
             pass
     return (_twilio_caller_memory.get(call_sid) or "").strip()
-
-
-async def _dedupe_whatsapp_message(message_id: str) -> bool:
-    """
-    Защита от дублей вебхука Meta.
-
-    Meta может доставлять одно и то же сообщение несколько раз, поэтому без идемпотентности
-    в админке появляются дубли (и расходуется лимит OpenAI).
-
-    Returns:
-        True если сообщение уже было обработано (дубликат), иначе False.
-    """
-    mid = (message_id or "").strip()
-    if not mid:
-        return False
-    key = f"wa:dedupe:{mid}"
-    try:
-        # redis.asyncio.Redis поддерживает nx/ex
-        created = await redis_client.set(key, "1", ex=WHATSAPP_DEDUPE_TTL_SECONDS, nx=True)  # type: ignore[arg-type]
-        return not bool(created)
-    except TypeError:
-        # InMemoryRedis не поддерживает nx — делаем простой get/set
-        existing = await redis_client.get(key)
-        if existing:
-            return True
-        try:
-            await redis_client.setex(key, WHATSAPP_DEDUPE_TTL_SECONDS, "1")
-        except Exception:
-            await redis_client.set(key, "1", ex=WHATSAPP_DEDUPE_TTL_SECONDS)
-        return False
 
 
 def _normalize_phone_e164(phone: str) -> str:
@@ -697,7 +668,12 @@ async def handle_order_payment_choice(
             )
         except Exception as exc:
             logger.warning("Telegram prepayment alert skipped: %s", exc)
-        await set_user_state(redis_client, phone, UserState.CHATTING, organization_id=organization_id)
+        await sync_user_dialog_state_to_db_then_redis(
+            redis_client,
+            phone=phone,
+            organization_id=organization_id,
+            new_state=UserState.CHATTING,
+        )
         prepay_reply = (
             f"Принял способ оплаты: {pay_human}.\n\n"
             f"{body}\n\n"
@@ -710,7 +686,12 @@ async def handle_order_payment_choice(
             )
         return prepay_reply
 
-    await set_user_state(redis_client, phone, UserState.CONFIRMING_ORDER, organization_id=organization_id)
+    await sync_user_dialog_state_to_db_then_redis(
+        redis_client,
+        phone=phone,
+        organization_id=organization_id,
+        new_state=UserState.CONFIRMING_ORDER,
+    )
     return reply
 
 
@@ -804,6 +785,8 @@ async def process_with_retry(
                         await db.commit()
                 except Exception as exc:
                     logger.warning("WhatsApp dedupe mark done failed (mid=%s): %s", wmid[:24], exc)
+                else:
+                    await cache_whatsapp_inbound_done_redis(wmid)
             return
         except Exception as exc:
             last_exc = exc
@@ -981,8 +964,11 @@ async def process_message(
                 )
                 return
             # None → клиент хочет изменить заказ; переключаем в CHATTING и идём в OpenAI
-            await set_user_state(
-                redis_client, phone, UserState.CHATTING, organization_id=organization_id,
+            await sync_user_dialog_state_to_db_then_redis(
+                redis_client,
+                phone=phone,
+                organization_id=organization_id,
+                new_state=UserState.CHATTING,
             )
             state = UserState.CHATTING
 
@@ -1019,8 +1005,11 @@ async def process_message(
                 )
                 return
             # None → клиент хочет изменить заказ; переключаем в CHATTING и идём в OpenAI
-            await set_user_state(
-                redis_client, phone, UserState.CHATTING, organization_id=organization_id,
+            await sync_user_dialog_state_to_db_then_redis(
+                redis_client,
+                phone=phone,
+                organization_id=organization_id,
+                new_state=UserState.CHATTING,
             )
             state = UserState.CHATTING
 
@@ -1586,9 +1575,9 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks) -
             if not phone:
                 continue
 
-            if message_id and await _dedupe_whatsapp_message(message_id):
+            if message_id and await redis_whatsapp_inbound_done_cache_hit(message_id):
                 logger.info(
-                    "Дубликат WhatsApp message_id=%s от %s — пропущен",
+                    "Дубликат WhatsApp message_id=%s от %s (redis после done) — пропущен",
                     message_id,
                     _redact_msisdn_for_log(phone),
                 )

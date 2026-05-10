@@ -1,12 +1,35 @@
 /**
- * Phase U1: выставляет --color-brand-* на document.documentElement из одного hex (акцент бренда).
- * Подключается только со страницы storybook; основная админка не зависит от этого файла.
+ * Палитра бренда и акцент арендатора для админки.
+ * — `restoMindApplyBrandTokens` — шкала --color-brand-* (Storybook / превью).
+ * — `restoMindApplyTenantAccent` — полоса филиала `--tenant-accent` (хедер/сайдбар).
  */
 (function () {
     'use strict';
 
     function clamp(n, a, b) {
         return Math.min(b, Math.max(a, n));
+    }
+
+    /**
+     * Тонкая полоса цвета филиала (Organization.brand_color_hex с /auth/me).
+     * @param {string | null | undefined} hex — #RGB или #RRGGBB; пусто — сброс.
+     */
+    function applyTenantAccent(hex) {
+        var root = document.documentElement;
+        var s = String(hex == null ? '' : hex).trim();
+        if (!s) {
+            root.style.removeProperty('--tenant-accent');
+            return;
+        }
+        if (!s.startsWith('#')) s = '#' + s;
+        if (/^#[0-9a-fA-F]{3}$/.test(s)) {
+            s = '#' + s[1] + s[1] + s[2] + s[2] + s[3] + s[3];
+        }
+        if (!/^#[0-9a-fA-F]{6}$/.test(s)) {
+            root.style.setProperty('--tenant-accent', '#2563eb');
+            return;
+        }
+        root.style.setProperty('--tenant-accent', s.toLowerCase());
     }
 
     function hexToRgb(hex) {
@@ -122,5 +145,6 @@
     }
 
     window.restoMindApplyBrandTokens = applyBrandPalette;
+    window.restoMindApplyTenantAccent = applyTenantAccent;
     window.restoMindDefaultBrandHex = '#2563eb';
 })();

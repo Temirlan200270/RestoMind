@@ -429,3 +429,38 @@ aside.bg-brand-900 nav.admin-sidebar-scroll::-webkit-scrollbar-thumb:hover {
     background: rgba(255, 255, 255, 0.48);
     background-clip: padding-box;
 }
+
+/* P1.5: акцент филиала + гашение хрома при смене org */
+.admin-root .ds-admin-tenant-stripe-header {
+    box-shadow: inset 0 2px 0 0 var(--tenant-accent, transparent);
+}
+.admin-root .ds-admin-tenant-stripe-sidebar {
+    box-shadow: inset 0 2px 0 0 var(--tenant-accent, transparent);
+}
+.admin-root .rm-chrome-org-switch {
+    opacity: 0.45;
+    pointer-events: none;
+    filter: grayscale(0.2);
+}
+
+/* Скелетоны (_skeleton.html) */
+@keyframes rm-skeleton-shimmer {
+    0% {
+        background-position: 100% 0;
+    }
+    100% {
+        background-position: -100% 0;
+    }
+}
+.admin-root .ds-skeleton-line {
+    height: 0.65rem;
+    border-radius: 9999px;
+    background: linear-gradient(
+        90deg,
+        var(--color-border) 0%,
+        var(--color-surface-muted) 40%,
+        var(--color-border) 80%
+    );
+    background-size: 220% 100%;
+    animation: rm-skeleton-shimmer 1.15s ease-in-out infinite;
+}

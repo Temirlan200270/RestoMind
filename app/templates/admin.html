@@ -17,6 +17,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RestoMind — Панель управления</title>
     <link rel="stylesheet" href="/static/css/admin.css?v={{ asset_ver }}">
+    <script defer src="/static/js/admin-brand-tokens.js?v={{ asset_ver }}"></script>
     <script defer src="/static/js/admin-app.js?v={{ asset_ver }}"></script>
     <script defer src="/static/vendor/alpine-3.min.js?v={{ asset_ver }}"></script>
 </head>
@@ -27,7 +28,9 @@
 {% include "screens/_login.html" %}
 
 <!-- ========== ПРИЛОЖЕНИЕ (после входа): вся высота — 100dvh, без calc; алерт в потоке — чат сжимается ========== -->
-<div x-show="authenticated" x-cloak class="flex h-[100dvh] min-h-0 w-full overflow-hidden bg-gray-50 relative">
+<div x-show="authenticated" x-cloak
+    class="flex h-[100dvh] min-h-0 w-full overflow-hidden bg-gray-50 relative transition-[opacity,filter] duration-200 ease-out"
+    :class="orgSwitchChromeDimmed ? 'rm-chrome-org-switch' : ''">
 
     {# Navigation shell #}
     {% include "screens/_sidebar.html" %}

@@ -1,3 +1,4 @@
+            {% from "components/_skeleton.html" import skeleton %}
             <!-- ========== ДАШБОРД ========== -->
             <div x-show="currentTab === 'dashboard'" x-cloak class="fade-in space-y-6">
                 <div class="flex flex-wrap items-center justify-between gap-3">
@@ -249,7 +250,7 @@
                                 Обновить
                             </button>
                         </div>
-                        <div x-show="dashActivityLoading" class="text-sm text-slate-400 py-6">Загрузка…</div>
+                        <div x-show="dashActivityLoading" class="py-4">{{ skeleton(kind='line', rows=6, extra_class='!p-2') }}</div>
                         <ul class="space-y-2" x-show="!dashActivityLoading && Array.isArray(dashActivity) && dashActivity.length" x-cloak>
                             <template x-for="(it, i) in dashActivity" :key="it.ts + ':' + i">
                                 <li class="flex items-start gap-3 rounded-2xl px-3 py-2 hover:bg-slate-50 transition">
@@ -263,7 +264,9 @@
                                     <div class="min-w-0 flex-1">
                                         <div class="flex items-center justify-between gap-3">
                                             <div class="font-semibold text-slate-900 truncate" x-text="it.title || ''"></div>
-                                            <div class="text-[11px] text-slate-400 tabular-nums shrink-0" x-text="fmt.time(it.ts)"></div>
+                                            <div class="text-[11px] text-slate-400 tabular-nums shrink-0"
+                                                :title="fmt.dateTime(it.ts)"
+                                                x-text="fmt.timeAgo(it.ts)"></div>
                                         </div>
                                         <div class="text-sm text-slate-500 truncate" x-text="it.subtitle || ''"></div>
                                     </div>

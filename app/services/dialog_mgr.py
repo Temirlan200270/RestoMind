@@ -107,6 +107,30 @@ async def update_user_session_fields_in_db(
     )
 
 
+async def sync_user_dialog_state_to_db_then_redis(
+    redis: Any,
+    *,
+    phone: str,
+    organization_id: int,
+    new_state: UserState,
+) -> None:
+    """
+    Durable state first: одна короткая транзакция User.current_state → commit → кэш в Redis.
+    Паттерн как в process_message после route_intent (без открытой LLM-транзакции).
+    """
+    from app.db.session import async_session_factory
+
+    async with async_session_factory() as db:
+        await update_user_session_fields_in_db(
+            db,
+            phone=phone,
+            organization_id=organization_id,
+            current_state=new_state.value,
+        )
+        await db.commit()
+    await set_user_state(redis, phone, new_state, organization_id=organization_id)
+
+
 async def _db_recover_session(phone: str, redis: Any, organization_id: int | None) -> UserState:
     """
     Полное восстановление сессии из БД при Redis miss.

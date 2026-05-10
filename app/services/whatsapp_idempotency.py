@@ -17,6 +17,44 @@ logger = logging.getLogger(__name__)
 
 PROCESSING_STALE_AFTER = timedelta(minutes=15)
 
+# Кэш «обработано» после commit done — только ускорение; источник истины — БД.
+WHATSAPP_INBOUND_REDIS_CACHE_TTL = int(PROCESSING_STALE_AFTER.total_seconds())
+
+
+async def redis_whatsapp_inbound_done_cache_hit(message_id: str) -> bool:
+    """True если в Redis помечено как успешно обработанное (после mark done)."""
+    mid = (message_id or "").strip()
+    if not mid:
+        return False
+    try:
+        from app.db.session import redis_client
+
+        raw = await redis_client.get(f"wa:dedupe:{mid}")
+        return raw is not None and str(raw).strip() != ""
+    except Exception as exc:
+        logger.debug("WhatsApp dedupe redis read skipped: %s", exc)
+        return False
+
+
+async def cache_whatsapp_inbound_done_redis(message_id: str) -> None:
+    """Выставить кэш после успешного commit mark_whatsapp_inbound_done (best-effort)."""
+    mid = (message_id or "").strip()
+    if not mid:
+        return
+    try:
+        from app.db.session import redis_client
+
+        await redis_client.setex(f"wa:dedupe:{mid}", WHATSAPP_INBOUND_REDIS_CACHE_TTL, "1")
+    except TypeError:
+        try:
+            from app.db.session import redis_client
+
+            await redis_client.set(f"wa:dedupe:{mid}", "1", ex=WHATSAPP_INBOUND_REDIS_CACHE_TTL)
+        except Exception as exc:
+            logger.debug("WhatsApp dedupe redis set (fallback) skipped: %s", exc)
+    except Exception as exc:
+        logger.debug("WhatsApp dedupe redis set skipped: %s", exc)
+
 
 async def try_claim_whatsapp_inbound_in_db(db: AsyncSession, *, message_id: str, phone: str) -> bool:
     """
