@@ -37,6 +37,7 @@ from app.db.models import (
     Order,
     OrderStatus,
     Organization,
+    OrganizationPaymentConfig,
     PackagingRule,
     PaymentEvent,
     RegistrationRequest,
@@ -712,10 +713,25 @@ async def list_orders(
     result = await db.execute(query)
     rows = result.all()
 
+    # Batch-загрузка последних PaymentTransaction для найденных заказов
+    from app.db.models import PaymentTransaction as _PTx
+    _order_ids = [o.id for o, _, _ in rows]
+    _tx_map: dict[int, _PTx] = {}
+    if _order_ids:
+        _txs = await db.scalars(
+            select(_PTx)
+            .where(_PTx.order_id.in_(_order_ids))
+            .order_by(_PTx.order_id, _PTx.id.desc())
+        )
+        for _tx in _txs:
+            if _tx.order_id not in _tx_map:
+                _tx_map[_tx.order_id] = _tx
+
     out: list[dict] = []
     for o, phone, user_name in rows:
         items_json = o.items_json
         meta = order_meta_from_items_json(items_json if isinstance(items_json, dict) else None)
+        _ltx = _tx_map.get(o.id)
         out.append(
             {
                 "id": o.id,
@@ -747,6 +763,17 @@ async def list_orders(
                 "payment_split_warning": _check_mixed_payment_split(
                     items_json if isinstance(items_json, dict) else None, float(o.total_price),
                 ),
+                "latest_payment_tx": {
+                    "id": _ltx.id,
+                    "provider": _ltx.provider,
+                    "status": _ltx.status,
+                    "amount": float(_ltx.amount),
+                    "currency": _ltx.currency,
+                    "payment_url": _ltx.payment_url,
+                    "expires_at": _ltx.expires_at.isoformat() if _ltx.expires_at else None,
+                    "paid_at": _ltx.paid_at.isoformat() if _ltx.paid_at else None,
+                    "failure_reason": _ltx.failure_reason,
+                } if _ltx else None,
             }
         )
 
@@ -6543,4 +6570,136 @@ async def delete_packaging_rule(
         raise HTTPException(status_code=404, detail="Правило не найдено")
     await db.delete(row)
     await db.flush()
+    return {"ok": True}
+
+
+# ─── Payment Provider Config ─────────────────────────────────────────────────
+
+_SUPPORTED_PAYMENT_PROVIDERS = {"freedom_pay", "kaspi", "cloudpayments"}
+
+
+class PaymentConfigUpsertBody(BaseModel):
+    provider: str = Field(..., description="freedom_pay | kaspi | cloudpayments")
+    is_enabled: bool = Field(default=False)
+    is_primary: bool = Field(default=False)
+    merchant_id: str = Field(default="", max_length=200)
+    api_key: str = Field(default="", description="Будет зашифрован. Пустая строка = не менять.")
+    secret_key: str = Field(default="", description="Будет зашифрован. Пустая строка = не менять.")
+    public_key: str = Field(default="", description="Будет зашифрован. Пустая строка = не менять.")
+    environment: str = Field(default="production", description="production | test")
+    callback_url: str = Field(default="", max_length=512)
+    success_url: str = Field(default="", max_length=512)
+
+
+def _payment_config_dict(cfg: OrganizationPaymentConfig) -> dict:
+    """Безопасное представление конфига — без расшифрованных секретов."""
+    return {
+        "id": cfg.id,
+        "provider": cfg.provider,
+        "is_enabled": cfg.is_enabled,
+        "is_primary": cfg.is_primary,
+        "merchant_id": cfg.merchant_id or "",
+        "has_api_key": bool(cfg.encrypted_api_key),
+        "has_secret_key": bool(cfg.encrypted_secret_key),
+        "has_public_key": bool(cfg.encrypted_public_key),
+        "extra_config": cfg.extra_config_json or {},
+    }
+
+
+@router.get("/organization/payment-config")
+async def list_payment_configs(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Список платёжных провайдеров организации (без секретов)."""
+    org_id = admin_org_from_session(request)
+    rows = await db.scalars(
+        select(OrganizationPaymentConfig).where(
+            OrganizationPaymentConfig.organization_id == org_id
+        )
+    )
+    return {"items": [_payment_config_dict(r) for r in rows]}
+
+
+@router.put("/organization/payment-config/{provider}")
+async def upsert_payment_config(
+    request: Request,
+    provider: str,
+    body: PaymentConfigUpsertBody,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Создать или обновить конфигурацию платёжного провайдера."""
+    from app.services.secrets_crypto import encrypt_secret
+
+    org_id = admin_org_from_session(request)
+    prov = (provider or "").strip().lower()
+    if prov not in _SUPPORTED_PAYMENT_PROVIDERS:
+        raise HTTPException(status_code=400, detail=f"Провайдер '{prov}' не поддерживается")
+
+    cfg = await db.scalar(
+        select(OrganizationPaymentConfig).where(
+            OrganizationPaymentConfig.organization_id == org_id,
+            OrganizationPaymentConfig.provider == prov,
+        )
+    )
+    if cfg is None:
+        cfg = OrganizationPaymentConfig(organization_id=org_id, provider=prov)
+        db.add(cfg)
+
+    cfg.is_enabled = body.is_enabled
+    cfg.merchant_id = (body.merchant_id or "").strip() or None
+
+    # Шифруем только если передано новое значение
+    if body.api_key.strip():
+        cfg.encrypted_api_key = encrypt_secret(body.api_key.strip())
+    if body.secret_key.strip():
+        cfg.encrypted_secret_key = encrypt_secret(body.secret_key.strip())
+    if body.public_key.strip():
+        cfg.encrypted_public_key = encrypt_secret(body.public_key.strip())
+
+    cfg.extra_config_json = {
+        "environment": body.environment or "production",
+        "callback_url": body.callback_url or "",
+        "success_url": body.success_url or "",
+    }
+
+    # Если is_primary=True — снимаем флаг у остальных провайдеров этой org
+    if body.is_primary:
+        others = await db.scalars(
+            select(OrganizationPaymentConfig).where(
+                OrganizationPaymentConfig.organization_id == org_id,
+                OrganizationPaymentConfig.provider != prov,
+                OrganizationPaymentConfig.is_primary.is_(True),
+            )
+        )
+        for other in others:
+            other.is_primary = False
+        cfg.is_primary = True
+    else:
+        cfg.is_primary = False
+
+    await db.commit()
+    await db.refresh(cfg)
+    return {"ok": True, "item": _payment_config_dict(cfg)}
+
+
+@router.delete("/organization/payment-config/{provider}")
+async def delete_payment_config(
+    request: Request,
+    provider: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Удалить конфигурацию платёжного провайдера."""
+    org_id = admin_org_from_session(request)
+    prov = (provider or "").strip().lower()
+    cfg = await db.scalar(
+        select(OrganizationPaymentConfig).where(
+            OrganizationPaymentConfig.organization_id == org_id,
+            OrganizationPaymentConfig.provider == prov,
+        )
+    )
+    if cfg is None:
+        raise HTTPException(status_code=404, detail="Конфигурация не найдена")
+    await db.delete(cfg)
+    await db.commit()
     return {"ok": True}

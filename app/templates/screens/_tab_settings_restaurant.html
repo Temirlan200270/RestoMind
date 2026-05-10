@@ -16,6 +16,10 @@
                         class="text-xs sm:text-sm font-semibold px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 min-h-[44px] inline-flex items-center transition-colors">
                         Упаковка
                     </button>
+                    <button type="button" @click="loadPaymentConfigs(); $nextTick(() => document.getElementById('settings-restaurant-payment')?.scrollIntoView({ behavior: 'smooth', block: 'start' }))"
+                        class="text-xs sm:text-sm font-semibold px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 min-h-[44px] inline-flex items-center transition-colors">
+                        Оплата
+                    </button>
                 </nav>
                 <section id="settings-restaurant-profile" class="scroll-mt-20" aria-label="Профиль ресторана">
                 <div class="rm-card-surface p-6" @input="orgProfileDirty = true" @change="orgProfileDirty = true">
@@ -626,5 +630,148 @@
                         <span x-show="orgProfileSaving" x-cloak>Сохраняем…</span>
                     </button>
                 </div>
+
+                <!-- ═══ Платёжные провайдеры ═══ -->
+                <div id="settings-restaurant-payment" class="space-y-4 scroll-mt-20 border-t border-gray-200/80 pt-8 mt-2">
+                    <div class="flex flex-wrap items-center justify-between gap-3 mb-2">
+                        <div>
+                            <h3 class="text-xl font-bold text-gray-900">Платёжные провайдеры</h3>
+                            <p class="text-sm text-gray-500 mt-1">Настройте интеграцию с платёжной системой — бот будет автоматически отправлять ссылки клиентам.</p>
+                        </div>
+                        <button type="button" @click="loadPaymentConfigs()"
+                            class="px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm font-semibold hover:bg-gray-50 transition-colors">
+                            Обновить
+                        </button>
+                    </div>
+
+                    <!-- Список провайдеров -->
+                    <template x-for="prov in ['freedom_pay', 'kaspi', 'cloudpayments']" :key="prov">
+                        <div class="rm-card-surface p-5"
+                            x-data="{
+                                get cfg() { return paymentConfigs[prov] || {}; },
+                                form: { is_enabled: false, is_primary: false, merchant_id: '', api_key: '', secret_key: '', public_key: '', environment: 'production', callback_url: '', success_url: '' },
+                                saving: false, open: false,
+                                get label() { return { freedom_pay: 'Freedom Pay', kaspi: 'Kaspi Pay', cloudpayments: 'CloudPayments' }[prov] || prov; },
+                                init() {
+                                    this.$watch('paymentConfigs', () => {
+                                        const c = this.paymentConfigs[prov] || {};
+                                        this.form.is_enabled = c.is_enabled || false;
+                                        this.form.is_primary = c.is_primary || false;
+                                        this.form.merchant_id = c.merchant_id || '';
+                                        this.form.environment = (c.extra_config || {}).environment || 'production';
+                                        this.form.callback_url = (c.extra_config || {}).callback_url || '';
+                                        this.form.success_url = (c.extra_config || {}).success_url || '';
+                                    });
+                                },
+                                async save() {
+                                    this.saving = true;
+                                    try {
+                                        const r = await fetch('/api/admin/organization/payment-config/' + prov, {
+                                            method: 'PUT',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({ provider: prov, ...this.form })
+                                        });
+                                        const d = await r.json();
+                                        if (d.ok) { paymentConfigs[prov] = d.item; showToast('Сохранено'); }
+                                        else showToast(d.detail || 'Ошибка', 'error');
+                                    } catch(e) { showToast('Ошибка сети', 'error'); }
+                                    this.saving = false;
+                                },
+                                async remove() {
+                                    if (!confirm('Удалить конфигурацию ' + this.label + '?')) return;
+                                    const r = await fetch('/api/admin/organization/payment-config/' + prov, { method: 'DELETE' });
+                                    const d = await r.json();
+                                    if (d.ok) { delete paymentConfigs[prov]; paymentConfigs = {...paymentConfigs}; showToast('Удалено'); }
+                                }
+                            }">
+                            <div class="flex flex-wrap items-center justify-between gap-3">
+                                <div class="flex items-center gap-3">
+                                    <span class="text-sm font-bold text-gray-900" x-text="label"></span>
+                                    <span x-show="cfg.is_primary" class="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Основной</span>
+                                    <span x-show="cfg.is_enabled && !cfg.is_primary" class="text-xs font-semibold px-2 py-0.5 rounded-full bg-sky-100 text-sky-700">Активен</span>
+                                    <span x-show="!cfg.is_enabled" class="text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">Отключён</span>
+                                </div>
+                                <button type="button" @click="open = !open"
+                                    class="text-xs font-semibold px-3 py-1.5 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 transition-colors"
+                                    x-text="open ? 'Скрыть' : 'Настроить'">
+                                </button>
+                            </div>
+
+                            <div x-show="open"
+                                x-transition:enter="transition ease-out duration-150"
+                                x-transition:enter-start="opacity-0 -translate-y-1"
+                                x-transition:enter-end="opacity-100 translate-y-0"
+                                x-transition:leave="transition ease-in duration-100"
+                                x-transition:leave-start="opacity-100"
+                                x-transition:leave-end="opacity-0"
+                                class="mt-4 space-y-3">
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <label class="flex items-center gap-2 text-sm cursor-pointer select-none">
+                                        <input type="checkbox" x-model="form.is_enabled" class="rounded">
+                                        <span class="font-medium">Включён</span>
+                                    </label>
+                                    <label class="flex items-center gap-2 text-sm cursor-pointer select-none">
+                                        <input type="checkbox" x-model="form.is_primary" class="rounded">
+                                        <span class="font-medium">Основной (для авто-генерации ссылок)</span>
+                                    </label>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Merchant ID</label>
+                                    <input type="text" x-model="form.merchant_id" placeholder="Публичный идентификатор мерчанта"
+                                        class="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm bg-white font-mono">
+                                </div>
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div>
+                                        <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">
+                                            API Key <span x-show="cfg.has_api_key" class="text-emerald-600 normal-case">(задан)</span>
+                                        </label>
+                                        <input type="password" x-model="form.api_key" placeholder="Новый ключ (пусто = не менять)"
+                                            class="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm bg-white font-mono" autocomplete="new-password">
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">
+                                            Secret Key <span x-show="cfg.has_secret_key" class="text-emerald-600 normal-case">(задан)</span>
+                                        </label>
+                                        <input type="password" x-model="form.secret_key" placeholder="Новый секрет (пусто = не менять)"
+                                            class="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm bg-white font-mono" autocomplete="new-password">
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div>
+                                        <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Среда</label>
+                                        <select x-model="form.environment" class="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm bg-white">
+                                            <option value="production">production</option>
+                                            <option value="test">test (sandbox)</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Callback URL (webhook)</label>
+                                        <input type="url" x-model="form.callback_url" placeholder="https://your-domain.com/api/webhooks/payment/providers/freedom_pay"
+                                            class="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm bg-white font-mono">
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Success URL (redirect после оплаты)</label>
+                                    <input type="url" x-model="form.success_url" placeholder="https://your-domain.com/payment-success"
+                                        class="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm bg-white font-mono">
+                                </div>
+                                <div class="flex flex-wrap gap-2 pt-1">
+                                    <button type="button" @click="save()" :disabled="saving"
+                                        class="px-4 py-2.5 rounded-xl bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 disabled:opacity-40 transition-colors">
+                                        <span x-show="!saving">Сохранить</span>
+                                        <span x-show="saving" x-cloak>Сохраняем…</span>
+                                    </button>
+                                    <button type="button" x-show="cfg.id" @click="remove()"
+                                        class="px-4 py-2.5 rounded-xl border border-red-200 text-red-700 text-sm font-semibold hover:bg-red-50 transition-colors">
+                                        Удалить
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+
+                    <p class="text-xs text-gray-400 mt-2">Секреты хранятся в зашифрованном виде (Fernet). Для шифрования задайте <code class="bg-gray-100 text-slate-700 px-1 rounded">APP_SECRETS_FERNET_KEY</code> в переменных окружения.</p>
+                </div>
+
             </div>
 

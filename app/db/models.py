@@ -860,6 +860,163 @@ class PaymentEvent(Base):
         return f"<PaymentEvent id={self.id} order={self.order_id} type={self.event_type}>"
 
 
+class PaymentTxStatus(StrEnum):
+    PENDING = "pending"
+    PAID = "paid"
+    FAILED = "failed"
+    EXPIRED = "expired"
+    WAIVED = "waived"
+
+
+class PaymentTransaction(Base):
+    """
+    Транзакция оплаты — source of truth для платёжного flow.
+    Один заказ может иметь несколько транзакций (retry, re-initiation после expired).
+    Order.prepayment_status — совместимый alias от последней транзакции.
+    """
+
+    __tablename__ = "payment_transactions"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_payment_tx_idempotency_key"),
+        Index("ix_payment_tx_order_id", "order_id"),
+        Index("ix_payment_tx_org_status", "organization_id", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id"), nullable=False, index=True,
+    )
+    order_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("orders.id", ondelete="CASCADE"), nullable=False,
+    )
+
+    provider: Mapped[str] = mapped_column(
+        String(64), nullable=False,
+        comment="freedom_pay | kaspi | cloudpayments | manual | generic",
+    )
+    provider_payment_id: Mapped[str | None] = mapped_column(
+        String(200), nullable=True, index=True,
+        comment="ID транзакции в системе провайдера (заполняется после webhook или initiation)",
+    )
+
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default=PaymentTxStatus.PENDING.value,
+        server_default=PaymentTxStatus.PENDING.value,
+        index=True,
+        comment="pending | paid | failed | expired | waived",
+    )
+
+    amount: Mapped[float] = mapped_column(
+        Numeric(12, 2), nullable=False, default=0,
+        comment="Сумма к оплате (в единицах currency)",
+    )
+    currency: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="KZT", server_default="KZT",
+    )
+
+    payment_url: Mapped[str | None] = mapped_column(
+        String(1024), nullable=True,
+        comment="Ссылка/QR для клиента; заполняется при initiation",
+    )
+
+    idempotency_key: Mapped[str] = mapped_column(
+        String(200), nullable=False,
+        comment="Ключ идемпотентности: re-initiation создаёт новую запись с новым ключом",
+    )
+
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+        comment="Когда ссылка протухает (провайдер или наш таймаут)",
+    )
+    paid_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+        comment="Время подтверждения оплаты (webhook от провайдера)",
+    )
+
+    failure_reason: Mapped[str | None] = mapped_column(
+        String(512), nullable=True,
+        comment="Текст ошибки от провайдера при status=failed",
+    )
+
+    provider_payload_json: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON, nullable=True,
+        comment="Сырой ответ провайдера при initiation или webhook (без sensitive данных)",
+    )
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON, nullable=True,
+        comment="Внутренние метаданные: description, retry_count, etc.",
+    )
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(),
+    )
+
+    def __repr__(self) -> str:
+        return f"<PaymentTransaction id={self.id} order={self.order_id} provider={self.provider} status={self.status}>"
+
+
+class OrganizationPaymentConfig(Base):
+    """
+    Платёжные credentials на уровне организации (multi-tenant SaaS).
+    Секреты хранятся зашифрованными через APP_SECRETS_FERNET_KEY.
+    Один провайдер — одна запись. Флаг is_primary = единственный активный по умолчанию.
+    """
+
+    __tablename__ = "organization_payment_configs"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "provider", name="uq_org_payment_config_provider"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    provider: Mapped[str] = mapped_column(
+        String(64), nullable=False,
+        comment="freedom_pay | kaspi | cloudpayments",
+    )
+    is_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false",
+    )
+    is_primary: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false",
+        comment="Основной провайдер для автоматической генерации ссылок",
+    )
+
+    merchant_id: Mapped[str | None] = mapped_column(
+        String(200), nullable=True,
+        comment="Публичный идентификатор мерчанта у провайдера (не секрет)",
+    )
+    encrypted_api_key: Mapped[str | None] = mapped_column(
+        Text, nullable=True,
+        comment="Fernet-зашифрованный API ключ провайдера",
+    )
+    encrypted_secret_key: Mapped[str | None] = mapped_column(
+        Text, nullable=True,
+        comment="Fernet-зашифрованный секрет (HMAC-ключ для webhook и initiation)",
+    )
+    encrypted_public_key: Mapped[str | None] = mapped_column(
+        Text, nullable=True,
+        comment="Fernet-зашифрованный публичный ключ (если требует провайдер)",
+    )
+
+    extra_config_json: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON, nullable=True,
+        comment="Доп. настройки провайдера: callback_url, environment (test/prod) и др.",
+    )
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(),
+    )
+
+    def __repr__(self) -> str:
+        return f"<OrganizationPaymentConfig id={self.id} org={self.organization_id} provider={self.provider}>"
+
+
 class SystemEvent(Base):
     """Durable domain event stream for analytics, AI intelligence, audit, and future automation."""
 

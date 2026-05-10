@@ -674,6 +674,18 @@ async def _handle_order(
             payload={"order_id": order.id, "status": order.status, "total_price": float(order.total_price or 0)},
         )
 
+    # Booking prepayment: если бронирование с предоплатой — пробуем сгенерировать ссылку сразу
+    booking_payment_url: str | None = None
+    if booking_row is not None and prepayment_status == "pending" and org_row is not None:
+        try:
+            from app.services.payment_initiation import initiate_payment, NoPaymentConfigError
+            _booking_tx = await initiate_payment(db, order=order, org=org_row)
+            booking_payment_url = _booking_tx.payment_url
+        except NoPaymentConfigError:
+            pass
+        except Exception as _bpay_exc:
+            logger.warning("booking prepayment initiate failed order=%s: %s", order.id, _bpay_exc)
+
     body_text = format_whatsapp_order_card(items_json, validated.summary_text)
     reply_core = _sanitize_reply_before_order_card(ai_response.reply_text)
     reply = reply_core + "\n\n" + body_text
@@ -712,14 +724,43 @@ async def _handle_order(
         next_state = UserState.CHATTING
         log_hint = "уточняем время самовывоза"
     elif requires_big_order_prepay:
-        reply += (
-            "\n\n"
-            f"💳 Сумма заказа от **{int(settings.order_prepayment_threshold_kzt):,}** ₸ — "
-            "нужна **предоплата** (полная или частичная). Оператор пришлёт реквизиты или ссылку. "
-            "После оплаты вы сможете подтвердить заказ ответом «Да»."
-        )
+        payment_url: str | None = None
+        if org_row is not None:
+            try:
+                from app.services.payment_initiation import initiate_payment, NoPaymentConfigError
+                tx = await initiate_payment(db, order=order, org=org_row)
+                payment_url = tx.payment_url
+            except NoPaymentConfigError:
+                pass  # провайдер не настроен — оператор пришлёт ссылку вручную
+            except Exception as _pay_exc:
+                logger.warning("initiate_payment failed for order=%s: %s", order.id, _pay_exc)
+
+        if payment_url:
+            reply += (
+                "\n\n"
+                f"💳 Сумма заказа от **{int(settings.order_prepayment_threshold_kzt):,}** ₸ — "
+                "нужна **предоплата**. Оплатите по ссылке:\n"
+                f"👉 {payment_url}\n\n"
+                "После оплаты вы сможете подтвердить заказ ответом «Да»."
+            )
+        else:
+            reply += (
+                "\n\n"
+                f"💳 Сумма заказа от **{int(settings.order_prepayment_threshold_kzt):,}** ₸ — "
+                "нужна **предоплата** (полная или частичная). Оператор пришлёт реквизиты или ссылку. "
+                "После оплаты вы сможете подтвердить заказ ответом «Да»."
+            )
         next_state = UserState.CHATTING
         log_hint = "ожидание предоплаты (крупный заказ)"
+    elif booking_payment_url:
+        reply += (
+            f"\n\n💳 Для подтверждения брони требуется предоплата {int(settings.hall_prepayment_min):,} ₸. "
+            "Оплатите по ссылке:\n"
+            f"👉 {booking_payment_url}\n\n"
+            "После оплаты бронь будет подтверждена."
+        )
+        next_state = UserState.CHATTING
+        log_hint = "ожидание предоплаты за бронь (ссылка отправлена)"
     else:
         reply += "\n\n✅ Подтверждаете заказ? (Да / Нет)"
         next_state = UserState.CONFIRMING_ORDER
