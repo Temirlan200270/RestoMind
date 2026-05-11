@@ -11,6 +11,8 @@ from typing import Any
 
 from app.services.owner_weekly_digest import owner_digest_scheduled_tick
 from app.services.payment_notify import run_payment_received_customer_notify
+from app.services.payment_expiry import expire_stale_payment_transactions
+from app.services.payment_reminder import send_payment_reminders_for_expired
 
 try:
     from arq.cron import cron
@@ -75,6 +77,18 @@ async def payment_notify_customer(
     await run_payment_received_customer_notify(order_id)
 
 
+async def payment_expire_cron(ctx: dict[str, Any]) -> None:
+    """Expire stale payment transactions and send re-initiation reminders."""
+    from app.db.database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as db:
+        expired = await expire_stale_payment_transactions(db)
+        await db.commit()
+
+    if expired:
+        await send_payment_reminders_for_expired(expired, AsyncSessionLocal)
+
+
 class WorkerSettings:
     # Это имена задач, которые мы enqueue_job("name", **kwargs) будем вызывать.
     functions = [
@@ -82,9 +96,16 @@ class WorkerSettings:
         whatsapp_process_voice,
         whatsapp_process_statuses,
         payment_notify_customer,
+        payment_expire_cron,
     ]
     # Понедельник ~10:00 в TZ каждой организации: проверка внутри тика (4× в час).
+    # payment_expire_cron: каждые 10 минут.
     cron_jobs = (
-        [cron(owner_digest_scheduled_tick, minute={0, 15, 30, 45})] if cron is not None else []
+        [
+            cron(owner_digest_scheduled_tick, minute={0, 15, 30, 45}),
+            cron(payment_expire_cron, minute={0, 10, 20, 30, 40, 50}),
+        ]
+        if cron is not None
+        else []
     )
 

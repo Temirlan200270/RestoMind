@@ -808,6 +808,7 @@ function adminMixinState() {
         unreadChats: 0,
         kanbanVisible: { draft: 20, confirmed: 20, sent_to_iiko: 20, in_transit: 20, waiting_pickup: 20, completed: 20 },
         upsellFeedbackLoading: false,
+        reinitiateLoading: false,
         /** Кабина оператора: сводка по клиенту */
         customerSummaryLoading: false,
         customerSummary: {
@@ -1847,6 +1848,35 @@ function adminMixinMenuOrdersUi() {
             return m[st] || (st ? String(st) : '');
         },
 
+        payTxProviderLabel(slug) {
+            const m = { kaspi: 'Kaspi Pay', freedom_pay: 'Freedom Pay', cloudpayments: 'CloudPayments' };
+            return m[slug] || String(slug || '').replace(/_/g, ' ');
+        },
+
+        payTxStatusLabel(st) {
+            const m = { pending: 'Ожидает', paid: 'Оплачено', failed: 'Ошибка', expired: 'Истёк', waived: 'Снято' };
+            return m[st] || (st || '—');
+        },
+
+        payTxStatusBadgeClass(st) {
+            if (st === 'paid') return 'bg-emerald-100 text-emerald-800';
+            if (st === 'pending') return 'bg-amber-100 text-amber-800';
+            if (st === 'failed') return 'bg-red-100 text-red-800';
+            if (st === 'expired') return 'bg-gray-200 text-gray-700';
+            if (st === 'waived') return 'bg-violet-100 text-violet-800';
+            return 'bg-gray-100 text-gray-600';
+        },
+
+        payTxBorderClass(tx) {
+            if (!tx) return 'border-gray-200 bg-gray-50';
+            if (tx.status === 'paid') return 'border-emerald-200 bg-emerald-50/50';
+            if (tx.status === 'pending') return 'border-amber-200 bg-amber-50/40';
+            if (tx.status === 'failed') return 'border-red-200 bg-red-50/40';
+            if (tx.status === 'expired') return 'border-gray-300 bg-gray-50';
+            if (tx.status === 'waived') return 'border-violet-200 bg-violet-50/40';
+            return 'border-gray-200 bg-gray-50';
+        },
+
         kanbanDragStart(ev, order) {
             try {
                 ev.dataTransfer.setData('text/plain', String(order.id));
@@ -2221,6 +2251,42 @@ function adminMixinMenuOrdersUi() {
                 this.selectedOrder.prepayment_status = 'paid';
                 await this.loadOrders();
             } catch { void this.showUiAlert('Ошибка сети. Проверьте соединение.', 'Ошибка'); }
+        },
+
+        async reinitiatePayment() {
+            if (!this.selectedOrder || this.reinitiateLoading) return;
+            this.reinitiateLoading = true;
+            try {
+                const id = this.selectedOrder.id;
+                const { ok, data } = await this.apiJsonResponse(`/api/admin/orders/${id}/payment/reinitiate`, {
+                    method: 'POST',
+                });
+                if (!ok) {
+                    void this.showUiAlert(this.formatApiError(data?.detail) || 'Не удалось создать новую ссылку', 'Ошибка');
+                    return;
+                }
+                if (data.payment_url) {
+                    this.selectedOrder.payment_link_url = data.payment_url;
+                    if (!this.selectedOrder.latest_payment_tx) {
+                        this.selectedOrder.latest_payment_tx = {};
+                    }
+                    Object.assign(this.selectedOrder.latest_payment_tx, {
+                        id: data.tx_id,
+                        provider: data.provider,
+                        status: 'pending',
+                        payment_url: data.payment_url,
+                        expires_at: data.expires_at,
+                        paid_at: null,
+                        failure_reason: null,
+                    });
+                }
+                this.flashToast('Новая ссылка создана и отправлена клиенту', 'success', 4000);
+                await this.loadOrders();
+            } catch {
+                void this.showUiAlert('Ошибка сети. Проверьте соединение.', 'Ошибка');
+            } finally {
+                this.reinitiateLoading = false;
+            }
         },
 
         async confirmSendToIiko() {

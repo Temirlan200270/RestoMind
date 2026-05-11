@@ -1072,6 +1072,48 @@ async def patch_order_payment_meta(
     }
 
 
+@router.post("/orders/{order_id}/payment/reinitiate")
+async def reinitiate_order_payment(
+    request: Request,
+    order_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Сгенерировать новую ссылку на оплату (используется оператором при expired/failed)."""
+    from app.services.payment_initiation import (
+        NoPaymentConfigError,
+        PaymentInitiationError,
+        re_initiate_payment,
+    )
+
+    org_id = admin_org_from_session(request)
+    order = await _order_in_org(db, order_id, org_id)
+    org = await db.get(Organization, org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Организация не найдена")
+
+    if order.prepayment_status in ("paid", "waived"):
+        raise HTTPException(status_code=409, detail="Заказ уже оплачен или освобождён от предоплаты")
+
+    try:
+        tx = await re_initiate_payment(db, order=order, org=org)
+        await db.commit()
+    except NoPaymentConfigError:
+        raise HTTPException(
+            status_code=422,
+            detail="Платёжный провайдер не настроен. Добавьте конфигурацию в Настройки → Оплата.",
+        )
+    except PaymentInitiationError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    return {
+        "ok": True,
+        "payment_url": tx.payment_url,
+        "provider": tx.provider,
+        "expires_at": tx.expires_at.isoformat() if tx.expires_at else None,
+        "tx_id": tx.id,
+    }
+
+
 @router.patch("/orders/{order_id}")
 async def patch_order_status(
     request: Request,
