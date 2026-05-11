@@ -52,7 +52,7 @@
 ## 🟢 P2: Развитие (Growth)
 
 - [ ] **E1 хвост (платежи):** raw payload + полноценная верификация подписей для провайдеров (не ломая существующую идемпотентность).
-- [ ] **E14 авто‑ссылка на оплату:** генерация ссылок в `intent_router` для предоплаты.
+- [x] **E14 авто‑ссылка на оплату:** генерация ссылок в `intent_router` для предоплаты.
 - [ ] **E8 WhatsApp интерактив:** кнопки Meta templates + (опционально) картинка‑чек.
 - [ ] **Telegram оператор‑бот:** управление диалогами из Telegram (эскалации/ответы/уведомления).
 - [x] **Экстренное закрытие ресторана:** причина + длительность паузы + корректное поведение вне рабочего времени.
@@ -77,5 +77,5 @@
 - [ ] AI incident detection: abnormal spikes, failures, stop-list impact.
 - [ ] AI business recommendations: upsell/menu/operator optimization.
 - [ ] Voice AI operator: realtime Twilio Media Streams / OpenAI Realtime or LiveKit.
-- [ ] Payment links: provider abstraction for creating payment URLs, not only webhook intake.
+- [x] Payment links: provider abstraction for creating payment URLs, not only webhook intake.
 - [ ] Multi-tenant security audit: verify `organization_id` isolation across all services/queries.

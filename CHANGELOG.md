@@ -4,6 +4,30 @@
 
 ---
 
+## [Unreleased] — 2026-05-11
+
+### Добавлено
+
+- **Платежи / инфраструктура (E14):** полная платёжная инфраструктура уровня production SaaS.
+  - Модели `PaymentTransaction` (state machine: pending → paid | failed | expired | waived) и `OrganizationPaymentConfig` (Fernet-шифрование api_key/secret_key per org) + Alembic-миграция.
+  - `payment_initiation.py` — сервис инициации/переинициации платежей; каждая попытка = новая `PaymentTransaction` (audit trail сохраняется).
+  - `payment_providers/base.py` — Protocol `PaymentInitiator` + dataclass `InitiatedPayment`.
+  - `payment_providers/freedom_pay.py` — `FreedomPayInitiator` (POST к `/init_payment.php`, XML/JSON-парсинг, TTL 60 мин) + `FreedomPayWebhookAdapter` (MD5 + HMAC-SHA256 sig).
+  - `payment_providers/kaspi.py` — `KaspiWebhookAdapter` (HMAC-SHA256 по заголовкам X-Kaspi-Signature / X-Hub-Signature-256 / X-Signature).
+  - `payment_expiry.py` — bulk-expire просроченных pending-транзакций, emit `SystemEvent("payment_expired")`.
+  - `payment_reminder.py` — WhatsApp-напоминание с новой ссылкой после истечения; открывает отдельную DB-сессию на каждый tx (CLAUDE.md rule 3).
+  - `payment_webhook.py` — upsert `PaymentTransaction` при входящем webhook (paid/failed).
+  - `app/main.py` — фоновый asyncio-цикл `_payment_expiry_loop` (каждые 10 мин).
+  - `worker.py` — ARQ cron-задача `payment_expire_cron` (каждые 10 мин).
+  - `intent_router.py` — авто-инициация ссылки при big order prepay и booking prepay; graceful fallback при `NoPaymentConfigError`.
+  - Админ API: `GET/PUT/DELETE /organization/payment-config/{provider}` (шифрование on write, маскирование `has_api_key` на чтение); `POST /orders/{id}/payment/reinitiate`; batch-загрузка `PaymentTransaction` в список заказов (no N+1).
+  - Настройки UI (`_tab_settings_restaurant.html`): карточки провайдеров freedom_pay / kaspi / cloudpayments с полями merchant_id, api_key, secret_key, environment, is_primary.
+  - Модалка заказа (`_modals.html`): полная карточка `latest_payment_tx` — провайдер-бейдж, статус, сумма, ссылка, срок, кнопка «Отправить новую ссылку» для expired/failed.
+  - `admin-app.js`: `reinitiatePayment()`, `payTxStatusLabel/BadgeClass/BorderClass/ProviderLabel`, `loadPaymentConfigs()`.
+  - Тесты: `test_payment_adapters_kaspi.py` (HMAC verify + parse), `test_payment_expiry.py` (expiry job), `test_payment_initiation.py` (initiation service, mocked provider).
+
+---
+
 ## [Unreleased] — 2026-03-20
 
 ### Исправлено
