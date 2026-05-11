@@ -684,6 +684,28 @@ async def _handle_order(
             payload={"order_id": order.id, "status": order.status, "total_price": float(order.total_price or 0)},
         )
 
+    # Ночной предзаказ: если ресторан закрыт — сохранить как kind='night_preorder' и выйти
+    if org_row is not None:
+        from app.services.time_context import check_operational_status
+        _op_status = check_operational_status(
+            org_row.timezone,
+            org_row.schedule_json,
+            force_closed_until=org_row.force_closed_until,
+        )
+        if not _op_status.is_business_open:
+            order.kind = "night_preorder"
+            await db.flush()
+            reply_night = (
+                f"{ai_response.reply_text}\n\n"
+                "🌙 Сейчас мы закрыты, но записали ваш заказ. "
+                "Утром, как откроемся, оператор свяжется с вами для подтверждения."
+            )
+            return RouteResult(
+                reply_text=reply_night,
+                pending_order_id=order.id,
+                new_state=UserState.CHATTING,
+            )
+
     # Booking prepayment: если бронирование с предоплатой — пробуем сгенерировать ссылку сразу
     booking_payment_url: str | None = None
     if booking_row is not None and prepayment_status == "pending" and org_row is not None:
@@ -711,6 +733,7 @@ async def _handle_order(
     pickup_note = (ai_eff.pickup_time_note or "").strip()
     delivery_addr = (ai_eff.delivery_address or "").strip()
 
+    payment_url: str | None = None
     if not ot:
         reply += "\n\nКак удобнее получить заказ — **доставка**, **самовывоз** или **в зале**?"
         next_state = UserState.CHATTING
@@ -734,7 +757,6 @@ async def _handle_order(
         next_state = UserState.CHATTING
         log_hint = "уточняем время самовывоза"
     elif requires_big_order_prepay:
-        payment_url: str | None = None
         if org_row is not None:
             try:
                 from app.services.payment_initiation import initiate_payment, NoPaymentConfigError

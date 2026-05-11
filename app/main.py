@@ -24,6 +24,8 @@ from app.api.admin import auth_router as admin_auth_router
 from app.api.admin import router as admin_router
 from app.api.admin import ws_router as admin_ws_router
 from app.api.admin.intelligence import router as admin_intelligence_router
+from app.api.admin.marketing import loyalty_router as admin_loyalty_router
+from app.api.admin.marketing import router as admin_marketing_router
 from app.api.payment_webhook import router as payment_webhook_router
 from app.api.superadmin import router as superadmin_router
 from app.api.telegram_webhook import router as telegram_webhook_router
@@ -378,6 +380,37 @@ async def _apply_sqlite_startup_schema_patches() -> None:
     except Exception as exc:
         _ddl_warn(sql1 or "ix_orders_payment_provider", exc)
 
+    # P2-B: night preorders, reviews, marketing/loyalty
+    for sql_sqlite in (
+        "ALTER TABLE orders ADD COLUMN kind VARCHAR(30) NOT NULL DEFAULT 'regular'",
+        "ALTER TABLE organizations ADD COLUMN review_url_2gis VARCHAR(512)",
+        "ALTER TABLE users ADD COLUMN marketing_opt_out INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN ai_snoozed_until TIMESTAMP",
+    ):
+        try:
+            async with async_engine.begin() as conn:
+                await conn.execute(text(sql_sqlite))
+        except Exception as exc:
+            _ddl_warn(sql_sqlite, exc)
+
+    for sql_sqlite in (
+        "CREATE TABLE IF NOT EXISTS customer_feedback (id INTEGER PRIMARY KEY AUTOINCREMENT, organization_id INTEGER NOT NULL, user_id INTEGER, order_id INTEGER, rating VARCHAR(20) NOT NULL, text TEXT, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(organization_id) REFERENCES organizations(id) ON DELETE CASCADE, FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL, FOREIGN KEY(order_id) REFERENCES orders(id) ON DELETE SET NULL)",
+        "CREATE INDEX IF NOT EXISTS ix_customer_feedback_org_created ON customer_feedback (organization_id, created_at)",
+        "CREATE TABLE IF NOT EXISTS marketing_blasts (id INTEGER PRIMARY KEY AUTOINCREMENT, organization_id INTEGER NOT NULL, name VARCHAR(255) NOT NULL, segment_type VARCHAR(50) NOT NULL, message_text TEXT NOT NULL, template_name VARCHAR(120), status VARCHAR(30) NOT NULL DEFAULT 'draft', scheduled_for TIMESTAMP, sent_at TIMESTAMP, total_recipients INTEGER NOT NULL DEFAULT 0, sent_count INTEGER NOT NULL DEFAULT 0, failed_count INTEGER NOT NULL DEFAULT 0, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(organization_id) REFERENCES organizations(id) ON DELETE CASCADE)",
+        "CREATE INDEX IF NOT EXISTS ix_marketing_blasts_org_status ON marketing_blasts (organization_id, status)",
+        "CREATE TABLE IF NOT EXISTS marketing_blast_recipients (id INTEGER PRIMARY KEY AUTOINCREMENT, blast_id INTEGER NOT NULL, user_id INTEGER, phone VARCHAR(20) NOT NULL, status VARCHAR(20) NOT NULL DEFAULT 'pending', sent_at TIMESTAMP, FOREIGN KEY(blast_id) REFERENCES marketing_blasts(id) ON DELETE CASCADE, FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL)",
+        "CREATE INDEX IF NOT EXISTS ix_mbr_blast_status ON marketing_blast_recipients (blast_id, status)",
+        "CREATE TABLE IF NOT EXISTS loyalty_balance (id INTEGER PRIMARY KEY AUTOINCREMENT, organization_id INTEGER NOT NULL, user_id INTEGER NOT NULL, balance_points INTEGER NOT NULL DEFAULT 0, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(organization_id) REFERENCES organizations(id) ON DELETE CASCADE, FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE, UNIQUE(organization_id, user_id))",
+        "CREATE TABLE IF NOT EXISTS loyalty_transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, organization_id INTEGER NOT NULL, user_id INTEGER NOT NULL, order_id INTEGER, points INTEGER NOT NULL, kind VARCHAR(20) NOT NULL, note VARCHAR(512), created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(organization_id) REFERENCES organizations(id) ON DELETE CASCADE, FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE, FOREIGN KEY(order_id) REFERENCES orders(id) ON DELETE SET NULL)",
+        "CREATE INDEX IF NOT EXISTS ix_loyalty_tx_org_user_created ON loyalty_transactions (organization_id, user_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS ix_orders_org_kind ON orders (organization_id, kind)",
+    ):
+        try:
+            async with async_engine.begin() as conn:
+                await conn.execute(text(sql_sqlite))
+        except Exception as exc:
+            _ddl_warn(sql_sqlite, exc)
+
 
 async def _stop_list_sync_loop() -> None:
     """Фоново: стоп-листы iiko (каждые 15 мин) и опционально полный импорт меню (IIKO_MENU_AUTO_SYNC_INTERVAL_SECONDS)."""
@@ -639,6 +672,8 @@ app.include_router(payment_webhook_router, prefix="/api")
 app.include_router(admin_auth_router, prefix="/api")
 app.include_router(admin_router, prefix="/api")
 app.include_router(admin_intelligence_router, prefix="/api")
+app.include_router(admin_marketing_router, prefix="/api")
+app.include_router(admin_loyalty_router, prefix="/api")
 app.include_router(admin_ws_router, prefix="/api")
 app.include_router(superadmin_router, prefix="/api")
 app.include_router(telegram_webhook_router, prefix="/api")

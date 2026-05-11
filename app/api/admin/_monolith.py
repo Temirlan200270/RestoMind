@@ -1274,6 +1274,20 @@ async def patch_order_status(
             if sent_to_iiko:
                 locked.status = OrderStatus.SENT_TO_IIKO.value
                 locked.iiko_last_error = None
+                # Запрос отзыва через REVIEW_REQUEST_DELAY_SEC
+                try:
+                    from app.core.config import settings as _settings
+                    from app.services.task_queue import enqueue_job
+                    if _settings.review_requests_enabled:
+                        await enqueue_job(
+                            "send_review_request",
+                            _defer_by=_settings.review_request_delay_sec,
+                            org_id=org_id,
+                            order_id=locked.id,
+                            phone=phone_s,
+                        )
+                except Exception as _rev_exc:
+                    logger.warning("review_request enqueue failed: %s", _rev_exc)
                 if iiko_raw and isinstance(locked.items_json, dict):
                     ij = dict(locked.items_json)
                     raw_om = ij.get("order_meta")
@@ -2574,6 +2588,11 @@ class OrganizationProfilePatchBody(BaseModel):
         max_length=8000,
         description="Доп. дисклеймер при предоплате по порогу суммы (показывается гостю в WhatsApp)",
     )
+    review_url_2gis: str | None = Field(
+        default=None,
+        max_length=512,
+        description="Ссылка на 2GIS для отзывов",
+    )
 
 
 @router.get("/organization/prefs")
@@ -2669,6 +2688,7 @@ async def get_organization_profile(request: Request, db: AsyncSession = Depends(
         "whatsapp_phone_number_id": (org.whatsapp_phone_number_id or "").strip(),
         "telegram_ops_chat_id": (getattr(org, "telegram_ops_chat_id", None) or "").strip(),
         "prepayment_legal_text": (getattr(org, "prepayment_legal_text", None) or "").strip(),
+        "review_url_2gis": (getattr(org, "review_url_2gis", None) or "").strip(),
         "schedule_json": parse_schedule_json(getattr(org, "schedule_json", None)).model_dump(mode="json"),
         "operational_label": op.human_label,
         "is_business_open": op.is_business_open,
@@ -2710,6 +2730,9 @@ async def patch_organization_profile(
     if body.prepayment_legal_text is not None:
         raw = (body.prepayment_legal_text or "").strip()
         org.prepayment_legal_text = raw if raw else None
+    if body.review_url_2gis is not None:
+        raw_url = (body.review_url_2gis or "").strip()
+        org.review_url_2gis = raw_url if raw_url else None
     await db.commit()
     await db.refresh(org)
     op = check_operational_status(
@@ -2727,6 +2750,7 @@ async def patch_organization_profile(
         "whatsapp_phone_number_id": (org.whatsapp_phone_number_id or "").strip(),
         "telegram_ops_chat_id": (getattr(org, "telegram_ops_chat_id", None) or "").strip(),
         "prepayment_legal_text": (getattr(org, "prepayment_legal_text", None) or "").strip(),
+        "review_url_2gis": (getattr(org, "review_url_2gis", None) or "").strip(),
         "schedule_json": parse_schedule_json(getattr(org, "schedule_json", None)).model_dump(mode="json"),
         "operational_label": op.human_label,
         "is_business_open": op.is_business_open,

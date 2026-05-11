@@ -11,6 +11,7 @@ from typing import Any
 
 from app.core.config import settings
 from app.services.billing_rollup import billing_usage_daily_scheduled_tick
+from app.services.night_preorders import morning_preorders_tick
 from app.services.owner_weekly_digest import owner_digest_scheduled_tick
 from app.services.payment_notify import run_payment_received_customer_notify
 
@@ -77,6 +78,26 @@ async def payment_notify_customer(
     await run_payment_received_customer_notify(order_id)
 
 
+async def send_review_request(
+    ctx: dict[str, Any],
+    *,
+    org_id: int,
+    order_id: int,
+    phone: str,
+) -> None:
+    from app.services.review_requests import run_send_review_request
+    await run_send_review_request(org_id=org_id, order_id=order_id, phone=phone)
+
+
+async def send_blast_batch(
+    ctx: dict[str, Any],
+    *,
+    blast_id: int,
+) -> None:
+    from app.services.marketing import run_send_blast_batch
+    await run_send_blast_batch(blast_id=blast_id)
+
+
 class WorkerSettings:
     # Это имена задач, которые мы enqueue_job("name", **kwargs) будем вызывать.
     # Важно: web-процесс ставит задачи в эту же очередь через task_queue._queue_name().
@@ -86,12 +107,16 @@ class WorkerSettings:
         whatsapp_process_voice,
         whatsapp_process_statuses,
         payment_notify_customer,
+        send_review_request,
+        send_blast_batch,
+        morning_preorders_tick,
     ]
-    # Digest: 4× в час; биллинг: суточный rollup за вчера (UTC) раз в день.
+    # Digest: 4× в час; биллинг: суточный rollup; ночные предзаказы: каждые 5 мин.
     cron_jobs = tuple(
         [
             cron(owner_digest_scheduled_tick, minute={0, 15, 30, 45}),
             cron(billing_usage_daily_scheduled_tick, hour=0, minute=12),
+            cron(morning_preorders_tick, minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55}),
         ]
         if cron is not None
         else [],

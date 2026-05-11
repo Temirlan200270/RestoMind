@@ -545,6 +545,47 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("OWNER_SUBSCRIPTION_MONTHLY_KZT", "owner_subscription_monthly_kzt"),
     )
 
+    # --- Отзывы после заказа ---
+    review_requests_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("REVIEW_REQUESTS_ENABLED", "review_requests_enabled"),
+    )
+    review_request_delay_sec: int = Field(
+        default=1800,
+        ge=60,
+        validation_alias=AliasChoices("REVIEW_REQUEST_DELAY_SEC", "review_request_delay_sec"),
+        description="Задержка перед запросом отзыва после SENT_TO_IIKO/COMPLETED (сек; по умолчанию 30 мин)",
+    )
+
+    # --- Ночные предзаказы / смена ---
+    shift_alert_timeout_min: int = Field(
+        default=60,
+        ge=5,
+        validation_alias=AliasChoices("SHIFT_ALERT_TIMEOUT_MIN", "shift_alert_timeout_min"),
+        description="Через сколько минут после открытия алертовать суперадмина, если никто не нажал «на смене»",
+    )
+
+    # --- Лояльность ---
+    loyalty_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("LOYALTY_ENABLED", "loyalty_enabled"),
+    )
+    loyalty_points_per_kzt: int = Field(
+        default=100,
+        ge=1,
+        validation_alias=AliasChoices("LOYALTY_POINTS_PER_KZT", "loyalty_points_per_kzt"),
+        description="Сколько тенге нужно потратить, чтобы получить 1 балл (по умолчанию 100 KZT = 1 балл)",
+    )
+
+    # --- Маркетинговые рассылки ---
+    marketing_blast_rate_per_min: int = Field(
+        default=60,
+        ge=1,
+        le=500,
+        validation_alias=AliasChoices("MARKETING_BLAST_RATE_PER_MIN", "marketing_blast_rate_per_min"),
+        description="Максимум WhatsApp-сообщений в минуту при рассылке",
+    )
+
     # --- Очередь задач (ARQ + Redis) ---
     arq_enabled: bool = Field(
         default=False,
