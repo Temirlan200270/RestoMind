@@ -10,6 +10,7 @@ import re
 from dataclasses import dataclass, field
 
 from app.db.models import MenuItem
+from app.services.sales_strategy_engine import apply_engine_rules_first
 from app.services.upsell_utils import (
     cart_iiko_ids,
     collect_cart_tag_profile,
@@ -168,14 +169,9 @@ def build_sales_strategy(
     """
     meta = order_meta if isinstance(order_meta, dict) else {}
 
-    if _trace_len(meta) >= 2:
-        return StrategyDecision(
-            goal="close_order",
-            restriction=(
-                "Уже было несколько рекомендаций в этом заказе. НЕ предлагай новые блюда — "
-                "помоги завершить оформление (тип получения, оплата, уточнения)."
-            ),
-        )
+    engine_first = apply_engine_rules_first(meta)
+    if engine_first is not None:
+        return engine_first
 
     offered = _offered_names(meta)
     rejected = _rejected_names(meta)

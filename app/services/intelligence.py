@@ -197,7 +197,6 @@ async def revenue_orders_summary(db: AsyncSession, org_id: int, period: str) -> 
 def build_intelligence_answer(question: str, intent: dict[str, str], summary: dict[str, Any]) -> str:
     lang = intent.get("language") or "ru"
     cur = summary["current"]
-    prev = summary["previous"]
     ch = summary["changes"]
     if lang == "en":
         lines = [

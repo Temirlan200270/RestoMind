@@ -4,6 +4,7 @@ import pytest
 from unittest.mock import AsyncMock
 
 from app.api.admin import _monolith as admin_api
+from app.api.admin import chats as chats_api
 from app.db.models import ChatLog, MenuItem, Order, OrderStatus, Organization, User
 from app.services.order_logic import compute_fee_lines
 
@@ -15,7 +16,7 @@ class DummyRequest:
 
 @pytest.mark.asyncio
 async def test_chat_triage_close_and_filters(db_session, monkeypatch) -> None:
-    monkeypatch.setattr(admin_api, "publish_event", AsyncMock())
+    monkeypatch.setattr(chats_api, "publish_event", AsyncMock())
 
     org = Organization(id=1, name="Org", slug="org")
     user = User(organization_id=1, phone="+77001112233", name="A")
@@ -25,10 +26,10 @@ async def test_chat_triage_close_and_filters(db_session, monkeypatch) -> None:
     await db_session.flush()
 
     req = DummyRequest({"organization_id": 1, "staff_id": 7})
-    await admin_api.close_chat(req, "+77001112233", db_session)
+    await chats_api.close_chat(req, "+77001112233", db_session)
 
-    active = await admin_api.list_chats_sidebar(req, limit=50, cursor_at=None, cursor_id=None, mode="active", db=db_session)
-    closed = await admin_api.list_chats_sidebar(req, limit=50, cursor_at=None, cursor_id=None, mode="closed", db=db_session)
+    active = await chats_api.list_chats_sidebar(req, limit=50, cursor_at=None, cursor_id=None, mode="active", db=db_session)
+    closed = await chats_api.list_chats_sidebar(req, limit=50, cursor_at=None, cursor_id=None, mode="closed", db=db_session)
 
     assert active["chats"] == []
     assert closed["chats"][0]["triageState"] == "closed"

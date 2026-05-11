@@ -9,6 +9,9 @@
 Временная пауза ИИ (User.ai_snoozed_until) и персистентный ai_paused обрабатываются
 **до** вызова LLM в ``process_message`` (WhatsApp) / ``test_bot`` (админка), а не здесь:
 ``route_intent`` вызывается уже после ответа модели.
+
+E11: правила допродаж до LLM — ``app.services.sales_strategy_engine`` + ``build_sales_strategy``
+(вызов из вебхука до ``call_openai``); здесь остаётся merge recommendation в order_meta.
 """
 
 import logging

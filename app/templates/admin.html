@@ -74,14 +74,16 @@
 
             {# Settings sections — lazy mount (один флаг на все подстраницы настроек). #}
             <template x-if="lazyTabMount.settings">
-            {% include "screens/_tab_settings_connections.html" %}
-            {% include "screens/_tab_settings_branding.html" %}
-            {% include "screens/_tab_settings_restaurant.html" %}
-            {% include "screens/_tab_settings_smart_sales.html" %}
-            {% include "screens/_tab_settings_health.html" %}
-            {% include "screens/_tab_settings_technical.html" %}
-            {% include "screens/_tab_settings_bot_test.html" %}
-            {% include "screens/_tab_settings_team.html" %}
+            <div class="contents">
+                {% include "screens/_tab_settings_connections.html" %}
+                {% include "screens/_tab_settings_branding.html" %}
+                {% include "screens/_tab_settings_restaurant.html" %}
+                {% include "screens/_tab_settings_smart_sales.html" %}
+                {% include "screens/_tab_settings_health.html" %}
+                {% include "screens/_tab_settings_technical.html" %}
+                {% include "screens/_tab_settings_bot_test.html" %}
+                {% include "screens/_tab_settings_team.html" %}
+            </div>
             </template>
 
             {# Screen-local overlays #}

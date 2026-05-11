@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.core.config import settings
 from app.services.billing_rollup import billing_usage_daily_scheduled_tick
 from app.services.owner_weekly_digest import owner_digest_scheduled_tick
 from app.services.payment_notify import run_payment_received_customer_notify
@@ -78,6 +79,8 @@ async def payment_notify_customer(
 
 class WorkerSettings:
     # Это имена задач, которые мы enqueue_job("name", **kwargs) будем вызывать.
+    # Важно: web-процесс ставит задачи в эту же очередь через task_queue._queue_name().
+    queue_name = (settings.arq_queue_name or "restomind").strip() or "restomind"
     functions = [
         whatsapp_process_text,
         whatsapp_process_voice,

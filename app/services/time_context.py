@@ -158,7 +158,6 @@ def check_operational_status(
     force_closed_reason: str = "",
 ) -> OperationalStatus:
     norm = zoneinfo_or_default(timezone_name, default=DEFAULT_ORG_TIMEZONE)
-    tz = norm.name
     z = norm.zone
     now_utc = now if now is not None else datetime.now(tz=ZoneInfo("UTC"))
     now_local = now_utc.astimezone(z)

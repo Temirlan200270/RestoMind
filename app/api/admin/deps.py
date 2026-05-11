@@ -179,6 +179,17 @@ def admin_org_from_session(request: Request) -> int:
     return int(settings.default_organization_id)
 
 
+def admin_actor_key(request: Request) -> str:
+    """Стабильный ключ действующего администратора для аудита/triage (staff id или email)."""
+    sid = request.session.get("staff_id")
+    if sid is not None:
+        return f"staff:{sid}"
+    email = request.session.get("email") or request.session.get("staff_email")
+    if email:
+        return f"staff:{email}"
+    return "staff:session"
+
+
 async def _order_in_org(db: AsyncSession, order_id: int, org_id: int) -> Order:
     """
     Заказ принадлежит филиалу: либо Order.organization_id совпадает, либо (legacy) NULL и user в этом org.

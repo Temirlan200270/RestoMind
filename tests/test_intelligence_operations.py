@@ -30,7 +30,6 @@ async def test_revenue_orders_summary_is_tenant_scoped(db_session):
     if duration.total_seconds() <= 0:
         duration = timedelta(hours=1)
     prev_start = today_start - duration
-    prev_end = today_start
     cur_mid = today_start + (duration / 2)
     prev_mid = prev_start + (duration / 2)
     db_session.add_all(

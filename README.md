@@ -119,6 +119,7 @@ python -m arq app.worker.WorkerSettings
 ```
 
 Имя очереди по умолчанию — `restomind` (`ARQ_QUEUE_NAME`). В `APP_ENV=production|staging` приложение при старте проверяет, что к Redis можно подключиться и ARQ включён; без worker задачи из вебхуков не выполнятся.
+Worker слушает ту же очередь, что и web-процесс использует для `enqueue_job`; статус можно проверить в админке через `GET /api/admin/system/task-queue-health`.
 
 ## Структура проекта
 
@@ -212,6 +213,7 @@ RestoMind/
 - `GET /`, `GET /admin` — HTML админ-панели  
 - `GET /request-access` — публичная форма заявки  
 - `GET /superadmin` — UI панели владельца (доступ проверяется API)  
+- `GET /api/admin/system/task-queue-health` — диагностика Redis / ARQ / worker для админки
 
 ## Режимы работы
 
@@ -223,6 +225,11 @@ RestoMind/
 | `REDIS_ENABLED` | `true` | Redis сервер |
 | `REDIS_MEMORY_ONLY` | `true` | Принудительно in-memory: **не** подключаться к Redis (приоритет над `REDIS_ENABLED`; для тестов и при исчерпании квоты Upstash) |
 | `REDIS_URL` | *(пусто)* | Если задан — полный URL подключения (приоритет над `REDIS_HOST`/`PORT`). Для Upstash: строка **Redis Connect** `rediss://…` (нужен TCP для Pub/Sub), не REST API |
+| `ARQ_ENABLED` | `false` | Включает постановку фоновых задач в ARQ; в `production/staging` должен быть `true` |
+| `ARQ_QUEUE_NAME` | `restomind` | Имя очереди ARQ; web и worker используют одно значение |
+| `WHATSAPP_FAST_ACK_ENABLED` | `true` | Safe fast-path: короткое «спасибо» отвечает без LLM |
+| `PIPELINE_TIMING_ENABLED` | `true` | Логирует `rm_stage_ms` по этапам inbound-пайплайна |
+| `RESTAURANT_MENU_CTX_REDIS_TTL_SEC` | `90` | TTL Redis-кэша строки меню для AI-контекста |
 
 ## Разработка
 

@@ -5302,8 +5302,8 @@ function adminMixinLiveChat() {
         },
 
         /**
-         * TODO(agent2): выровнять путь/контракт с бэкендом — ожидается `GET /api/admin/system/task-queue-health`
-         * → `{ redis: 'ok'|'degraded'|'down', arq: '...', worker: '...' }`. Пока безопасный no-op при 404/ошибке.
+         * E5: health очереди (`GET /api/admin/system/task-queue-health`).
+         * Безопасный no-op при ошибке, чтобы диагностика не ломала основной UI.
          */
         async refreshTaskQueueHealth() {
             try {

@@ -19,6 +19,7 @@ from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.services.restaurant_context_cache import redis_cached_menu_context_string
 from app.data.plovxana_menu import build_mock_menu_dict
 from app.db.models import MenuItem, Order, OrderStatus, Organization, PackagingRule
 from app.services.menu_embeddings import embed_query_vector, top_k_menu_items_by_similarity
@@ -852,6 +853,15 @@ _MENU_CTX_TTL = 90.0  # seconds
 
 def invalidate_menu_context_cache(organization_id: int) -> None:
     _menu_ctx_cache.pop(organization_id, None)
+    try:
+        import asyncio
+
+        from app.services.restaurant_context_cache import redis_bump_menu_ctx_cache_version
+
+        loop = asyncio.get_running_loop()
+        loop.create_task(redis_bump_menu_ctx_cache_version(int(organization_id)))
+    except RuntimeError:
+        pass
 
 
 async def build_menu_context_for_ai(menu_items: list[MenuItem], user_query: str) -> str:
@@ -865,10 +875,15 @@ async def build_menu_context_for_ai(menu_items: list[MenuItem], user_query: str)
             cached = _menu_ctx_cache.get(org_id)
             if cached and (time.monotonic() - cached[1]) < _MENU_CTX_TTL:
                 return cached[0]
-        ctx = build_menu_context(menu_items)
+
+        async def _materialize_full_menu() -> str:
+            return build_menu_context(menu_items)
+
         if org_id is not None:
+            ctx = await redis_cached_menu_context_string(org_id, _materialize_full_menu)
             _menu_ctx_cache[org_id] = (ctx, time.monotonic())
-        return ctx
+            return ctx
+        return build_menu_context(menu_items)
     if len(menu_items) < int(settings.menu_rag_min_items):
         return build_menu_context(menu_items)
     q = (user_query or "").strip()

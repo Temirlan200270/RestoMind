@@ -13,7 +13,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from sqlalchemy import select
 
-from app.api.admin._monolith import TextRequest, admin_send_message
+from app.api.admin.chats import admin_send_message
+from app.api.admin.schemas import TextRequest
 from app.db.models import ChatLog, Organization, User
 
 
@@ -37,7 +38,7 @@ async def test_admin_send_message_persists_log_before_send_on_success(db_session
         captured_log_state["provider_message_id"] = row.provider_message_id if row else None
         return WaResult()
 
-    monkeypatch.setattr("app.api.admin._monolith.send_message", AsyncMock(side_effect=fake_send_message))
+    monkeypatch.setattr("app.api.admin.chats.send_message", AsyncMock(side_effect=fake_send_message))
 
     req = MagicMock()
     req.session = {"organization_id": 1}
@@ -73,7 +74,7 @@ async def test_admin_send_message_records_failed_on_provider_error(db_session, m
         error = {"code": 131000, "message": "boom"}
 
     monkeypatch.setattr(
-        "app.api.admin._monolith.send_message",
+        "app.api.admin.chats.send_message",
         AsyncMock(return_value=WaResult()),
     )
 

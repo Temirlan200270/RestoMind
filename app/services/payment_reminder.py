@@ -10,10 +10,9 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Order, Organization, PaymentTransaction, PaymentTxStatus, User
+from app.db.models import Order, Organization, PaymentTransaction, User
 from app.services.payment_initiation import NoPaymentConfigError, re_initiate_payment
 
 logger = logging.getLogger(__name__)

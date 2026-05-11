@@ -13,10 +13,9 @@ from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from zoneinfo import ZoneInfo
 
 from app.core.config import settings
-from app.db.models import ChatLog, FailedTask, Order, OrderStatus, Organization, User
+from app.db.models import ChatLog, FailedTask, Order, OrderStatus, Organization
 from app.services.timezones import zoneinfo_or_default
 from app.services.intelligence_analytics import (
     list_recommendation_events,

@@ -3,7 +3,6 @@
 Фабрика сессий для Dependency Injection в FastAPI.
 """
 
-import json
 import logging
 import ssl
 from collections.abc import AsyncGenerator

@@ -1,7 +1,5 @@
 """Тарификация v2: контейнеры и доставка."""
 
-import pytest
-
 from app.schemas.ai_schemas import AIBrainResponse, OrderItem
 from app.services.order_logic import (
     ValidatedOrder,

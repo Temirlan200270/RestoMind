@@ -20,7 +20,7 @@
 - [x] **WhatsApp inbound dedupe durable handoff:** атомарный старт в БД (`try_start_whatsapp_inbound_in_db`) в [`process_with_retry`](app/api/webhooks.py) до обработки; `mark_whatsapp_inbound_done` / `failed` + commit; Redis [`redis_whatsapp_inbound_done_cache_hit`](app/services/whatsapp_idempotency.py) только после успешного commit `done` (раннего Redis‑preclaim до DB‑claim нет).
 - [x] **OpenAI timeout masking → retry:** transient‑ошибки (`RateLimitError | APIConnectionError | APITimeoutError | APIError 429/5xx`) превращаются в `TransientAiError` в [`app/services/ai_engine/openai_p.py:267-271`](app/services/ai_engine/openai_p.py); диспетчер [`app/services/ai_brain.py:247`](app/services/ai_brain.py) пробрасывает их (`raise_on_transient=True` по умолчанию); внешний цикл `_enqueue_processing` ([`app/api/webhooks.py:790-813`](app/api/webhooks.py), `MAX_RETRIES=3`, exp back‑off) делает повтор. Аналогично в `gemini_p.py`.
 - [x] **Source of Truth для dialog state:** переходы из оплаты/подтверждения зеркалятся в БД через [`sync_user_dialog_state_to_db_then_redis`](app/services/dialog_mgr.py) (вызовы в [`app/api/webhooks.py`](app/api/webhooks.py): prepay → CHATTING, CONFIRMING_ORDER, выход из `AWAITING_ORDER_PAYMENT` / `CONFIRMING_ORDER` в CHATTING). Главный путь `route_intent` остаётся DB‑first в транзакции → commit → Redis.
-- [x] **Operator outbound: отправка наружу только после фиксации ChatLog:** в [`admin_send_message`](app/api/admin/_monolith.py) и [`resend_failed_chat_message`](app/api/admin/_monolith.py) сначала пишется `ChatLog(delivery_status='sending')` + commit, затем `await send_message(...)` в WhatsApp, потом [`finalize_outbound_delivery`](app/services/chat_delivery.py) обновляет `delivery_status` и `provider_message_id` + commit; при ошибке провайдера статус становится `failed`, запись остаётся в БД. Регресс: [`tests/test_admin_operator_outbound.py`](tests/test_admin_operator_outbound.py), [`tests/test_admin_multitenant_ws_resend.py`](tests/test_admin_multitenant_ws_resend.py).
+- [x] **Operator outbound: отправка наружу только после фиксации ChatLog:** в [`admin_send_message`](app/api/admin/chats.py) и [`resend_failed_chat_message`](app/api/admin/chats.py) сначала пишется `ChatLog(delivery_status='sending')` + commit, затем `await send_message(...)` в WhatsApp, потом [`finalize_outbound_delivery`](app/services/chat_delivery.py) обновляет `delivery_status` и `provider_message_id` + commit; при ошибке провайдера статус становится `failed`, запись остаётся в БД. Регресс: [`tests/test_admin_operator_outbound.py`](tests/test_admin_operator_outbound.py), [`tests/test_admin_multitenant_ws_resend.py`](tests/test_admin_multitenant_ws_resend.py).
 - [x] **UI: race-condition в заказах (REST vs WS):** в [`app/static/js/admin-app.js:6159-6210`](app/static/js/admin-app.js) реализован seq‑guard (`_ordersLoadSeq` отбрасывает устаревшие ответы REST) и merge по `row_version` (REST не перетирает более свежие WS‑данные).
 - [x] **Admin UI refactor (split + lazy DOM):**
   - [x] Первая фаза — статичный split: [`app/templates/admin.html`](app/templates/admin.html) сократился до ~75 строк и собирается из 27 экранов в [`app/templates/screens/`](app/templates/screens/) через `{% include %}` (login, sidebar, header, banners, 11 табов, 8 экранов настроек, modals, bottom_nav).
@@ -28,10 +28,10 @@
 
 ## 🟡 P1: Ближайший спринт (Core SaaS)
 
-- [ ] **E0.1: добить раскол временного `_monolith.py`** на подмодули `app/api/admin/` (цель: файлы ≤ ~1500 строк, без изменения поведения). Прогресс: вынесены [`menu_bulk.py`](app/api/admin/menu_bulk.py), [`knowledge.py`](app/api/admin/knowledge.py), [`branding.py`](app/api/admin/branding.py), [`bookings.py`](app/api/admin/bookings.py) (`GET/PATCH /bookings`), [`customers.py`](app/api/admin/customers.py) (`/customers/{phone}/summary|note|ai-pause`), [`system.py`](app/api/admin/system.py) (`/system/task-queue-health`); монолит → продолжаем.
+- [ ] **E0.1: добить раскол временного `_monolith.py`** на подмодули `app/api/admin/` (цель: файлы ≤ ~1500 строк, без изменения поведения). Прогресс: вынесены [`menu_bulk.py`](app/api/admin/menu_bulk.py), [`knowledge.py`](app/api/admin/knowledge.py), [`branding.py`](app/api/admin/branding.py), [`bookings.py`](app/api/admin/bookings.py) (`GET/PATCH /bookings`), [`customers.py`](app/api/admin/customers.py) (`/customers/{phone}/summary|note|ai-pause`), [`chats.py`](app/api/admin/chats.py) (`/chats*`, triage, операторская отправка), [`system.py`](app/api/admin/system.py) (`/system/task-queue-health`); монолит → продолжаем.
 - [x] **E2.2 Branding (backend):** [`Tenant.brand_name`/`brand_color_hex`/`brand_logo_url`](app/db/models.py) + миграция [`20260511_e22_tenant_branding`](alembic/versions/20260511_e22_tenant_branding.py); модуль [`app/api/admin/branding.py`](app/api/admin/branding.py) — `GET /api/admin/branding`, `PATCH /api/admin/branding` (HEX-валидация, тримминг имени), `POST /api/admin/branding/logo` (PNG/JPEG ≤ 1 МБ, сохранение в `app/static/uploads/branding/tenant-<id>.<ext>`, cache-buster в URL). `GET /api/admin/auth/me → branding` читает данные из `Tenant` (контракт совместим с UI). Регресс: [`tests/test_admin_branding.py`](tests/test_admin_branding.py).
 - [x] **E2.3 Billing (минимум):** `Tenant.plan_status`, таблица `billing_usage_daily`, ежедневный rollup (ARQ cron в [`app/worker.py`](app/worker.py)); блокировка login/`auth`/select-org и ранний выход WhatsApp webhook при `plan_status=suspended`; опциональное поле `billing_blocked` в `GET /auth/me`. Миграция [`20260512_e23_billing_minimal`](alembic/versions/20260512_e23_billing_minimal.py). Полноценный Stripe/лимиты по тарифу — вне scope.
-- [x] **E5 ARQ-only:** убран fallback на `BackgroundTasks` в [`app/services/task_queue.py`](app/services/task_queue.py); в `APP_ENV=production|staging` старт web-процесса проверяет Redis+ARQ; worker обязателен в проде.
+- [x] **E5 ARQ-only:** убран fallback на `BackgroundTasks` в [`app/services/task_queue.py`](app/services/task_queue.py); в `APP_ENV=production|staging` старт web-процесса проверяет Redis+ARQ; worker обязателен в проде. Web enqueue и [`WorkerSettings`](app/worker.py) используют один `ARQ_QUEUE_NAME` (`restomind` по умолчанию).
 - [x] **E5 диагностика очереди (light):** `GET /api/admin/system/task-queue-health` ([`app/api/admin/system.py`](app/api/admin/system.py)) + хелпер [`app/services/task_queue_health.py`](app/services/task_queue_health.py) — структурированный статус Redis/ARQ/worker (heartbeat по `<queue>:health-check`). Структурный лог `event=task_queue_enqueue` на каждый enqueue в [`app/services/task_queue.py`](app/services/task_queue.py).
 
 ## 🟠 P1.5: UX Density & AI Trust
@@ -57,7 +57,7 @@
 ## 🟢 P2: Развитие (Growth)
 
 - [x] **E1 хвост (платежи):** HMAC-SHA256/MD5 верификация для Freedom Pay (`freedom_pay.py` — MD5 pg_sig + FreedomPayInitiator) и Kaspi Pay (`kaspi.py` — HMAC-SHA256, `sha256=` prefix); per-org `payment_config_json` (миграции `20260509_payment_tx_config` + `20260510_org_pay_cfg_json`); UI CRUD в настройках (`_tab_settings_restaurant.html`, `_tab_settings_connections.html`). Остаток: уточнить заголовки подписи по актуальным докам провайдеров + `E14` генерация ссылок на оплату.
-- [ ] **E14 авто‑ссылка на оплату:** генерация ссылок в `intent_router` для предоплаты.
+- [ ] **E14 авто‑ссылка на оплату (генерация payment URL / deep link):** генерация ссылок в `intent_router` для предоплаты — **не** путать с intake webhook; провайдерские ключи уже в `payment_config_json`.
 - [ ] **E8 WhatsApp интерактив:** кнопки Meta templates + (опционально) картинка‑чек.
 - [ ] **Telegram оператор‑бот:** управление диалогами из Telegram (эскалации/ответы/уведомления). _Wishlist Темира #12._
 - [x] **Экстренное закрытие ресторана:** причина + длительность паузы + корректное поведение вне рабочего времени.
@@ -68,7 +68,7 @@
 
 ## ⚪ P3: Бэклог и R&D
 
-- [ ] **E11 Strategy Engine:** вынести upsell-логику из промпта в Python‑правила.
+- [ ] **E11 Strategy Engine (продолжение):** расширить Python‑правила (ещё эвристики из промпта / приоритеты по часам); опционально дергать движок из дополнительных точек после A/B. **MVP сделан:** `app/services/sales_strategy_engine.py` (лимит `recommendation_trace`), метрики этапов `rm_stage_ms`, кэш контекста ресторана (расписание + Redis меню).
 - [ ] **E12 RAG по меню:** семантический поиск для больших каталогов.
 - [ ] **BI по iiko:** продажи по времени суток и автоподстройка upsell. _Wishlist Темира #16._
 - [ ] **Авто‑рассылка из iiko по клиентам** (Wishlist Темира R1): забирать клиентскую базу из iiko (телефоны, история заказов, сегменты), синхронизировать в `User`/`marketing_segment`, и далее через тот же канал рассылок (см. P2 «Горячая рассылка»). Зависимость: завершённый клиент iiko + соглашения по PII.
@@ -84,6 +84,7 @@
 - [x] **Restaurant state snapshots:** `RestaurantStateSnapshot` and `GET /api/admin/intelligence/digital-twin`.
 - [x] **Digital Twin MVP:** separate admin tab and operator-capacity simulation engine.
 - [ ] Predictive analytics: demand, cancellations, overload forecasting.
+- [ ] **Inbound latency baselines:** агрегация `rm_stage_ms` (dedupe/preflight/context/llm/route/reply) в метриках/алертах; пороги p95 по LLM и route (на базе `pipeline_timing` / `restomind.pipeline`).
 - [ ] SLA monitor: response-time degradation detection. _Wishlist Темира #18 (часть)._
 - [ ] Operator efficiency analytics. _Wishlist Темира #18 (часть)._
 - [ ] AI incident detection: abnormal spikes, failures, stop-list impact. _Wishlist Темира #18 (часть)._

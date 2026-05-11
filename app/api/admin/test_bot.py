@@ -125,7 +125,6 @@ async def test_bot(request: Request, body: TextRequest) -> dict:
             strategy_ctx = format_strategy_for_prompt(decision)
             sales_gastro_hint = (decision.gastro_hint or "").strip()
             sales_target_iiko_ids = list(decision.target_iiko_ids or [])
-        u_meta = u_row.meta_json if u_row is not None else None
     # DB-сессия закрыта — все данные в памяти
 
     # ФАЗА 2: LLM-вызов вне DB-сессии (не держим соединение в пуле)
