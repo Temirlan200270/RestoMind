@@ -45,6 +45,46 @@ async def test_login_rejects_suspended_tenant(asgi_memory_client) -> None:
 
 
 @pytest.mark.asyncio
+async def test_active_session_admin_api_rejects_after_tenant_suspended(asgi_memory_client) -> None:
+    ac, sf = asgi_memory_client
+    async with sf() as db:
+        t = Tenant(name="LaterSuspended", plan_status="active")
+        db.add(t)
+        await db.flush()
+        o = Organization(name="Branch", slug="later-sus", tenant_id=int(t.id))
+        db.add(o)
+        await db.flush()
+        db.add(
+            StaffUser(
+                organization_id=int(o.id),
+                tenant_owner_id=int(t.id),
+                email="later@sus.kz",
+                password_hash=hash_password("pw12345678"),
+                role=StaffRole.ADMIN.value,
+                is_active=True,
+                is_superadmin=False,
+            ),
+        )
+        await db.commit()
+
+    login = await ac.post(
+        "/api/admin/auth/login",
+        json={"email": "later@sus.kz", "password": "pw12345678"},
+    )
+    assert login.status_code == 200
+
+    async with sf() as db:
+        tenant = await db.scalar(select(Tenant).where(Tenant.name == "LaterSuspended"))
+        assert tenant is not None
+        tenant.plan_status = "suspended"
+        await db.commit()
+
+    r = await ac.get("/api/admin/bookings")
+    assert r.status_code == 403
+    assert "биллинг" in (r.json().get("detail") or "").lower()
+
+
+@pytest.mark.asyncio
 async def test_rollup_billing_usage_daily(db_session) -> None:
     t = Tenant(name="RollT")
     db_session.add(t)

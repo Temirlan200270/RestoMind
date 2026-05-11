@@ -29,17 +29,21 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _as_utc_aware(dt: datetime) -> datetime:
+    """SQLite can return naive datetimes for timezone=True columns; treat them as UTC."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 def ai_snooze_is_active(row: User | None, *, now: datetime | None = None) -> bool:
     if row is None:
         return False
     until = getattr(row, "ai_snoozed_until", None)
     if until is None:
         return False
-    t = now or utc_now()
-    try:
-        return bool(until > t)
-    except TypeError:
-        return False
+    t = _as_utc_aware(now or utc_now())
+    return bool(_as_utc_aware(until) > t)
 
 
 def snooze_until_for_preset(preset: AiSnoozePreset, org_timezone: str | None) -> datetime | None:
@@ -71,7 +75,7 @@ async def clear_ai_snooze_if_expired(db: AsyncSession, user: User, *, now: datet
     until = getattr(user, "ai_snoozed_until", None)
     if until is None:
         return
-    t = now or utc_now()
-    if until <= t:
+    t = _as_utc_aware(now or utc_now())
+    if _as_utc_aware(until) <= t:
         user.ai_snoozed_until = None
         await db.flush()

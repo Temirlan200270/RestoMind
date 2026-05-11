@@ -573,6 +573,11 @@ function adminMixinState() {
         },
 
         currentTab: 'dashboard',
+        /** P0 lazy DOM: монтировать разметку тяжёлых вкладок после первого визита (`admin.html` + `template x-if`). */
+        lazyTabMount: { chats: false, orders: false, settings: false },
+        /** E5 UI: ответ `GET /api/admin/system/task-queue-health` (если есть на бэкенде). */
+        taskQueueHealth: null,
+        taskQueueHealthChecked: false,
         /** Каталог vs стоп-лист внутри вкладки «Меню» (Phase U5). */
         menuView: 'catalog',
         /** Загрузка данных при смене вкладки (избегаем общего имени `loading` — конфликт миксинов). */
@@ -5289,6 +5294,42 @@ function adminMixinLiveChat() {
          * @param {string} tabId
          * @param {{ settingsTab?: string }} [opts]
          */
+        _touchLazyTabMount() {
+            const t = this.currentTab;
+            if (t === 'chats') this.lazyTabMount.chats = true;
+            else if (t === 'orders') this.lazyTabMount.orders = true;
+            else if (t === 'settings') this.lazyTabMount.settings = true;
+        },
+
+        /**
+         * TODO(agent2): выровнять путь/контракт с бэкендом — ожидается `GET /api/admin/system/task-queue-health`
+         * → `{ redis: 'ok'|'degraded'|'down', arq: '...', worker: '...' }`. Пока безопасный no-op при 404/ошибке.
+         */
+        async refreshTaskQueueHealth() {
+            try {
+                const res = await this.apiFetch('/api/admin/system/task-queue-health');
+                this.taskQueueHealthChecked = true;
+                if (!res.ok) {
+                    this.taskQueueHealth = null;
+                    return;
+                }
+                const data = await res.json();
+                this.taskQueueHealth = data && typeof data === 'object' ? data : null;
+            } catch (_e) {
+                this.taskQueueHealthChecked = true;
+                this.taskQueueHealth = null;
+            }
+        },
+
+        /** Класс бейджа для поля статуса очереди (redis/arq/worker). */
+        taskQueueStatusClass(raw) {
+            const s = String(raw || '').toLowerCase();
+            if (s === 'ok') return 'ds-badge-success';
+            if (s === 'degraded') return 'ds-badge-warning-soft';
+            if (s === 'down') return 'ds-badge-danger';
+            return 'ds-badge-neutral';
+        },
+
         navigateToTab(tabId, opts) {
             const o = opts && typeof opts === 'object' ? opts : {};
             this.currentTab = tabId;
@@ -6155,9 +6196,12 @@ function adminMixinDataChartsSettings() {
                 this.menuBulkSelectedIds = [];
                 this.menuView = 'catalog';
             }
+            this._touchLazyTabMount();
+            await this.$nextTick();
             this.tabDataLoading = true;
             try {
                 if (this.currentTab === 'dashboard') {
+                    void this.refreshTaskQueueHealth();
                     if (this.dashboardTab === 'analytics') {
                         await this.loadAnalytics();
                     } else {
@@ -6199,6 +6243,7 @@ function adminMixinDataChartsSettings() {
                 } else if (this.currentTab === 'settings') {
                     if (this.settingsTab === 'connections') {
                         await this.loadIntegrationStatus();
+                        void this.refreshTaskQueueHealth();
                     } else if (this.settingsTab === 'smart_sales') {
                         await this.loadUpsellRules();
                     } else if (this.settingsTab === 'team') {

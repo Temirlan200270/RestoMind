@@ -154,7 +154,7 @@ async def resolve_tenant_summary_for_session(
     staff: StaffUser | None,
     active_organization_id: int,
 ) -> dict[str, Any] | None:
-    """Краткое описание сети для GET /auth/me; plan_status — заглушка до E2.3."""
+    """Краткое описание сети для GET /auth/me."""
     tenant_id = await resolve_active_tenant_id(
         db,
         staff=staff,
@@ -169,7 +169,7 @@ async def resolve_tenant_summary_for_session(
         "id": int(t.id),
         "name": str(t.name),
         "plan": str(t.plan),
-        "plan_status": "active",
+        "plan_status": str(t.plan_status or "active"),
     }
 
 

@@ -74,7 +74,11 @@ from app.services.dialog_mgr import (
     update_user_session_fields_in_db,
 )
 from app.services.events import publish_event, subscribe_events
-from app.services.billing_guard import load_tenant_for_organization, tenant_is_billing_suspended
+from app.services.billing_guard import (
+    billing_suspended_http_exception,
+    load_tenant_for_organization,
+    tenant_is_billing_suspended,
+)
 from app.services.intent_router import (
     confirm_order,
     get_open_draft_order,
@@ -143,8 +147,10 @@ from .deps import (
 )
 from .bookings import bookings_router
 from .branding import branding_router
+from .customers import customers_router
 from .knowledge import knowledge_router
 from .menu_bulk import menu_bulk_router
+from .system import system_router
 from .menu_schemas import (
     ClearMenuBody,
     MenuItemCreateBody,
@@ -210,10 +216,7 @@ async def admin_login(request: Request, body: LoginBody, db: AsyncSession = Depe
                     )
                 tenant_st = await load_tenant_for_organization(db, int(staff.organization_id))
                 if tenant_is_billing_suspended(tenant_st):
-                    raise HTTPException(
-                        status_code=403,
-                        detail="Доступ приостановлен по биллингу. Свяжитесь с поддержкой.",
-                    )
+                    raise billing_suspended_http_exception()
             request.session["admin_ok"] = True
             request.session["admin_user"] = staff.email
             request.session["staff_id"] = int(staff.id)
@@ -243,10 +246,7 @@ async def admin_login(request: Request, body: LoginBody, db: AsyncSession = Depe
             raise HTTPException(status_code=403, detail="Подписка приостановлена. Свяжитесь с администратором.")
         tenant_st = await load_tenant_for_organization(db, oid)
         if tenant_is_billing_suspended(tenant_st):
-            raise HTTPException(
-                status_code=403,
-                detail="Доступ приостановлен по биллингу. Свяжитесь с поддержкой.",
-            )
+            raise billing_suspended_http_exception()
         request.session["admin_ok"] = True
         request.session["admin_user"] = body.username.strip()
         request.session["organization_id"] = oid
@@ -376,7 +376,22 @@ class SelectOrgBody(BaseModel):
 
 
 async def _admin_auth_me_payload(request: Request, db: AsyncSession) -> dict[str, Any]:
-    """Тело ответа GET /auth/me и успешного POST /auth/select-org (контракт PARALLEL_AI_PLAN §4)."""
+    """
+    Тело ответа GET /auth/me и успешного POST /auth/select-org (контракт PARALLEL_AI_PLAN §4).
+
+    Контракт по биллингу (E2.3):
+
+    * `billing_blocked` — стабильное поле, всегда `bool`. Сейчас всегда
+      возвращается ``False``: при `tenant.plan_status == "suspended"` мы
+      раньше возвращаем 403 (см. ``billing_suspended_http_exception``), сюда не
+      доходим. Поле сохранено в payload как контрактная подушка для
+      будущего «soft suspend» (тёплое окно после превышения лимита) —
+      UI сможет читать `billing_blocked` без новой версии API.
+    * Поля `branding`, `tenant`, `available_organizations`, `ws_token`
+      обязательны и не должны быть `null` для успешной сессии (см.
+      ``.cursor/rules/restomind-zones.mdc``).
+    * Super-admin не блокируется ни статусом организации, ни биллингом.
+    """
     user = request.session.get("admin_user") or settings.admin_username
     oid = admin_org_from_session(request)
     # Если в сессии лежит несуществующий organization_id (после миграций/ресетов БД),
@@ -403,10 +418,7 @@ async def _admin_auth_me_payload(request: Request, db: AsyncSession) -> dict[str
             raise HTTPException(status_code=403, detail="Подписка приостановлена. Свяжитесь с администратором.")
         tenant_me = await load_tenant_for_organization(db, int(oid))
         if tenant_is_billing_suspended(tenant_me):
-            raise HTTPException(
-                status_code=403,
-                detail="Доступ приостановлен по биллингу. Свяжитесь с поддержкой.",
-            )
+            raise billing_suspended_http_exception()
 
     available = await available_organizations_for_admin_session(
         db,
@@ -504,10 +516,7 @@ async def admin_select_org(
     if not is_superadmin:
         tenant_t = await load_tenant_for_organization(db, int(body.organization_id))
         if tenant_is_billing_suspended(tenant_t):
-            raise HTTPException(
-                status_code=403,
-                detail="Доступ приостановлен по биллингу. Свяжитесь с поддержкой.",
-            )
+            raise billing_suspended_http_exception()
 
     request.session["organization_id"] = int(body.organization_id)
     return await _admin_auth_me_payload(request, db)
@@ -525,7 +534,8 @@ router.include_router(menu_bulk_router)
 router.include_router(knowledge_router)
 router.include_router(branding_router)
 router.include_router(bookings_router)
-router.include_router(bookings_router)
+router.include_router(customers_router)
+router.include_router(system_router)
 
 
 # WebSocket без cookie-сессии (браузер ограничен) — только подписанный токен
@@ -3368,172 +3378,7 @@ async def get_chat_log(
     }
 
 
-class CustomerNoteBody(BaseModel):
-    """Тело запроса: заметка оператора о клиенте."""
-
-    note: str = ""
-
-
-@router.get("/customers/{phone}/summary")
-async def customer_summary(
-    request: Request,
-    phone: str,
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    """
-    Сводка по клиенту для панели оператора: заказы, выручка, заметка, «чёрный список» (is_active).
-    Если пользователя с таким телефоном ещё нет в БД — возвращаются нули (диалог только откроют вручную).
-    """
-    org_id = admin_org_from_session(request)
-    user = await db.scalar(
-        select(User).where(User.phone == phone, User.organization_id == org_id),
-    )
-    if user is None:
-        return {
-            "user_exists": False,
-            "phone": phone,
-            "name": None,
-            "total_orders": 0,
-            "revenue_orders": 0,
-            "total_spent": 0.0,
-            "avg_check": 0.0,
-            "is_blocked": False,
-            "ai_paused": False,
-            "ai_snoozed_until": None,
-            "operator_note": "",
-            "last_escalation": None,
-        }
-
-    from app.services.ai_snooze import clear_ai_snooze_if_expired
-
-    await clear_ai_snooze_if_expired(db, user)
-    await db.commit()
-
-    not_cancelled = Order.status != OrderStatus.CANCELLED.value
-    cnt_all = await db.scalar(
-        select(func.count(Order.id)).where(Order.user_id == user.id, not_cancelled),
-    ) or 0
-
-    revenue_statuses = (
-        OrderStatus.CONFIRMED.value,
-        OrderStatus.SENT_TO_IIKO.value,
-        OrderStatus.IN_TRANSIT.value,
-        OrderStatus.WAITING_PICKUP.value,
-        OrderStatus.COMPLETED.value,
-    )
-    rev_row = await db.execute(
-        select(
-            func.count(Order.id),
-            func.coalesce(func.sum(Order.total_price), 0),
-        ).where(Order.user_id == user.id, Order.status.in_(revenue_statuses)),
-    )
-    rev = rev_row.one()
-    rev_count = int(rev[0] or 0)
-    total_spent = float(rev[1] or 0)
-    avg_check = (total_spent / rev_count) if rev_count else 0.0
-
-    esc_res = await db.execute(
-        select(EscalationEvent)
-        .where(
-            EscalationEvent.phone == user.phone,
-            or_(
-                EscalationEvent.organization_id == org_id,
-                EscalationEvent.organization_id.is_(None),
-            ),
-        )
-        .order_by(EscalationEvent.created_at.desc())
-        .limit(1),
-    )
-    esc_row = esc_res.scalars().first()
-    last_escalation = None
-    if esc_row is not None:
-        last_escalation = {
-            "created_at": esc_row.created_at.isoformat() if esc_row.created_at else None,
-            "reason": (esc_row.reason or "")[:500],
-            "user_message": (esc_row.user_message or "")[:500],
-        }
-
-    return {
-        "user_exists": True,
-        "phone": user.phone,
-        "name": user.name,
-        "total_orders": int(cnt_all),
-        "revenue_orders": rev_count,
-        "total_spent": total_spent,
-        "avg_check": round(avg_check, 2),
-        "is_blocked": not user.is_active,
-        "ai_paused": bool(getattr(user, "ai_paused", False)),
-        "ai_snoozed_until": user.ai_snoozed_until.isoformat() if user.ai_snoozed_until else None,
-        "operator_note": user.operator_note or "",
-        "last_escalation": last_escalation,
-    }
-
-
-@router.post("/customers/{phone}/note")
-async def save_customer_note(
-    request: Request,
-    phone: str,
-    body: CustomerNoteBody,
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    """Сохранить внутреннюю заметку оператора о клиенте."""
-    org_id = admin_org_from_session(request)
-    user = await db.scalar(
-        select(User).where(User.phone == phone, User.organization_id == org_id),
-    )
-    if user is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Пользователь не найден — заметку можно сохранить после первого контакта клиента с ботом",
-        )
-    user.operator_note = body.note[:8000] if body.note else ""
-    await db.flush()
-    return {"ok": True}
-
-
-class AiPauseBody(BaseModel):
-    """Отключить или снова включить ИИ для клиента (персистентно + Redis)."""
-
-    paused: bool = True
-
-
-@router.post("/customers/{phone}/ai-pause")
-async def set_customer_ai_pause(
-    request: Request,
-    phone: str,
-    body: AiPauseBody,
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    """
-    Заблокировать ИИ для номера: бот не отвечает, пока не снять блокировку.
-    Дублирует смысл «перехвата», но сохраняется в БД (переживает рестарт Redis).
-    """
-    org_id = admin_org_from_session(request)
-    user = await db.scalar(
-        select(User).where(User.phone == phone, User.organization_id == org_id),
-    )
-    if user is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Пользователь не найден — сначала должен быть диалог или заказ",
-        )
-    user.ai_paused = body.paused
-    await db.flush()
-    await db.commit()
-
-    if body.paused:
-        await set_user_state(redis_client, phone, UserState.HUMAN_MODE, organization_id=org_id)
-        await publish_event(
-            "state_changed",
-            {"phone": phone, "state": UserState.HUMAN_MODE.value, "organization_id": org_id},
-        )
-    else:
-        await set_user_state(redis_client, phone, UserState.CHATTING, organization_id=org_id)
-        await publish_event(
-            "state_changed",
-            {"phone": phone, "state": UserState.CHATTING.value, "organization_id": org_id},
-        )
-    return {"ok": True, "ai_paused": user.ai_paused}
+# ─── /customers/{phone}/* — вынесены в app/api/admin/customers.py (E0.1) ─
 
 
 # ─── Меню ────────────────────────────────────────────────

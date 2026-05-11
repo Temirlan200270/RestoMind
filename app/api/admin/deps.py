@@ -22,6 +22,7 @@ from app.db.models import (
     MenuItem,
     Order,
     Organization,
+    PackagingRule,
     StaffRole,
     StaffUser,
     User,
@@ -29,6 +30,10 @@ from app.db.models import (
 from app.db.session import get_db
 from app.services.order_logic import classify_packaging_kind
 from app.services.org_iiko import resolve_org_iiko_credentials
+from app.services.billing_guard import (
+    billing_suspended_http_exception,
+    tenant_billing_blocks_inbound,
+)
 from app.services.tenant_scope import organization_id_allowed_for_admin_session
 from app.services.tenant_scope import phones_subquery_for_org as _phones_subquery_for_org
 
@@ -106,6 +111,8 @@ async def require_admin_session_active(request: Request, db: AsyncSession = Depe
         org = await db.get(Organization, int(org_id))
         if org is not None and not bool(org.is_active):
             raise HTTPException(status_code=403, detail="Подписка приостановлена. Свяжитесь с администратором.")
+        if org is not None and await tenant_billing_blocks_inbound(db, org):
+            raise billing_suspended_http_exception()
         return
 
     staff = await db.get(StaffUser, int(sid))
@@ -118,6 +125,8 @@ async def require_admin_session_active(request: Request, db: AsyncSession = Depe
     org = await db.get(Organization, int(org_id))
     if org is not None and not bool(org.is_active):
         raise HTTPException(status_code=403, detail="Подписка приостановлена. Свяжитесь с администратором.")
+    if org is not None and await tenant_billing_blocks_inbound(db, org):
+        raise billing_suspended_http_exception()
 
 
 async def require_staff_admin(request: Request, db: AsyncSession = Depends(get_db)) -> None:

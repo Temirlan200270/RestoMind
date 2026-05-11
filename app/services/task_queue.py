@@ -39,6 +39,10 @@ def arq_can_run() -> bool:
     return True
 
 
+def _queue_name() -> str:
+    return (settings.arq_queue_name or "restomind").strip() or "restomind"
+
+
 async def _get_pool() -> Any:
     global _pool
     if _pool is not None:
@@ -59,7 +63,7 @@ async def _get_pool() -> Any:
         try:
             _pool = await create_pool(
                 RedisSettings.from_dsn(settings.redis_url),
-                default_queue_name=(settings.arq_queue_name or "restomind").strip(),
+                default_queue_name=_queue_name(),
             )
             return _pool
         except Exception as exc:
@@ -67,12 +71,57 @@ async def _get_pool() -> Any:
 
 
 async def enqueue_job(name: str, **kwargs: Any) -> None:
-    """Поставить задачу в Redis или бросить TaskQueueEnqueueError."""
-    pool = await _get_pool()
+    """
+    Поставить задачу в Redis или бросить ``TaskQueueEnqueueError``.
+
+    Лог-формат структурный (поля попадают в `extra`, а текст — короткий
+    и стабильный), чтобы пайплайн логов мог выделить:
+    ``event=task_queue_enqueue queue=<name> job=<name> [job_id=...] [error=...]``.
+    """
+    queue = _queue_name()
+    job_id = kwargs.get("_job_id") or kwargs.get("job_id")
+    common = {
+        "event": "task_queue_enqueue",
+        "queue": queue,
+        "job": name,
+    }
+    if job_id is not None:
+        common["job_id"] = str(job_id)
+
     try:
-        await pool.enqueue_job(name, **kwargs)
+        pool = await _get_pool()
+    except TaskQueueEnqueueError as exc:
+        logger.error(
+            "task_queue_enqueue_failed queue=%s job=%s error=%s",
+            queue,
+            name,
+            exc,
+            extra={**common, "outcome": "pool_unavailable", "error": str(exc)[:300]},
+        )
+        raise
+
+    try:
+        result = await pool.enqueue_job(name, **kwargs)
     except Exception as exc:
+        logger.error(
+            "task_queue_enqueue_failed queue=%s job=%s error=%s",
+            queue,
+            name,
+            exc,
+            extra={**common, "outcome": "enqueue_failed", "error": str(exc)[:300]},
+        )
         raise TaskQueueEnqueueError(f"ARQ enqueue_job({name}) failed: {exc}") from exc
+
+    real_job_id = getattr(result, "job_id", None) if result is not None else None
+    if real_job_id and "job_id" not in common:
+        common["job_id"] = str(real_job_id)
+    logger.info(
+        "task_queue_enqueue_ok queue=%s job=%s job_id=%s",
+        queue,
+        name,
+        common.get("job_id") or "-",
+        extra={**common, "outcome": "enqueued"},
+    )
 
 
 async def assert_arq_reachable_for_prod_startup() -> None:

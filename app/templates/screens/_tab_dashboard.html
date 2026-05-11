@@ -29,6 +29,19 @@
                                 :class="(orgProfile.is_kitchen_open ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : (orgProfile.is_business_open ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-slate-50 border-slate-200 text-slate-700'))"
                                 x-text="(orgProfile.is_kitchen_open ? '🟢 ' : (orgProfile.is_business_open ? '🟡 ' : '⚫️ ')) + (orgProfile.operational_label || '')"></span>
                         </div>
+                        <!-- E5: здоровье очереди (fetch в loadTabData для дашборда); бэкенд может отсутствовать — без ошибок в консоли. -->
+                        <div class="flex flex-wrap items-center gap-2 mt-2" x-show="dashboardTab === 'overview'" x-cloak role="status" aria-live="polite">
+                            <span class="text-[11px] text-slate-500 shrink-0">Очередь задач</span>
+                            <span x-show="!taskQueueHealthChecked" class="text-[11px] text-slate-400">…</span>
+                            <span x-show="taskQueueHealthChecked && !taskQueueHealth" x-cloak class="ds-badge ds-badge-neutral text-[11px]">недоступно</span>
+                            <template x-if="taskQueueHealth">
+                                <span class="flex flex-wrap items-center gap-1.5">
+                                    <span class="ds-badge text-[11px]" :class="taskQueueStatusClass(taskQueueHealth.redis)" x-text="'Redis: ' + (taskQueueHealth.redis || '—')"></span>
+                                    <span class="ds-badge text-[11px]" :class="taskQueueStatusClass(taskQueueHealth.arq)" x-text="'ARQ: ' + (taskQueueHealth.arq || '—')"></span>
+                                    <span class="ds-badge text-[11px]" :class="taskQueueStatusClass(taskQueueHealth.worker)" x-text="'Worker: ' + (taskQueueHealth.worker || '—')"></span>
+                                </span>
+                            </template>
+                        </div>
                     </div>
                     <div class="hidden sm:flex flex-wrap items-center gap-2">
                         <button type="button" class="ds-btn ds-btn-secondary ds-btn-md"

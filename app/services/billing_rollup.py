@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -66,6 +66,6 @@ async def run_billing_usage_daily_rollup_for_day(db: AsyncSession, target_day: d
 async def billing_usage_daily_scheduled_tick(ctx: dict) -> None:
     """ARQ cron: вчера по UTC."""
     _ = ctx
-    yesterday = (date.today() - timedelta(days=1))
+    yesterday = datetime.now(timezone.utc).date() - timedelta(days=1)
     async with async_session_factory() as db:
         await run_billing_usage_daily_rollup_for_day(db, yesterday)
