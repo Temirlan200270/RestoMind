@@ -89,6 +89,8 @@ async def test_validate_fuzzy_match(db_with_menu: AsyncSession) -> None:
 
     assert len(result.valid_items) == 1
     assert result.total_price == 1190.0
+    assert len(result.fuzzy_match_details) == 1
+    assert result.fuzzy_match_details[0]["source_name"] == "капучинно"
 
 
 @pytest.mark.asyncio

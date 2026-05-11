@@ -261,8 +261,10 @@
                             @dragover.prevent="$event.dataTransfer.dropEffect='move'"
                             @drop.prevent="kanbanDrop($event, 'sent_to_iiko')">
                             <template x-for="order in kanbanSentVisible" :key="order.id">
+                                <div>
                                 {{ order_card_kanban('sent', 'bg-white shadow-sm border border-emerald-100') }}
                                 {{ iiko_error('order', 'mt-3') }}
+                                </div>
                             </template>
                             <div x-show="ordersLoading && kanbanSent.length === 0" x-cloak class="py-4 px-1">{{ skeleton(kind='card', rows=4, extra_class='!p-2') }}</div>
                             <div x-show="kanbanSent.length === 0 && !ordersLoading" class="text-center py-8 px-2 text-gray-500 text-xs space-y-3">
@@ -287,8 +289,10 @@
                             @dragover.prevent="$event.dataTransfer.dropEffect='move'"
                             @drop.prevent="kanbanDrop($event, 'in_transit')">
                             <template x-for="order in kanbanInTransitVisible" :key="order.id">
+                                <div>
                                 {{ order_card_kanban('in-transit', 'bg-white shadow-sm border border-sky-100') }}
                                 {{ iiko_error('order', 'mt-3') }}
+                                </div>
                             </template>
                             <div x-show="ordersLoading && kanbanInTransit.length === 0" x-cloak class="py-4 px-1">{{ skeleton(kind='card', rows=4, extra_class='!p-2') }}</div>
                             <div x-show="kanbanInTransit.length === 0 && !ordersLoading" class="text-center py-8 px-2 text-gray-500 text-xs">Заказы появятся после ручного переноса из кухни.</div>
@@ -309,8 +313,10 @@
                             @dragover.prevent="$event.dataTransfer.dropEffect='move'"
                             @drop.prevent="kanbanDrop($event, 'waiting_pickup')">
                             <template x-for="order in kanbanWaitingPickupVisible" :key="order.id">
+                                <div>
                                 {{ order_card_kanban('waiting-pickup', 'bg-white shadow-sm border border-amber-100') }}
                                 {{ iiko_error('order', 'mt-3') }}
+                                </div>
                             </template>
                             <div x-show="ordersLoading && kanbanWaitingPickup.length === 0" x-cloak class="py-4 px-1">{{ skeleton(kind='card', rows=4, extra_class='!p-2') }}</div>
                             <div x-show="kanbanWaitingPickup.length === 0 && !ordersLoading" class="text-center py-8 px-2 text-gray-500 text-xs">Готовые к выдаче заказы будут здесь.</div>
@@ -331,8 +337,10 @@
                             @dragover.prevent="$event.dataTransfer.dropEffect='move'"
                             @drop.prevent="kanbanDrop($event, 'completed')">
                             <template x-for="order in kanbanCompletedVisible" :key="order.id">
+                                <div>
                                 {{ order_card_kanban('completed', 'bg-white shadow-sm border border-emerald-100') }}
                                 {{ iiko_error('order', 'mt-3') }}
+                                </div>
                             </template>
                             <div x-show="ordersLoading && kanbanCompleted.length === 0" x-cloak class="py-4 px-1">{{ skeleton(kind='card', rows=4, extra_class='!p-2') }}</div>
                             <div x-show="kanbanCompleted.length === 0 && !ordersLoading" class="text-center py-8 px-2 text-gray-500 text-xs">Закрытые заказы появятся после финального переноса.</div>

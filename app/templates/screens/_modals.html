@@ -312,6 +312,13 @@
                         <div class="font-mono text-gray-900" x-text="selectedOrder?.user_phone || '—'"></div>
                         <div class="text-gray-600 mt-1" x-show="selectedOrder?.user_name" x-text="selectedOrder?.user_name"></div>
                     </div>
+                    <div class="mb-4 rounded-xl border border-amber-200/90 bg-amber-50/85 px-4 py-3 text-sm ds-order-surface--ai-confidence" role="status"
+                        x-show="orderLowConfidence(selectedOrder)">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <span class="ds-badge-warning-soft">AI сомневается</span>
+                            <span class="text-xs text-amber-950/90">Проверьте позиции и адрес доставки перед отправкой в кухню.</span>
+                        </div>
+                    </div>
                     <div class="mb-4">
                         <div class="text-xs font-bold uppercase tracking-wide text-gray-500 mb-2">Хронология</div>
                         <div x-show="orderTimelineLoading" class="text-sm text-gray-400 py-2">Загрузка…</div>
@@ -335,6 +342,18 @@
                             <p class="text-sm text-red-900 font-semibold leading-snug break-words mt-1" x-text="selectedOrder?.iiko_last_error"></p>
                             <p class="text-[11px] text-red-800/90 mt-2 leading-snug">Проверьте в настройках филиала терминальную группу iiko и тип заказа (доставка / самовывоз / зал). Заказ остаётся подтверждённым — после исправления нажмите «Повторить отправку в iiko».</p>
                         </div>
+                    </div>
+                    <div x-show="orderFailedWhatsappCount(selectedOrder) > 0" class="mb-4 rounded-xl border border-rose-300 bg-rose-50/90 px-4 py-3 text-sm" role="status">
+                        <p class="text-xs font-bold uppercase tracking-wide text-rose-900">WhatsApp</p>
+                        <p class="text-sm text-rose-950 font-semibold mt-1">
+                            <span x-text="orderFailedWhatsappCount(selectedOrder)"></span>
+                            <span x-text="orderFailedWhatsappCount(selectedOrder) === 1 ? ' сообщение не доставлено' : ' сообщений не доставлено'"></span>
+                            <span class="text-rose-800 font-normal"> (окно ±1 ч от заказа)</span>
+                        </p>
+                        <button type="button" @click="goToGuestChatForOrder(selectedOrder)"
+                            class="mt-3 w-full min-h-[44px] rounded-xl bg-white text-rose-800 text-xs font-bold border border-rose-300 hover:bg-rose-100/80">
+                            Открыть чат с гостем
+                        </button>
                     </div>
                     <details class="mb-4 rounded-xl border border-slate-200 bg-slate-50/90 px-4 py-3 text-sm"
                         x-show="canEditOrderComposition(selectedOrder)"
@@ -831,4 +850,74 @@
                     </div>
                 </div>
             </template>
+        </div>
+
+        {# p15:delete-modal — ds-modal-panel, задержка кнопки 1 с #}
+        <div x-show="orderDeleteModalOpen" x-cloak x-transition.opacity class="fixed inset-0 z-[125] flex items-end sm:items-center justify-center sm:p-4">
+            <div class="ds-modal-backdrop !fixed" @click="closeOrderDeleteModal()" role="presentation" aria-hidden="true"></div>
+            <div class="ds-modal-panel relative z-10 w-full sm:!max-w-lg rounded-t-3xl sm:rounded-2xl p-6 max-h-[90dvh] overflow-y-auto border border-gray-100 shadow-2xl" @click.stop role="dialog" aria-modal="true" aria-labelledby="p15-order-delete-title">
+                <h2 id="p15-order-delete-title" class="text-lg font-bold text-gray-900" x-text="orderDeleteIds.length > 1 ? ('Удалить заказы (' + orderDeleteIds.length + ')') : 'Удалить заказ'"></h2>
+                <p class="text-sm text-gray-600 mt-2">Действие необратимо: записи исчезнут из списков и аналитики.</p>
+                <div class="mt-4 space-y-3 max-h-[40vh] overflow-y-auto">
+                    <template x-for="row in orderDeleteRows" :key="'del-' + row.id">
+                        <div class="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5 text-sm">
+                            <div class="font-bold text-brand-700 tabular-nums" x-text="'#' + row.id"></div>
+                            <template x-if="row.o">
+                                <div class="text-xs text-gray-700 mt-1 space-y-0.5">
+                                    <p><span class="text-gray-500">Сумма:</span> <span class="font-semibold tabular-nums" x-text="fmt.money(row.o.total_price)"></span></p>
+                                    <p x-show="row.o.user_phone"><span class="text-gray-500">Клиент:</span> <span class="font-mono" x-text="row.o.user_phone"></span></p>
+                                    <p x-show="row.o.user_name"><span class="text-gray-500">Имя:</span> <span x-text="row.o.user_name"></span></p>
+                                    <p><span class="text-gray-500">Тип / оплата:</span>
+                                        <span x-text="(orderTypeBadge(row.o) || '—') + ' · ' + (paymentMethodTitle(row.o) || '—')"></span>
+                                    </p>
+                                </div>
+                            </template>
+                            <template x-if="!row.o">
+                                <p class="text-xs text-gray-500 mt-1">Карточка не в памяти — удаление по № заказа.</p>
+                            </template>
+                        </div>
+                    </template>
+                </div>
+                <div class="mt-4">
+                    <label class="block text-[11px] font-semibold text-gray-500 mb-1" for="p15-order-delete-reason">Причина (необязательно)</label>
+                    <textarea id="p15-order-delete-reason" x-model="orderDeleteReason" rows="2" maxlength="2000"
+                        class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
+                        placeholder="Для внутреннего учёта, в систему не отправляется"></textarea>
+                </div>
+                <label class="mt-4 flex items-start gap-3 cursor-pointer group">
+                    <input type="checkbox" x-model="orderDeleteAck" class="mt-1 rounded border-gray-300 text-red-600 focus:ring-red-500">
+                    <span class="text-sm text-gray-700" x-text="orderDeleteIds.length > 1 ? 'Я понимаю, что эти заказы нельзя восстановить' : 'Я понимаю, что заказ нельзя восстановить'"></span>
+                </label>
+                <p x-show="!orderDeleteDelayReady" class="text-[11px] text-amber-700 mt-2">Кнопка станет доступна через секунду…</p>
+                <div class="mt-6 flex flex-col-reverse sm:flex-row gap-3">
+                    <button type="button" @click="closeOrderDeleteModal()" :disabled="orderDeleteSubmitting"
+                        class="flex-1 min-h-[44px] py-3 rounded-xl border border-gray-200 text-gray-800 font-semibold text-sm hover:bg-gray-50 disabled:opacity-50">Отмена</button>
+                    <button type="button" @click="submitOrderDeleteModal()"
+                        :disabled="orderDeleteSubmitting || !orderDeleteAck || !orderDeleteDelayReady"
+                        class="flex-1 min-h-[44px] py-3 rounded-xl bg-red-600 text-white font-bold text-sm hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed">
+                        <span x-show="!orderDeleteSubmitting" x-text="orderDeleteIds.length > 1 ? 'Удалить заказы' : 'Удалить заказ'"></span>
+                        <span x-show="orderDeleteSubmitting" x-cloak>Удаляем…</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        {# p15:tour — coach-marks #}
+        <div x-show="p15TourActive" x-cloak class="fixed inset-0 z-[130] pointer-events-none" aria-live="polite">
+            <div class="absolute inset-0 bg-slate-900/45 pointer-events-auto" @click="p15TourSkip()" aria-hidden="true"></div>
+            <div class="ds-p15-tour-hole absolute rounded-xl ring-4 ring-brand-400 ring-offset-2 ring-offset-transparent shadow-[0_0_0_9999px_rgba(15,23,42,0.5)] pointer-events-none z-[131]"
+                :style="'top:' + p15TourRect.top + 'px;left:' + p15TourRect.left + 'px;width:' + p15TourRect.width + 'px;height:' + p15TourRect.height + 'px'"></div>
+            <div class="fixed z-[132] w-[min(340px,calc(100vw-32px))] max-w-[340px] rounded-2xl bg-white border border-gray-200 shadow-2xl p-4 pointer-events-auto ds-p15-tour-pop"
+                :style="p15TourPopoverStyle">
+                <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400"
+                    x-text="'Шаг ' + (p15TourStepIndex + 1) + ' / ' + p15TourSteps().length"></p>
+                <h3 class="text-base font-bold text-gray-900 mt-1" x-text="p15TourSteps()[p15TourStepIndex]?.title"></h3>
+                <p class="text-sm text-gray-600 mt-2 leading-relaxed" x-text="p15TourSteps()[p15TourStepIndex]?.text"></p>
+                <div class="flex flex-wrap gap-2 mt-4">
+                    <button type="button" @click="p15TourSkip()" class="min-h-[40px] px-4 rounded-xl border border-gray-200 text-gray-800 text-sm font-semibold hover:bg-gray-50">Пропустить</button>
+                    <button type="button" @click="p15TourNext()" class="min-h-[40px] px-4 rounded-xl bg-brand-600 text-white text-sm font-bold hover:bg-brand-700">
+                        <span x-text="p15TourStepIndex + 1 >= p15TourSteps().length ? 'Готово' : 'Далее'"></span>
+                    </button>
+                </div>
+            </div>
         </div>

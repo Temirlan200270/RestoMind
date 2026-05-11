@@ -1,9 +1,9 @@
 """
 ARQ (asyncio + Redis) очередь задач.
 
-Цель: убрать тяжёлую обработку из FastAPI BackgroundTasks.
-Если Redis/ARQ выключены — функции возвращают False, и вызывающий код может
-безопасно откатиться на BackgroundTasks.
+В продакшене worker обязателен: fallback на FastAPI BackgroundTasks отсутствует.
+При недоступности Redis/ARQ постановка задачи бросает исключение (и на старте
+в production/staging — проверка в app.main lifespan).
 """
 
 from __future__ import annotations
@@ -12,13 +12,18 @@ import asyncio
 import logging
 from typing import Any
 
-from app.core.config import settings
 from fastapi import BackgroundTasks
+
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 _pool_lock = asyncio.Lock()
 _pool: Any | None = None
+
+
+class TaskQueueEnqueueError(RuntimeError):
+    """Не удалось поставить задачу в ARQ (нет Redis, ошибка соединения или enqueue)."""
 
 
 def arq_can_run() -> bool:
@@ -34,12 +39,19 @@ def arq_can_run() -> bool:
     return True
 
 
-async def _get_pool() -> Any | None:
+def _queue_name() -> str:
+    return (settings.arq_queue_name or "restomind").strip() or "restomind"
+
+
+async def _get_pool() -> Any:
     global _pool
     if _pool is not None:
         return _pool
     if not arq_can_run():
-        return None
+        raise TaskQueueEnqueueError(
+            "ARQ queue unavailable: set REDIS_ENABLED=true, ARQ_ENABLED=true, REDIS_URL, "
+            "and do not use REDIS_MEMORY_ONLY.",
+        )
     async with _pool_lock:
         if _pool is not None:
             return _pool
@@ -47,95 +59,102 @@ async def _get_pool() -> Any | None:
             from arq import create_pool
             from arq.connections import RedisSettings
         except Exception as exc:  # pragma: no cover
-            logger.error("ARQ import error: %s", exc)
-            return None
+            raise TaskQueueEnqueueError(f"ARQ import error: {exc}") from exc
         try:
             _pool = await create_pool(
                 RedisSettings.from_dsn(settings.redis_url),
-                default_queue_name=(settings.arq_queue_name or "restomind").strip(),
+                default_queue_name=_queue_name(),
             )
             return _pool
         except Exception as exc:
-            logger.error("ARQ create_pool failed: %s", exc)
-            _pool = None
-            return None
+            raise TaskQueueEnqueueError(f"ARQ create_pool failed: {exc}") from exc
 
 
-async def enqueue_job(name: str, **kwargs: Any) -> bool:
+async def enqueue_job(name: str, **kwargs: Any) -> None:
     """
-    Enqueue задачу в Redis.
-    Возвращает False если очередь недоступна (тогда можно fallback на BackgroundTasks).
+    Поставить задачу в Redis или бросить ``TaskQueueEnqueueError``.
+
+    Лог-формат структурный (поля попадают в `extra`, а текст — короткий
+    и стабильный), чтобы пайплайн логов мог выделить:
+    ``event=task_queue_enqueue queue=<name> job=<name> [job_id=...] [error=...]``.
     """
-    pool = await _get_pool()
-    if pool is None:
-        return False
+    queue = _queue_name()
+    job_id = kwargs.get("_job_id") or kwargs.get("job_id")
+    common = {
+        "event": "task_queue_enqueue",
+        "queue": queue,
+        "job": name,
+    }
+    if job_id is not None:
+        common["job_id"] = str(job_id)
+
     try:
-        await pool.enqueue_job(name, **kwargs)
-        return True
+        pool = await _get_pool()
+    except TaskQueueEnqueueError as exc:
+        logger.error(
+            "task_queue_enqueue_failed queue=%s job=%s error=%s",
+            queue,
+            name,
+            exc,
+            extra={**common, "outcome": "pool_unavailable", "error": str(exc)[:300]},
+        )
+        raise
+
+    try:
+        result = await pool.enqueue_job(name, **kwargs)
     except Exception as exc:
-        logger.error("ARQ enqueue_job(%s) failed: %s", name, exc)
-        return False
+        logger.error(
+            "task_queue_enqueue_failed queue=%s job=%s error=%s",
+            queue,
+            name,
+            exc,
+            extra={**common, "outcome": "enqueue_failed", "error": str(exc)[:300]},
+        )
+        raise TaskQueueEnqueueError(f"ARQ enqueue_job({name}) failed: {exc}") from exc
+
+    real_job_id = getattr(result, "job_id", None) if result is not None else None
+    if real_job_id and "job_id" not in common:
+        common["job_id"] = str(real_job_id)
+    logger.info(
+        "task_queue_enqueue_ok queue=%s job=%s job_id=%s",
+        queue,
+        name,
+        common.get("job_id") or "-",
+        extra={**common, "outcome": "enqueued"},
+    )
+
+
+async def assert_arq_reachable_for_prod_startup() -> None:
+    """Проверка при старте web-процесса в production/staging (одно краткое подключение)."""
+    from arq import create_pool
+    from arq.connections import RedisSettings
+
+    if not arq_can_run():
+        raise RuntimeError(
+            "APP_ENV production/staging requires Redis and ARQ: "
+            "REDIS_URL, REDIS_ENABLED=true, ARQ_ENABLED=true, REDIS_MEMORY_ONLY=false.",
+        )
+    pool = await create_pool(
+        RedisSettings.from_dsn(settings.redis_url),
+        default_queue_name=(settings.arq_queue_name or "restomind").strip(),
+    )
+    try:
+        await pool.close()
+    except Exception:
+        logger.warning("ARQ probe: pool.close failed", exc_info=True)
 
 
 async def dispatch_arq_or_background(
     job_name: str,
     background_tasks: BackgroundTasks,
     **kwargs: Any,
-) -> bool:
+) -> None:
     """
-    Enqueue в ARQ; при недоступности — тот же fallback, что раньше вручную через BackgroundTasks.
-    Возвращает True, если задача ушла в ARQ, False — если поставлен fallback.
+    Поставить задачу в ARQ.
+
+    Параметр background_tasks оставлен для совместимости вызовов (в т.ч. payment webhook);
+    не используется — фоновая обработка только через worker.
     """
-    ok = await enqueue_job(job_name, **kwargs)
-    if ok:
-        logger.debug("ARQ: task %s enqueued", job_name)
-        return True
-    # Ленивые импорты, чтобы не зацикливать webhooks ↔ task_queue
-    if job_name == "whatsapp_process_statuses":
-        from app.api.webhooks import _process_whatsapp_status_batch
-
-        statuses = kwargs.get("statuses")
-        if statuses is not None:
-            background_tasks.add_task(_process_whatsapp_status_batch, list(statuses))
-        else:
-            logger.error("ARQ fallback: whatsapp_process_statuses без statuses")
-        logger.warning("ARQ недоступен: whatsapp_process_statuses → BackgroundTasks")
-        return False
-    if job_name == "whatsapp_process_text":
-        from app.api.webhooks import process_with_retry
-
-        background_tasks.add_task(
-            process_with_retry,
-            kwargs["phone"],
-            kwargs.get("message_text", ""),
-            whatsapp_message_id=kwargs.get("whatsapp_message_id", ""),
-            voice_audio=kwargs.get("voice_audio"),
-            webhook_value=kwargs.get("webhook_value"),
-            organization_id=kwargs.get("organization_id"),
-        )
-        logger.warning("ARQ недоступен: whatsapp_process_text → BackgroundTasks")
-        return False
-    if job_name == "whatsapp_process_voice":
-        from app.api.webhooks import process_voice_message
-
-        background_tasks.add_task(
-            process_voice_message,
-            kwargs["phone"],
-            kwargs["media_id"],
-            whatsapp_message_id=kwargs.get("whatsapp_message_id", ""),
-            webhook_value=kwargs.get("webhook_value"),
-        )
-        logger.warning("ARQ недоступен: whatsapp_process_voice → BackgroundTasks")
-        return False
-    if job_name == "payment_notify_customer":
-        from app.services.payment_notify import run_payment_received_customer_notify
-
-        background_tasks.add_task(
-            run_payment_received_customer_notify,
-            int(kwargs["order_id"]),
-        )
-        logger.warning("ARQ недоступен: payment_notify_customer → BackgroundTasks")
-        return False
-    logger.error("ARQ fallback: неизвестная задача %s (kwargs=%s)", job_name, list(kwargs))
-    return False
-
+    _ = background_tasks
+    await enqueue_job(job_name, **kwargs)
+    logger.debug("ARQ: task %s enqueued", job_name)

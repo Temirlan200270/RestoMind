@@ -96,6 +96,7 @@ async def test_select_org_updates_active_and_me_contract(asgi_memory_client):
     assert int(body["tenant"]["id"]) == tenant_id
     assert body.get("branding") is not None
     assert "brand_logo_url" in body["branding"]
+    assert body.get("billing_blocked") is False
 
     me = await ac.get("/api/admin/auth/me")
     assert me.status_code == 200

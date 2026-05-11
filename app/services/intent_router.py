@@ -5,6 +5,13 @@
   book → сохранение бронирования в БД
   escalate → уведомление администратора + перевод в HUMAN_MODE
   faq → просто отправка ответа
+
+Временная пауза ИИ (User.ai_snoozed_until) и персистентный ai_paused обрабатываются
+**до** вызова LLM в ``process_message`` (WhatsApp) / ``test_bot`` (админка), а не здесь:
+``route_intent`` вызывается уже после ответа модели.
+
+E11: правила допродаж до LLM — ``app.services.sales_strategy_engine`` + ``build_sales_strategy``
+(вызов из вебхука до ``call_openai``); здесь остаётся merge recommendation в order_meta.
 """
 
 import logging
@@ -371,6 +378,9 @@ class RouteResult:
     pending_booking_id: int | None = None
     new_state: UserState | None = None
     events: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
+    # E8: если заполнено, webhooks.py отправит interactive message вместо plain text
+    interactive_buttons: list[dict] | None = None  # [{"id": str, "title": str}, ...]
+    cta_url: str | None = None                      # URL для CTA-кнопки оплаты
 
 
 async def get_or_create_user(
@@ -736,12 +746,12 @@ async def _handle_order(
                 logger.warning("initiate_payment failed for order=%s: %s", order.id, _pay_exc)
 
         if payment_url:
+            # E8+E14: текст без URL (CTA-кнопка отправляется отдельно через RouteResult.cta_url)
             reply += (
                 "\n\n"
                 f"💳 Сумма заказа от **{int(settings.order_prepayment_threshold_kzt):,}** ₸ — "
-                "нужна **предоплата**. Оплатите по ссылке:\n"
-                f"👉 {payment_url}\n\n"
-                "После оплаты вы сможете подтвердить заказ ответом «Да»."
+                "нужна **предоплата**. Нажмите кнопку для оплаты.\n"
+                "После оплаты подтвердите заказ ответом «Да»."
             )
         else:
             reply += (
@@ -755,14 +765,12 @@ async def _handle_order(
     elif booking_payment_url:
         reply += (
             f"\n\n💳 Для подтверждения брони требуется предоплата {int(settings.hall_prepayment_min):,} ₸. "
-            "Оплатите по ссылке:\n"
-            f"👉 {booking_payment_url}\n\n"
-            "После оплаты бронь будет подтверждена."
+            "Нажмите кнопку для оплаты. После оплаты бронь будет подтверждена."
         )
         next_state = UserState.CHATTING
         log_hint = "ожидание предоплаты за бронь (ссылка отправлена)"
     else:
-        reply += "\n\n✅ Подтверждаете заказ? (Да / Нет)"
+        reply += "\n\n✅ Подтверждаете заказ?"
         next_state = UserState.CONFIRMING_ORDER
         log_hint = "ждём подтверждение"
 
@@ -803,11 +811,26 @@ async def _handle_order(
     if getattr(order, "created_at", None):
         evt_data["created_at"] = order.created_at.isoformat()
 
+    # E8: кнопки подтверждения / E14: CTA оплаты
+    _confirm_btns: list[dict] | None = None
+    _cta_url: str | None = None
+    if next_state == UserState.CONFIRMING_ORDER:
+        _confirm_btns = [
+            {"id": "confirm", "title": "✅ Подтвердить"},
+            {"id": "cancel",  "title": "❌ Отменить"},
+        ]
+    elif payment_url:
+        _cta_url = payment_url
+    elif booking_payment_url:
+        _cta_url = booking_payment_url
+
     return RouteResult(
         reply_text=reply,
         pending_order_id=order.id,
         new_state=next_state,
         events=[("order_updated", evt_data)],
+        interactive_buttons=_confirm_btns,
+        cta_url=_cta_url,
     )
 
 

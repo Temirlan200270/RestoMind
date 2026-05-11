@@ -53,8 +53,13 @@
         >
             {# Operations #}
             {% include "screens/_tab_inbox.html" %}
+            {# P0 lazy DOM: тяжёлые операционные табы — в дереве после первого визита (`lazyTabMount.*` в admin-app.js). #}
+            <template x-if="lazyTabMount.orders">
             {% include "screens/_tab_orders.html" %}
+            </template>
+            <template x-if="lazyTabMount.chats">
             {% include "screens/_tab_chats.html" %}
+            </template>
             {% include "screens/_tab_bookings.html" %}
             {% include "screens/_tab_operator_queue.html" %}
             {% include "screens/_tab_incidents.html" %}
@@ -67,15 +72,19 @@
             {% include "screens/_tab_digital_twin.html" %}
             {% include "screens/_tab_menu.html" %}
 
-            {# Settings sections #}
-            {% include "screens/_tab_settings_connections.html" %}
-            {% include "screens/_tab_settings_branding.html" %}
-            {% include "screens/_tab_settings_restaurant.html" %}
-            {% include "screens/_tab_settings_smart_sales.html" %}
-            {% include "screens/_tab_settings_health.html" %}
-            {% include "screens/_tab_settings_technical.html" %}
-            {% include "screens/_tab_settings_bot_test.html" %}
-            {% include "screens/_tab_settings_team.html" %}
+            {# Settings sections — lazy mount (один флаг на все подстраницы настроек). #}
+            <template x-if="lazyTabMount.settings">
+            <div class="contents">
+                {% include "screens/_tab_settings_connections.html" %}
+                {% include "screens/_tab_settings_branding.html" %}
+                {% include "screens/_tab_settings_restaurant.html" %}
+                {% include "screens/_tab_settings_smart_sales.html" %}
+                {% include "screens/_tab_settings_health.html" %}
+                {% include "screens/_tab_settings_technical.html" %}
+                {% include "screens/_tab_settings_bot_test.html" %}
+                {% include "screens/_tab_settings_team.html" %}
+            </div>
+            </template>
 
             {# Screen-local overlays #}
             {% include "screens/_modal_packaging_create.html" %}

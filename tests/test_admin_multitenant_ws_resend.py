@@ -61,7 +61,7 @@ async def test_resend_failed_operator_message(db_session, monkeypatch) -> None:
         error = None
 
     monkeypatch.setattr(
-        "app.api.admin._monolith.send_message",
+        "app.api.admin.chats.send_message",
         AsyncMock(return_value=WaResult()),
     )
 
@@ -94,7 +94,7 @@ async def test_resend_wrong_org_404(db_session, monkeypatch) -> None:
     db_session.add(log)
     await db_session.flush()
 
-    monkeypatch.setattr("app.api.admin._monolith.send_message", AsyncMock())
+    monkeypatch.setattr("app.api.admin.chats.send_message", AsyncMock())
 
     req = MagicMock()
     req.session = {"organization_id": 2}

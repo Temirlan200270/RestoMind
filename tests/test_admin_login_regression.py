@@ -107,7 +107,7 @@ async def test_organization_model_columns_accessible(login_client: AsyncClient):
     Если столбец добавлен в модель без миграции — этот тест упадёт
     раньше, чем пользователь попытается войти в систему.
     """
-    from sqlalchemy import select, text
+    from sqlalchemy import select
     from app.db.models import Organization as OrgModel
 
     engine = _make_engine()

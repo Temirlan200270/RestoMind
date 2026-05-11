@@ -1,7 +1,7 @@
 """
 Роутер для входящих вебхуков WhatsApp.
 Принимает сообщения, мгновенно возвращает 200 OK,
-а обработку передаёт в BackgroundTasks.
+а обработку передаёт в очередь ARQ (worker).
 """
 
 import asyncio
@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.pipeline_log import log_pipeline_stage
+from app.core.pipeline_timing import PipelineStopwatch, log_pipeline_rm_stage_ms
 from app.core.rate_limiter import check_rate_limit
 from app.db.models import ChatLog, EscalationEvent, FailedTask, Order, OrderStatus, Organization, User
 from app.db.session import async_session_factory, redis_client
@@ -31,7 +32,7 @@ from app.integrations.iiko_client import IikoClient
 from app.integrations.telegram import EscalationAlertExtras, send_tg_fallback_alert
 from app.integrations.twilio_client import verify_twilio_signature
 from app.integrations.twilio_media import mulaw_8k_to_wav
-from app.integrations.whatsapp import download_media_bytes, send_template, send_voice_message
+from app.integrations.whatsapp import download_media_bytes, send_voice_message
 from app.services.prepayment_legal import append_prepayment_legal_disclaimer
 from app.services.ai_brain import (
     call_ai_with_audio,
@@ -42,7 +43,7 @@ from app.services.ai_brain import (
 )
 from app.services.chat_delivery import apply_whatsapp_status_webhook
 from app.services.context_engine import fetch_ai_read_context
-from app.services.time_context import format_org_current_time_block
+from app.services.restaurant_context_cache import cached_format_org_current_time_block
 from app.services.customer_reply import (
     reset_twilio_call_context,
     send_customer_text,
@@ -65,8 +66,10 @@ from app.services.dialog_mgr import (
     sync_user_dialog_state_to_db_then_redis,
     update_user_session_fields_in_db,
 )
-from app.services.ai_usage import schedule_log_ai_usage
+from app.services.ai_usage import schedule_log_ai_error, schedule_log_ai_usage
+from app.services.pipeline_latency import schedule_log_pipeline_latency
 from app.services.events import publish_event
+from app.services.billing_guard import tenant_billing_blocks_inbound
 from app.services.org_resolve import organization_id_for_whatsapp_value
 from app.services.intent_router import (
     cancel_booking,
@@ -229,6 +232,20 @@ def _is_plain_greeting(text: str) -> bool:
 
 def _greeting_reply() -> str:
     return "Здравствуйте! Чем могу помочь?"
+
+
+_POLITE_ACK_RE = re.compile(
+    r"^(спасибо|благодарю|thanks|thank\s*you|мерси)\s*[!.\s]*$",
+    re.IGNORECASE | re.UNICODE,
+)
+
+
+def _is_polite_ack_only(text: str) -> bool:
+    """Короткое «спасибо» без запроса — безопасный fast-path до LLM (CHATTING)."""
+    raw = (text or "").strip()
+    if not raw or len(raw) > 48:
+        return False
+    return bool(_POLITE_ACK_RE.match(raw))
 
 
 async def _save_chat_log(
@@ -738,6 +755,7 @@ async def process_with_retry(
     """
     org_id = int(organization_id) if organization_id is not None else int(settings.default_organization_id)
     org_active = True
+    pipeline_sw = PipelineStopwatch()
     if webhook_value is not None and organization_id is None:
         try:
             async with async_session_factory() as db:
@@ -768,6 +786,9 @@ async def process_with_retry(
             # Если дедуп-таблица недоступна, лучше не терять сообщение: продолжаем без БД-идемпотентности.
             logger.warning("WhatsApp dedupe start failed (mid=%s): %s", wmid[:24], exc)
 
+    if settings.pipeline_timing_enabled:
+        pipeline_sw.split("dedupe")
+
     last_exc: BaseException | None = None
     for attempt in range(MAX_RETRIES):
         try:
@@ -777,6 +798,7 @@ async def process_with_retry(
                 whatsapp_message_id=wmid,
                 voice_audio=voice_audio,
                 organization_id=org_id,
+                pipeline_sw=pipeline_sw,
             )
             if wmid:
                 try:
@@ -825,11 +847,13 @@ async def process_message(
     whatsapp_message_id: str = "",
     voice_audio: tuple[bytes, str] | None = None,
     organization_id: int,
+    pipeline_sw: PipelineStopwatch | None = None,
 ) -> None:
     """
     Полный цикл обработки входящего сообщения с учётом State Machine.
     """
     try:
+        pipe_sw = pipeline_sw or PipelineStopwatch()
         state = await get_user_state(redis_client, phone, organization_id=organization_id)
         if message_text and _is_plain_greeting(message_text):
             if state == UserState.CHATTING and voice_audio is None:
@@ -876,6 +900,13 @@ async def process_message(
                 ),
             )
             ai_paused_db = bool(u_row and getattr(u_row, "ai_paused", False))
+            ai_snooze_active = False
+            if u_row is not None:
+                from app.services.ai_snooze import ai_snooze_is_active, clear_ai_snooze_if_expired
+
+                await clear_ai_snooze_if_expired(db_u, u_row)
+                ai_snooze_active = ai_snooze_is_active(u_row)
+                await db_u.commit()
 
         # Голос без мультимодального чата: сначала текст (подтверждения, оператор)
         if voice_bytes is not None and (
@@ -884,6 +915,7 @@ async def process_message(
             or state == UserState.CONFIRMING_BOOKING
             or state == UserState.HUMAN_MODE
             or ai_paused_db
+            or ai_snooze_active
         ):
             if not voice_supported():
                 await send_customer_text(
@@ -912,15 +944,16 @@ async def process_message(
             "organization_id": organization_id,
         })
 
-        # ─── HUMAN_MODE / ai_paused: AI молчит, только логируем ─────────
+        # ─── HUMAN_MODE / ai_paused / ai_snooze: AI молчит, только логируем ─────────
         # Состояние в Redis: ключ user:state:{phone} (см. dialog_mgr.get_user_state), не вызываем LLM.
-        if state == UserState.HUMAN_MODE or ai_paused_db:
+        # Временная пауза: User.ai_snoozed_until (UTC) — без перевода Redis в HUMAN_MODE; см. app.services.ai_snooze.
+        if state == UserState.HUMAN_MODE or ai_paused_db or ai_snooze_active:
             async with async_session_factory() as db:
                 await _save_chat_log(
                     db,
                     phone,
                     message_text,
-                    "[HUMAN_MODE — AI отключён]",
+                    "[OPERATOR_ONLY — AI не отвечает]",
                     organization_id=organization_id,
                     outbound_whatsapp=False,
                 )
@@ -928,7 +961,13 @@ async def process_message(
             await append_to_history(
                 redis_client, phone, "user", message_text, organization_id=organization_id,
             )
-            logger.info("HUMAN_MODE: сообщение от %s сохранено, AI не вызван", phone)
+            logger.info(
+                "operator_only: сообщение от %s сохранено, AI не вызван (human=%s paused=%s snooze=%s)",
+                phone,
+                state == UserState.HUMAN_MODE,
+                ai_paused_db,
+                ai_snooze_active,
+            )
             return
 
         # ─── AWAITING_ORDER_PAYMENT: способ оплаты, правка заказа или Да/Нет ───
@@ -1061,6 +1100,50 @@ async def process_message(
                 redis_client, phone, "user", message_text, organization_id=organization_id,
             )
 
+        if (
+            settings.whatsapp_fast_ack_enabled
+            and message_text.strip()
+            and not had_voice
+            and _is_polite_ack_only(message_text)
+        ):
+            ack_reply = (
+                "Рады были помочь! Если захотите заказать или что-то уточнить по меню — напишите."
+            )
+            outbound_ack: int | None = None
+            async with async_session_factory() as db_ack:
+                outbound_ack = await _save_chat_log(
+                    db_ack,
+                    phone,
+                    message_text,
+                    ack_reply,
+                    organization_id=organization_id,
+                )
+                await db_ack.commit()
+            await append_to_history(
+                redis_client, phone, "assistant", ack_reply, organization_id=organization_id,
+            )
+            await publish_event("new_message", {
+                "phone": phone,
+                "role": "assistant",
+                "content": ack_reply,
+                "id": outbound_ack,
+                "delivery_status": "sending",
+                "organization_id": organization_id,
+            })
+            await send_customer_text(phone, ack_reply, outbound_chat_log_id=outbound_ack)
+            if settings.pipeline_timing_enabled:
+                pipe_sw.split("preflight")
+                pipe_sw.split("short_circuit_ack")
+                log_pipeline_rm_stage_ms(
+                    phone_tail=_redact_msisdn_for_log(phone),
+                    rm_stage_ms=pipe_sw.rm_stage_ms,
+                    extra={"organization_id": organization_id, "path": "fast_ack"},
+                )
+            return
+
+        if settings.pipeline_timing_enabled:
+            pipe_sw.split("preflight")
+
         outbound_id_chat: int | None = None
         tg_alert_ctx: EscalationAlertExtras | None = None
         # 1) DB: параллельное чтение (несколько коротких сессий), затем сбор строк без I/O
@@ -1070,7 +1153,8 @@ async def process_message(
         u_row = read_ctx.user
         customer_ctx = read_ctx.customer_ctx
         org_ent = read_ctx.org
-        current_time_ctx = format_org_current_time_block(
+        current_time_ctx = cached_format_org_current_time_block(
+            organization_id,
             getattr(org_ent, "timezone", None) if org_ent is not None else "Etc/GMT-5",
             getattr(org_ent, "schedule_json", None) if org_ent is not None else None,
         )
@@ -1098,6 +1182,9 @@ async def process_message(
             strategy_ctx = ""
             sales_gastro_hint = ""
             sales_target_iiko_ids = []
+
+        if settings.pipeline_timing_enabled:
+            pipe_sw.split("context")
 
         # 2) OpenAI: без DB-сессии
         if had_voice:
@@ -1134,12 +1221,18 @@ async def process_message(
                 raise_on_transient=False,
             )
 
+        if settings.pipeline_timing_enabled:
+            pipe_sw.split("llm")
+
         log_pipeline_stage(
             "llm_ok",
             phone=phone,
             extra={"intent": ai_response.intent, "voice": had_voice},
         )
         schedule_log_ai_usage(organization_id, getattr(ai_response, "_usage", None))
+        # P4: регистрируем транзиентную AI-ошибку (fallback = провайдер недоступен)
+        if is_openai_fallback_escalation_reply(ai_response.reply_text):
+            schedule_log_ai_error(organization_id)
 
         # 3) DB: короткая мутация/запись результатов
         post_commit_state: UserState | None = None
@@ -1237,6 +1330,9 @@ async def process_message(
                 )
             await db.commit()
 
+        if settings.pipeline_timing_enabled:
+            pipe_sw.split("route")
+
         # Cache update после commit — иначе риск рассинхрона Redis↔БД при падении процесса
         if post_commit_state:
             await set_user_state(redis_client, phone, post_commit_state, organization_id=organization_id)
@@ -1260,9 +1356,42 @@ async def process_message(
             "delivery_status": "sending",
             "organization_id": organization_id,
         })
-        await send_customer_text(
-            phone, result.reply_text, outbound_chat_log_id=outbound_id_chat,
-        )
+        # E8: интерактивное сообщение (кнопки или CTA) вместо plain text если задано
+        _sent_interactive = False
+        if result.interactive_buttons:
+            try:
+                from app.integrations.whatsapp import send_interactive_buttons
+                ir = await send_interactive_buttons(phone, result.reply_text, result.interactive_buttons)
+                _sent_interactive = ir.ok
+            except Exception as _ie:
+                logger.warning("send_interactive_buttons failed, fallback to text: %s", _ie)
+        elif result.cta_url:
+            try:
+                from app.integrations.whatsapp import send_cta_url_button
+                ir = await send_cta_url_button(
+                    phone, result.reply_text, "💳 Оплатить", result.cta_url,
+                )
+                _sent_interactive = ir.ok
+            except Exception as _ce:
+                logger.warning("send_cta_url_button failed, fallback to text: %s", _ce)
+        if not _sent_interactive:
+            await send_customer_text(
+                phone, result.reply_text, outbound_chat_log_id=outbound_id_chat,
+            )
+
+        if settings.pipeline_timing_enabled:
+            pipe_sw.split("reply")
+            log_pipeline_rm_stage_ms(
+                phone_tail=_redact_msisdn_for_log(phone),
+                rm_stage_ms=pipe_sw.rm_stage_ms,
+                extra={"organization_id": organization_id, "intent": ai_response.intent},
+            )
+            # P4: fire-and-forget latency recording для SLA мониторинга
+            schedule_log_pipeline_latency(
+                organization_id,
+                pipe_sw.rm_stage_ms,
+                pipeline_type="whatsapp_voice" if had_voice else "whatsapp_text",
+            )
 
         if had_voice and settings.whatsapp_voice_replies:
             try:
@@ -1551,6 +1680,9 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks) -
                 if org_ent is not None and not bool(org_ent.is_active):
                     logger.info("org=%s inactive: incoming webhook ignored", org_id)
                     return {"status": "ok"}
+                if org_ent is not None and await tenant_billing_blocks_inbound(db, org_ent):
+                    logger.info("org=%s tenant billing suspended: incoming webhook ignored", org_id)
+                    return {"status": "ok"}
         except Exception as exc:
             logger.warning("organization activity check failed: %s", exc)
         statuses = value.get("statuses", []) or []
@@ -1597,6 +1729,40 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks) -
                         webhook_value=value,
                     )
                     logger.info("Голосовое от %s поставлено в очередь", phone)
+            elif msg_type == "interactive":
+                # E8: кнопки quick-reply — клиент нажал одну из кнопок
+                interactive = msg.get("interactive") or {}
+                interactive_type = (interactive.get("type") or "").strip()
+                message_text = ""
+                if interactive_type == "button_reply":
+                    br = interactive.get("button_reply") or {}
+                    btn_id = (br.get("id") or "").strip()
+                    btn_title = (br.get("title") or "").strip()
+                    # Маппинг стандартных ID на слова, которые понимает CONFIRM_WORDS / CANCEL_WORDS
+                    if btn_id == "confirm":
+                        message_text = "да"
+                    elif btn_id == "cancel":
+                        message_text = "нет"
+                    else:
+                        message_text = btn_title or btn_id
+                elif interactive_type == "list_reply":
+                    lr = interactive.get("list_reply") or {}
+                    message_text = (lr.get("title") or lr.get("id") or "").strip()
+                if message_text:
+                    from app.services.task_queue import dispatch_arq_or_background
+
+                    await dispatch_arq_or_background(
+                        "whatsapp_process_text",
+                        background_tasks,
+                        phone=phone,
+                        message_text=message_text,
+                        whatsapp_message_id=message_id,
+                        webhook_value=value,
+                    )
+                    logger.info(
+                        "Interactive (%s) от %s → '%s' поставлено в очередь",
+                        interactive_type, phone, message_text,
+                    )
             else:
                 message_text = (msg.get("text") or {}).get("body") or ""
                 if message_text:

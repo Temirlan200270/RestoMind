@@ -141,3 +141,46 @@ async def test_bulk_stoplist_foreign_id_reported_not_found(asgi_memory_client) -
     assert data["updated"] == 1
     assert len(data["failed"]) == 1
     assert data["failed"][0]["error"] == "not_found"
+
+
+@pytest.mark.asyncio
+async def test_bulk_stoplist_deduplicates_item_ids(asgi_memory_client) -> None:
+    ac, sf = asgi_memory_client
+    async with sf() as db:
+        org = Organization(name="Bulk Dedupe Org", slug="bulk-dedupe-org")
+        db.add(org)
+        await db.flush()
+        item = MenuItem(
+            organization_id=int(org.id),
+            name="Only one",
+            category="T",
+            price=100,
+            is_available=True,
+            iiko_id="uuid-dedupe",
+        )
+        db.add(item)
+        db.add(
+            StaffUser(
+                organization_id=int(org.id),
+                tenant_owner_id=None,
+                email="dedupe@test.kz",
+                password_hash=hash_password("secret123"),
+                role=StaffRole.ADMIN.value,
+                is_active=True,
+                is_superadmin=False,
+            ),
+        )
+        await db.commit()
+        item_id = int(item.id)
+
+    await ac.post(
+        "/api/admin/auth/login",
+        json={"email": "dedupe@test.kz", "password": "secret123"},
+    )
+
+    r = await ac.post(
+        "/api/admin/menu/bulk-stoplist",
+        json={"action": "stop", "item_ids": [item_id, item_id, item_id]},
+    )
+    assert r.status_code == 200
+    assert r.json()["updated"] == 1

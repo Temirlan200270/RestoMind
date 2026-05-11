@@ -183,6 +183,46 @@ class Settings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("WHATSAPP_VOICE_REPLIES", "whatsapp_voice_replies"),
     )
+    # Короткое «спасибо» в CHATTING без вызова LLM (безопасный fast-path).
+    whatsapp_fast_ack_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "WHATSAPP_FAST_ACK_ENABLED",
+            "whatsapp_fast_ack_enabled",
+        ),
+    )
+    # Разбивка rm_stage_ms по этапам inbound WhatsApp (dedupe → … → reply).
+    pipeline_timing_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "PIPELINE_TIMING_ENABLED",
+            "pipeline_timing_enabled",
+        ),
+    )
+    pipeline_latency_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("PIPELINE_LATENCY_ENABLED", "pipeline_latency_enabled"),
+    )
+    sla_llm_p95_ms: int = Field(
+        default=4000,
+        ge=500,
+        validation_alias=AliasChoices("SLA_LLM_P95_MS", "sla_llm_p95_ms"),
+    )
+    sla_total_p95_ms: int = Field(
+        default=8000,
+        ge=1000,
+        validation_alias=AliasChoices("SLA_TOTAL_P95_MS", "sla_total_p95_ms"),
+    )
+    # TTL строки меню в Redis (ключ rm:menu_ctx:{org_id}); in-process кэш остаётся в order_logic.
+    restaurant_menu_ctx_redis_ttl_sec: int = Field(
+        default=90,
+        ge=30,
+        le=3600,
+        validation_alias=AliasChoices(
+            "RESTAURANT_MENU_CTX_REDIS_TTL_SEC",
+            "restaurant_menu_ctx_redis_ttl_sec",
+        ),
+    )
     # Phase 13.1: имена одобренных в Meta шаблонов (пусто — сценарий не шлёт template из кода).
     whatsapp_template_order_receipt: str = Field(
         default="",
@@ -230,6 +270,12 @@ class Settings(BaseSettings):
             "TELEGRAM_ALERT_TIMEZONE",
             "display_timezone",
         ),
+    )
+
+    # Telegram webhook: секрет для верификации входящих update от Telegram (X-Telegram-Bot-Api-Secret-Token)
+    telegram_webhook_secret: str = Field(
+        default="",
+        validation_alias=AliasChoices("TELEGRAM_WEBHOOK_SECRET", "telegram_webhook_secret"),
     )
 
     # Fernet (URL-safe base64 32-byte key): python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"

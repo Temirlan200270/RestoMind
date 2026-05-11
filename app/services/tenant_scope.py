@@ -39,9 +39,52 @@ def failed_tasks_tenant_clause(org_id: int):
     )
 
 
-def branding_placeholder_e21() -> dict[str, Any | None]:
-    """Заглушка до E2.2 (Tenant.brand_*); контракт auth/me уже резервирует поля."""
+def branding_empty_payload() -> dict[str, Any | None]:
+    """Дефолтная (пустая) форма branding для GET /auth/me и GET /admin/branding."""
     return {"brand_name": None, "brand_logo_url": None, "brand_color_hex": None}
+
+
+# Сохраняем старое имя для обратной совместимости импорта (тесты, чужие модули).
+branding_placeholder_e21 = branding_empty_payload
+
+
+async def resolve_active_tenant_id(
+    db: AsyncSession,
+    *,
+    staff: StaffUser | None,
+    active_organization_id: int,
+) -> int | None:
+    """Tenant_id для текущей сессии (E2.1: владелец сети vs филиал)."""
+    if staff is not None and staff.tenant_owner_id is not None:
+        return int(staff.tenant_owner_id)
+    org = await db.get(Organization, int(active_organization_id))
+    if org is None or org.tenant_id is None:
+        return None
+    return int(org.tenant_id)
+
+
+async def resolve_branding_for_session(
+    db: AsyncSession,
+    *,
+    staff: StaffUser | None,
+    active_organization_id: int,
+) -> dict[str, Any | None]:
+    """Branding для контракта /auth/me; null-поля если арендатор не настроил бренд."""
+    tenant_id = await resolve_active_tenant_id(
+        db,
+        staff=staff,
+        active_organization_id=int(active_organization_id),
+    )
+    if tenant_id is None:
+        return branding_empty_payload()
+    t = await db.get(Tenant, tenant_id)
+    if t is None:
+        return branding_empty_payload()
+    return {
+        "brand_name": str(t.brand_name) if t.brand_name else None,
+        "brand_color_hex": str(t.brand_color_hex) if t.brand_color_hex else None,
+        "brand_logo_url": str(t.brand_logo_url) if t.brand_logo_url else None,
+    }
 
 
 async def available_organizations_for_admin_session(
@@ -111,16 +154,14 @@ async def resolve_tenant_summary_for_session(
     staff: StaffUser | None,
     active_organization_id: int,
 ) -> dict[str, Any] | None:
-    """Краткое описание сети для GET /auth/me; plan_status — заглушка до E2.3."""
-    tenant_id: int | None = None
-    if staff is not None and staff.tenant_owner_id is not None:
-        tenant_id = int(staff.tenant_owner_id)
-    else:
-        org = await db.get(Organization, int(active_organization_id))
-        if org is None or org.tenant_id is None:
-            return None
-        tenant_id = int(org.tenant_id)
-
+    """Краткое описание сети для GET /auth/me."""
+    tenant_id = await resolve_active_tenant_id(
+        db,
+        staff=staff,
+        active_organization_id=int(active_organization_id),
+    )
+    if tenant_id is None:
+        return None
     t = await db.get(Tenant, tenant_id)
     if t is None:
         return None
@@ -128,7 +169,7 @@ async def resolve_tenant_summary_for_session(
         "id": int(t.id),
         "name": str(t.name),
         "plan": str(t.plan),
-        "plan_status": "active",
+        "plan_status": str(t.plan_status or "active"),
     }
 
 

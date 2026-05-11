@@ -11,12 +11,18 @@ import hashlib
 import hmac
 import json
 import secrets
+from datetime import datetime, timedelta, timezone
 from typing import Any, ClassVar
 
+import httpx
 from starlette.requests import Request
 
 from app.core.config import settings
 from app.services.payment_adapters import ParsedPayment
+from app.services.payment_providers.base import InitiatedPayment
+
+_CLOUDPAYMENTS_API = "https://api.cloudpayments.ru"
+_PAYMENT_TTL_MINUTES = 60
 
 
 class CloudPaymentsWebhookAdapter:
@@ -70,4 +76,69 @@ class CloudPaymentsWebhookAdapter:
             status="paid" if status == "paid" else "failed",
             amount=amount_f,
             raw=data,
+        )
+
+
+class CloudPaymentsInitiator:
+    """Создаёт платёжную сессию через CloudPayments API (hosted payment page)."""
+
+    provider_slug: ClassVar[str] = "cloudpayments"
+
+    async def create_payment(
+        self,
+        *,
+        order_id: int,
+        amount: float,
+        currency: str,
+        description: str,
+        idempotency_key: str,
+        callback_url: str,
+        success_url: str,
+        credentials: dict[str, str],
+    ) -> InitiatedPayment:
+        public_id = credentials.get("api_key", "")
+        api_secret = credentials.get("secret_key", "")
+
+        if not public_id or not api_secret:
+            raise ValueError("CloudPayments: api_key (PublicId) и secret_key обязательны")
+
+        payload: dict[str, Any] = {
+            "Amount": round(amount, 2),
+            "Currency": currency,
+            "Description": description[:255],
+            "AccountId": str(order_id),
+            "InvoiceId": idempotency_key[:200],
+        }
+        if callback_url:
+            payload["CallbackUrl"] = callback_url
+        if success_url:
+            payload["SuccessRedirectUrl"] = success_url
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{_CLOUDPAYMENTS_API}/payments/link/create",
+                auth=(public_id, api_secret),
+                json=payload,
+            )
+            resp.raise_for_status()
+
+        data = resp.json()
+        if not data.get("Success"):
+            msg = data.get("Message") or "CloudPayments: неизвестная ошибка"
+            raise ValueError(f"CloudPayments initiation error: {msg}")
+
+        model = data.get("Model") or {}
+        payment_url = str(model.get("Url") or "")
+        payment_id = str(model.get("Id") or "")
+
+        if not payment_url:
+            raise ValueError(f"CloudPayments не вернул URL: {data!r}")
+
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=_PAYMENT_TTL_MINUTES)
+
+        return InitiatedPayment(
+            payment_url=payment_url,
+            provider_payment_id=payment_id,
+            expires_at=expires_at,
+            raw=model,
         )

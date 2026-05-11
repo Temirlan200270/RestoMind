@@ -26,6 +26,7 @@ from app.api.admin import ws_router as admin_ws_router
 from app.api.admin.intelligence import router as admin_intelligence_router
 from app.api.payment_webhook import router as payment_webhook_router
 from app.api.superadmin import router as superadmin_router
+from app.api.telegram_webhook import router as telegram_webhook_router
 from app.api.webhooks import router as webhooks_router
 from app.core.config import settings
 from app.db.models import Base, Organization
@@ -345,6 +346,21 @@ async def _apply_sqlite_startup_schema_patches() -> None:
         "ALTER TABLE orders ADD COLUMN payment_provider VARCHAR(64)",
         "ALTER TABLE orders ADD COLUMN external_payment_id VARCHAR(200)",
         "ALTER TABLE orders ADD COLUMN payment_amount_captured NUMERIC(12,2)",
+        # P4 sprint
+        "ALTER TABLE ai_usage_logs ADD COLUMN error_count INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE ai_usage_logs ADD COLUMN p95_latency_ms INTEGER",
+    ):
+        try:
+            async with async_engine.begin() as conn:
+                await conn.execute(text(sql_sqlite))
+        except Exception as exc:
+            _ddl_warn(sql_sqlite, exc)
+
+    for sql_sqlite in (
+        "CREATE TABLE IF NOT EXISTS pipeline_latency_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, organization_id INTEGER NOT NULL, pipeline_type VARCHAR(32) NOT NULL DEFAULT 'whatsapp_text', dedupe_ms INTEGER, context_ms INTEGER, llm_ms INTEGER, route_ms INTEGER, reply_ms INTEGER, total_ms INTEGER, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(organization_id) REFERENCES organizations(id) ON DELETE CASCADE)",
+        "CREATE TABLE IF NOT EXISTS business_recommendations (id INTEGER PRIMARY KEY AUTOINCREMENT, organization_id INTEGER NOT NULL, recommendation_type VARCHAR(64) NOT NULL, title VARCHAR(240) NOT NULL, body TEXT NOT NULL DEFAULT '', confidence_pct INTEGER NOT NULL DEFAULT 50, expected_impact_kzt INTEGER, status VARCHAR(20) NOT NULL DEFAULT 'new', data_json TEXT, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(organization_id) REFERENCES organizations(id) ON DELETE CASCADE)",
+        "CREATE INDEX IF NOT EXISTS ix_pipeline_latency_logs_org_created ON pipeline_latency_logs (organization_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS ix_business_recommendations_org_created ON business_recommendations (organization_id, created_at)",
     ):
         try:
             async with async_engine.begin() as conn:
@@ -569,15 +585,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     await init_redis_or_fallback()
 
+    if settings.is_prod_like:
+        from app.services.task_queue import assert_arq_reachable_for_prod_startup
+
+        await assert_arq_reachable_for_prod_startup()
+        logger.info("ARQ/Redis: production/staging connectivity check OK")
+
     await init_whatsapp_http_client()
 
     stop_list_task = asyncio.create_task(_stop_list_sync_loop())
     chat_retention_task = asyncio.create_task(_chat_log_retention_loop())
     payment_expiry_task = asyncio.create_task(_payment_expiry_loop())
 
+    from app.services.recommendations import recommendations_daily_loop
+    recommendations_task = asyncio.create_task(recommendations_daily_loop(async_session_factory))
+
     yield
 
-    for bg in (stop_list_task, chat_retention_task, payment_expiry_task):
+    for bg in (stop_list_task, chat_retention_task, payment_expiry_task, recommendations_task):
         bg.cancel()
         try:
             await bg
@@ -616,6 +641,7 @@ app.include_router(admin_router, prefix="/api")
 app.include_router(admin_intelligence_router, prefix="/api")
 app.include_router(admin_ws_router, prefix="/api")
 app.include_router(superadmin_router, prefix="/api")
+app.include_router(telegram_webhook_router, prefix="/api")
 
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 USER_META_UPSELL_REJECTS_KEY = "upsell_rejections"
 """В User.meta_json: map iiko_id (lower) → ISO-8601 UTC от последнего отказа."""

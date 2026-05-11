@@ -9,10 +9,15 @@
 {%- endmacro %}
 
 {% macro order_card_row(order_var="order") -%}
-<tr class="border-b border-gray-50 hover:bg-blue-50/30 cursor-pointer transition" @click="openOrderDetails({{ order_var }})">
+<tr class="border-b border-gray-50 hover:bg-blue-50/30 cursor-pointer transition"
+  :class="orderLowConfidence({{ order_var }}) ? 'ds-order-surface--ai-confidence bg-amber-50/20' : ''"
+  @click="openOrderDetails({{ order_var }})">
   <td class="py-3 font-medium text-brand-600" x-text="'#' + {{ order_var }}.id"></td>
   <td class="py-3">
-    {{ order_status_badge(order_var) }}
+    <div class="flex flex-wrap items-center gap-1.5">
+      {{ order_status_badge(order_var) }}
+      <span x-show="orderLowConfidence({{ order_var }})" class="ds-badge-warning-soft">AI</span>
+    </div>
   </td>
   <td class="py-3 font-semibold" x-text="fmt.money({{ order_var }}.total_price)"></td>
   <td class="py-3 text-gray-500 tabular-nums"
@@ -24,7 +29,10 @@
 {% macro order_card_mobile(order_var="order") -%}
 <div
   class="w-full text-left px-4 py-3 flex flex-col gap-1 hover:bg-gray-50"
-  :class="{{ order_var }}.iiko_last_error ? 'bg-rose-50/80' : ''">
+  :class="[
+    {{ order_var }}.iiko_last_error ? 'bg-rose-50/80' : '',
+    orderLowConfidence({{ order_var }}) ? 'ds-order-surface--ai-confidence bg-amber-50/25' : '',
+  ]">
   <div class="cursor-pointer min-w-0" @click="openOrderDetails({{ order_var }})" role="button" tabindex="0"
     @keydown.enter.prevent="openOrderDetails({{ order_var }})">
     <div class="flex justify-between items-center gap-2">
@@ -32,6 +40,10 @@
       <span class="text-sm font-semibold" x-text="fmt.money({{ order_var }}.total_price)"></span>
     </div>
     <div class="font-mono text-xs text-gray-700" x-text="{{ order_var }}.user_phone || '—'"></div>
+    <button type="button" x-show="orderFailedWhatsappCount({{ order_var }}) > 0" @click.stop="goToGuestChatForOrder({{ order_var }})"
+      class="self-start text-[10px] font-bold px-2 py-1 rounded-lg bg-rose-100 text-rose-900 border border-rose-200">
+      <span x-text="orderFailedWhatsappCount({{ order_var }})"></span> не доставлено в WhatsApp — чат
+    </button>
     <div class="flex flex-wrap items-center gap-2">
       <span :class="statusConfig[{{ order_var }}.status]?.class || 'bg-gray-100 text-gray-600'"
         x-text="statusConfig[{{ order_var }}.status]?.label || {{ order_var }}.status"
@@ -40,6 +52,8 @@
         x-text="orderTypeBadge({{ order_var }})"></span>
       <span x-show="orderHasUpsell({{ order_var }})" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200"
         title="Upsell">UPSELL</span>
+      <span x-show="orderLowConfidence({{ order_var }})" class="ds-badge-warning-soft max-w-[11rem] truncate"
+        title="Позиции или адрес требуют проверки">AI: проверьте</span>
       <span class="text-[10px] text-gray-400 tabular-nums"
         :title="fmt.dateTime({{ order_var }}.created_at)"
         x-text="fmt.timeAgo({{ order_var }}.created_at)"></span>
@@ -71,12 +85,18 @@
       :title="fmt.dateTime(order.created_at)"
       x-text="fmt.timeAgo(order.created_at)"></span>
   </div>
-  <div class="flex flex-wrap gap-1 mb-1 items-center">
+    <div class="flex flex-wrap gap-1 mb-1 items-center">
     <span x-show="order.order_type" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-800 border border-indigo-100" x-text="orderTypeBadge(order)"></span>
     <span :class="paymentKanbanBadgeClass(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded border tracking-wide" x-text="paymentMethodShort(order)"></span>
     <span x-show="orderAwaitingOrderPrepay(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-400">ПРЕДОПЛАТА</span>
     <span x-show="orderPlov1kgHint(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-50 text-violet-800 border border-violet-200 truncate max-w-[10rem]" x-text="orderPlov1kgHint(order)"></span>
     <span x-show="orderHasUpsell(order)" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200" title="Бот сделал допродажу">UPSELL</span>
+    <span x-show="orderLowConfidence(order)" class="ds-badge-warning-soft max-w-[10rem] truncate" title="ИИ сомневается — проверьте позиции и адрес">AI сомневается</span>
+    <button type="button" x-show="orderFailedWhatsappCount(order) > 0" @click.stop="goToGuestChatForOrder(order)"
+      class="text-[9px] font-black px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-200 hover:bg-rose-200/80"
+      title="Сообщения не доставлены в WhatsApp — открыть чат">
+      <span x-text="orderFailedWhatsappCount(order)"></span> WA fail
+    </button>
   </div>
   <div class="text-xs font-mono text-gray-600 mb-1 truncate" x-show="order.user_phone" x-text="order.user_phone"></div>
   <div class="text-xs text-gray-500 mb-2" x-text="(order.items?.items?.length || 0) + ' позиций'"></div>
@@ -104,8 +124,12 @@
       <span class="min-w-0 flex-1 truncate text-gray-700" x-text="orderCompactTitle(order)"></span>
       <span x-show="orderTimerWarn(order, '{{ stage_key }}')" class="shrink-0 rounded-full bg-red-50 px-1.5 py-0.5 font-black text-red-700">!</span>
       <span x-show="orderAwaitingOrderPrepay(order)" class="shrink-0 rounded-full bg-amber-100 px-1.5 py-0.5 font-black text-amber-900">P</span>
+      <button type="button" x-show="orderFailedWhatsappCount(order) > 0" @click.stop="goToGuestChatForOrder(order)"
+        class="shrink-0 rounded-full bg-rose-100 px-1.5 py-0.5 font-black text-rose-800 border border-transparent hover:border-rose-300"
+        :title="'WhatsApp: не доставлено ' + orderFailedWhatsappCount(order)" x-text="'WA×' + orderFailedWhatsappCount(order)"></button>
       <span class="shrink-0 rounded-md bg-indigo-50 px-1.5 py-0.5 font-black text-indigo-800" :title="orderTypeBadge(order)" x-text="orderTypeCompactLabel(order)"></span>
       <span class="shrink-0 rounded-md bg-gray-100 px-1.5 py-0.5 font-black text-gray-700" :title="paymentMethodTitle(order)" x-text="paymentMethodCompactLabel(order)"></span>
+      <span x-show="orderLowConfidence(order)" class="shrink-0 ds-badge-warning-soft !px-1 !py-0.5" title="Проверьте заказ">AI?</span>
       <span class="shrink-0 font-mono text-gray-500 tabular-nums" x-text="orderPhoneLast4(order)"></span>
       <span class="shrink-0 font-black text-gray-950 tabular-nums" x-text="fmt.money(order.total_price)"></span>
       <button type="button"

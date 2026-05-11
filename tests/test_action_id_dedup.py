@@ -1,7 +1,5 @@
 """E4.1: идемпотентность дельт по action_id (дедупликация)."""
 
-import pytest
-
 from app.schemas.ai_schemas import OrderAction
 from app.services.order_logic import (
     filter_order_actions_idempotent,

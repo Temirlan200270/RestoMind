@@ -3,7 +3,6 @@
 REST-эндпоинты для просмотра заказов, диалогов, аналитики и синхронизации меню.
 """
 
-import asyncio
 import csv
 import io
 import json
@@ -47,7 +46,6 @@ from app.db.models import (
     User,
 )
 from app.db.session import async_session_factory, get_db, redis_client
-from app.integrations.whatsapp import send_message
 from app.services.admin_tokens import AdminWsClaims, create_admin_ws_token, parse_admin_ws_token
 from app.services.ai_brain import call_openai
 from app.services.customer_context import build_customer_context
@@ -59,7 +57,6 @@ from app.services.integration_health import (
     record_menu_sync,
     record_stoplist_sync,
 )
-from app.services.chat_delivery import finalize_outbound_delivery
 from app.services.chat_log_retention import count_chat_logs_eligible_for_purge, purge_old_chat_logs
 from app.services.dialog_mgr import (
     UserState,
@@ -75,7 +72,11 @@ from app.services.dialog_mgr import (
     update_user_session_fields_in_db,
 )
 from app.services.events import publish_event, subscribe_events
-from app.services.booking_halls import BOOKING_HALL_KEYS, BOOKING_HALL_VIP, vip_slot_occupied
+from app.services.billing_guard import (
+    billing_suspended_http_exception,
+    load_tenant_for_organization,
+    tenant_is_billing_suspended,
+)
 from app.services.intent_router import (
     confirm_order,
     get_open_draft_order,
@@ -88,8 +89,8 @@ from app.services.menu_sync import sync_menu_from_iiko, sync_stop_lists
 from app.services.org_iiko import resolve_org_iiko_credentials
 from app.services.tenant_scope import (
     available_organizations_for_admin_session,
-    branding_placeholder_e21,
     organization_id_allowed_for_admin_session,
+    resolve_branding_for_session,
     resolve_tenant_summary_for_session,
 )
 from app.services.knowledge_context import load_knowledge_context_block
@@ -102,6 +103,7 @@ from app.services.order_logic import (
     invalidate_menu_context_cache,
     load_available_menu,
     load_packaging_rules,
+    merge_confidence_into_order_meta,
     validate_mixed_payment_total,
     validate_order,
 )
@@ -110,7 +112,6 @@ from app.services.payment_notify import run_payment_received_customer_notify
 from app.services.tenant_scope import (
     failed_tasks_tenant_clause as _failed_tasks_tenant_clause,
     orders_tenant_clause as _orders_tenant_clause,
-    phones_subquery_for_org as _phones_subquery_for_org,
 )
 from app.services.sales_strategy import build_sales_strategy, format_strategy_for_prompt
 from app.services.intelligence_analytics import (
@@ -130,21 +131,27 @@ from .deps import (
     _escalation_tenant_clause,
     _integration_events_tenant_clause,
     _iiko_login_org_for_tenant,
-    _knowledge_tenant_clause,
     _menu_item_in_org,
     _menu_tenant_clause,
     _order_in_org,
     _packaging_tenant_clause,
     _pick_seed_menu_item,
     _session_is_superadmin,
-    _session_staff_user,
+    admin_actor_key,
     admin_org_from_session,
-    require_admin_session,
+    require_admin_session,  # noqa: F401 - re-exported from app.api.admin for compatibility
     require_admin_session_active,
     require_staff_admin,
     require_superadmin,
 )
+from .bookings import bookings_router
+from .branding import branding_router
+from .chats import admin_send_message, chats_router
+from .customers import customers_router
+from .knowledge import knowledge_router
 from .menu_bulk import menu_bulk_router
+from .schemas import TextRequest
+from .system import system_router
 from .menu_schemas import (
     ClearMenuBody,
     MenuItemCreateBody,
@@ -208,6 +215,9 @@ async def admin_login(request: Request, body: LoginBody, db: AsyncSession = Depe
                         status_code=403,
                         detail="Подписка приостановлена. Свяжитесь с администратором.",
                     )
+                tenant_st = await load_tenant_for_organization(db, int(staff.organization_id))
+                if tenant_is_billing_suspended(tenant_st):
+                    raise billing_suspended_http_exception()
             request.session["admin_ok"] = True
             request.session["admin_user"] = staff.email
             request.session["staff_id"] = int(staff.id)
@@ -235,6 +245,9 @@ async def admin_login(request: Request, body: LoginBody, db: AsyncSession = Depe
         org_login = await db.get(Organization, oid)
         if org_login is not None and not bool(org_login.is_active):
             raise HTTPException(status_code=403, detail="Подписка приостановлена. Свяжитесь с администратором.")
+        tenant_st = await load_tenant_for_organization(db, oid)
+        if tenant_is_billing_suspended(tenant_st):
+            raise billing_suspended_http_exception()
         request.session["admin_ok"] = True
         request.session["admin_user"] = body.username.strip()
         request.session["organization_id"] = oid
@@ -280,6 +293,9 @@ async def admin_demo_login(request: Request, db: AsyncSession = Depends(get_db))
         raise HTTPException(status_code=503, detail="Демо временно недоступно")
     if not bool(demo_org.is_active):
         raise HTTPException(status_code=503, detail="Демо временно отключено")
+    tenant_st = await load_tenant_for_organization(db, int(demo_org.id))
+    if tenant_is_billing_suspended(tenant_st):
+        raise HTTPException(status_code=503, detail="Демо временно недоступно")
 
     request.session["admin_ok"] = True
     request.session["admin_user"] = "demo-guest"
@@ -361,7 +377,22 @@ class SelectOrgBody(BaseModel):
 
 
 async def _admin_auth_me_payload(request: Request, db: AsyncSession) -> dict[str, Any]:
-    """Тело ответа GET /auth/me и успешного POST /auth/select-org (контракт PARALLEL_AI_PLAN §4)."""
+    """
+    Тело ответа GET /auth/me и успешного POST /auth/select-org (контракт PARALLEL_AI_PLAN §4).
+
+    Контракт по биллингу (E2.3):
+
+    * `billing_blocked` — стабильное поле, всегда `bool`. Сейчас всегда
+      возвращается ``False``: при `tenant.plan_status == "suspended"` мы
+      раньше возвращаем 403 (см. ``billing_suspended_http_exception``), сюда не
+      доходим. Поле сохранено в payload как контрактная подушка для
+      будущего «soft suspend» (тёплое окно после превышения лимита) —
+      UI сможет читать `billing_blocked` без новой версии API.
+    * Поля `branding`, `tenant`, `available_organizations`, `ws_token`
+      обязательны и не должны быть `null` для успешной сессии (см.
+      ``.cursor/rules/restomind-zones.mdc``).
+    * Super-admin не блокируется ни статусом организации, ни биллингом.
+    """
     user = request.session.get("admin_user") or settings.admin_username
     oid = admin_org_from_session(request)
     # Если в сессии лежит несуществующий organization_id (после миграций/ресетов БД),
@@ -386,6 +417,9 @@ async def _admin_auth_me_payload(request: Request, db: AsyncSession) -> dict[str
         org_me = await db.get(Organization, int(oid))
         if org_me is not None and not bool(org_me.is_active):
             raise HTTPException(status_code=403, detail="Подписка приостановлена. Свяжитесь с администратором.")
+        tenant_me = await load_tenant_for_organization(db, int(oid))
+        if tenant_is_billing_suspended(tenant_me):
+            raise billing_suspended_http_exception()
 
     available = await available_organizations_for_admin_session(
         db,
@@ -399,7 +433,11 @@ async def _admin_auth_me_payload(request: Request, db: AsyncSession) -> dict[str
         staff=staff_me,
         active_organization_id=int(oid),
     )
-    branding = branding_placeholder_e21()
+    branding = await resolve_branding_for_session(
+        db,
+        staff=staff_me,
+        active_organization_id=int(oid),
+    )
 
     staff_id_val: int | None = int(sid) if sid is not None else None
     email_out = str(user)
@@ -428,6 +466,7 @@ async def _admin_auth_me_payload(request: Request, db: AsyncSession) -> dict[str
         "available_organizations": available,
         "tenant": tenant_payload,
         "branding": branding,
+        "billing_blocked": False,
     }
 
 
@@ -475,6 +514,10 @@ async def admin_select_org(
         raise HTTPException(status_code=404, detail="Организация не найдена")
     if not is_superadmin and not bool(target.is_active):
         raise HTTPException(status_code=403, detail="Подписка приостановлена. Свяжитесь с администратором.")
+    if not is_superadmin:
+        tenant_t = await load_tenant_for_organization(db, int(body.organization_id))
+        if tenant_is_billing_suspended(tenant_t):
+            raise billing_suspended_http_exception()
 
     request.session["organization_id"] = int(body.organization_id)
     return await _admin_auth_me_payload(request, db)
@@ -489,6 +532,12 @@ router = APIRouter(
 )
 
 router.include_router(menu_bulk_router)
+router.include_router(knowledge_router)
+router.include_router(branding_router)
+router.include_router(bookings_router)
+router.include_router(customers_router)
+router.include_router(chats_router)
+router.include_router(system_router)
 
 
 # WebSocket без cookie-сессии (браузер ограничен) — только подписанный токен
@@ -632,6 +681,8 @@ def _merge_preserved_order_meta_keys(
     for key in ("recommendation", "recommendation_trace"):
         if key in preserved and preserved[key] is not None:
             new_meta[key] = preserved[key]
+    if preserved.get("delivery_address_verified") is True:
+        new_meta["delivery_address_verified"] = True
     return new_meta
 
 
@@ -736,6 +787,42 @@ async def list_orders(
             if _tx.order_id not in _tx_map:
                 _tx_map[_tx.order_id] = _tx
 
+    # P1.5: число исходящих WhatsApp failed в окне ±1 ч от created_at заказа.
+    # Считаем в Python: SQL datetime +/- timedelta компилируется по-разному в SQLite/Postgres.
+    _failed_wa_map: dict[int, int] = {int(oid): 0 for oid in _order_ids}
+    _orders_for_failed = [(o.id, o.user_id, _make_naive(o.created_at)) for o, _, _ in rows if o.created_at]
+    if _orders_for_failed:
+        _created_values = [dt for _, _, dt in _orders_for_failed if dt is not None]
+        if _created_values:
+            _min_dt = min(_created_values) - timedelta(hours=1)
+            _max_dt = max(_created_values) + timedelta(hours=1)
+            _user_ids = sorted({int(uid) for _, uid, _ in _orders_for_failed})
+            _log_rows = (
+                await db.execute(
+                    select(ChatLog.user_id, ChatLog.created_at)
+                    .where(
+                        ChatLog.organization_id == org_id,
+                        ChatLog.user_id.in_(_user_ids),
+                        ChatLog.role != "user",
+                        func.lower(func.coalesce(ChatLog.delivery_status, "")) == "failed",
+                        ChatLog.created_at >= _min_dt,
+                        ChatLog.created_at <= _max_dt,
+                    )
+                )
+            ).all()
+            for oid, uid, order_dt in _orders_for_failed:
+                if order_dt is None:
+                    continue
+                start = order_dt - timedelta(hours=1)
+                end = order_dt + timedelta(hours=1)
+                _failed_wa_map[int(oid)] = sum(
+                    1
+                    for log_uid, log_dt_raw in _log_rows
+                    if int(log_uid) == int(uid)
+                    and (log_dt := _make_naive(log_dt_raw)) is not None
+                    and start <= log_dt <= end
+                )
+
     out: list[dict] = []
     for o, phone, user_name in rows:
         items_json = o.items_json
@@ -772,6 +859,9 @@ async def list_orders(
                 "payment_split_warning": _check_mixed_payment_split(
                     items_json if isinstance(items_json, dict) else None, float(o.total_price),
                 ),
+                "failed_whatsapp_near_order": int(_failed_wa_map.get(int(o.id), 0)),
+                "order_confidence": meta.get("confidence"),
+                "low_confidence": bool((meta.get("confidence") or {}).get("low_confidence")),
                 "latest_payment_tx": {
                     "id": _ltx.id,
                     "provider": _ltx.provider,
@@ -1264,7 +1354,7 @@ async def patch_order_status(
         ij = dict(order.items_json or {}) if isinstance(order.items_json, dict) else {}
         om = dict(ij.get("order_meta") or {}) if isinstance(ij.get("order_meta"), dict) else {}
         events = list(om.get("fulfillment_events") or []) if isinstance(om.get("fulfillment_events"), list) else []
-        event = {"from": cur, "to": want, "at": datetime.now(timezone.utc).isoformat(), "actor": _admin_actor_key(request)}
+        event = {"from": cur, "to": want, "at": datetime.now(timezone.utc).isoformat(), "actor": admin_actor_key(request)}
         if body.message_template:
             event["message_template"] = body.message_template
         events.append(event)
@@ -1374,7 +1464,7 @@ async def retry_failed_task(
 
     from app.services.task_queue import dispatch_arq_or_background
 
-    queued_in_arq = await dispatch_arq_or_background(
+    await dispatch_arq_or_background(
         "whatsapp_process_text",
         background_tasks,
         phone=phone,
@@ -1388,7 +1478,7 @@ async def retry_failed_task(
     await db.refresh(t)
     return {
         "ok": True,
-        "queued": "arq" if queued_in_arq else "background",
+        "queued": "arq",
         "task": _failed_task_public(t),
     }
 
@@ -1425,6 +1515,8 @@ async def rebuild_order_draft(
         for k in ("recommendation", "recommendation_trace")
         if k in old_meta and old_meta[k] is not None
     }
+    if old_meta.get("delivery_address_verified") is True:
+        preserved_rec["delivery_address_verified"] = True
     items_in: list[OrderItem] = []
     for line in body.food_lines:
         pkg_raw = (line.packaging_plov_1kg or "").strip()
@@ -1473,6 +1565,7 @@ async def rebuild_order_draft(
     om = merged.get("order_meta")
     if isinstance(om, dict):
         merged["order_meta"] = _merge_preserved_order_meta_keys(om, preserved_rec)
+        merge_confidence_into_order_meta(merged["order_meta"], validated)
     order.items_json = merged
     order.total_price = grand_total
     order.row_version = int(order.row_version) + 1
@@ -3054,492 +3147,9 @@ async def integrations_sync_now(
     }
 
 
-# ─── Бронирования ───────────────────────────────────────
-
-@router.get("/bookings")
-async def list_bookings(
-    request: Request,
-    status: str | None = Query(None, description="Фильтр по статусу (pending, confirmed, cancelled)"),
-    q: str | None = Query(None, description="Поиск по телефону клиента"),
-    limit: int = Query(50, ge=1, le=200),
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    """Список бронирований."""
-    org_id = admin_org_from_session(request)
-    query = (
-        select(Booking, User.phone, User.name, Order.id)
-        .join(User, Booking.user_id == User.id)
-        .outerjoin(Order, Order.booking_id == Booking.id)
-        .where(User.organization_id == org_id)
-        .order_by(Booking.created_at.desc())
-    )
-    if status:
-        query = query.where(Booking.status == status)
-    if q and q.strip():
-        query = query.where(User.phone.ilike(f"%{q.strip()}%"))
-    query = query.limit(limit)
-
-    result = await db.execute(query)
-    rows = result.all()
-
-    return {
-        "count": len(rows),
-        "bookings": [
-            {
-                "id": b.id,
-                "user_id": b.user_id,
-                "user_phone": phone,
-                "user_name": name,
-                "date": b.booking_date.isoformat(),
-                "time": b.booking_time.isoformat(),
-                "guests": b.guests,
-                "hall": b.hall,
-                "comment": b.comment,
-                "status": b.status,
-                "created_at": b.created_at.isoformat() if b.created_at else None,
-                "linked_order_id": linked_oid,
-            }
-            for b, phone, name, linked_oid in rows
-        ],
-    }
 
 
-BOOKING_STATUS_KEYS = frozenset({"draft", "pending", "confirmed", "cancelled"})
-
-
-class BookingPatch(BaseModel):
-    """Частичное обновление брони: зал и/или статус."""
-
-    hall: str | None = Field(default=None, description="hall_1 | hall_2 | vip")
-    status: str | None = Field(default=None, description="draft | pending | confirmed | cancelled")
-
-
-@router.patch("/bookings/{booking_id}")
-async def patch_booking(
-    request: Request,
-    booking_id: int,
-    body: BookingPatch,
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    """
-    Обновить зал и/или статус.
-    VIP — не более одной активной брони на дату+время (кроме отменённых).
-    """
-    if body.hall is None and body.status is None:
-        raise HTTPException(status_code=400, detail="Укажите поле hall и/или status")
-
-    org_id = admin_org_from_session(request)
-    result = await db.execute(
-        select(Booking)
-        .join(User, User.id == Booking.user_id)
-        .where(Booking.id == booking_id, User.organization_id == org_id),
-    )
-    booking = result.scalar_one_or_none()
-    if not booking:
-        raise HTTPException(status_code=404, detail="Бронирование не найдено")
-
-    if body.hall is not None:
-        h = (body.hall or "").strip()
-        if h not in BOOKING_HALL_KEYS:
-            raise HTTPException(status_code=400, detail="Недопустимый зал (ожидается hall_1, hall_2 или vip)")
-        booking.hall = h
-
-    if body.status is not None:
-        st = (body.status or "").strip()
-        if st not in BOOKING_STATUS_KEYS:
-            raise HTTPException(
-                status_code=400,
-                detail="Недопустимый статус (draft, pending, confirmed, cancelled)",
-            )
-        booking.status = st
-
-    if booking.hall == BOOKING_HALL_VIP and booking.status != "cancelled":
-        if await vip_slot_occupied(
-            db, booking.booking_date, booking.booking_time, booking.id,
-        ):
-            raise HTTPException(
-                status_code=409,
-                detail="VIP зал на это время уже занят — выберите другое время или другой зал",
-            )
-
-    await db.commit()
-    return {
-        "status": "ok",
-        "id": booking_id,
-        "hall": booking.hall,
-        "booking_status": booking.status,
-    }
-
-
-# ─── Диалоги ────────────────────────────────────────────
-
-
-def _parse_dt(value: object) -> datetime | None:
-    if not value:
-        return None
-    try:
-        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-    except Exception:
-        return None
-
-
-def _admin_actor_key(request: Request) -> str:
-    sid = request.session.get("staff_id")
-    if sid is not None:
-        return f"staff:{sid}"
-    email = request.session.get("email") or request.session.get("staff_email")
-    if email:
-        return f"staff:{email}"
-    return "staff:session"
-
-
-def _chat_triage_from_meta(meta: object) -> dict[str, Any]:
-    src = dict(meta or {}) if isinstance(meta, dict) else {}
-    raw = src.get("chat_triage")
-    triage = dict(raw) if isinstance(raw, dict) else {}
-    state = str(triage.get("state") or "active").lower()
-    if state not in {"active", "closed"}:
-        state = "active"
-    return {
-        "state": state,
-        "assignee": str(triage.get("assignee") or ""),
-        "snoozed_until": triage.get("snoozed_until"),
-        "snooze_reason": str(triage.get("snooze_reason") or ""),
-        "closed_at": triage.get("closed_at"),
-        "closed_by": str(triage.get("closed_by") or ""),
-    }
-
-
-async def _user_for_chat(db: AsyncSession, org_id: int, phone: str) -> User:
-    user = await db.scalar(select(User).where(User.phone == phone, User.organization_id == org_id))
-    if user is None:
-        raise HTTPException(status_code=404, detail="Chat user not found")
-    return user
-
-
-async def _save_chat_triage(
-    request: Request,
-    db: AsyncSession,
-    phone: str,
-    patch: dict[str, Any],
-) -> dict:
-    org_id = admin_org_from_session(request)
-    user = await _user_for_chat(db, org_id, phone)
-    meta = dict(user.meta_json or {}) if isinstance(user.meta_json, dict) else {}
-    triage = _chat_triage_from_meta(meta)
-    triage.update(patch)
-    meta["chat_triage"] = triage
-    user.meta_json = meta
-    await db.commit()
-    await publish_event("chat_triage_updated", {"phone": phone, "organization_id": org_id, "triage": triage})
-    return {"ok": True, "phone": phone, "triage": triage}
-
-
-@router.get("/chats")
-async def list_chats_sidebar(
-    request: Request,
-    limit: int = Query(50, ge=1, le=200),
-    cursor_at: str | None = Query(None, description="Cursor: lastAt ISO (for infinite scroll)"),
-    cursor_id: int | None = Query(None, ge=1, description="Cursor: last message id (tie-breaker)"),
-    mode: Literal["active", "mine", "closed", "snoozed", "all"] = Query("active"),
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    """
-    Список диалогов для боковой панели админки: телефон, превью последнего сообщения, время.
-    Infinite scroll: курсор по (lastAt, last_id). Без full-scan chat_logs.
-    """
-    org_id = admin_org_from_session(request)
-
-    cur_dt: datetime | None = None
-    if cursor_at:
-        try:
-            cur_dt = datetime.fromisoformat(cursor_at.replace("Z", "+00:00"))
-            if cur_dt.tzinfo is None:
-                cur_dt = cur_dt.replace(tzinfo=timezone.utc)
-            else:
-                cur_dt = cur_dt.astimezone(timezone.utc)
-        except Exception:
-            cur_dt = None
-
-    # last message per user via window function (portable for Postgres/SQLite).
-    base_sq = (
-        select(
-            ChatLog.id.label("log_id"),
-            ChatLog.user_id.label("user_id"),
-            ChatLog.created_at.label("last_at"),
-            ChatLog.content.label("content"),
-            User.phone.label("phone"),
-            User.name.label("user_name"),
-            User.meta_json.label("user_meta"),
-            func.row_number()
-            .over(
-                partition_by=ChatLog.user_id,
-                order_by=(ChatLog.created_at.desc(), ChatLog.id.desc()),
-            )
-            .label("rn"),
-        )
-        .join(User, User.id == ChatLog.user_id)
-        .where(User.organization_id == org_id)
-        .subquery()
-    )
-
-    stmt = (
-        select(base_sq)
-        .where(base_sq.c.rn == 1)
-    )
-    if cur_dt is not None and cursor_id is not None:
-        stmt = stmt.where(
-            or_(
-                base_sq.c.last_at < cur_dt,
-                and_(base_sq.c.last_at == cur_dt, base_sq.c.log_id < int(cursor_id)),
-            )
-        )
-    elif cur_dt is not None:
-        stmt = stmt.where(base_sq.c.last_at < cur_dt)
-    elif cursor_id is not None:
-        stmt = stmt.where(base_sq.c.log_id < int(cursor_id))
-
-    stmt = stmt.order_by(base_sq.c.last_at.desc(), base_sq.c.log_id.desc()).limit(limit + 1)
-
-    result = await db.execute(stmt)
-    rows = result.all()
-
-    has_more = len(rows) > limit
-    rows = rows[:limit]
-    chats: list[dict] = []
-    next_cursor: dict[str, object] | None = None
-    staff_key = _admin_actor_key(request)
-    now = datetime.now(timezone.utc)
-    for r in rows:
-        phone = r.phone
-        if not phone:
-            continue
-        triage = _chat_triage_from_meta(r.user_meta)
-        snoozed_until = _parse_dt(triage.get("snoozed_until"))
-        is_snoozed = snoozed_until is not None and snoozed_until > now
-        is_closed = triage.get("state") == "closed"
-        assignee = str(triage.get("assignee") or "")
-        if mode == "active" and (is_closed or is_snoozed):
-            continue
-        if mode == "mine" and assignee != staff_key:
-            continue
-        if mode == "closed" and not is_closed:
-            continue
-        if mode == "snoozed" and not is_snoozed:
-            continue
-        chats.append(
-            {
-                "phone": phone,
-                "lastMessage": (r.content or "")[:80],
-                "lastAt": r.last_at.isoformat() if r.last_at else None,
-                "state": "chatting",
-                "unread": False,
-                "userName": r.user_name,
-                "triage": triage,
-                "triageState": triage.get("state") or "active",
-                "assignee": assignee,
-                "snoozedUntil": triage.get("snoozed_until"),
-            }
-        )
-    if chats:
-        last = rows[-1]
-        if last.last_at is not None:
-            next_cursor = {"cursor_at": last.last_at.isoformat(), "cursor_id": int(last.log_id)}
-        else:
-            next_cursor = {"cursor_at": None, "cursor_id": int(last.log_id)}
-
-    return {"chats": chats, "has_more": has_more, "next_cursor": next_cursor}
-
-
-@router.get("/chats/{phone}")
-async def get_chat_log(
-    request: Request,
-    phone: str,
-    limit: int = Query(50, ge=1, le=200),
-    before_id: int | None = Query(None, ge=1, description="Cursor: load older messages with id < before_id"),
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    """Просмотр истории диалога с клиентом по номеру телефона."""
-    org_id = admin_org_from_session(request)
-    result = await db.execute(
-        select(User).where(User.phone == phone, User.organization_id == org_id),
-    )
-    user = result.scalar_one_or_none()
-
-    if user is None:
-        raise HTTPException(status_code=404, detail=f"Пользователь с номером {phone} не найден")
-
-    stmt = select(ChatLog).where(ChatLog.user_id == user.id)
-    if before_id is not None:
-        stmt = stmt.where(ChatLog.id < int(before_id))
-    # Cursor-based: stable by primary key.
-    stmt = stmt.order_by(ChatLog.id.desc()).limit(limit + 1)
-    logs_result = await db.execute(stmt)
-    logs = logs_result.scalars().all()
-    has_more = len(logs) > limit
-    logs = logs[:limit]
-    next_before_id = int(logs[-1].id) if (has_more and logs) else None
-
-    return {
-        "phone": phone,
-        "user_name": user.name,
-        "count": len(logs),
-        "has_more": has_more,
-        "next_before_id": next_before_id,
-        "messages": [
-            {
-                "id": log.id,
-                "role": log.role,
-                "content": log.content,
-                "created_at": log.created_at.isoformat() if log.created_at else None,
-                "meta": log.meta_json if isinstance(log.meta_json, dict) else None,
-                "provider_message_id": log.provider_message_id,
-                "delivery_status": log.delivery_status,
-                "error_details": log.error_details if isinstance(log.error_details, dict) else None,
-                "status_updated_at": log.status_updated_at.isoformat() if log.status_updated_at else None,
-            }
-            for log in reversed(list(logs))
-        ],
-    }
-
-
-class CustomerNoteBody(BaseModel):
-    """Тело запроса: заметка оператора о клиенте."""
-
-    note: str = ""
-
-
-@router.get("/customers/{phone}/summary")
-async def customer_summary(
-    request: Request,
-    phone: str,
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    """
-    Сводка по клиенту для панели оператора: заказы, выручка, заметка, «чёрный список» (is_active).
-    Если пользователя с таким телефоном ещё нет в БД — возвращаются нули (диалог только откроют вручную).
-    """
-    org_id = admin_org_from_session(request)
-    user = await db.scalar(
-        select(User).where(User.phone == phone, User.organization_id == org_id),
-    )
-    if user is None:
-        return {
-            "user_exists": False,
-            "phone": phone,
-            "name": None,
-            "total_orders": 0,
-            "revenue_orders": 0,
-            "total_spent": 0.0,
-            "avg_check": 0.0,
-            "is_blocked": False,
-            "ai_paused": False,
-            "operator_note": "",
-        }
-
-    not_cancelled = Order.status != OrderStatus.CANCELLED.value
-    cnt_all = await db.scalar(
-        select(func.count(Order.id)).where(Order.user_id == user.id, not_cancelled),
-    ) or 0
-
-    revenue_statuses = (
-        OrderStatus.CONFIRMED.value,
-        OrderStatus.SENT_TO_IIKO.value,
-        OrderStatus.IN_TRANSIT.value,
-        OrderStatus.WAITING_PICKUP.value,
-        OrderStatus.COMPLETED.value,
-    )
-    rev_row = await db.execute(
-        select(
-            func.count(Order.id),
-            func.coalesce(func.sum(Order.total_price), 0),
-        ).where(Order.user_id == user.id, Order.status.in_(revenue_statuses)),
-    )
-    rev = rev_row.one()
-    rev_count = int(rev[0] or 0)
-    total_spent = float(rev[1] or 0)
-    avg_check = (total_spent / rev_count) if rev_count else 0.0
-
-    return {
-        "user_exists": True,
-        "phone": user.phone,
-        "name": user.name,
-        "total_orders": int(cnt_all),
-        "revenue_orders": rev_count,
-        "total_spent": total_spent,
-        "avg_check": round(avg_check, 2),
-        "is_blocked": not user.is_active,
-        "ai_paused": bool(getattr(user, "ai_paused", False)),
-        "operator_note": user.operator_note or "",
-    }
-
-
-@router.post("/customers/{phone}/note")
-async def save_customer_note(
-    request: Request,
-    phone: str,
-    body: CustomerNoteBody,
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    """Сохранить внутреннюю заметку оператора о клиенте."""
-    org_id = admin_org_from_session(request)
-    user = await db.scalar(
-        select(User).where(User.phone == phone, User.organization_id == org_id),
-    )
-    if user is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Пользователь не найден — заметку можно сохранить после первого контакта клиента с ботом",
-        )
-    user.operator_note = body.note[:8000] if body.note else ""
-    await db.flush()
-    return {"ok": True}
-
-
-class AiPauseBody(BaseModel):
-    """Отключить или снова включить ИИ для клиента (персистентно + Redis)."""
-
-    paused: bool = True
-
-
-@router.post("/customers/{phone}/ai-pause")
-async def set_customer_ai_pause(
-    request: Request,
-    phone: str,
-    body: AiPauseBody,
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    """
-    Заблокировать ИИ для номера: бот не отвечает, пока не снять блокировку.
-    Дублирует смысл «перехвата», но сохраняется в БД (переживает рестарт Redis).
-    """
-    org_id = admin_org_from_session(request)
-    user = await db.scalar(
-        select(User).where(User.phone == phone, User.organization_id == org_id),
-    )
-    if user is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Пользователь не найден — сначала должен быть диалог или заказ",
-        )
-    user.ai_paused = body.paused
-    await db.flush()
-    await db.commit()
-
-    if body.paused:
-        await set_user_state(redis_client, phone, UserState.HUMAN_MODE, organization_id=org_id)
-        await publish_event(
-            "state_changed",
-            {"phone": phone, "state": UserState.HUMAN_MODE.value, "organization_id": org_id},
-        )
-    else:
-        await set_user_state(redis_client, phone, UserState.CHATTING, organization_id=org_id)
-        await publish_event(
-            "state_changed",
-            {"phone": phone, "state": UserState.CHATTING.value, "organization_id": org_id},
-        )
-    return {"ok": True, "ai_paused": user.ai_paused}
+# ─── /customers/{phone}/* — вынесены в app/api/admin/customers.py (E0.1) ─
 
 
 # ─── Меню ────────────────────────────────────────────────
@@ -3714,165 +3324,14 @@ async def delete_menu_item(
 ) -> dict:
     """Удалить позицию из меню (осторожно: старые заказы ссылаются на названия в JSON)."""
     org_id = admin_org_from_session(request)
-    item = await _menu_item_in_org(db, item_id, org_id)
+    await _menu_item_in_org(db, item_id, org_id)
     await db.execute(sql_delete(MenuItem).where(MenuItem.id == item_id))
     await db.flush()
     return {"ok": True, "id": item_id}
 
 
 # ─── База знаний (FAQ заведения для промпта LLM / OpenAI) ──────
-
-
-def _knowledge_item_dict(row: KnowledgeItem) -> dict:
-    return {
-        "id": row.id,
-        "organization_id": row.organization_id,
-        "knowledge_kind": getattr(row, "knowledge_kind", None) or "facility",
-        "category": row.category or "",
-        "question": row.question,
-        "answer": row.answer,
-        "is_active": row.is_active,
-        "sort_order": row.sort_order,
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
-    }
-
-
-class KnowledgeItemCreateBody(BaseModel):
-    category: str = Field(default="", max_length=120)
-    question: str = Field(..., min_length=1, max_length=500)
-    answer: str = Field(..., min_length=1, max_length=50_000)
-    is_active: bool = True
-    sort_order: int = Field(0, ge=-10_000, le=10_000)
-    organization_id: int | None = Field(
-        None,
-        description="Игнорируется: запись создаётся в филиале текущей сессии (multi-tenant).",
-    )
-    knowledge_kind: str = Field(
-        "facility",
-        description="facility — справочник заведения; persona — тон и характер бота",
-    )
-
-
-class KnowledgeItemPatchBody(BaseModel):
-    category: str | None = Field(None, max_length=120)
-    question: str | None = Field(None, min_length=1, max_length=500)
-    answer: str | None = Field(None, min_length=1, max_length=50_000)
-    is_active: bool | None = None
-    sort_order: int | None = Field(None, ge=-10_000, le=10_000)
-    organization_id: int | None = None
-    knowledge_kind: str | None = Field(None, description="facility | persona")
-
-
-@router.get("/knowledge")
-async def list_knowledge_items(
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    active_only: bool = Query(False, description="Только is_active=true"),
-) -> dict:
-    """Список записей базы знаний для админки."""
-    org_id = admin_org_from_session(request)
-    q = (
-        select(KnowledgeItem)
-        .where(_knowledge_tenant_clause(org_id))
-        .order_by(KnowledgeItem.sort_order, KnowledgeItem.id)
-    )
-    if active_only:
-        q = q.where(KnowledgeItem.is_active.is_(True))
-    result = await db.execute(q)
-    rows = list(result.scalars().all())
-    return {"items": [_knowledge_item_dict(r) for r in rows]}
-
-
-@router.post("/knowledge")
-async def create_knowledge_item(
-    request: Request,
-    body: KnowledgeItemCreateBody,
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    org_id = admin_org_from_session(request)
-    kk_raw = (body.knowledge_kind or "facility").strip().lower()
-    kk = "persona" if kk_raw == "persona" else "facility"
-    row = KnowledgeItem(
-        organization_id=org_id,
-        knowledge_kind=kk[:32],
-        category=(body.category or "").strip(),
-        question=body.question.strip(),
-        answer=body.answer.strip(),
-        is_active=body.is_active,
-        sort_order=body.sort_order,
-    )
-    db.add(row)
-    await db.flush()
-    return {"ok": True, "item": _knowledge_item_dict(row)}
-
-
-@router.patch("/knowledge/{item_id}")
-async def patch_knowledge_item(
-    request: Request,
-    item_id: int,
-    body: KnowledgeItemPatchBody,
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    org_id = admin_org_from_session(request)
-    row = await db.get(KnowledgeItem, item_id)
-    if row is None:
-        raise HTTPException(status_code=404, detail="Запись не найдена")
-    if row.organization_id is None and org_id != int(settings.default_organization_id):
-        raise HTTPException(status_code=404, detail="Запись не найдена")
-    if row.organization_id is not None and int(row.organization_id) != org_id:
-        raise HTTPException(status_code=404, detail="Запись не найдена")
-    data = body.model_dump(exclude_unset=True)
-    # Запрет переноса записи между филиалами через PATCH.
-    data.pop("organization_id", None)
-    if "category" in data and data["category"] is not None:
-        data["category"] = data["category"].strip()
-    if "question" in data and data["question"] is not None:
-        data["question"] = data["question"].strip()
-    if "answer" in data and data["answer"] is not None:
-        data["answer"] = data["answer"].strip()
-    if "knowledge_kind" in data and data["knowledge_kind"] is not None:
-        kk = str(data["knowledge_kind"]).strip().lower()
-        data["knowledge_kind"] = kk if kk == "persona" else "facility"
-    for key, value in data.items():
-        setattr(row, key, value)
-    await db.flush()
-    return {"ok": True, "item": _knowledge_item_dict(row)}
-
-
-@router.delete("/knowledge/{item_id}")
-async def delete_knowledge_item(
-    request: Request,
-    item_id: int,
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    return await _delete_knowledge_item_impl(request, item_id, db)
-
-
-@router.post("/knowledge/{item_id}/delete")
-async def delete_knowledge_item_post(
-    request: Request,
-    item_id: int,
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    """
-    То же, что DELETE /knowledge/{id}: часть хостингов/прокси режет метод DELETE.
-    """
-    return await _delete_knowledge_item_impl(request, item_id, db)
-
-
-async def _delete_knowledge_item_impl(request: Request, item_id: int, db: AsyncSession) -> dict:
-    org_id = admin_org_from_session(request)
-    row = await db.get(KnowledgeItem, item_id)
-    if row is None:
-        raise HTTPException(status_code=404, detail="Запись не найдена")
-    if row.organization_id is None and org_id != int(settings.default_organization_id):
-        raise HTTPException(status_code=404, detail="Запись не найдена")
-    if row.organization_id is not None and int(row.organization_id) != org_id:
-        raise HTTPException(status_code=404, detail="Запись не найдена")
-    await db.execute(sql_delete(KnowledgeItem).where(KnowledgeItem.id == item_id))
-    await db.flush()
-    return {"ok": True, "id": item_id}
+# E0.1: вынесено в `app/api/admin/knowledge.py` (router подключается выше).
 
 
 @router.post("/menu/sync")
@@ -4348,6 +3807,7 @@ async def settings_environment(request: Request, db: AsyncSession = Depends(get_
         str(getattr(org_row, "telegram_ops_chat_id", "") or "").strip(),
     ) if org_row is not None else False
     telegram_staff_reachable = tg_token_ok and (tg_global_chat_ok or tg_org_chat_ok)
+    elig = await count_chat_logs_eligible_for_purge(db)
     return {
         "app_name": settings.app_name,
         "app_version": settings.app_version,
@@ -4684,7 +4144,6 @@ async def dashboard_stats(
     today_orders = today_row[0]
     today_revenue = float(today_row[1])
 
-    yesterday_start = today_start - timedelta(days=1)
     yesterday_q = await db.execute(
         select(func.count(Order.id), func.coalesce(func.sum(Order.total_price), 0))
         .where(
@@ -5739,236 +5198,6 @@ async def analytics(
     }
 
 
-# ─── Human Override (Перехват диалога) ───────────────────
-
-
-@router.post("/chats/{phone}/takeover")
-async def takeover_chat(request: Request, phone: str, db: AsyncSession = Depends(get_db)) -> dict:
-    """
-    Перехватить диалог — AI замолкает, оператор ведёт общение вручную.
-    Устанавливает флаг HUMAN_MODE в Redis.
-    """
-    org_id = admin_org_from_session(request)
-    await set_user_state(redis_client, phone, UserState.HUMAN_MODE, organization_id=org_id)
-    await publish_event("state_changed", {
-        "phone": phone,
-        "state": UserState.HUMAN_MODE,
-        "organization_id": org_id,
-    })
-    try:
-        await _save_chat_triage(
-            request,
-            db,
-            phone,
-            {"state": "active", "assignee": _admin_actor_key(request), "snoozed_until": None, "snooze_reason": ""},
-        )
-    except HTTPException:
-        pass
-    logger.info("Оператор перехватил диалог: %s", phone)
-    return {"status": "ok", "phone": phone, "mode": "human"}
-
-
-@router.post("/chats/{phone}/release")
-async def release_chat(request: Request, phone: str) -> dict:
-    """
-    Вернуть управление боту — AI снова отвечает на сообщения.
-    Возвращает состояние в CHATTING.
-    """
-    org_id = admin_org_from_session(request)
-    await set_user_state(redis_client, phone, UserState.CHATTING, organization_id=org_id)
-    await publish_event("state_changed", {
-        "phone": phone,
-        "state": UserState.CHATTING,
-        "organization_id": org_id,
-    })
-    logger.info("Оператор вернул бота: %s", phone)
-    return {"status": "ok", "phone": phone, "mode": "bot"}
-
-
-class ChatSnoozeBody(BaseModel):
-    minutes: int = Field(30, ge=1, le=60 * 24 * 14)
-    reason: str = Field("", max_length=240)
-
-
-@router.post("/chats/{phone}/assign-me")
-async def assign_chat_to_me(request: Request, phone: str, db: AsyncSession = Depends(get_db)) -> dict:
-    return await _save_chat_triage(
-        request,
-        db,
-        phone,
-        {
-            "state": "active",
-            "assignee": _admin_actor_key(request),
-            "snoozed_until": None,
-            "snooze_reason": "",
-        },
-    )
-
-
-@router.post("/chats/{phone}/snooze")
-async def snooze_chat(
-    request: Request,
-    phone: str,
-    body: ChatSnoozeBody,
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    until = datetime.now(timezone.utc) + timedelta(minutes=int(body.minutes))
-    return await _save_chat_triage(
-        request,
-        db,
-        phone,
-        {
-            "state": "active",
-            "assignee": _admin_actor_key(request),
-            "snoozed_until": until.isoformat(),
-            "snooze_reason": (body.reason or "").strip(),
-        },
-    )
-
-
-@router.post("/chats/{phone}/close")
-async def close_chat(request: Request, phone: str, db: AsyncSession = Depends(get_db)) -> dict:
-    now = datetime.now(timezone.utc).isoformat()
-    return await _save_chat_triage(
-        request,
-        db,
-        phone,
-        {
-            "state": "closed",
-            "assignee": _admin_actor_key(request),
-            "snoozed_until": None,
-            "snooze_reason": "",
-            "closed_at": now,
-            "closed_by": _admin_actor_key(request),
-        },
-    )
-
-
-@router.post("/chats/{phone}/reopen")
-async def reopen_chat(request: Request, phone: str, db: AsyncSession = Depends(get_db)) -> dict:
-    return await _save_chat_triage(
-        request,
-        db,
-        phone,
-        {
-            "state": "active",
-            "assignee": _admin_actor_key(request),
-            "snoozed_until": None,
-            "snooze_reason": "",
-            "closed_at": None,
-            "closed_by": "",
-        },
-    )
-
-
-class TextRequest(BaseModel):
-    """Тело запроса с текстовым сообщением."""
-    text: str
-
-
-@router.post("/chats/{phone}/send_message")
-async def admin_send_message(
-    request: Request,
-    phone: str,
-    body: TextRequest,
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    """
-    Отправить сообщение клиенту от имени оператора.
-    Сохраняется в ChatLog и отправляется через WhatsApp.
-    """
-    org_id = admin_org_from_session(request)
-    user = await get_or_create_user(db, phone, org_id)
-    now = datetime.now(timezone.utc)
-    op_log = ChatLog(
-        user_id=user.id,
-        organization_id=org_id,
-        role="operator",
-        content=body.text,
-        delivery_status="sending",
-        status_updated_at=now,
-    )
-    db.add(op_log)
-    await db.commit()
-    await db.refresh(op_log)
-    log_id = int(op_log.id)
-
-    # UI-event только после commit: иначе фантомная запись, если транзакция упадёт.
-    await publish_event("new_message", {
-        "phone": phone,
-        "role": "operator",
-        "content": body.text,
-        "id": log_id,
-        "delivery_status": "sending",
-        "organization_id": org_id,
-    })
-
-    wa = await send_message(phone, body.text)
-
-    # finalize после внешнего I/O, но в той же сессии (важно для тестов/фикстур)
-    evt = await finalize_outbound_delivery(
-        db, log_id, wa.ok, provider_message_id=wa.message_id, error_details=wa.error,
-    )
-    await db.commit()
-    if evt is not None:
-        await publish_event("message_status_updated", evt)
-    logger.info("Оператор отправил сообщение в %s: %s", phone, body.text[:50])
-    return {"status": "sent" if wa.ok else "failed", "phone": phone, "chat_log_id": log_id}
-
-
-@router.post("/chats/{phone}/messages/{chat_log_id}/resend")
-async def resend_failed_chat_message(
-    request: Request,
-    phone: str,
-    chat_log_id: int,
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    """Повторная отправка текста той же записи ChatLog после статуса failed (WhatsApp)."""
-    org_id = admin_org_from_session(request)
-    log = await db.get(ChatLog, chat_log_id)
-    if log is None:
-        raise HTTPException(status_code=404, detail="Сообщение не найдено")
-    user = await db.get(User, log.user_id)
-    if user is None or int(user.organization_id) != org_id or user.phone != phone:
-        raise HTTPException(status_code=404, detail="Сообщение не найдено")
-    if (log.delivery_status or "").lower() != "failed":
-        raise HTTPException(status_code=400, detail="Переотправка доступна только для failed")
-    if (log.role or "") not in ("operator", "assistant", "system"):
-        raise HTTPException(status_code=400, detail="Неподдерживаемая роль для переотправки")
-    text = (log.content or "").strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="Пустой текст сообщения")
-
-    now = datetime.now(timezone.utc)
-    log.delivery_status = "sending"
-    log.error_details = None
-    log.status_updated_at = now
-    await db.commit()
-    await publish_event("new_message", {
-        "phone": phone,
-        "role": log.role,
-        "content": text,
-        "id": chat_log_id,
-        "delivery_status": "sending",
-        "organization_id": org_id,
-    })
-    wa = await send_message(phone, text)
-    evt = await finalize_outbound_delivery(
-        db, chat_log_id, wa.ok, provider_message_id=wa.message_id, error_details=wa.error,
-    )
-    await db.commit()
-    if evt is not None:
-        await publish_event("message_status_updated", evt)
-    return {"status": "sent" if wa.ok else "failed", "phone": phone, "chat_log_id": chat_log_id}
-
-
-@router.get("/chats/{phone}/state")
-async def get_chat_state(request: Request, phone: str) -> dict:
-    """Получить текущее состояние диалога (CHATTING, CONFIRMING_ORDER, HUMAN_MODE)."""
-    org_id = admin_org_from_session(request)
-    state = await get_user_state(redis_client, phone, organization_id=org_id)
-    return {"phone": phone, "state": state.value}
-
 
 # ─── Тест бота (без WhatsApp) ────────────────────────────
 
@@ -6052,6 +5281,13 @@ async def test_bot(request: Request, body: TextRequest) -> dict:
             strategy_ctx = format_strategy_for_prompt(decision)
             sales_gastro_hint = (decision.gastro_hint or "").strip()
             sales_target_iiko_ids = list(decision.target_iiko_ids or [])
+        if u_row is not None:
+            from app.services.ai_snooze import ai_snooze_is_active, clear_ai_snooze_if_expired
+
+            await clear_ai_snooze_if_expired(db, u_row)
+            await db.commit()
+            if getattr(u_row, "ai_paused", False) or ai_snooze_is_active(u_row):
+                return {"reply": "[OPERATOR_ONLY — AI не отвечает]", "state": state.value, "intent": None}
         ai_response = await call_openai(
             history,
             message_text,
@@ -6316,7 +5552,7 @@ async def create_upsell_rule_from_order_feedback(
     audit.append({
         "mode": body.mode,
         "at": datetime.now(timezone.utc).isoformat(),
-        "actor": _admin_actor_key(request),
+        "actor": admin_actor_key(request),
         "result": created,
     })
     om["upsell_feedback_audit"] = audit[-25:]

@@ -31,7 +31,6 @@ async def test_retry_failed_task_enqueues_and_resolves(db_session, monkeypatch) 
 
     async def fake_dispatch(job_name, background_tasks, **kwargs):
         calls.append({"job_name": job_name, **kwargs})
-        return True
 
     monkeypatch.setattr("app.services.task_queue.dispatch_arq_or_background", fake_dispatch)
 

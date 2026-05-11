@@ -29,6 +29,8 @@ edge-tts>=7.0.0
 
 # === Шаблоны (админ-панель) ===
 jinja2>=3.1.0
+# === Form-data / uploads (FastAPI File/UploadFile: branding logo) ===
+python-multipart>=0.0.9
 
 # === Утилиты ===
 python-dotenv>=1.0.1

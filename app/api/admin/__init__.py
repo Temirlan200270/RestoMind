@@ -16,12 +16,11 @@ from ._monolith import (
     auth_router,
     require_admin_session,
     require_admin_session_active,
-    resend_failed_chat_message,
     retry_failed_task,
     router,
-    send_message,
     ws_router,
 )
+from .chats import resend_failed_chat_message, send_message
 
 __all__ = [
     "LoginBody",

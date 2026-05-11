@@ -6,7 +6,6 @@ Telephony Integration — фундамент голосового AI (v2.0).
 
 import logging
 from dataclasses import dataclass
-from typing import Any
 
 logger = logging.getLogger(__name__)
 

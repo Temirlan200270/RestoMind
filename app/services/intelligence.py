@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.db.models import (
+    AiUsageLog,
     ChatLog,
     IntelligenceConversation,
     IntelligenceMessage,
@@ -197,7 +198,6 @@ async def revenue_orders_summary(db: AsyncSession, org_id: int, period: str) -> 
 def build_intelligence_answer(question: str, intent: dict[str, str], summary: dict[str, Any]) -> str:
     lang = intent.get("language") or "ru"
     cur = summary["current"]
-    prev = summary["previous"]
     ch = summary["changes"]
     if lang == "en":
         lines = [
@@ -325,7 +325,103 @@ async def generate_revenue_order_insights(db: AsyncSession, org_id: int) -> list
     return insights
 
 
+async def detect_ai_incidents(db: AsyncSession, org_id: int) -> list[OperationalInsight]:
+    """
+    Анализирует AiUsageLog за последние 7 дней и генерирует инсайты при аномалиях:
+    - ai_token_spike: сегодня > 3× rolling-7d avg
+    - ai_error_spike: error_count/call_count > 15%
+    - ai_latency_spike: p95_latency_ms > 1.5 × SLA threshold
+    """
+    now = datetime.now(timezone.utc)
+    today_date = now.date()
+    week_ago = (now - timedelta(days=7)).date()
+
+    rows = (await db.execute(
+        select(AiUsageLog)
+        .where(AiUsageLog.organization_id == org_id, AiUsageLog.day >= week_ago)
+        .order_by(AiUsageLog.day.asc())
+    )).scalars().all()
+
+    if not rows:
+        return []
+
+    generated: list[OperationalInsight] = []
+    today_row = next((r for r in rows if r.day == today_date), None)
+    prev_rows = [r for r in rows if r.day < today_date]
+
+    async def _upsert_insight(
+        insight_type: str, severity: str, title: str, summary: str, payload: dict
+    ) -> None:
+        idempotency = f"ai_incident:{org_id}:{insight_type}:{today_date}"
+        existing = await db.scalar(
+            select(OperationalInsight).where(
+                OperationalInsight.organization_id == org_id,
+                OperationalInsight.insight_type == insight_type,
+                OperationalInsight.status == "new",
+                OperationalInsight.created_at >= _sql_dt_for_filter(now - timedelta(hours=12)),
+            ).limit(1)
+        )
+        if existing:
+            return
+        ins = OperationalInsight(
+            organization_id=org_id,
+            insight_type=insight_type,
+            severity=severity,
+            title=title,
+            summary=summary,
+            payload_json={**payload, "_idempotency": idempotency},
+            status="new",
+        )
+        db.add(ins)
+        await db.flush()
+        generated.append(ins)
+
+    # --- Token spike ---
+    if today_row and prev_rows:
+        avg_tokens = sum(r.total_tokens for r in prev_rows) / len(prev_rows)
+        if avg_tokens > 0 and today_row.total_tokens > avg_tokens * 3:
+            await _upsert_insight(
+                "ai_token_spike", "warning",
+                "Аномальный расход токенов AI сегодня",
+                f"Сегодня использовано {today_row.total_tokens:,} токенов "
+                f"(≈{int(avg_tokens):,} в среднем за прошлую неделю — превышение в {today_row.total_tokens / avg_tokens:.1f}×).",
+                {"today_tokens": today_row.total_tokens, "avg_tokens_7d": round(avg_tokens)},
+            )
+
+    # --- Error spike ---
+    if today_row and today_row.call_count > 5:
+        error_rate = today_row.error_count / today_row.call_count
+        if error_rate > 0.15:
+            await _upsert_insight(
+                "ai_error_spike", "critical",
+                f"Высокая частота ошибок AI-провайдера ({int(error_rate*100)}%)",
+                f"За сегодня {today_row.error_count} из {today_row.call_count} запросов завершились ошибкой провайдера. "
+                "Проверьте статус OpenAI / Gemini и квоты API.",
+                {"error_count": today_row.error_count, "call_count": today_row.call_count},
+            )
+
+    # --- Latency spike ---
+    if today_row and today_row.p95_latency_ms:
+        threshold = settings.sla_llm_p95_ms * 1.5
+        if today_row.p95_latency_ms > threshold:
+            await _upsert_insight(
+                "ai_latency_spike", "warning",
+                f"Повышенная задержка LLM (p95 = {today_row.p95_latency_ms} ms)",
+                f"95-й перцентиль задержки AI составил {today_row.p95_latency_ms} ms "
+                f"(порог SLA: {settings.sla_llm_p95_ms} ms). Возможна деградация провайдера.",
+                {"p95_ms": today_row.p95_latency_ms, "sla_threshold_ms": settings.sla_llm_p95_ms},
+            )
+
+    return generated
+
+
 async def list_insights(db: AsyncSession, org_id: int, *, limit: int = 20) -> list[OperationalInsight]:
+    # P4: запускаем детектор AI-инцидентов при каждом запросе insights (lazy detection)
+    try:
+        await detect_ai_incidents(db, org_id)
+    except Exception:
+        pass
+
     rows = await db.execute(
         select(OperationalInsight)
         .where(OperationalInsight.organization_id == org_id, OperationalInsight.status != "dismissed")

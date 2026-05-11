@@ -247,3 +247,5 @@ function onboardingApp() {
     };
 }
 
+window.onboardingApp = onboardingApp;
+

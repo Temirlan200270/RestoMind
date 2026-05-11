@@ -25,6 +25,7 @@
                         <template x-for="item in navItems.filter(i => i.section === sec.id)" :key="item.id">
                             <button
                                 @click="navigateToTab(item.id)"
+                                :data-p15-tour="item.id === 'inbox' ? 'inbox' : item.id === 'orders' ? 'orders' : null"
                                 :class="currentTab === item.id
                                     ? 'bg-white/15 text-white shadow-lg'
                                     : 'text-blue-200 hover:bg-white/10 hover:text-white'"
