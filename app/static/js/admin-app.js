@@ -391,7 +391,7 @@ function adminParseLocationHash() {
 
 /** Допустимые верхнеуровневые вкладки (id из navItems). */
 const ADMIN_TOP_TAB_IDS = new Set([
-    'dashboard', 'inbox', 'ai_center', 'orders', 'bookings', 'chats', 'menu', 'settings',
+    'dashboard', 'inbox', 'ai_center', 'marketing', 'orders', 'bookings', 'chats', 'menu', 'settings',
 ]);
 
 /** Начальное состояние GET /integrations/status — чтобы Alpine не падал на undefined до первой загрузки. */
@@ -613,6 +613,8 @@ function adminMixinState() {
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/></svg>' },
             { id: 'dashboard', section: 'management', label: 'Дашборд', desc: 'Общая статистика и последние заказы',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25A2.25 2.25 0 018.25 10.5H6A2.25 2.25 0 013.75 8.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z"/></svg>' },
+            { id: 'marketing', section: 'management', label: 'Маркетинг', desc: 'Рассылки и программа лояльности',
+              icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10.34 15.84c-.688-.06-1.386-.09-2.09-.09H7.5a4.5 4.5 0 110-9h.75c.704 0 1.402-.03 2.09-.09m0 9.18c.253.962.584 1.892.985 2.783.247.55.06 1.21-.463 1.511l-.657.38c-.551.318-1.26.117-1.527-.461a20.845 20.845 0 01-1.44-4.282m3.102.069a18.03 18.03 0 01-.59-4.59c0-1.586.205-3.124.59-4.59m0 9.18a23.848 23.848 0 018.835 2.535M10.34 6.66a23.847 23.847 0 008.835-2.535m0 0A23.74 23.74 0 0018.795 3m.38 1.125a23.91 23.91 0 011.014 5.395m-1.014 8.855c-.118.38-.245.754-.38 1.125m.38-1.125a23.91 23.91 0 001.014-5.395m0-3.46c.495.413.811 1.035.811 1.73 0 .695-.316 1.317-.811 1.73m0-3.46a24.347 24.347 0 010 3.46"/></svg>' },
             { id: 'ai_center', section: 'management', label: 'ИИ-аналитика', desc: 'Вклад ИИ, инсайты и нагрузка',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 3.75h4.5m-7.5 4.5h10.5m-12 4.5h13.5m-15 4.5h7.5m2.25 0h6M7.5 21h9a2.25 2.25 0 002.25-2.25V5.25A2.25 2.25 0 0016.5 3h-9a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21z"/></svg>' },
             { id: 'menu', section: 'management', label: 'Меню', desc: 'Каталог и стоп-лист',
@@ -8380,3 +8382,126 @@ function adminApp() {
 }
 
 window.adminApp = adminApp;
+
+function marketingTab() {
+    return {
+        subTab: 'blasts',
+        blasts: [],
+        loading: false,
+        saving: false,
+        formError: '',
+        segmentCount: null,
+        form: { name: '', segment_type: 'inactive_30d', message_text: '', template_name: '' },
+        loyaltyEnabled: false,
+        loyaltyHistory: [],
+        loyaltyBalance: 0,
+        adjustPhone: '',
+        adjustPoints: 0,
+        adjustNote: '',
+        adjustResult: '',
+
+        async init() {
+            await this.loadBlasts();
+        },
+
+        async loadBlasts() {
+            this.loading = true;
+            try {
+                const r = await fetch('/api/admin/marketing/blasts');
+                if (r.ok) { const d = await r.json(); this.blasts = d.items || []; }
+            } catch(e) {}
+            this.loading = false;
+        },
+
+        async previewSegment() {
+            this.segmentCount = null;
+            try {
+                const r = await fetch(`/api/admin/marketing/segment-preview/${this.form.segment_type}`);
+                if (r.ok) { const d = await r.json(); this.segmentCount = d.count; }
+            } catch(e) {}
+        },
+
+        async createBlast() {
+            this.formError = '';
+            if (!this.form.name.trim() || !this.form.message_text.trim()) {
+                this.formError = 'Заполните название и текст'; return;
+            }
+            this.saving = true;
+            try {
+                const r = await fetch('/api/admin/marketing/blasts', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.form),
+                });
+                if (r.ok) {
+                    this.form = { name: '', segment_type: 'inactive_30d', message_text: '', template_name: '' };
+                    this.segmentCount = null;
+                    await this.loadBlasts();
+                } else {
+                    const d = await r.json();
+                    this.formError = d.detail || 'Ошибка создания';
+                }
+            } catch(e) { this.formError = 'Сетевая ошибка'; }
+            this.saving = false;
+        },
+
+        async sendBlast(id) {
+            if (!confirm('Запустить рассылку? Действие необратимо.')) return;
+            try {
+                await fetch(`/api/admin/marketing/blasts/${id}/send`, { method: 'POST' });
+                await this.loadBlasts();
+            } catch(e) {}
+        },
+
+        async deleteBlast(id) {
+            if (!confirm('Удалить черновик?')) return;
+            try {
+                await fetch(`/api/admin/marketing/blasts/${id}`, { method: 'DELETE' });
+                await this.loadBlasts();
+            } catch(e) {}
+        },
+
+        async loadLoyalty() {
+            try {
+                const r = await fetch('/api/admin/system/task-queue-health');
+                this.loyaltyEnabled = document.cookie.includes('LOYALTY') || false;
+            } catch(e) {}
+        },
+
+        async loadLoyaltyHistory() {
+            if (!this.adjustPhone) return;
+            this.loyaltyHistory = [];
+            this.loyaltyBalance = 0;
+            try {
+                const r = await fetch(`/api/admin/loyalty/transactions?phone=${encodeURIComponent(this.adjustPhone)}`);
+                if (r.ok) {
+                    const d = await r.json();
+                    this.loyaltyHistory = d.transactions || [];
+                    this.loyaltyBalance = d.balance || 0;
+                }
+            } catch(e) {}
+        },
+
+        async submitAdjust() {
+            if (!this.adjustPhone || this.adjustPoints === 0) return;
+            this.adjustResult = '';
+            try {
+                const r = await fetch('/api/admin/loyalty/adjust', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ phone: this.adjustPhone, points: this.adjustPoints, note: this.adjustNote }),
+                });
+                if (r.ok) {
+                    const d = await r.json();
+                    this.adjustResult = `✅ Новый баланс: ${d.new_balance} баллов`;
+                    this.adjustPoints = 0;
+                    await this.loadLoyaltyHistory();
+                } else {
+                    const d = await r.json();
+                    this.adjustResult = `❌ ${d.detail || 'Ошибка'}`;
+                }
+            } catch(e) { this.adjustResult = '❌ Сетевая ошибка'; }
+        },
+    };
+}
+window.marketingTab = marketingTab;

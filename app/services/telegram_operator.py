@@ -127,6 +127,17 @@ async def handle_callback_query(callback: dict) -> None:
         await _answer_callback(query_id, "Ошибка: нет id пользователя.")
         return
 
+    if data.startswith("on_shift:"):
+        parts = data.split(":", 1)
+        org_id_str = parts[1].strip() if len(parts) > 1 else ""
+        org_id = int(org_id_str) if org_id_str.isdigit() else 0
+        if org_id:
+            await _answer_callback(query_id, "Активирую предзаказы...")
+            await _handle_on_shift_callback(chat_id, org_id)
+        else:
+            await _answer_callback(query_id, "Неверный org_id.")
+        return
+
     if not data.startswith("reply:"):
         return
 
@@ -255,3 +266,35 @@ async def handle_dialogs_command(msg: dict) -> None:
     except Exception as exc:
         logger.exception("handle_dialogs_command failed: %s", exc)
         await _send_to_operator(chat_id, f"Ошибка: {exc!s}")
+
+
+async def _handle_on_shift_callback(chat_id: int | str, org_id: int) -> None:
+    """Активирует ночные предзаказы и уведомляет оператора через Telegram."""
+    try:
+        from app.db.session import async_session_factory
+        from app.services.night_preorders import activate_night_preorders
+
+        async with async_session_factory() as db:
+            n = await activate_night_preorders(db, org_id)
+
+        if n:
+            msg = f"✅ Активировано {n} ночных предзаказов — клиентам отправлены сообщения."
+        else:
+            msg = "✅ Смена начата. Ночных предзаказов нет."
+
+        await _send_to_operator(chat_id, msg)
+
+        # Удаляем Redis pending key
+        try:
+            from app.integrations.redis_client import get_redis_client
+            from datetime import date
+            redis = await get_redis_client()
+            if redis:
+                pending_key = f"rm:shift:pending:{org_id}:{date.today().isoformat()}"
+                await redis.delete(pending_key)
+        except Exception:
+            pass
+
+    except Exception as exc:
+        logger.exception("_handle_on_shift_callback failed: %s", exc)
+        await _send_to_operator(chat_id, f"❌ Ошибка активации: {exc!s}")

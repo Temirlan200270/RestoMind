@@ -1,0 +1,164 @@
+<!-- Маркетинг: рассылки и лояльность -->
+<div id="rm-tab-marketing" x-show="currentTab === 'marketing'" x-cloak
+     x-data="marketingTab()" x-init="$watch('currentTab', v => v === 'marketing' && init())">
+
+    <!-- Подвкладки -->
+    <div class="sticky top-0 z-[40] bg-white border-b px-4 py-2 flex gap-2">
+        <button type="button" @click="subTab = 'blasts'"
+            class="px-4 py-2 rounded-xl text-sm font-medium transition"
+            :class="subTab === 'blasts' ? 'bg-slate-800 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'">
+            Рассылки
+        </button>
+        <button type="button" @click="subTab = 'loyalty'; loadLoyalty()"
+            class="px-4 py-2 rounded-xl text-sm font-medium transition"
+            :class="subTab === 'loyalty' ? 'bg-slate-800 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'">
+            Лояльность
+        </button>
+    </div>
+
+    <!-- ── Рассылки ─────────────────────────────────────── -->
+    <div x-show="subTab === 'blasts'" class="p-4 space-y-4">
+        <!-- Форма создания -->
+        <div class="rounded-2xl border border-gray-200 bg-white p-4 space-y-3">
+            <h3 class="font-semibold text-sm text-gray-800">Новая рассылка</h3>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                    <label class="block text-xs font-medium text-gray-500 mb-1">Название</label>
+                    <input type="text" x-model="form.name" placeholder="Пятничная акция"
+                        class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-500 mb-1">Сегмент</label>
+                    <select x-model="form.segment_type" @change="previewSegment()"
+                        class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm bg-white">
+                        <option value="inactive_30d">Не заказывали &gt;30 дней</option>
+                        <option value="frequent">Частые гости (3+ за 90 дн.)</option>
+                        <option value="all_active">Все активные клиенты</option>
+                    </select>
+                    <p class="text-xs text-gray-400 mt-1"
+                        x-text="segmentCount !== null ? `~${segmentCount} получателей` : ''"></p>
+                </div>
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-500 mb-1">Текст сообщения</label>
+                <textarea x-model="form.message_text" rows="3" placeholder="Привет! Специально для вас — скидка 10%..."
+                    class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm resize-none"></textarea>
+                <p class="text-xs text-gray-400 mt-1" x-text="`${(form.message_text || '').length} / 4000`"></p>
+            </div>
+            <div class="flex items-center gap-3">
+                <button type="button" @click="createBlast()"
+                    :disabled="saving || !form.name || !form.message_text"
+                    class="px-4 py-2 rounded-xl bg-slate-800 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50 transition">
+                    <span x-show="!saving">Создать черновик</span>
+                    <span x-show="saving">Создаём...</span>
+                </button>
+                <p class="text-xs text-red-600" x-show="formError" x-text="formError"></p>
+            </div>
+        </div>
+
+        <!-- Список рассылок -->
+        <div x-show="loading" class="text-center text-sm text-gray-400 py-8">Загрузка...</div>
+        <div x-show="!loading && blasts.length === 0" class="text-center text-sm text-gray-400 py-8">
+            Рассылок пока нет. Создайте первую выше.
+        </div>
+        <template x-if="!loading && blasts.length > 0">
+            <div class="space-y-2">
+                <template x-for="blast in blasts" :key="blast.id">
+                    <div class="rounded-2xl border border-gray-200 bg-white p-4 flex flex-wrap items-start gap-3">
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <span class="font-medium text-sm text-gray-800" x-text="blast.name"></span>
+                                <span class="text-xs rounded-full px-2 py-0.5 font-medium"
+                                    :class="{
+                                        'bg-gray-100 text-gray-600': blast.status === 'draft',
+                                        'bg-blue-100 text-blue-700': blast.status === 'sending',
+                                        'bg-emerald-100 text-emerald-700': blast.status === 'done',
+                                        'bg-red-100 text-red-700': blast.status === 'cancelled',
+                                    }"
+                                    x-text="blast.status"></span>
+                            </div>
+                            <p class="text-xs text-gray-400 mt-1 line-clamp-1" x-text="blast.message_text"></p>
+                            <p class="text-xs text-gray-400 mt-0.5"
+                                x-text="`${blast.segment_type} · ${blast.total_recipients} получателей · отправлено: ${blast.sent_count}`">
+                            </p>
+                        </div>
+                        <div class="flex gap-2 shrink-0">
+                            <button x-show="blast.status === 'draft'" type="button"
+                                @click="sendBlast(blast.id)"
+                                class="px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 transition">
+                                Отправить
+                            </button>
+                            <button x-show="blast.status === 'draft'" type="button"
+                                @click="deleteBlast(blast.id)"
+                                class="px-3 py-1.5 rounded-xl border border-red-200 text-red-600 text-xs font-medium hover:bg-red-50 transition">
+                                Удалить
+                            </button>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </template>
+    </div>
+
+    <!-- ── Лояльность ───────────────────────────────────── -->
+    <div x-show="subTab === 'loyalty'" class="p-4 space-y-4">
+        <div class="rounded-2xl border border-gray-200 bg-white p-4 space-y-3">
+            <div class="flex items-center justify-between">
+                <h3 class="font-semibold text-sm text-gray-800">Бонусная программа</h3>
+                <span class="text-xs px-2 py-1 rounded-full"
+                    :class="loyaltyEnabled ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'"
+                    x-text="loyaltyEnabled ? 'Включена' : 'Выключена (LOYALTY_ENABLED=false)'"></span>
+            </div>
+            <p class="text-xs text-gray-500">Включается через переменную <code class="bg-gray-100 px-1 rounded">LOYALTY_ENABLED=true</code>.
+                Курс начисления задаётся <code class="bg-gray-100 px-1 rounded">LOYALTY_POINTS_PER_KZT</code>
+                (по умолчанию 100 KZT = 1 балл). Бот автоматически сообщает клиенту его баланс.</p>
+        </div>
+
+        <!-- Ручная корректировка баланса -->
+        <div class="rounded-2xl border border-gray-200 bg-white p-4 space-y-3">
+            <h3 class="font-semibold text-sm text-gray-800">Корректировка баланса</h3>
+            <div class="flex flex-wrap gap-3">
+                <div class="flex-1 min-w-[160px]">
+                    <label class="block text-xs font-medium text-gray-500 mb-1">Телефон клиента</label>
+                    <input type="tel" x-model="adjustPhone" placeholder="+77001234567"
+                        @change="loadLoyaltyHistory()"
+                        class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
+                </div>
+                <div class="w-28">
+                    <label class="block text-xs font-medium text-gray-500 mb-1">Баллы (+/-)</label>
+                    <input type="number" x-model.number="adjustPoints" placeholder="50"
+                        class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
+                </div>
+                <div class="flex-1 min-w-[160px]">
+                    <label class="block text-xs font-medium text-gray-500 mb-1">Примечание</label>
+                    <input type="text" x-model="adjustNote" placeholder="Ручная корректировка"
+                        class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
+                </div>
+            </div>
+            <div class="flex items-center gap-3">
+                <button type="button" @click="submitAdjust()"
+                    :disabled="!adjustPhone || adjustPoints === 0"
+                    class="px-4 py-2 rounded-xl bg-slate-800 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50 transition">
+                    Применить
+                </button>
+                <span class="text-xs text-gray-500" x-show="adjustResult" x-text="adjustResult"></span>
+            </div>
+        </div>
+
+        <!-- История транзакций -->
+        <template x-if="loyaltyHistory.length > 0">
+            <div class="rounded-2xl border border-gray-200 bg-white p-4 space-y-2">
+                <h3 class="font-semibold text-sm text-gray-800" x-text="`История · баланс: ${loyaltyBalance} баллов`"></h3>
+                <template x-for="tx in loyaltyHistory" :key="tx.id">
+                    <div class="flex items-center justify-between text-xs py-1 border-b border-gray-100 last:border-0">
+                        <span class="font-medium" :class="tx.points > 0 ? 'text-emerald-600' : 'text-red-600'"
+                            x-text="tx.points > 0 ? `+${tx.points}` : tx.points"></span>
+                        <span class="text-gray-600" x-text="tx.kind"></span>
+                        <span class="text-gray-400" x-text="tx.note || '—'"></span>
+                        <span class="text-gray-400" x-text="tx.created_at ? tx.created_at.slice(0, 16).replace('T', ' ') : ''"></span>
+                    </div>
+                </template>
+            </div>
+        </template>
+    </div>
+</div>

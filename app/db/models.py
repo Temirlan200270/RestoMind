@@ -157,6 +157,11 @@ class Organization(Base):
         server_default="",
         comment="Причина экстренного закрытия (показывается боту)",
     )
+    review_url_2gis: Mapped[str | None] = mapped_column(
+        String(512),
+        nullable=True,
+        comment="Ссылка на страницу 2GIS для отзывов (отправляется клиенту после 👍)",
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_demo: Mapped[bool] = mapped_column(
         Boolean,
@@ -316,6 +321,12 @@ class User(Base):
         nullable=True,
         comment="Персистентные флаги клиента (отказы от допродаж upsell_rejections → ISO UTC и др.)",
     )
+    marketing_opt_out: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default="false",
+        comment="Клиент отказался от маркетинговых рассылок",
+    )
 
     # Связи
     orders: Mapped[list["Order"]] = relationship(back_populates="user", lazy="selectin")
@@ -395,6 +406,12 @@ class Order(Base):
         Numeric(12, 2),
         nullable=True,
         comment="Сумма, зафиксированная при оплате (вебхук или ручное подтверждение)",
+    )
+    kind: Mapped[str] = mapped_column(
+        String(30),
+        default="regular",
+        server_default="regular",
+        comment="regular | night_preorder",
     )
     # Optimistic locking: SQLAlchemy увеличивает при UPDATE; при конфликте — StaleDataError
     row_version: Mapped[int] = mapped_column(
@@ -1264,6 +1281,143 @@ class BusinessRecommendation(Base):
 
     def __repr__(self) -> str:
         return f"<BusinessRecommendation id={self.id} org={self.organization_id} type={self.recommendation_type}>"
+
+
+class CustomerFeedback(Base):
+    """Отзыв клиента после завершения заказа (👍 / 👎)."""
+
+    __tablename__ = "customer_feedback"
+    __table_args__ = (
+        Index("ix_customer_feedback_org_created", "organization_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    order_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("orders.id", ondelete="SET NULL"), nullable=True,
+    )
+    rating: Mapped[str] = mapped_column(
+        String(20), nullable=False, comment="positive | negative",
+    )
+    text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class MarketingBlast(Base):
+    """Кампания-рассылка по клиентам через WhatsApp."""
+
+    __tablename__ = "marketing_blasts"
+    __table_args__ = (
+        Index("ix_marketing_blasts_org_status", "organization_id", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    segment_type: Mapped[str] = mapped_column(
+        String(50), nullable=False,
+        comment="inactive_30d | frequent | all_active | custom",
+    )
+    message_text: Mapped[str] = mapped_column(Text, nullable=False)
+    template_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(30), default="draft", server_default="draft",
+        comment="draft | sending | done | cancelled",
+    )
+    scheduled_for: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    total_recipients: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    sent_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    failed_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(),
+    )
+
+    recipients: Mapped[list["MarketingBlastRecipient"]] = relationship(
+        back_populates="blast", lazy="dynamic",
+    )
+
+
+class MarketingBlastRecipient(Base):
+    """Получатель маркетинговой рассылки."""
+
+    __tablename__ = "marketing_blast_recipients"
+    __table_args__ = (
+        Index("ix_mbr_blast_status", "blast_id", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    blast_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("marketing_blasts.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True,
+    )
+    phone: Mapped[str] = mapped_column(String(20), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), default="pending", server_default="pending",
+        comment="pending | sent | failed | opted_out",
+    )
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    blast: Mapped["MarketingBlast"] = relationship(back_populates="recipients")
+
+
+class LoyaltyBalance(Base):
+    """Текущий бонусный баланс клиента."""
+
+    __tablename__ = "loyalty_balance"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "user_id", name="uq_loyalty_balance_org_user"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    balance_points: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(),
+    )
+
+
+class LoyaltyTransaction(Base):
+    """История начислений/списаний бонусных баллов."""
+
+    __tablename__ = "loyalty_transactions"
+    __table_args__ = (
+        Index("ix_loyalty_tx_org_user_created", "organization_id", "user_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    order_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("orders.id", ondelete="SET NULL"), nullable=True,
+    )
+    points: Mapped[int] = mapped_column(
+        Integer, nullable=False, comment=">0 начисление, <0 списание",
+    )
+    kind: Mapped[str] = mapped_column(
+        String(20), nullable=False, comment="earn | redeem | adjust",
+    )
+    note: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class OrganizationIntegrationSync(Base):

@@ -1738,6 +1738,23 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks) -
                     br = interactive.get("button_reply") or {}
                     btn_id = (br.get("id") or "").strip()
                     btn_title = (br.get("title") or "").strip()
+                    # Отзывы: обрабатываем до LLM
+                    if btn_id in ("review_pos", "review_neg"):
+                        _org_id = value.get("metadata", {}).get("organization_id") or settings.default_organization_id
+                        from app.services.review_requests import (
+                            save_customer_feedback,
+                            send_review_positive_reply,
+                            send_review_negative_alert,
+                        )
+                        _rating = "positive" if btn_id == "review_pos" else "negative"
+                        asyncio.create_task(save_customer_feedback(
+                            org_id=_org_id, phone=phone, rating=_rating,
+                        ))
+                        if btn_id == "review_pos":
+                            asyncio.create_task(send_review_positive_reply(phone, _org_id))
+                        else:
+                            asyncio.create_task(send_review_negative_alert(phone, _org_id))
+                        continue  # не передаём в LLM
                     # Маппинг стандартных ID на слова, которые понимает CONFIRM_WORDS / CANCEL_WORDS
                     if btn_id == "confirm":
                         message_text = "да"

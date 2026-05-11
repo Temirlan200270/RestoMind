@@ -51,6 +51,14 @@ async def fetch_ai_read_context(phone: str, organization_id: int) -> AIReadConte
                 ),
             )
             ctx = await build_customer_context(db, u)
+            if u is not None:
+                try:
+                    from app.services.loyalty import get_loyalty_context_line
+                    loyalty_line = await get_loyalty_context_line(db, organization_id, u.id)
+                    if loyalty_line:
+                        ctx = f"{ctx}\n{loyalty_line}".strip() if ctx else loyalty_line
+                except Exception:
+                    pass
             return u, ctx
 
     async def get_org() -> Organization | None:
