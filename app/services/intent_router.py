@@ -711,6 +711,7 @@ async def _handle_order(
     pickup_note = (ai_eff.pickup_time_note or "").strip()
     delivery_addr = (ai_eff.delivery_address or "").strip()
 
+    payment_url: str | None = None
     if not ot:
         reply += "\n\nКак удобнее получить заказ — **доставка**, **самовывоз** или **в зале**?"
         next_state = UserState.CHATTING
@@ -734,7 +735,6 @@ async def _handle_order(
         next_state = UserState.CHATTING
         log_hint = "уточняем время самовывоза"
     elif requires_big_order_prepay:
-        payment_url: str | None = None
         if org_row is not None:
             try:
                 from app.services.payment_initiation import initiate_payment, NoPaymentConfigError
