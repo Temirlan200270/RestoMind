@@ -22,7 +22,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import BusinessRecommendation, MenuItem, Order, OrderStatus, SystemEvent
+from app.db.models import BusinessRecommendation, Order, OrderStatus, SystemEvent
 from app.services.intelligence_analytics import (
     delivery_geo_rows,
     menu_engineering_rows,

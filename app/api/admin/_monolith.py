@@ -149,7 +149,12 @@ from .branding import branding_router
 from .chats import admin_send_message, chats_router
 from .customers import customers_router
 from .knowledge import knowledge_router
+from .analytics import router as analytics_router
+from .menu import router as menu_router
 from .menu_bulk import menu_bulk_router
+from .orders import router as orders_router
+from .organization import router as organization_router
+from .rules import router as rules_router
 from .schemas import TextRequest
 from .system import system_router
 from .menu_schemas import (
@@ -538,6 +543,11 @@ router.include_router(bookings_router)
 router.include_router(customers_router)
 router.include_router(chats_router)
 router.include_router(system_router)
+router.include_router(rules_router)
+router.include_router(analytics_router)
+router.include_router(menu_router)
+router.include_router(organization_router)
+router.include_router(orders_router)
 
 
 # WebSocket без cookie-сессии (браузер ограничен) — только подписанный токен

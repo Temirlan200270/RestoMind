@@ -9,9 +9,8 @@ ARQ cron morning_preorders_tick запускается каждые 5 мин:
 
 from __future__ import annotations
 
-import asyncio
 import logging
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -40,7 +39,7 @@ async def activate_night_preorders(db: AsyncSession, org_id: int) -> int:
     - Отправляет каждому клиенту WA-сообщение с резюме + кнопки ✅/❌.
     Возвращает количество активированных заказов.
     """
-    from app.db.models import Order, User
+    from app.db.models import User
     from app.integrations.whatsapp import send_interactive_buttons, send_message
 
     orders = await get_pending_night_preorders(db, org_id)
@@ -128,7 +127,6 @@ async def morning_preorders_tick(ctx: dict) -> None:
     from app.core.config import settings
     from app.db.models import Organization
     from app.db.session import async_session_factory
-    from app.services.time_context import check_operational_status
 
     try:
         from app.integrations.redis_client import get_redis_client
@@ -229,9 +227,8 @@ async def _process_org_morning_tick(
 
 def _minutes_since_opening(org: Any) -> int | None:
     """Сколько минут прошло с момента открытия сегодня (None — не можем определить)."""
-    from app.services.time_context import check_operational_status, _WEEKDAY_KEYS
+    from app.services.time_context import _WEEKDAY_KEYS
     from app.services.timezones import zoneinfo_or_default
-    from zoneinfo import ZoneInfo
 
     schedule = org.schedule_json
     if not schedule:

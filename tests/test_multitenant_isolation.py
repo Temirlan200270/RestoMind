@@ -16,7 +16,6 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-import app.db.session as db_session_module
 from app.db.models import (
     AiUsageLog,
     Base,
@@ -26,7 +25,6 @@ from app.db.models import (
     MenuItem,
     OperationalInsight,
     Order,
-    OrderStatus,
     Organization,
     PipelineLatencyLog,
     User,

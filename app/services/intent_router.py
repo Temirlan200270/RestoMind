@@ -685,7 +685,7 @@ async def _handle_order(
         )
 
     # Ночной предзаказ: если ресторан закрыт — сохранить как kind='night_preorder' и выйти
-    if org_row is not None:
+    if org_row is not None and not bool(ai_eff.is_preorder):
         from app.services.time_context import check_operational_status
         _op_status = check_operational_status(
             org_row.timezone,
