@@ -110,6 +110,7 @@ async def _run_payment_webhook(
     db: AsyncSession,
     background_tasks: BackgroundTasks,
     audit_event: PaymentWebhookEvent | None,
+    raw_payload: dict | None = None,
 ) -> dict:
     try:
         out = await apply_payment_webhook(
@@ -120,6 +121,7 @@ async def _run_payment_webhook(
             provider=body.provider,
             status=body.status,
             amount=body.amount,
+            raw_payload=raw_payload,
         )
     except LookupError:
         if audit_event is not None:
@@ -283,7 +285,7 @@ async def post_payment_webhook_by_provider(
         body = _parsed_to_body(parsed, slug)
         await update_payment_webhook_audit(db, audit_event, verified=True)
         await db.flush()
-        return await _run_payment_webhook(body, db, background_tasks, audit_event)
+        return await _run_payment_webhook(body, db, background_tasks, audit_event, raw_payload=parsed.raw)
 
     if slug not in _SIMPLE_PROVIDER_SLUGS:
         await _finalize_verify_failure(db, audit_event, "unknown_provider")

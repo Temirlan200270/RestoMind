@@ -199,23 +199,22 @@ class MenuEntry:
 async def load_available_menu(
     db: AsyncSession,
     *,
-    organization_id: int | None = None,
+    organization_id: int,
 ) -> list[MenuItem]:
     """
     Один запрос на весь цикл обработки — загрузка доступных позиций.
 
-    В multi-tenant режиме обязателен фильтр по organization_id, иначе это data leak меню между филиалами.
+    organization_id обязателен: без него вернулись бы позиции всех организаций (data leak).
     Для legacy-данных (MenuItem.organization_id IS NULL) разрешаем чтение только для default organization.
     """
-    stmt = select(MenuItem).where(MenuItem.is_available.is_(True))
-    if organization_id is not None:
-        from app.core.config import settings
+    from app.core.config import settings
 
-        org_id = int(organization_id)
-        if org_id == int(settings.default_organization_id):
-            stmt = stmt.where(or_(MenuItem.organization_id == org_id, MenuItem.organization_id.is_(None)))
-        else:
-            stmt = stmt.where(MenuItem.organization_id == org_id)
+    org_id = int(organization_id)
+    stmt = select(MenuItem).where(MenuItem.is_available.is_(True))
+    if org_id == int(settings.default_organization_id):
+        stmt = stmt.where(or_(MenuItem.organization_id == org_id, MenuItem.organization_id.is_(None)))
+    else:
+        stmt = stmt.where(MenuItem.organization_id == org_id)
     stmt = stmt.order_by(MenuItem.category, MenuItem.name)
     result = await db.execute(stmt)
     return list(result.scalars().all())

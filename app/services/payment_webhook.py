@@ -40,6 +40,7 @@ async def apply_payment_webhook(
     provider: str,
     status: PaymentWebhookStatus,
     amount: float | None,
+    raw_payload: dict | None = None,
 ) -> dict:
     """
     Обновляет prepayment_status при status=paid, пишет PaymentEvent.
@@ -109,6 +110,7 @@ async def apply_payment_webhook(
             amount=amt,
             currency="KZT",
             paid_at=datetime.now(_tz.utc),
+            provider_payload_json=raw_payload,
         )
 
         await emit_system_event(
@@ -168,6 +170,7 @@ async def apply_payment_webhook(
         amount=float(amount) if amount is not None else float(order.total_price or 0),
         currency="KZT",
         failure_reason="webhook_failed",
+        provider_payload_json=raw_payload,
     )
 
     await db.flush()
@@ -208,6 +211,7 @@ async def _upsert_payment_transaction(
     currency: str = "KZT",
     paid_at: "datetime | None" = None,
     failure_reason: str | None = None,
+    provider_payload_json: dict | None = None,
 ) -> None:
     """
     Обновляет существующую pending-транзакцию для заказа или создаёт новую.
@@ -229,6 +233,7 @@ async def _upsert_payment_transaction(
         existing.provider_payment_id = provider_payment_id or existing.provider_payment_id
         existing.paid_at = paid_at
         existing.failure_reason = failure_reason
+        existing.provider_payload_json = provider_payload_json or existing.provider_payload_json
     else:
         tx = PaymentTransaction(
             organization_id=organization_id,
@@ -241,5 +246,6 @@ async def _upsert_payment_transaction(
             idempotency_key=f"wh:{provider}:{provider_payment_id or order_id}:{uuid.uuid4().hex[:8]}",
             paid_at=paid_at,
             failure_reason=failure_reason,
+            provider_payload_json=provider_payload_json,
         )
         db.add(tx)

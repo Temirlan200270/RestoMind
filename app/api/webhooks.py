@@ -599,6 +599,32 @@ async def handle_booking_confirmation(
     return "Пожалуйста, ответьте «Да» для подтверждения или «Нет» для отмены бронирования."
 
 
+async def _transition_state(
+    phone: str,
+    new_state: "UserState",
+    organization_id: int,
+) -> None:
+    """Сохраняет смену состояния в БД, затем обновляет Redis-кэш.
+
+    Без DB-зеркала состояние теряется при рестарте сервера или очистке Redis.
+    """
+    try:
+        async with async_session_factory() as _db:
+            await update_user_session_fields_in_db(
+                _db,
+                phone=phone,
+                organization_id=organization_id,
+                current_state=new_state.value,
+            )
+            await _db.commit()
+    except Exception:
+        logger.warning(
+            "_transition_state DB write failed phone=%s state=%s",
+            phone, new_state, exc_info=True,
+        )
+    await set_user_state(redis_client, phone, new_state, organization_id=organization_id)
+
+
 _PAYMENT_LABEL_RU = {
     "cash": "Наличные при получении",
     "card": "Карта при получении",
@@ -696,7 +722,7 @@ async def handle_order_payment_choice(
             )
         except Exception as exc:
             logger.warning("Telegram prepayment alert skipped: %s", exc)
-        await set_user_state(redis_client, phone, UserState.CHATTING, organization_id=organization_id)
+        await _transition_state(phone, UserState.CHATTING, organization_id)
         prepay_reply = (
             f"Принял способ оплаты: {pay_human}.\n\n"
             f"{body}\n\n"
@@ -709,7 +735,7 @@ async def handle_order_payment_choice(
             )
         return prepay_reply
 
-    await set_user_state(redis_client, phone, UserState.CONFIRMING_ORDER, organization_id=organization_id)
+    await _transition_state(phone, UserState.CONFIRMING_ORDER, organization_id)
     return reply
 
 
@@ -980,9 +1006,7 @@ async def process_message(
                 )
                 return
             # None → клиент хочет изменить заказ; переключаем в CHATTING и идём в OpenAI
-            await set_user_state(
-                redis_client, phone, UserState.CHATTING, organization_id=organization_id,
-            )
+            await _transition_state(phone, UserState.CHATTING, organization_id)
             state = UserState.CHATTING
 
         # ─── CONFIRMING_ORDER: ждём Да/Нет или правку заказа ──────
@@ -1018,9 +1042,7 @@ async def process_message(
                 )
                 return
             # None → клиент хочет изменить заказ; переключаем в CHATTING и идём в OpenAI
-            await set_user_state(
-                redis_client, phone, UserState.CHATTING, organization_id=organization_id,
-            )
+            await _transition_state(phone, UserState.CHATTING, organization_id)
             state = UserState.CHATTING
 
         # ─── CONFIRMING_BOOKING: ждём Да/Нет ─────────────────
@@ -1584,13 +1606,9 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks) -
             if not phone:
                 continue
 
-            if message_id and await _dedupe_whatsapp_message(message_id):
-                logger.info(
-                    "Дубликат WhatsApp message_id=%s от %s — пропущен",
-                    message_id,
-                    _redact_msisdn_for_log(phone),
-                )
-                continue
+            # Идемпотентность обеспечивается через DB-claim в process_with_retry
+            # (try_start_whatsapp_inbound_in_db). Redis здесь не используем: Redis SET
+            # между приёмом вебхука и DB-commit может потерять сообщение при сбое.
 
             if msg_type == "audio":
                 media_id = (msg.get("audio") or {}).get("id") or ""
