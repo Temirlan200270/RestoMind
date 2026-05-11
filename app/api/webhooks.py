@@ -66,7 +66,8 @@ from app.services.dialog_mgr import (
     sync_user_dialog_state_to_db_then_redis,
     update_user_session_fields_in_db,
 )
-from app.services.ai_usage import schedule_log_ai_usage
+from app.services.ai_usage import schedule_log_ai_error, schedule_log_ai_usage
+from app.services.pipeline_latency import schedule_log_pipeline_latency
 from app.services.events import publish_event
 from app.services.billing_guard import tenant_billing_blocks_inbound
 from app.services.org_resolve import organization_id_for_whatsapp_value
@@ -1229,6 +1230,9 @@ async def process_message(
             extra={"intent": ai_response.intent, "voice": had_voice},
         )
         schedule_log_ai_usage(organization_id, getattr(ai_response, "_usage", None))
+        # P4: регистрируем транзиентную AI-ошибку (fallback = провайдер недоступен)
+        if is_openai_fallback_escalation_reply(ai_response.reply_text):
+            schedule_log_ai_error(organization_id)
 
         # 3) DB: короткая мутация/запись результатов
         post_commit_state: UserState | None = None
@@ -1352,9 +1356,28 @@ async def process_message(
             "delivery_status": "sending",
             "organization_id": organization_id,
         })
-        await send_customer_text(
-            phone, result.reply_text, outbound_chat_log_id=outbound_id_chat,
-        )
+        # E8: интерактивное сообщение (кнопки или CTA) вместо plain text если задано
+        _sent_interactive = False
+        if result.interactive_buttons:
+            try:
+                from app.integrations.whatsapp import send_interactive_buttons
+                ir = await send_interactive_buttons(phone, result.reply_text, result.interactive_buttons)
+                _sent_interactive = ir.ok
+            except Exception as _ie:
+                logger.warning("send_interactive_buttons failed, fallback to text: %s", _ie)
+        elif result.cta_url:
+            try:
+                from app.integrations.whatsapp import send_cta_url_button
+                ir = await send_cta_url_button(
+                    phone, result.reply_text, "💳 Оплатить", result.cta_url,
+                )
+                _sent_interactive = ir.ok
+            except Exception as _ce:
+                logger.warning("send_cta_url_button failed, fallback to text: %s", _ce)
+        if not _sent_interactive:
+            await send_customer_text(
+                phone, result.reply_text, outbound_chat_log_id=outbound_id_chat,
+            )
 
         if settings.pipeline_timing_enabled:
             pipe_sw.split("reply")
@@ -1362,6 +1385,12 @@ async def process_message(
                 phone_tail=_redact_msisdn_for_log(phone),
                 rm_stage_ms=pipe_sw.rm_stage_ms,
                 extra={"organization_id": organization_id, "intent": ai_response.intent},
+            )
+            # P4: fire-and-forget latency recording для SLA мониторинга
+            schedule_log_pipeline_latency(
+                organization_id,
+                pipe_sw.rm_stage_ms,
+                pipeline_type="whatsapp_voice" if had_voice else "whatsapp_text",
             )
 
         if had_voice and settings.whatsapp_voice_replies:
@@ -1700,6 +1729,40 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks) -
                         webhook_value=value,
                     )
                     logger.info("Голосовое от %s поставлено в очередь", phone)
+            elif msg_type == "interactive":
+                # E8: кнопки quick-reply — клиент нажал одну из кнопок
+                interactive = msg.get("interactive") or {}
+                interactive_type = (interactive.get("type") or "").strip()
+                message_text = ""
+                if interactive_type == "button_reply":
+                    br = interactive.get("button_reply") or {}
+                    btn_id = (br.get("id") or "").strip()
+                    btn_title = (br.get("title") or "").strip()
+                    # Маппинг стандартных ID на слова, которые понимает CONFIRM_WORDS / CANCEL_WORDS
+                    if btn_id == "confirm":
+                        message_text = "да"
+                    elif btn_id == "cancel":
+                        message_text = "нет"
+                    else:
+                        message_text = btn_title or btn_id
+                elif interactive_type == "list_reply":
+                    lr = interactive.get("list_reply") or {}
+                    message_text = (lr.get("title") or lr.get("id") or "").strip()
+                if message_text:
+                    from app.services.task_queue import dispatch_arq_or_background
+
+                    await dispatch_arq_or_background(
+                        "whatsapp_process_text",
+                        background_tasks,
+                        phone=phone,
+                        message_text=message_text,
+                        whatsapp_message_id=message_id,
+                        webhook_value=value,
+                    )
+                    logger.info(
+                        "Interactive (%s) от %s → '%s' поставлено в очередь",
+                        interactive_type, phone, message_text,
+                    )
             else:
                 message_text = (msg.get("text") or {}).get("body") or ""
                 if message_text:

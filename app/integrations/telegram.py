@@ -310,12 +310,15 @@ async def send_tg_fallback_alert(
         "parse_mode": "HTML",
         "disable_web_page_preview": True,
     }
+    org_id_int = int(organization_id) if organization_id is not None else 0
+    # E8/Telegram: кнопка «Ответить клиенту» → webhook → relay в WhatsApp
+    reply_callback = f"reply:{q}:{org_id_int}"
+    inline_rows: list[list[dict]] = [
+        [{"text": "📩 Ответить клиенту", "callback_data": reply_callback}],
+    ]
     if admin_link_abs:
-        payload["reply_markup"] = {
-            "inline_keyboard": [
-                [{"text": "ОТКРЫТЬ ЧАТ ↗️", "url": admin_link_abs}],
-            ],
-        }
+        inline_rows.append([{"text": "ОТКРЫТЬ ЧАТ ↗️", "url": admin_link_abs}])
+    payload["reply_markup"] = {"inline_keyboard": inline_rows}
 
     api_url = f"https://api.telegram.org/bot{token}/sendMessage"
     async with httpx.AsyncClient(timeout=20.0) as client:

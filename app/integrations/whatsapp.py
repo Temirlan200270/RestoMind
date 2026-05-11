@@ -321,6 +321,110 @@ async def send_message(phone: str, text: str) -> WhatsAppSendResult:
     )
 
 
+async def send_interactive_buttons(
+    phone: str,
+    body_text: str,
+    buttons: list[dict],
+) -> WhatsAppSendResult:
+    """
+    Отправить сообщение с quick-reply кнопками (Meta interactive/button).
+    buttons: список {"id": str, "title": str}, максимум 3 штуки.
+    Без токена (dev) — fallback: текст + подсказка вариантов.
+    """
+    if not settings.whatsapp_api_token:
+        labels = " / ".join(b.get("title", b.get("id", "")) for b in buttons[:3])
+        logger.info("WhatsApp (dev) interactive_buttons -> %s: %s [%s]", phone, body_text[:120], labels)
+        return WhatsAppSendResult(ok=True, message_id=None)
+
+    candidates = _whatsapp_to_candidates(phone)
+    if not candidates:
+        return WhatsAppSendResult(ok=False, error={"code": "empty_recipient"})
+
+    headers = {
+        "Authorization": f"Bearer {settings.whatsapp_api_token}",
+        "Content-Type": "application/json",
+    }
+    safe_buttons = buttons[:3]
+
+    def _body(to: str) -> dict[str, Any]:
+        return {
+            "messaging_product": "whatsapp",
+            "to": to,
+            "type": "interactive",
+            "interactive": {
+                "type": "button",
+                "body": {"text": _strip_markdown_for_whatsapp(body_text)},
+                "action": {
+                    "buttons": [
+                        {"type": "reply", "reply": {"id": b["id"], "title": b["title"][:20]}}
+                        for b in safe_buttons
+                    ]
+                },
+            },
+        }
+
+    return await _post_whatsapp_messages(
+        candidates=candidates,
+        headers=headers,
+        build_json=_body,
+        timeout=SEND_TIMEOUT,
+        extract_wamid=True,
+        log_prefix="WhatsApp Interactive",
+    )
+
+
+async def send_cta_url_button(
+    phone: str,
+    body_text: str,
+    button_title: str,
+    url: str,
+) -> WhatsAppSendResult:
+    """
+    Отправить сообщение с CTA-кнопкой-ссылкой (Meta interactive/cta_url).
+    Используется для платёжных ссылок (E14).
+    Без токена — fallback: текст + URL на новой строке.
+    """
+    if not settings.whatsapp_api_token:
+        logger.info("WhatsApp (dev) cta_url -> %s: %s → %s", phone, body_text[:80], url)
+        return WhatsAppSendResult(ok=True, message_id=None)
+
+    candidates = _whatsapp_to_candidates(phone)
+    if not candidates:
+        return WhatsAppSendResult(ok=False, error={"code": "empty_recipient"})
+
+    headers = {
+        "Authorization": f"Bearer {settings.whatsapp_api_token}",
+        "Content-Type": "application/json",
+    }
+
+    def _body(to: str) -> dict[str, Any]:
+        return {
+            "messaging_product": "whatsapp",
+            "to": to,
+            "type": "interactive",
+            "interactive": {
+                "type": "cta_url",
+                "body": {"text": _strip_markdown_for_whatsapp(body_text)},
+                "action": {
+                    "name": "cta_url",
+                    "parameters": {
+                        "display_text": button_title[:20],
+                        "url": url,
+                    },
+                },
+            },
+        }
+
+    return await _post_whatsapp_messages(
+        candidates=candidates,
+        headers=headers,
+        build_json=_body,
+        timeout=SEND_TIMEOUT,
+        extract_wamid=True,
+        log_prefix="WhatsApp CTA",
+    )
+
+
 async def send_template(
     phone: str,
     template_name: str,

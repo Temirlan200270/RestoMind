@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.admin.deps import admin_org_from_session, require_admin_session_active
-from app.db.models import OperationalInsight
+from app.db.models import BusinessRecommendation, OperationalInsight
 from app.db.session import get_db
 from app.services.intelligence import (
     SimulationInput,
@@ -162,3 +162,102 @@ async def digital_twin_simulate(body: SimulationBody) -> dict:
         )
     )
     return {"result": result}
+
+
+# ─── P4: Latency baselines ────────────────────────────────────────────────────
+
+@router.get("/latency")
+async def intelligence_latency(
+    request: Request,
+    hours: int = Query(default=24, ge=1, le=168),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Агрегированные метрики задержки пайплайна по стадиям (p50/p95/max)."""
+    from app.services.pipeline_latency import get_latency_summary, get_sla_violations_count
+    org_id = admin_org_from_session(request)
+    stages = await get_latency_summary(db, org_id, hours=hours)
+    violations = await get_sla_violations_count(db, org_id, hours=hours)
+    return {
+        "period_hours": hours,
+        "stages": stages,
+        "sla_violations": violations,
+        "sla_thresholds": {
+            "llm_p95_ms": 4000,
+            "total_p95_ms": 8000,
+        },
+    }
+
+
+# ─── P4: Operator efficiency ──────────────────────────────────────────────────
+
+@router.get("/operator-efficiency")
+async def intelligence_operator_efficiency(
+    request: Request,
+    hours: int = Query(default=24, ge=1, le=168),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Метрики эффективности операторов: эскалации, время отклика, recovery rate."""
+    from app.services.operator_efficiency import get_operator_efficiency
+    org_id = admin_org_from_session(request)
+    return await get_operator_efficiency(db, org_id, hours=hours)
+
+
+# ─── P4: Business recommendations ────────────────────────────────────────────
+
+def _rec_public(r: BusinessRecommendation) -> dict:
+    return {
+        "id": r.id,
+        "recommendation_type": r.recommendation_type,
+        "title": r.title,
+        "body": r.body,
+        "confidence_pct": r.confidence_pct,
+        "expected_impact_kzt": r.expected_impact_kzt,
+        "status": r.status,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+    }
+
+
+class RecommendationPatchBody(BaseModel):
+    status: str = Field(..., pattern="^(viewed|acted_on|dismissed)$")
+
+
+@router.get("/recommendations")
+async def intelligence_recommendations(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Последние бизнес-рекомендации для ресторана."""
+    from app.services.recommendations import list_recommendations
+    org_id = admin_org_from_session(request)
+    recs = await list_recommendations(db, org_id, limit=10)
+    return {"items": [_rec_public(r) for r in recs]}
+
+
+@router.post("/recommendations/refresh")
+async def intelligence_recommendations_refresh(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Принудительно перегенерировать рекомендации прямо сейчас."""
+    from app.services.recommendations import generate_recommendations
+    org_id = admin_org_from_session(request)
+    recs = await generate_recommendations(db, org_id)
+    await db.commit()
+    return {"ok": True, "generated": len(recs), "items": [_rec_public(r) for r in recs]}
+
+
+@router.patch("/recommendations/{rec_id}")
+async def patch_recommendation(
+    rec_id: int,
+    body: RecommendationPatchBody,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Обновить статус рекомендации (viewed / acted_on / dismissed)."""
+    org_id = admin_org_from_session(request)
+    row = await db.get(BusinessRecommendation, int(rec_id))
+    if row is None or int(row.organization_id) != int(org_id):
+        raise HTTPException(status_code=404, detail="Recommendation not found")
+    row.status = body.status
+    await db.commit()
+    return {"ok": True, "item": _rec_public(row)}

@@ -1201,8 +1201,69 @@ class AiUsageLog(Base):
     completion_tokens: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     total_tokens: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     call_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    error_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0",
+                                              comment="AI-провайдер вернул transient ошибку (сумма за день)")
+    p95_latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True,
+                                                        comment="95-й перцентиль задержки LLM за день (ms)")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class PipelineLatencyLog(Base):
+    """Запись задержек обработки входящего сообщения по стадиям (ms). Одна строка = один WhatsApp-запрос."""
+
+    __tablename__ = "pipeline_latency_logs"
+    __table_args__ = (
+        Index("ix_pipeline_latency_logs_org_created", "organization_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    pipeline_type: Mapped[str] = mapped_column(
+        String(32), default="whatsapp_text", server_default="whatsapp_text",
+        comment="whatsapp_text | whatsapp_voice",
+    )
+    dedupe_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    context_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    llm_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    route_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reply_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class BusinessRecommendation(Base):
+    """AI-сгенерированная бизнес-рекомендация для ресторана."""
+
+    __tablename__ = "business_recommendations"
+    __table_args__ = (
+        Index("ix_business_recommendations_org_created", "organization_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    recommendation_type: Mapped[str] = mapped_column(
+        String(64), nullable=False, index=True,
+        comment="product_boost | pricing_adj | geo_expansion | upsell_pair | stoplist_impact",
+    )
+    title: Mapped[str] = mapped_column(String(240), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    confidence_pct: Mapped[int] = mapped_column(Integer, default=50, server_default="50",
+                                                 comment="0-100 уверенность на основе sample_count")
+    expected_impact_kzt: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(20), default="new", server_default="new", index=True,
+        comment="new | viewed | acted_on | dismissed",
+    )
+    data_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    def __repr__(self) -> str:
+        return f"<BusinessRecommendation id={self.id} org={self.organization_id} type={self.recommendation_type}>"
 
 
 class OrganizationIntegrationSync(Base):

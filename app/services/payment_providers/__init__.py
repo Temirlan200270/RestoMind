@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from app.services.payment_adapters import register_adapter
-from app.services.payment_providers.cloudpayments import CloudPaymentsWebhookAdapter
+from app.services.payment_providers.cloudpayments import CloudPaymentsInitiator, CloudPaymentsWebhookAdapter
 from app.services.payment_providers.freedom_pay import FreedomPayInitiator, FreedomPayWebhookAdapter
 from app.services.payment_providers.generic_hmac import GenericHmacWebhookAdapter
 from app.services.payment_providers.kaspi import KaspiWebhookAdapter
@@ -19,6 +19,7 @@ def register_payment_provider_adapters() -> None:
     register_adapter("freedom_pay", FreedomPayWebhookAdapter)
 
     _INITIATOR_REGISTRY["freedom_pay"] = FreedomPayInitiator()
+    _INITIATOR_REGISTRY["cloudpayments"] = CloudPaymentsInitiator()
 
 
 def get_initiator(provider_slug: str) -> PaymentInitiator | None:
