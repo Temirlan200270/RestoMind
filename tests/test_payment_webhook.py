@@ -71,6 +71,11 @@ async def pw_client(monkeypatch):
     monkeypatch.setattr(app_config.settings, "payment_webhook_bearer_token", PW_HOOK_BEARER)
     monkeypatch.setattr(app_config.settings, "payment_webhook_hmac_secret", PW_HOOK_HMAC)
 
+    async def _noop_enqueue_job(*_a, **_kw):
+        return None
+
+    monkeypatch.setattr("app.services.task_queue.enqueue_job", _noop_enqueue_job)
+
     engine = _memory_sqlite_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -304,6 +309,11 @@ async def test_payment_webhook_failed_records_event_only(pw_client):
 async def test_payment_webhook_hmac_only_success(monkeypatch):
     monkeypatch.setattr(app_config.settings, "payment_webhook_bearer_token", "")
     monkeypatch.setattr(app_config.settings, "payment_webhook_hmac_secret", "hm-shared")
+
+    async def _noop_enqueue_job(*_a, **_kw):
+        return None
+
+    monkeypatch.setattr("app.services.task_queue.enqueue_job", _noop_enqueue_job)
 
     engine = _memory_sqlite_engine()
     async with engine.begin() as conn:

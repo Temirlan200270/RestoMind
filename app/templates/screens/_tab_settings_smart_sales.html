@@ -8,7 +8,10 @@
                     <p class="text-sm text-gray-500 mt-1">Режим «нет категории в корзине» → предложить позицию из другой категории. Работает после ответа AI.</p>
                     <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
                         <div>
-                            <label class="text-[11px] font-semibold text-gray-500 uppercase">Если нет категории (подстрока)</label>
+                            <label class="flex items-center gap-1.5 text-[11px] font-semibold text-gray-500 uppercase">
+                                <span>Если нет категории (подстрока)</span>
+                                <span class="ds-field-help" title="Ищется подстрока в поле category позиций меню в корзине. Регистр не важен. Пример: «напит» сработает для категории «Напитки».">?</span>
+                            </label>
                             <input type="text" x-model="upsellNew.trigger_category" placeholder="напит"
                                 class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
                         </div>
@@ -28,7 +31,10 @@
                                 class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
                         </div>
                         <div class="md:col-span-2">
-                            <label class="text-[11px] font-semibold text-gray-500 uppercase">Шаблон фразы ({item_name}, {price})</label>
+                            <label class="flex items-center gap-1.5 text-[11px] font-semibold text-gray-500 uppercase">
+                                <span>Шаблон фразы ({item_name}, {price})</span>
+                                <span class="ds-field-help" title="Текст подсказки для ИИ; подставляются имя позиции и цена. Пусто — используется шаблон по умолчанию на сервере.">?</span>
+                            </label>
                             <input type="text" x-model="upsellNew.phrase_template" placeholder="по умолчанию из сервера"
                                 class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
                         </div>

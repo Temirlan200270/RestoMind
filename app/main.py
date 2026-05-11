@@ -569,6 +569,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     await init_redis_or_fallback()
 
+    if settings.is_prod_like:
+        from app.services.task_queue import assert_arq_reachable_for_prod_startup
+
+        await assert_arq_reachable_for_prod_startup()
+        logger.info("ARQ/Redis: production/staging connectivity check OK")
+
     await init_whatsapp_http_client()
 
     stop_list_task = asyncio.create_task(_stop_list_sync_loop())

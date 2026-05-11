@@ -1,7 +1,7 @@
 """
 Роутер для входящих вебхуков WhatsApp.
 Принимает сообщения, мгновенно возвращает 200 OK,
-а обработку передаёт в BackgroundTasks.
+а обработку передаёт в очередь ARQ (worker).
 """
 
 import asyncio
@@ -67,6 +67,7 @@ from app.services.dialog_mgr import (
 )
 from app.services.ai_usage import schedule_log_ai_usage
 from app.services.events import publish_event
+from app.services.billing_guard import tenant_billing_blocks_inbound
 from app.services.org_resolve import organization_id_for_whatsapp_value
 from app.services.intent_router import (
     cancel_booking,
@@ -876,6 +877,13 @@ async def process_message(
                 ),
             )
             ai_paused_db = bool(u_row and getattr(u_row, "ai_paused", False))
+            ai_snooze_active = False
+            if u_row is not None:
+                from app.services.ai_snooze import ai_snooze_is_active, clear_ai_snooze_if_expired
+
+                await clear_ai_snooze_if_expired(db_u, u_row)
+                ai_snooze_active = ai_snooze_is_active(u_row)
+                await db_u.commit()
 
         # Голос без мультимодального чата: сначала текст (подтверждения, оператор)
         if voice_bytes is not None and (
@@ -884,6 +892,7 @@ async def process_message(
             or state == UserState.CONFIRMING_BOOKING
             or state == UserState.HUMAN_MODE
             or ai_paused_db
+            or ai_snooze_active
         ):
             if not voice_supported():
                 await send_customer_text(
@@ -912,15 +921,16 @@ async def process_message(
             "organization_id": organization_id,
         })
 
-        # ─── HUMAN_MODE / ai_paused: AI молчит, только логируем ─────────
+        # ─── HUMAN_MODE / ai_paused / ai_snooze: AI молчит, только логируем ─────────
         # Состояние в Redis: ключ user:state:{phone} (см. dialog_mgr.get_user_state), не вызываем LLM.
-        if state == UserState.HUMAN_MODE or ai_paused_db:
+        # Временная пауза: User.ai_snoozed_until (UTC) — без перевода Redis в HUMAN_MODE; см. app.services.ai_snooze.
+        if state == UserState.HUMAN_MODE or ai_paused_db or ai_snooze_active:
             async with async_session_factory() as db:
                 await _save_chat_log(
                     db,
                     phone,
                     message_text,
-                    "[HUMAN_MODE — AI отключён]",
+                    "[OPERATOR_ONLY — AI не отвечает]",
                     organization_id=organization_id,
                     outbound_whatsapp=False,
                 )
@@ -928,7 +938,13 @@ async def process_message(
             await append_to_history(
                 redis_client, phone, "user", message_text, organization_id=organization_id,
             )
-            logger.info("HUMAN_MODE: сообщение от %s сохранено, AI не вызван", phone)
+            logger.info(
+                "operator_only: сообщение от %s сохранено, AI не вызван (human=%s paused=%s snooze=%s)",
+                phone,
+                state == UserState.HUMAN_MODE,
+                ai_paused_db,
+                ai_snooze_active,
+            )
             return
 
         # ─── AWAITING_ORDER_PAYMENT: способ оплаты, правка заказа или Да/Нет ───
@@ -1550,6 +1566,9 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks) -
                 org_ent = await db.get(Organization, int(org_id))
                 if org_ent is not None and not bool(org_ent.is_active):
                     logger.info("org=%s inactive: incoming webhook ignored", org_id)
+                    return {"status": "ok"}
+                if org_ent is not None and await tenant_billing_blocks_inbound(db, org_ent):
+                    logger.info("org=%s tenant billing suspended: incoming webhook ignored", org_id)
                     return {"status": "ok"}
         except Exception as exc:
             logger.warning("organization activity check failed: %s", exc)

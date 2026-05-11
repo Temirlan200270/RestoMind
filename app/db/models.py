@@ -52,9 +52,29 @@ class Tenant(Base):
         String(512), nullable=True, comment="Публичный URL логотипа (POST /branding/logo заполняет)",
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    plan_status: Mapped[str] = mapped_column(
+        String(32),
+        default="active",
+        server_default="active",
+        comment="active | suspended — блок входа и WhatsApp для всех филиалов tenant",
+    )
 
     def __repr__(self) -> str:
         return f"<Tenant id={self.id} name='{self.name}'>"
+
+
+class BillingUsageDaily(Base):
+    """Суточный rollup использования AI по tenant (из ai_usage_logs)."""
+
+    __tablename__ = "billing_usage_daily"
+    __table_args__ = (UniqueConstraint("tenant_id", "day", name="uq_billing_usage_daily_tenant_day"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    day: Mapped[date] = mapped_column(Date, nullable=False, comment="UTC-календарный день")
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    ai_calls: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 class Organization(Base):
@@ -266,6 +286,12 @@ class User(Base):
         Boolean,
         default=False,
         comment="ИИ отключён для этого клиента (персистентно; дублирует смысл HUMAN_MODE)",
+    )
+    ai_snoozed_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        default=None,
+        comment="UTC: до этого времени LLM не вызывается (временная пауза без смены Redis state)",
     )
     current_state: Mapped[str] = mapped_column(
         String(50), default="chatting", server_default="chatting",

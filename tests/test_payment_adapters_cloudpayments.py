@@ -61,6 +61,14 @@ async def cp_client(monkeypatch):
     monkeypatch.setattr(app_config.settings, "payment_webhook_hmac_secret", "")
     monkeypatch.setattr(app_config.settings, "cloudpayments_api_secret", CP_SECRET)
 
+    async def _noop_arq_dispatch(*_a, **_kw):
+        return None
+
+    monkeypatch.setattr(
+        "app.services.task_queue.dispatch_arq_or_background",
+        _noop_arq_dispatch,
+    )
+
     engine = _memory_sqlite_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

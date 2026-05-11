@@ -11,8 +11,8 @@ import re
 import time
 import uuid
 from copy import deepcopy
-from dataclasses import dataclass
-from difflib import get_close_matches
+from dataclasses import dataclass, field
+from difflib import SequenceMatcher, get_close_matches
 from typing import Any, Literal
 
 from sqlalchemy import or_, select, update
@@ -185,6 +185,8 @@ class ValidatedOrder:
     unknown_items: list[str]
     total_price: float
     summary_text: str
+    # Нечёткое сопоставление с меню: similarity = SequenceMatcher по нижнему регистру (0..1).
+    fuzzy_match_details: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -238,6 +240,39 @@ def _build_menu_lookup(
     return lookup
 
 
+def merge_confidence_into_order_meta(
+    order_meta: dict[str, object],
+    validated: ValidatedOrder,
+) -> None:
+    """
+    P1.5: флаги доверия к автозаполнению заказа (админка, канбан).
+
+    - fuzzy_menu_match: нечёткое совпадение с меню с similarity < 0.8 (difflib.SequenceMatcher).
+    - unverified_delivery_address: доставка с непустым адресом, пока нет order_meta.delivery_address_verified.
+    """
+    reasons: list[str] = []
+    details: dict[str, object] = {}
+
+    low_fuzzy = [
+        x for x in validated.fuzzy_match_details
+        if float(x.get("similarity") or 0) < 0.8
+    ]
+    if low_fuzzy:
+        reasons.append("fuzzy_menu_match")
+        details["fuzzy_matches"] = low_fuzzy
+
+    ot = str(order_meta.get("order_type") or "")
+    addr = str(order_meta.get("delivery_address") or "").strip()
+    if ot == "delivery" and addr and order_meta.get("delivery_address_verified") is not True:
+        reasons.append("unverified_delivery_address")
+
+    order_meta["confidence"] = {
+        "low_confidence": bool(reasons),
+        "reasons": reasons,
+        "details": details,
+    }
+
+
 async def validate_order(
     items: list[OrderItem],
     menu_items: list[MenuItem] | None = None,
@@ -260,6 +295,7 @@ async def validate_order(
     valid_items: list[dict] = []
     unknown_items: list[str] = []
     fuzzy_matched: list[str] = []
+    fuzzy_match_details: list[dict[str, Any]] = []
     total_price = 0.0
 
     for item in items:
@@ -271,8 +307,14 @@ async def validate_order(
             matches = get_close_matches(name_lower, menu_names, n=1, cutoff=0.6)
             if matches:
                 matched_name = matches[0]
+                similarity = SequenceMatcher(None, name_lower, matched_name).ratio()
                 entry = menu_lookup[matched_name]
                 fuzzy_matched.append(f"{item.name} → {matched_name}")
+                fuzzy_match_details.append({
+                    "source_name": item.name,
+                    "matched_menu_name": matched_name,
+                    "similarity": round(float(similarity), 4),
+                })
                 logger.info("Fuzzy match: '%s' → '%s'", name_lower, matched_name)
 
         if entry is not None:
@@ -319,6 +361,7 @@ async def validate_order(
         unknown_items=unknown_items,
         total_price=total_price,
         summary_text=summary,
+        fuzzy_match_details=fuzzy_match_details,
     )
 
 
@@ -1232,6 +1275,8 @@ def build_order_items_json(
             "hall": ai.booking_details.hall,
         }
 
+    merge_confidence_into_order_meta(order_meta, validated)
+
     payload: dict[str, object] = {
         "items": foods,
         "fee_lines": fee_lines,
@@ -1399,6 +1444,10 @@ def build_demo_order_payload(
         "delivery_address": delivery_address.strip(),
         "pickup_time_note": pickup_time_note.strip(),
     }
+    merge_confidence_into_order_meta(
+        order_meta,
+        ValidatedOrder([], [], 0.0, "", fuzzy_match_details=[]),
+    )
     payload: dict[str, object] = {
         "items": food_lines,
         "fee_lines": fee_lines,

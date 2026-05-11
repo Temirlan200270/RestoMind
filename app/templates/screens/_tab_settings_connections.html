@@ -14,7 +14,10 @@
                                 :disabled="orgPrepaymentEnforcedSaving"
                                 @change="onPrepaymentEnforcedToggle($event)">
                             <div>
-                                <div class="text-sm font-semibold text-gray-900">Автоматическая предоплата по порогу суммы</div>
+                                <div class="flex items-center gap-1.5 text-sm font-semibold text-gray-900">
+                                    <span>Автоматическая предоплата по порогу суммы</span>
+                                    <span class="ds-field-help" title="Порог задаётся на сервере (переменная окружения). При превышении бот запрашивает предоплату до подтверждения заказа. Выключение — для пилотов без онлайн-оплаты.">?</span>
+                                </div>
                                 <p class="text-xs text-gray-600 mt-1 leading-relaxed">Если выключено, бот не удерживает подтверждение заказа из‑за крупной суммы: оператор отмечает оплату вручную в карточке заказа (или приходит вебхук оплаты).</p>
                             </div>
                         </label>

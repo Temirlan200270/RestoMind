@@ -59,6 +59,7 @@ def test_build_order_items_json_totals() -> None:
         items=[OrderItem(name="Плов", quantity=2)],
         order_type="delivery",
         payment_method="cash",
+        delivery_address="ул. Тест 1",
     )
     payload, grand = build_order_items_json(validated, ai)
     merged = merge_total_into_items_json(payload, grand)
@@ -66,6 +67,9 @@ def test_build_order_items_json_totals() -> None:
     assert float(merged["total_price"]) >= 2000.0
     assert "order_meta" in merged
     assert merged["order_meta"]["order_type"] == "delivery"
+    assert "confidence" in merged["order_meta"]
+    assert merged["order_meta"]["confidence"]["low_confidence"] is True
+    assert "unverified_delivery_address" in merged["order_meta"]["confidence"]["reasons"]
 
 
 def test_build_demo_order_payload_matches_v2_shape() -> None:

@@ -3,7 +3,6 @@
 REST-эндпоинты для просмотра заказов, диалогов, аналитики и синхронизации меню.
 """
 
-import asyncio
 import csv
 import io
 import json
@@ -75,7 +74,7 @@ from app.services.dialog_mgr import (
     update_user_session_fields_in_db,
 )
 from app.services.events import publish_event, subscribe_events
-from app.services.booking_halls import BOOKING_HALL_KEYS, BOOKING_HALL_VIP, vip_slot_occupied
+from app.services.billing_guard import load_tenant_for_organization, tenant_is_billing_suspended
 from app.services.intent_router import (
     confirm_order,
     get_open_draft_order,
@@ -102,6 +101,7 @@ from app.services.order_logic import (
     invalidate_menu_context_cache,
     load_available_menu,
     load_packaging_rules,
+    merge_confidence_into_order_meta,
     validate_mixed_payment_total,
     validate_order,
 )
@@ -110,7 +110,6 @@ from app.services.payment_notify import run_payment_received_customer_notify
 from app.services.tenant_scope import (
     failed_tasks_tenant_clause as _failed_tasks_tenant_clause,
     orders_tenant_clause as _orders_tenant_clause,
-    phones_subquery_for_org as _phones_subquery_for_org,
 )
 from app.services.sales_strategy import build_sales_strategy, format_strategy_for_prompt
 from app.services.intelligence_analytics import (
@@ -130,20 +129,19 @@ from .deps import (
     _escalation_tenant_clause,
     _integration_events_tenant_clause,
     _iiko_login_org_for_tenant,
-    _knowledge_tenant_clause,
     _menu_item_in_org,
     _menu_tenant_clause,
     _order_in_org,
     _packaging_tenant_clause,
     _pick_seed_menu_item,
     _session_is_superadmin,
-    _session_staff_user,
     admin_org_from_session,
-    require_admin_session,
+    require_admin_session,  # noqa: F401 - re-exported from app.api.admin for compatibility
     require_admin_session_active,
     require_staff_admin,
     require_superadmin,
 )
+from .bookings import bookings_router
 from .branding import branding_router
 from .knowledge import knowledge_router
 from .menu_bulk import menu_bulk_router
@@ -210,6 +208,12 @@ async def admin_login(request: Request, body: LoginBody, db: AsyncSession = Depe
                         status_code=403,
                         detail="Подписка приостановлена. Свяжитесь с администратором.",
                     )
+                tenant_st = await load_tenant_for_organization(db, int(staff.organization_id))
+                if tenant_is_billing_suspended(tenant_st):
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Доступ приостановлен по биллингу. Свяжитесь с поддержкой.",
+                    )
             request.session["admin_ok"] = True
             request.session["admin_user"] = staff.email
             request.session["staff_id"] = int(staff.id)
@@ -237,6 +241,12 @@ async def admin_login(request: Request, body: LoginBody, db: AsyncSession = Depe
         org_login = await db.get(Organization, oid)
         if org_login is not None and not bool(org_login.is_active):
             raise HTTPException(status_code=403, detail="Подписка приостановлена. Свяжитесь с администратором.")
+        tenant_st = await load_tenant_for_organization(db, oid)
+        if tenant_is_billing_suspended(tenant_st):
+            raise HTTPException(
+                status_code=403,
+                detail="Доступ приостановлен по биллингу. Свяжитесь с поддержкой.",
+            )
         request.session["admin_ok"] = True
         request.session["admin_user"] = body.username.strip()
         request.session["organization_id"] = oid
@@ -282,6 +292,9 @@ async def admin_demo_login(request: Request, db: AsyncSession = Depends(get_db))
         raise HTTPException(status_code=503, detail="Демо временно недоступно")
     if not bool(demo_org.is_active):
         raise HTTPException(status_code=503, detail="Демо временно отключено")
+    tenant_st = await load_tenant_for_organization(db, int(demo_org.id))
+    if tenant_is_billing_suspended(tenant_st):
+        raise HTTPException(status_code=503, detail="Демо временно недоступно")
 
     request.session["admin_ok"] = True
     request.session["admin_user"] = "demo-guest"
@@ -388,6 +401,12 @@ async def _admin_auth_me_payload(request: Request, db: AsyncSession) -> dict[str
         org_me = await db.get(Organization, int(oid))
         if org_me is not None and not bool(org_me.is_active):
             raise HTTPException(status_code=403, detail="Подписка приостановлена. Свяжитесь с администратором.")
+        tenant_me = await load_tenant_for_organization(db, int(oid))
+        if tenant_is_billing_suspended(tenant_me):
+            raise HTTPException(
+                status_code=403,
+                detail="Доступ приостановлен по биллингу. Свяжитесь с поддержкой.",
+            )
 
     available = await available_organizations_for_admin_session(
         db,
@@ -434,6 +453,7 @@ async def _admin_auth_me_payload(request: Request, db: AsyncSession) -> dict[str
         "available_organizations": available,
         "tenant": tenant_payload,
         "branding": branding,
+        "billing_blocked": False,
     }
 
 
@@ -481,6 +501,13 @@ async def admin_select_org(
         raise HTTPException(status_code=404, detail="Организация не найдена")
     if not is_superadmin and not bool(target.is_active):
         raise HTTPException(status_code=403, detail="Подписка приостановлена. Свяжитесь с администратором.")
+    if not is_superadmin:
+        tenant_t = await load_tenant_for_organization(db, int(body.organization_id))
+        if tenant_is_billing_suspended(tenant_t):
+            raise HTTPException(
+                status_code=403,
+                detail="Доступ приостановлен по биллингу. Свяжитесь с поддержкой.",
+            )
 
     request.session["organization_id"] = int(body.organization_id)
     return await _admin_auth_me_payload(request, db)
@@ -497,6 +524,8 @@ router = APIRouter(
 router.include_router(menu_bulk_router)
 router.include_router(knowledge_router)
 router.include_router(branding_router)
+router.include_router(bookings_router)
+router.include_router(bookings_router)
 
 
 # WebSocket без cookie-сессии (браузер ограничен) — только подписанный токен
@@ -640,6 +669,8 @@ def _merge_preserved_order_meta_keys(
     for key in ("recommendation", "recommendation_trace"):
         if key in preserved and preserved[key] is not None:
             new_meta[key] = preserved[key]
+    if preserved.get("delivery_address_verified") is True:
+        new_meta["delivery_address_verified"] = True
     return new_meta
 
 
@@ -675,22 +706,8 @@ async def list_orders(
 ) -> dict:
     """Список заказов с пагинацией; телефон/имя — из связанного пользователя (WhatsApp)."""
     org_id = admin_org_from_session(request)
-    # P1.5: число исходящих в WhatsApp с delivery_status=failed в окне ±1 ч от created_at заказа (тот же user_id).
-    failed_wa_near_order = (
-        select(func.count(ChatLog.id))
-        .where(
-            ChatLog.user_id == Order.user_id,
-            ChatLog.organization_id == org_id,
-            ChatLog.role != "user",
-            func.lower(func.coalesce(ChatLog.delivery_status, "")) == "failed",
-            ChatLog.created_at >= Order.created_at - timedelta(hours=1),
-            ChatLog.created_at <= Order.created_at + timedelta(hours=1),
-        )
-        .correlate(Order)
-        .scalar_subquery()
-    )
     base_query = (
-        select(Order, User.phone, User.name, failed_wa_near_order)
+        select(Order, User.phone, User.name)
         .join(User, Order.user_id == User.id)
         .options(joinedload(Order.booking))
         .where(
@@ -758,8 +775,44 @@ async def list_orders(
             if _tx.order_id not in _tx_map:
                 _tx_map[_tx.order_id] = _tx
 
+    # P1.5: число исходящих WhatsApp failed в окне ±1 ч от created_at заказа.
+    # Считаем в Python: SQL datetime +/- timedelta компилируется по-разному в SQLite/Postgres.
+    _failed_wa_map: dict[int, int] = {int(oid): 0 for oid in _order_ids}
+    _orders_for_failed = [(o.id, o.user_id, _make_naive(o.created_at)) for o, _, _ in rows if o.created_at]
+    if _orders_for_failed:
+        _created_values = [dt for _, _, dt in _orders_for_failed if dt is not None]
+        if _created_values:
+            _min_dt = min(_created_values) - timedelta(hours=1)
+            _max_dt = max(_created_values) + timedelta(hours=1)
+            _user_ids = sorted({int(uid) for _, uid, _ in _orders_for_failed})
+            _log_rows = (
+                await db.execute(
+                    select(ChatLog.user_id, ChatLog.created_at)
+                    .where(
+                        ChatLog.organization_id == org_id,
+                        ChatLog.user_id.in_(_user_ids),
+                        ChatLog.role != "user",
+                        func.lower(func.coalesce(ChatLog.delivery_status, "")) == "failed",
+                        ChatLog.created_at >= _min_dt,
+                        ChatLog.created_at <= _max_dt,
+                    )
+                )
+            ).all()
+            for oid, uid, order_dt in _orders_for_failed:
+                if order_dt is None:
+                    continue
+                start = order_dt - timedelta(hours=1)
+                end = order_dt + timedelta(hours=1)
+                _failed_wa_map[int(oid)] = sum(
+                    1
+                    for log_uid, log_dt_raw in _log_rows
+                    if int(log_uid) == int(uid)
+                    and (log_dt := _make_naive(log_dt_raw)) is not None
+                    and start <= log_dt <= end
+                )
+
     out: list[dict] = []
-    for o, phone, user_name, failed_wa_cnt in rows:
+    for o, phone, user_name in rows:
         items_json = o.items_json
         meta = order_meta_from_items_json(items_json if isinstance(items_json, dict) else None)
         _ltx = _tx_map.get(o.id)
@@ -794,7 +847,9 @@ async def list_orders(
                 "payment_split_warning": _check_mixed_payment_split(
                     items_json if isinstance(items_json, dict) else None, float(o.total_price),
                 ),
-                "failed_whatsapp_near_order": int(failed_wa_cnt or 0),
+                "failed_whatsapp_near_order": int(_failed_wa_map.get(int(o.id), 0)),
+                "order_confidence": meta.get("confidence"),
+                "low_confidence": bool((meta.get("confidence") or {}).get("low_confidence")),
                 "latest_payment_tx": {
                     "id": _ltx.id,
                     "provider": _ltx.provider,
@@ -1397,7 +1452,7 @@ async def retry_failed_task(
 
     from app.services.task_queue import dispatch_arq_or_background
 
-    queued_in_arq = await dispatch_arq_or_background(
+    await dispatch_arq_or_background(
         "whatsapp_process_text",
         background_tasks,
         phone=phone,
@@ -1411,7 +1466,7 @@ async def retry_failed_task(
     await db.refresh(t)
     return {
         "ok": True,
-        "queued": "arq" if queued_in_arq else "background",
+        "queued": "arq",
         "task": _failed_task_public(t),
     }
 
@@ -1448,6 +1503,8 @@ async def rebuild_order_draft(
         for k in ("recommendation", "recommendation_trace")
         if k in old_meta and old_meta[k] is not None
     }
+    if old_meta.get("delivery_address_verified") is True:
+        preserved_rec["delivery_address_verified"] = True
     items_in: list[OrderItem] = []
     for line in body.food_lines:
         pkg_raw = (line.packaging_plov_1kg or "").strip()
@@ -1496,6 +1553,7 @@ async def rebuild_order_draft(
     om = merged.get("order_meta")
     if isinstance(om, dict):
         merged["order_meta"] = _merge_preserved_order_meta_keys(om, preserved_rec)
+        merge_confidence_into_order_meta(merged["order_meta"], validated)
     order.items_json = merged
     order.total_price = grand_total
     order.row_version = int(order.row_version) + 1
@@ -3077,123 +3135,6 @@ async def integrations_sync_now(
     }
 
 
-# ─── Бронирования ───────────────────────────────────────
-
-@router.get("/bookings")
-async def list_bookings(
-    request: Request,
-    status: str | None = Query(None, description="Фильтр по статусу (pending, confirmed, cancelled)"),
-    q: str | None = Query(None, description="Поиск по телефону клиента"),
-    limit: int = Query(50, ge=1, le=200),
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    """Список бронирований."""
-    org_id = admin_org_from_session(request)
-    query = (
-        select(Booking, User.phone, User.name, Order.id)
-        .join(User, Booking.user_id == User.id)
-        .outerjoin(Order, Order.booking_id == Booking.id)
-        .where(User.organization_id == org_id)
-        .order_by(Booking.created_at.desc())
-    )
-    if status:
-        query = query.where(Booking.status == status)
-    if q and q.strip():
-        query = query.where(User.phone.ilike(f"%{q.strip()}%"))
-    query = query.limit(limit)
-
-    result = await db.execute(query)
-    rows = result.all()
-
-    return {
-        "count": len(rows),
-        "bookings": [
-            {
-                "id": b.id,
-                "user_id": b.user_id,
-                "user_phone": phone,
-                "user_name": name,
-                "date": b.booking_date.isoformat(),
-                "time": b.booking_time.isoformat(),
-                "guests": b.guests,
-                "hall": b.hall,
-                "comment": b.comment,
-                "status": b.status,
-                "created_at": b.created_at.isoformat() if b.created_at else None,
-                "linked_order_id": linked_oid,
-            }
-            for b, phone, name, linked_oid in rows
-        ],
-    }
-
-
-BOOKING_STATUS_KEYS = frozenset({"draft", "pending", "confirmed", "cancelled"})
-
-
-class BookingPatch(BaseModel):
-    """Частичное обновление брони: зал и/или статус."""
-
-    hall: str | None = Field(default=None, description="hall_1 | hall_2 | vip")
-    status: str | None = Field(default=None, description="draft | pending | confirmed | cancelled")
-
-
-@router.patch("/bookings/{booking_id}")
-async def patch_booking(
-    request: Request,
-    booking_id: int,
-    body: BookingPatch,
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    """
-    Обновить зал и/или статус.
-    VIP — не более одной активной брони на дату+время (кроме отменённых).
-    """
-    if body.hall is None and body.status is None:
-        raise HTTPException(status_code=400, detail="Укажите поле hall и/или status")
-
-    org_id = admin_org_from_session(request)
-    result = await db.execute(
-        select(Booking)
-        .join(User, User.id == Booking.user_id)
-        .where(Booking.id == booking_id, User.organization_id == org_id),
-    )
-    booking = result.scalar_one_or_none()
-    if not booking:
-        raise HTTPException(status_code=404, detail="Бронирование не найдено")
-
-    if body.hall is not None:
-        h = (body.hall or "").strip()
-        if h not in BOOKING_HALL_KEYS:
-            raise HTTPException(status_code=400, detail="Недопустимый зал (ожидается hall_1, hall_2 или vip)")
-        booking.hall = h
-
-    if body.status is not None:
-        st = (body.status or "").strip()
-        if st not in BOOKING_STATUS_KEYS:
-            raise HTTPException(
-                status_code=400,
-                detail="Недопустимый статус (draft, pending, confirmed, cancelled)",
-            )
-        booking.status = st
-
-    if booking.hall == BOOKING_HALL_VIP and booking.status != "cancelled":
-        if await vip_slot_occupied(
-            db, booking.booking_date, booking.booking_time, booking.id,
-        ):
-            raise HTTPException(
-                status_code=409,
-                detail="VIP зал на это время уже занят — выберите другое время или другой зал",
-            )
-
-    await db.commit()
-    return {
-        "status": "ok",
-        "id": booking_id,
-        "hall": booking.hall,
-        "booking_status": booking.status,
-    }
-
-
 # ─── Диалоги ────────────────────────────────────────────
 
 
@@ -3458,9 +3399,15 @@ async def customer_summary(
             "avg_check": 0.0,
             "is_blocked": False,
             "ai_paused": False,
+            "ai_snoozed_until": None,
             "operator_note": "",
             "last_escalation": None,
         }
+
+    from app.services.ai_snooze import clear_ai_snooze_if_expired
+
+    await clear_ai_snooze_if_expired(db, user)
+    await db.commit()
 
     not_cancelled = Order.status != OrderStatus.CANCELLED.value
     cnt_all = await db.scalar(
@@ -3516,6 +3463,7 @@ async def customer_summary(
         "avg_check": round(avg_check, 2),
         "is_blocked": not user.is_active,
         "ai_paused": bool(getattr(user, "ai_paused", False)),
+        "ai_snoozed_until": user.ai_snoozed_until.isoformat() if user.ai_snoozed_until else None,
         "operator_note": user.operator_note or "",
         "last_escalation": last_escalation,
     }
@@ -3760,7 +3708,7 @@ async def delete_menu_item(
 ) -> dict:
     """Удалить позицию из меню (осторожно: старые заказы ссылаются на названия в JSON)."""
     org_id = admin_org_from_session(request)
-    item = await _menu_item_in_org(db, item_id, org_id)
+    await _menu_item_in_org(db, item_id, org_id)
     await db.execute(sql_delete(MenuItem).where(MenuItem.id == item_id))
     await db.flush()
     return {"ok": True, "id": item_id}
@@ -4243,6 +4191,7 @@ async def settings_environment(request: Request, db: AsyncSession = Depends(get_
         str(getattr(org_row, "telegram_ops_chat_id", "") or "").strip(),
     ) if org_row is not None else False
     telegram_staff_reachable = tg_token_ok and (tg_global_chat_ok or tg_org_chat_ok)
+    elig = await count_chat_logs_eligible_for_purge(db)
     return {
         "app_name": settings.app_name,
         "app_version": settings.app_version,
@@ -4579,7 +4528,6 @@ async def dashboard_stats(
     today_orders = today_row[0]
     today_revenue = float(today_row[1])
 
-    yesterday_start = today_start - timedelta(days=1)
     yesterday_q = await db.execute(
         select(func.count(Order.id), func.coalesce(func.sum(Order.total_price), 0))
         .where(
@@ -5680,6 +5628,70 @@ async def release_chat(request: Request, phone: str) -> dict:
     return {"status": "ok", "phone": phone, "mode": "bot"}
 
 
+class ChatAiSnoozeBody(BaseModel):
+    """Временная или постоянная пауза ответов ИИ для номера (БД + при таймере — Redis CHATTING)."""
+
+    preset: Literal["30m", "2h", "until_tomorrow", "forever", "off"]
+
+
+@router.post("/chats/{phone}/ai-snooze")
+async def set_chat_ai_snooze(
+    request: Request,
+    phone: str,
+    body: ChatAiSnoozeBody,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    Отключить ИИ на время (или навсегда через ai_paused).
+    Не путать с POST /chats/{phone}/snooze — там triage очереди оператора.
+    """
+    org_id = admin_org_from_session(request)
+    user = await db.scalar(select(User).where(User.phone == phone, User.organization_id == org_id))
+    if user is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Пользователь не найден для этого номера в филиале",
+        )
+    org = await db.get(Organization, org_id)
+    tz = getattr(org, "timezone", None) if org else None
+    from app.services.ai_snooze import snooze_until_for_preset
+
+    preset = body.preset
+    if preset == "off":
+        user.ai_snoozed_until = None
+        await db.commit()
+        return {
+            "ok": True,
+            "ai_paused": bool(user.ai_paused),
+            "ai_snoozed_until": None,
+        }
+    if preset == "forever":
+        user.ai_snoozed_until = None
+        user.ai_paused = True
+        await db.commit()
+        await set_user_state(redis_client, phone, UserState.HUMAN_MODE, organization_id=org_id)
+        await publish_event(
+            "state_changed",
+            {"phone": phone, "state": UserState.HUMAN_MODE.value, "organization_id": org_id},
+        )
+        return {"ok": True, "ai_paused": True, "ai_snoozed_until": None}
+
+    user.ai_paused = False
+    until = snooze_until_for_preset(preset, tz)  # type: ignore[arg-type]
+    user.ai_snoozed_until = until
+    await db.commit()
+    await set_user_state(redis_client, phone, UserState.CHATTING, organization_id=org_id)
+    await publish_event(
+        "state_changed",
+        {"phone": phone, "state": UserState.CHATTING.value, "organization_id": org_id},
+    )
+    return {
+        "ok": True,
+        "ai_paused": False,
+        "ai_snoozed_until": until.isoformat() if until else None,
+    }
+
+
 class ChatSnoozeBody(BaseModel):
     minutes: int = Field(30, ge=1, le=60 * 24 * 14)
     reason: str = Field("", max_length=240)
@@ -5858,11 +5870,24 @@ async def resend_failed_chat_message(
 
 
 @router.get("/chats/{phone}/state")
-async def get_chat_state(request: Request, phone: str) -> dict:
+async def get_chat_state(
+    request: Request,
+    phone: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
     """Получить текущее состояние диалога (CHATTING, CONFIRMING_ORDER, HUMAN_MODE)."""
     org_id = admin_org_from_session(request)
     state = await get_user_state(redis_client, phone, organization_id=org_id)
-    return {"phone": phone, "state": state.value}
+    ai_snoozed_until: str | None = None
+    u = await db.scalar(select(User).where(User.phone == phone, User.organization_id == org_id))
+    if u is not None:
+        from app.services.ai_snooze import ai_snooze_is_active, clear_ai_snooze_if_expired
+
+        await clear_ai_snooze_if_expired(db, u)
+        await db.commit()
+        if ai_snooze_is_active(u) and u.ai_snoozed_until is not None:
+            ai_snoozed_until = u.ai_snoozed_until.isoformat()
+    return {"phone": phone, "state": state.value, "ai_snoozed_until": ai_snoozed_until}
 
 
 # ─── Тест бота (без WhatsApp) ────────────────────────────
@@ -5947,6 +5972,13 @@ async def test_bot(request: Request, body: TextRequest) -> dict:
             strategy_ctx = format_strategy_for_prompt(decision)
             sales_gastro_hint = (decision.gastro_hint or "").strip()
             sales_target_iiko_ids = list(decision.target_iiko_ids or [])
+        if u_row is not None:
+            from app.services.ai_snooze import ai_snooze_is_active, clear_ai_snooze_if_expired
+
+            await clear_ai_snooze_if_expired(db, u_row)
+            await db.commit()
+            if getattr(u_row, "ai_paused", False) or ai_snooze_is_active(u_row):
+                return {"reply": "[OPERATOR_ONLY — AI не отвечает]", "state": state.value, "intent": None}
         ai_response = await call_openai(
             history,
             message_text,

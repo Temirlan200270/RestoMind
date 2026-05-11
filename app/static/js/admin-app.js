@@ -1788,11 +1788,21 @@ function adminMixinMenuOrdersUi() {
             return Math.min(100, Math.round((rev / total) * 1000) / 10);
         },
 
+        orderLowConfidence(order) {
+            if (!order) return false;
+            if (order.low_confidence === true) return true;
+            const c = order.items?.order_meta?.confidence;
+            return !!(c && c.low_confidence);
+        },
+
         kanbanOrderSurfaceClass(order, normalClass) {
             if (order?.iiko_last_error) {
                 return 'bg-gradient-to-br from-rose-50 via-white to-red-50/40 border-2 border-red-400 border-l-[5px] border-l-red-600 shadow-md ring-2 ring-red-200/90 ring-offset-1 ring-offset-white';
             }
             let c = normalClass;
+            if (this.orderLowConfidence(order)) {
+                c += ' ds-order-surface--ai-confidence';
+            }
             if (this.orderAwaitingOrderPrepay(order)) {
                 c += ' ring-2 ring-amber-400 ring-offset-2 ring-offset-white border-amber-400';
             }
@@ -5688,6 +5698,7 @@ function adminMixinLiveChat() {
                 avg_check: 0,
                 is_blocked: false,
                 ai_paused: false,
+                ai_snoozed_until: null,
                 operator_note: '',
                 last_escalation: null,
             };
@@ -5708,6 +5719,9 @@ function adminMixinLiveChat() {
                 if (stateRes.ok) {
                     const stateData = await stateRes.json();
                     this.activeChatState = stateData.state;
+                    if (stateData.ai_snoozed_until != null && this.customerSummary) {
+                        this.customerSummary.ai_snoozed_until = stateData.ai_snoozed_until;
+                    }
                     if (chatIdx >= 0) this.chatList[chatIdx].state = stateData.state;
                 }
             } catch {}
@@ -5816,6 +5830,7 @@ function adminMixinLiveChat() {
                         avg_check: data.avg_check ?? 0,
                         is_blocked: !!data.is_blocked,
                         ai_paused: !!data.ai_paused,
+                        ai_snoozed_until: data.ai_snoozed_until ?? null,
                         operator_note: data.operator_note ?? '',
                         last_escalation: data.last_escalation && typeof data.last_escalation === 'object'
                             ? data.last_escalation
@@ -5875,7 +5890,7 @@ function adminMixinLiveChat() {
         },
 
         _pickActiveGuestOrder(orders) {
-            const st = new Set(['draft', 'confirmed', 'sending_to_iiko']);
+            const st = new Set(['draft', 'confirmed', 'sending_to_iiko', 'sent_to_iiko']);
             const rows = (orders || []).filter((o) => o && st.has(String(o.status || '')));
             if (!rows.length) return null;
             rows.sort((a, b) => {
@@ -5951,9 +5966,60 @@ function adminMixinLiveChat() {
             });
         },
 
+        customerAiSnoozeActive() {
+            const iso = this.customerSummary?.ai_snoozed_until;
+            if (!iso) return false;
+            const t = Date.parse(iso);
+            return Number.isFinite(t) && t > Date.now();
+        },
+
+        customerAiSnoozeUntilLabel() {
+            if (!this.customerAiSnoozeActive()) return '';
+            try {
+                const d = new Date(this.customerSummary.ai_snoozed_until);
+                return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            } catch {
+                return '';
+            }
+        },
+
+        async setChatAiSnoozePreset(preset) {
+            const p = this.activeChatPhone?.trim();
+            if (!p) return;
+            try {
+                const res = await this.apiFetch(`/api/admin/chats/${encodeURIComponent(p)}/ai-snooze`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ preset }),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (res.ok) {
+                    if (this.customerSummary) {
+                        this.customerSummary.ai_paused = !!data.ai_paused;
+                        this.customerSummary.ai_snoozed_until = data.ai_snoozed_until || null;
+                    }
+                    if (data.ai_paused) {
+                        this.activeChatState = 'human_mode';
+                    } else {
+                        this.activeChatState = 'chatting';
+                    }
+                    const ix = this.chatList.findIndex((c) => c.phone === p);
+                    if (ix >= 0) this.chatList[ix].state = this.activeChatState;
+                    this.flashToast(preset === 'off' ? 'Пауза ИИ снята' : 'Режим ИИ обновлён', 'success', 2200);
+                } else {
+                    void this.showUiAlert(this.formatApiError(data.detail) || 'Не удалось изменить паузу ИИ', 'Ошибка');
+                }
+            } catch {
+                void this.showUiAlert('Ошибка сети', 'Ошибка');
+            }
+        },
+
         /** true — бот/ИИ ведёт диалог, поле ввода заблокировано */
         chatIsBotActive() {
             if (this.customerSummary?.user_exists && this.customerSummary.ai_paused) {
+                return false;
+            }
+            if (this.customerSummary?.user_exists && this.customerAiSnoozeActive()) {
                 return false;
             }
             return this.activeChatState !== 'human_mode';

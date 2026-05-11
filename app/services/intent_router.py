@@ -5,6 +5,10 @@
   book → сохранение бронирования в БД
   escalate → уведомление администратора + перевод в HUMAN_MODE
   faq → просто отправка ответа
+
+Временная пауза ИИ (User.ai_snoozed_until) и персистентный ai_paused обрабатываются
+**до** вызова LLM в ``process_message`` (WhatsApp) / ``test_bot`` (админка), а не здесь:
+``route_intent`` вызывается уже после ответа модели.
 """
 
 import logging

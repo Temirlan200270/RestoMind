@@ -21,7 +21,7 @@ AI-оператор для ресторана: принимает заказы �
 |-----------|------------|
 | Backend | Python 3.11+, FastAPI |
 | Database | PostgreSQL / SQLite (dev), SQLAlchemy 2.0, **Alembic** |
-| Cache | Redis (опционально, есть in-memory fallback) |
+| Cache / очередь | Redis; **ARQ worker** обрабатывает входящие WhatsApp и фоновые задачи (см. ниже) |
 | AI | OpenAI (`gpt-4o-mini`, env `OPENAI_MODEL`) или Gemini (`AI_PROVIDER=gemini`, `GEMINI_API_KEY`); structured output + Whisper (`OPENAI_TRANSCRIPTION_MODEL`); опц. `OPENAI_BASE_URL` |
 | Интеграции | Meta WhatsApp API, iiko Cloud API |
 | Админка | Jinja2 + Alpine.js + Tailwind CSS + Chart.js |
@@ -112,7 +112,13 @@ curl -b cookies.txt -X POST http://localhost:8000/api/admin/test-bot \
 
 Автоматически задеплоить в ваш аккаунт нельзя — нужен ваш git-репозиторий и вход в Render. Плагины Vercel/Render в IDE только помогают связать проект; шаги — в таблице выше.
 
-Кратко для продакшена: `APP_DEBUG=false`, PostgreSQL, секреты `OPENAI_API_KEY`, админка, `SESSION_SECRET` / `generateValue` на Render, токены WhatsApp; Redis на Render опционально (см. DEPLOY_RENDER).
+Кратко для продакшена: `APP_DEBUG=false`, PostgreSQL, секреты `OPENAI_API_KEY`, админка, `SESSION_SECRET` / `generateValue` на Render, токены WhatsApp; **Redis обязателен** для очереди; **`REDIS_ENABLED=true`**, **`ARQ_ENABLED=true`**, задайте **`REDIS_URL`** (или host/port). Отдельным процессом поднимите worker:
+
+```bash
+python -m arq app.worker.WorkerSettings
+```
+
+Имя очереди по умолчанию — `restomind` (`ARQ_QUEUE_NAME`). В `APP_ENV=production|staging` приложение при старте проверяет, что к Redis можно подключиться и ARQ включён; без worker задачи из вебхуков не выполнятся.
 
 ## Структура проекта
 

@@ -1,0 +1,129 @@
+"""Бронирования админки (E0.1: вынесено из _monolith)."""
+
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.admin.deps import admin_org_from_session, require_admin_session_active
+from app.db.models import Booking, Order, User
+from app.db.session import get_db
+from app.services.booking_halls import BOOKING_HALL_KEYS, BOOKING_HALL_VIP, vip_slot_occupied
+
+bookings_router = APIRouter(dependencies=[Depends(require_admin_session_active)])
+
+BOOKING_STATUS_KEYS = frozenset({"draft", "pending", "confirmed", "cancelled"})
+
+
+class BookingPatch(BaseModel):
+    """Частичное обновление брони: зал и/или статус."""
+
+    hall: str | None = Field(default=None, description="hall_1 | hall_2 | vip")
+    status: str | None = Field(default=None, description="draft | pending | confirmed | cancelled")
+
+
+@bookings_router.get("/bookings")
+async def list_bookings(
+    request: Request,
+    status: str | None = Query(None, description="Фильтр по статусу (pending, confirmed, cancelled)"),
+    q: str | None = Query(None, description="Поиск по телефону клиента"),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Список бронирований."""
+    org_id = admin_org_from_session(request)
+    query = (
+        select(Booking, User.phone, User.name, Order.id)
+        .join(User, Booking.user_id == User.id)
+        .outerjoin(Order, Order.booking_id == Booking.id)
+        .where(User.organization_id == org_id)
+        .order_by(Booking.created_at.desc())
+    )
+    if status:
+        query = query.where(Booking.status == status)
+    if q and q.strip():
+        query = query.where(User.phone.ilike(f"%{q.strip()}%"))
+    query = query.limit(limit)
+
+    result = await db.execute(query)
+    rows = result.all()
+
+    return {
+        "count": len(rows),
+        "bookings": [
+            {
+                "id": b.id,
+                "user_id": b.user_id,
+                "user_phone": phone,
+                "user_name": name,
+                "date": b.booking_date.isoformat(),
+                "time": b.booking_time.isoformat(),
+                "guests": b.guests,
+                "hall": b.hall,
+                "comment": b.comment,
+                "status": b.status,
+                "created_at": b.created_at.isoformat() if b.created_at else None,
+                "linked_order_id": linked_oid,
+            }
+            for b, phone, name, linked_oid in rows
+        ],
+    }
+
+
+@bookings_router.patch("/bookings/{booking_id}")
+async def patch_booking(
+    request: Request,
+    booking_id: int,
+    body: BookingPatch,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    Обновить зал и/или статус.
+    VIP — не более одной активной брони на дату+время (кроме отменённых).
+    """
+    if body.hall is None and body.status is None:
+        raise HTTPException(status_code=400, detail="Укажите поле hall и/или status")
+
+    org_id = admin_org_from_session(request)
+    result = await db.execute(
+        select(Booking)
+        .join(User, User.id == Booking.user_id)
+        .where(Booking.id == booking_id, User.organization_id == org_id),
+    )
+    booking = result.scalar_one_or_none()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Бронирование не найдено")
+
+    if body.hall is not None:
+        h = (body.hall or "").strip()
+        if h not in BOOKING_HALL_KEYS:
+            raise HTTPException(status_code=400, detail="Недопустимый зал (ожидается hall_1, hall_2 или vip)")
+        booking.hall = h
+
+    if body.status is not None:
+        st = (body.status or "").strip()
+        if st not in BOOKING_STATUS_KEYS:
+            raise HTTPException(
+                status_code=400,
+                detail="Недопустимый статус (draft, pending, confirmed, cancelled)",
+            )
+        booking.status = st
+
+    if booking.hall == BOOKING_HALL_VIP and booking.status != "cancelled":
+        if await vip_slot_occupied(
+            db, booking.booking_date, booking.booking_time, booking.id,
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="VIP зал на это время уже занят — выберите другое время или другой зал",
+            )
+
+    await db.commit()
+    return {
+        "status": "ok",
+        "id": booking_id,
+        "hall": booking.hall,
+        "booking_status": booking.status,
+    }

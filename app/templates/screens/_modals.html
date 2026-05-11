@@ -312,6 +312,13 @@
                         <div class="font-mono text-gray-900" x-text="selectedOrder?.user_phone || '—'"></div>
                         <div class="text-gray-600 mt-1" x-show="selectedOrder?.user_name" x-text="selectedOrder?.user_name"></div>
                     </div>
+                    <div class="mb-4 rounded-xl border border-amber-200/90 bg-amber-50/85 px-4 py-3 text-sm ds-order-surface--ai-confidence" role="status"
+                        x-show="orderLowConfidence(selectedOrder)">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <span class="ds-badge-warning-soft">AI сомневается</span>
+                            <span class="text-xs text-amber-950/90">Проверьте позиции и адрес доставки перед отправкой в кухню.</span>
+                        </div>
+                    </div>
                     <div class="mb-4">
                         <div class="text-xs font-bold uppercase tracking-wide text-gray-500 mb-2">Хронология</div>
                         <div x-show="orderTimelineLoading" class="text-sm text-gray-400 py-2">Загрузка…</div>

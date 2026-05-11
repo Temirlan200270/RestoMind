@@ -64,6 +64,14 @@ async def autoprint_client(monkeypatch):
     monkeypatch.setattr(app_config.settings, "payment_webhook_bearer_token", PW_HOOK_BEARER)
     monkeypatch.setattr(app_config.settings, "payment_webhook_hmac_secret", PW_HOOK_HMAC)
 
+    async def _noop_arq_dispatch(*_a, **_kw):
+        return None
+
+    monkeypatch.setattr(
+        "app.services.task_queue.dispatch_arq_or_background",
+        _noop_arq_dispatch,
+    )
+
     engine = _memory_sqlite_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

@@ -23,7 +23,16 @@ async def test_revenue_orders_summary_is_tenant_scoped(db_session):
             User(id=2, organization_id=2, phone="+77000000002"),
         ]
     )
+    # Окна периода «today» в intelligence — скользящие [UTC midnight, now), а не календарные сутки.
     now = datetime.now(timezone.utc)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    duration = now - today_start
+    if duration.total_seconds() <= 0:
+        duration = timedelta(hours=1)
+    prev_start = today_start - duration
+    prev_end = today_start
+    cur_mid = today_start + (duration / 2)
+    prev_mid = prev_start + (duration / 2)
     db_session.add_all(
         [
             Order(
@@ -32,7 +41,7 @@ async def test_revenue_orders_summary_is_tenant_scoped(db_session):
                 status=OrderStatus.COMPLETED.value,
                 total_price=5000,
                 items_json={"items": [{"name": "Plov", "quantity": 1, "item_total": 5000}]},
-                created_at=now,
+                created_at=cur_mid,
             ),
             Order(
                 organization_id=2,
@@ -40,7 +49,7 @@ async def test_revenue_orders_summary_is_tenant_scoped(db_session):
                 status=OrderStatus.COMPLETED.value,
                 total_price=999999,
                 items_json={"items": [{"name": "Other", "quantity": 1, "item_total": 999999}]},
-                created_at=now,
+                created_at=cur_mid,
             ),
             Order(
                 organization_id=1,
@@ -48,7 +57,7 @@ async def test_revenue_orders_summary_is_tenant_scoped(db_session):
                 status=OrderStatus.COMPLETED.value,
                 total_price=7000,
                 items_json={"items": [{"name": "Lagman", "quantity": 1, "item_total": 7000}]},
-                created_at=now - timedelta(days=1),
+                created_at=prev_mid,
             ),
         ]
     )
