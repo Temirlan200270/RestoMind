@@ -38,6 +38,7 @@ from app.services.dialog_mgr import UserState
 from app.services.upsell_utils import record_upsell_rejections_on_user
 from app.services.prepayment_legal import append_prepayment_legal_disclaimer
 from app.services.system_events import emit_system_event
+from app.services.trace_context import trace_payload
 from app.services.order_logic import (
     ValidatedOrder,
     applied_order_action_ids_from_items_json,
@@ -418,6 +419,8 @@ async def _handle_order(
     inbound_message_id: str = "",
     sales_gastro_hint: str = "",
     sales_target_iiko_ids: list[str] | None = None,
+    trace_id: str = "",
+    conversation_id: str = "",
 ) -> RouteResult:
     """
     Обработка intent='order':
@@ -681,11 +684,15 @@ async def _handle_order(
             entity_type="order",
             entity_id=order.id,
             idempotency_key=f"order_created:{order.id}",
-            payload={"order_id": order.id, "status": order.status, "total_price": float(order.total_price or 0)},
+            payload=trace_payload(
+                trace_id=trace_id,
+                conversation_id=conversation_id,
+                extra={"order_id": order.id, "status": order.status, "total_price": float(order.total_price or 0)},
+            ),
         )
 
     # Ночной предзаказ: если ресторан закрыт — сохранить как kind='night_preorder' и выйти
-    if org_row is not None:
+    if org_row is not None and not bool(ai_eff.is_preorder):
         from app.services.time_context import check_operational_status
         _op_status = check_operational_status(
             org_row.timezone,
@@ -956,14 +963,27 @@ async def _handle_escalate(
     )
 
 
-async def confirm_order(db: AsyncSession, order_id: int) -> Order | None:
+async def confirm_order(
+    db: AsyncSession,
+    order_id: int,
+    *,
+    trace_id: str = "",
+    conversation_id: str = "",
+    source: str = "intent_router",
+) -> Order | None:
     """Подтвердить заказ — перевести из DRAFT в confirmed; связанную бронь — тоже."""
     result = await db.execute(select(Order).where(Order.id == order_id))
     order = result.scalar_one_or_none()
 
     if order and order.status == OrderStatus.DRAFT:
         if order.booking_id:
-            _bk, err = await confirm_booking(db, order.booking_id)
+            _bk, err = await confirm_booking(
+                db,
+                order.booking_id,
+                trace_id=trace_id,
+                conversation_id=conversation_id,
+                source=source,
+            )
             if err:
                 return None
         order.status = OrderStatus.CONFIRMED
@@ -973,11 +993,15 @@ async def confirm_order(db: AsyncSession, order_id: int) -> Order | None:
                 db,
                 organization_id=int(order.organization_id),
                 event_type="order_confirmed",
-                source="intent_router",
+                source=source,
                 entity_type="order",
                 entity_id=order.id,
                 idempotency_key=f"order_confirmed:{order.id}",
-                payload={"order_id": order.id, "total_price": float(order.total_price or 0)},
+                payload={
+                    "order_id": order.id,
+                    "total_price": float(order.total_price or 0),
+                    **trace_payload(trace_id=trace_id, conversation_id=conversation_id),
+                },
             )
         await sync_recommendation_events_for_order(db, order)
         logger.info("Заказ #%d подтверждён клиентом", order_id)
@@ -985,7 +1009,12 @@ async def confirm_order(db: AsyncSession, order_id: int) -> Order | None:
 
 
 async def confirm_booking(
-    db: AsyncSession, booking_id: int,
+    db: AsyncSession,
+    booking_id: int,
+    *,
+    trace_id: str = "",
+    conversation_id: str = "",
+    source: str = "intent_router",
 ) -> tuple[Booking | None, str | None]:
     """
     Подтвердить бронирование — перевести из draft в confirmed.
@@ -1003,22 +1032,64 @@ async def confirm_booking(
         return None, "vip_conflict"
     booking.status = "confirmed"
     await db.flush()
+    if booking.organization_id:
+        await emit_system_event(
+            db,
+            organization_id=int(booking.organization_id),
+            event_type="booking_confirmed",
+            source=source,
+            entity_type="booking",
+            entity_id=booking.id,
+            idempotency_key=f"booking_confirmed:{booking.id}",
+            payload={
+                "booking_id": booking.id,
+                **trace_payload(trace_id=trace_id, conversation_id=conversation_id),
+            },
+        )
     logger.info("Бронь #%d подтверждена клиентом", booking_id)
     return booking, None
 
 
-async def cancel_booking(db: AsyncSession, booking_id: int) -> Booking | None:
+async def cancel_booking(
+    db: AsyncSession,
+    booking_id: int,
+    *,
+    trace_id: str = "",
+    conversation_id: str = "",
+    source: str = "intent_router",
+) -> Booking | None:
     """Отменить бронирование."""
     result = await db.execute(select(Booking).where(Booking.id == booking_id))
     booking = result.scalar_one_or_none()
     if booking and booking.status == "draft":
         booking.status = "cancelled"
         await db.flush()
+        if booking.organization_id:
+            await emit_system_event(
+                db,
+                organization_id=int(booking.organization_id),
+                event_type="booking_cancelled",
+                source=source,
+                entity_type="booking",
+                entity_id=booking.id,
+                idempotency_key=f"booking_cancelled:{booking.id}",
+                payload={
+                    "booking_id": booking.id,
+                    **trace_payload(trace_id=trace_id, conversation_id=conversation_id),
+                },
+            )
         logger.info("Бронь #%d отменена клиентом", booking_id)
     return booking
 
 
-async def cancel_order(db: AsyncSession, order_id: int) -> Order | None:
+async def cancel_order(
+    db: AsyncSession,
+    order_id: int,
+    *,
+    trace_id: str = "",
+    conversation_id: str = "",
+    source: str = "intent_router",
+) -> Order | None:
     """Отменить заказ — перевести из DRAFT в cancelled; черновую бронь — отменить."""
     result = await db.execute(select(Order).where(Order.id == order_id))
     order = result.scalar_one_or_none()
@@ -1026,18 +1097,28 @@ async def cancel_order(db: AsyncSession, order_id: int) -> Order | None:
     if order and order.status == OrderStatus.DRAFT:
         order.status = OrderStatus.CANCELLED
         if order.booking_id:
-            await cancel_booking(db, order.booking_id)
+            await cancel_booking(
+                db,
+                order.booking_id,
+                trace_id=trace_id,
+                conversation_id=conversation_id,
+                source=source,
+            )
         await db.flush()
         if order.organization_id:
             await emit_system_event(
                 db,
                 organization_id=int(order.organization_id),
                 event_type="order_cancelled",
-                source="intent_router",
+                source=source,
                 entity_type="order",
                 entity_id=order.id,
                 idempotency_key=f"order_cancelled:{order.id}",
-                payload={"order_id": order.id, "total_price": float(order.total_price or 0)},
+                payload={
+                    "order_id": order.id,
+                    "total_price": float(order.total_price or 0),
+                    **trace_payload(trace_id=trace_id, conversation_id=conversation_id),
+                },
             )
         logger.info("Заказ #%d отменён клиентом", order_id)
     return order
@@ -1052,6 +1133,8 @@ async def route_intent(
     inbound_message_id: str = "",
     sales_gastro_hint: str = "",
     sales_target_iiko_ids: list[str] | None = None,
+    trace_id: str = "",
+    conversation_id: str = "",
 ) -> RouteResult:
     """
     Главный маршрутизатор — вызывает обработчик в зависимости от intent.
@@ -1073,6 +1156,8 @@ async def route_intent(
             inbound_message_id=inbound_message_id,
             sales_gastro_hint=sales_gastro_hint,
             sales_target_iiko_ids=sales_target_iiko_ids,
+            trace_id=trace_id,
+            conversation_id=conversation_id,
         )
     elif intent == "book":
         return await _handle_booking(db, phone, ai_response, organization_id=oid)

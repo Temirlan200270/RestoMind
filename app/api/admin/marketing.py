@@ -195,7 +195,7 @@ async def loyalty_adjust(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     from app.db.models import User
-    from app.services.loyalty import add_points, get_balance
+    from app.services.loyalty import add_points
     from sqlalchemy import select as sa_select
     org_id = admin_org_from_session(request)
     user = await db.scalar(

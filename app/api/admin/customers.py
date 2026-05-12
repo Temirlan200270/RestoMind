@@ -26,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import EscalationEvent, Order, OrderStatus, User
 from app.db.session import get_db, redis_client
 from app.services.ai_snooze import clear_ai_snooze_if_expired
-from app.services.dialog_mgr import UserState, set_user_state
+from app.services.dialog_mgr import UserState, set_user_state_durable
 from app.services.events import publish_event
 
 from .deps import admin_org_from_session, require_admin_session_active
@@ -190,13 +190,27 @@ async def set_customer_ai_pause(
     await db.commit()
 
     if body.paused:
-        await set_user_state(redis_client, phone, UserState.HUMAN_MODE, organization_id=org_id)
+        await set_user_state_durable(
+            redis_client,
+            phone=phone,
+            organization_id=org_id,
+            new_state=UserState.HUMAN_MODE,
+            source="admin.customers",
+            reason="customer_ai_pause_on",
+        )
         await publish_event(
             "state_changed",
             {"phone": phone, "state": UserState.HUMAN_MODE.value, "organization_id": org_id},
         )
     else:
-        await set_user_state(redis_client, phone, UserState.CHATTING, organization_id=org_id)
+        await set_user_state_durable(
+            redis_client,
+            phone=phone,
+            organization_id=org_id,
+            new_state=UserState.CHATTING,
+            source="admin.customers",
+            reason="customer_ai_pause_off",
+        )
         await publish_event(
             "state_changed",
             {"phone": phone, "state": UserState.CHATTING.value, "organization_id": org_id},
