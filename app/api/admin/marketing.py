@@ -149,13 +149,16 @@ async def delete_blast(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    from app.db.models import MarketingBlast
+    from sqlalchemy import delete as sa_delete
+
+    from app.db.models import MarketingBlast, MarketingBlastRecipient
     org_id = admin_org_from_session(request)
     blast = await db.get(MarketingBlast, blast_id)
     if blast is None or int(blast.organization_id) != int(org_id):
         raise HTTPException(status_code=404, detail="Blast not found")
     if blast.status == "sending":
         raise HTTPException(status_code=400, detail="Рассылка отправляется — сначала отмените её")
+    await db.execute(sa_delete(MarketingBlastRecipient).where(MarketingBlastRecipient.blast_id == blast_id))
     await db.delete(blast)
     await db.commit()
     return {"ok": True}
