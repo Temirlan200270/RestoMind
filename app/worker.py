@@ -98,6 +98,24 @@ async def send_blast_batch(
     await run_send_blast_batch(blast_id=blast_id)
 
 
+async def iiko_stoplist_sync(
+    ctx: dict[str, Any],
+    *,
+    org_id: int,
+) -> None:
+    from app.services.iiko_sync_tasks import run_stoplist_sync
+    await run_stoplist_sync(org_id)
+
+
+async def iiko_menu_sync(
+    ctx: dict[str, Any],
+    *,
+    org_id: int,
+) -> None:
+    from app.services.iiko_sync_tasks import run_menu_sync
+    await run_menu_sync(org_id)
+
+
 class WorkerSettings:
     # Это имена задач, которые мы enqueue_job("name", **kwargs) будем вызывать.
     # Важно: web-процесс ставит задачи в эту же очередь через task_queue._queue_name().
@@ -110,6 +128,8 @@ class WorkerSettings:
         send_review_request,
         send_blast_batch,
         morning_preorders_tick,
+        iiko_stoplist_sync,
+        iiko_menu_sync,
     ]
     # Digest: 4× в час; биллинг: суточный rollup; ночные предзаказы: каждые 5 мин.
     cron_jobs = tuple(

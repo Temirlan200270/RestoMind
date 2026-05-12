@@ -6,6 +6,8 @@ import pytest
 
 from app.api.admin import analytics
 from app.api.admin import _monolith as admin_api
+import importlib
+analytics_module = importlib.import_module("app.api.admin.analytics")
 from app.db.models import Order, Organization, User
 
 
@@ -73,9 +75,9 @@ async def test_roi_today_returns_safe_payload_when_aggregation_fails(db_session,
     async def _boom(*_args, **_kwargs):
         raise RuntimeError("broken aggregate")
 
-    monkeypatch.setattr(admin_api, "aggregate_org_window", _boom)
+    monkeypatch.setattr(analytics_module, "aggregate_org_window", _boom)
 
-    out = await admin_api.roi_today_summary(DummyRequest(int(org.id)), db_session)
+    out = await analytics_module.roi_today_summary(DummyRequest(int(org.id)), db_session)
 
     assert out["metrics"]["orders_count"] == 0
     assert out["metrics"]["revenue"] == 0

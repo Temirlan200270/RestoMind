@@ -1465,17 +1465,17 @@ async def process_message(
         await append_to_history(
             redis_client, phone, "assistant", result.reply_text, organization_id=organization_id,
         )
-        await publish_event("new_message", {
-            "phone": phone,
-            "role": "assistant",
-            "content": result.reply_text,
-            "intent": ai_response.intent,
-            "id": outbound_id_chat,
-            "delivery_status": "sending",
-            "organization_id": organization_id,
-            "trace_id": trace_id,
-            "conversation_id": conversation_id,
-        })
+        from app.services.trace_context import publish_chat_event
+        await publish_chat_event(
+            phone=phone,
+            role="assistant",
+            content=result.reply_text,
+            organization_id=organization_id,
+            chat_log_id=outbound_id_chat,
+            trace_id=trace_id,
+            conversation_id=conversation_id,
+            intent=ai_response.intent,
+        )
         # E8: интерактивное сообщение (кнопки или CTA) вместо plain text если задано
         _sent_interactive = False
         if result.interactive_buttons:
@@ -1525,15 +1525,16 @@ async def process_message(
                 logger.warning("edge-tts / отправка голоса: %s", tts_exc)
 
         if result.new_state == UserState.HUMAN_MODE:
-            await publish_event("human_needed", {
-                "phone": phone,
-                "reason": ai_response.reply_text,
-                "user_message": (user_log_text or "")[:500],
-                "intent": ai_response.intent,
-                "organization_id": organization_id,
-                "trace_id": trace_id,
-                "conversation_id": conversation_id,
-            })
+            from app.services.trace_context import publish_human_event
+            await publish_human_event(
+                phone=phone,
+                organization_id=organization_id,
+                reason=ai_response.reply_text,
+                user_message=user_log_text or "",
+                trace_id=trace_id,
+                conversation_id=conversation_id,
+                intent=ai_response.intent,
+            )
             try:
                 await send_tg_fallback_alert(
                     phone,

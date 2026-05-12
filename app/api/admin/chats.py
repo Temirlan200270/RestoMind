@@ -277,11 +277,8 @@ async def takeover_chat(request: Request, phone: str, db: AsyncSession = Depends
         source="admin.chats",
         reason="operator_takeover",
     )
-    await publish_event("state_changed", {
-        "phone": phone,
-        "state": UserState.HUMAN_MODE,
-        "organization_id": org_id,
-    })
+    from app.services.trace_context import publish_state_event
+    await publish_state_event(phone=phone, state=UserState.HUMAN_MODE.value, organization_id=org_id)
     try:
         await _save_chat_triage(
             request,
@@ -310,11 +307,8 @@ async def release_chat(request: Request, phone: str) -> dict:
         source="admin.chats",
         reason="operator_release",
     )
-    await publish_event("state_changed", {
-        "phone": phone,
-        "state": UserState.CHATTING,
-        "organization_id": org_id,
-    })
+    from app.services.trace_context import publish_state_event
+    await publish_state_event(phone=phone, state=UserState.CHATTING.value, organization_id=org_id)
     logger.info("Оператор вернул бота: %s", phone)
     return {"status": "ok", "phone": phone, "mode": "bot"}
 
@@ -368,10 +362,8 @@ async def set_chat_ai_snooze(
             source="admin.chats",
             reason="ai_pause_forever",
         )
-        await publish_event(
-            "state_changed",
-            {"phone": phone, "state": UserState.HUMAN_MODE.value, "organization_id": org_id},
-        )
+        from app.services.trace_context import publish_state_event
+        await publish_state_event(phone=phone, state=UserState.HUMAN_MODE.value, organization_id=org_id)
         return {"ok": True, "ai_paused": True, "ai_snoozed_until": None}
 
     user.ai_paused = False
@@ -386,10 +378,8 @@ async def set_chat_ai_snooze(
         source="admin.chats",
         reason="ai_pause_temporary",
     )
-    await publish_event(
-        "state_changed",
-        {"phone": phone, "state": UserState.CHATTING.value, "organization_id": org_id},
-    )
+    from app.services.trace_context import publish_state_event
+    await publish_state_event(phone=phone, state=UserState.CHATTING.value, organization_id=org_id)
     return {
         "ok": True,
         "ai_paused": False,
@@ -501,14 +491,11 @@ async def admin_send_message(
     log_id = int(op_log.id)
 
     # UI-event только после commit: иначе фантомная запись, если транзакция упадёт.
-    await publish_event("new_message", {
-        "phone": phone,
-        "role": "operator",
-        "content": body.text,
-        "id": log_id,
-        "delivery_status": "sending",
-        "organization_id": org_id,
-    })
+    from app.services.trace_context import publish_chat_event
+    await publish_chat_event(
+        phone=phone, role="operator", content=body.text,
+        organization_id=org_id, chat_log_id=log_id,
+    )
 
     wa = await send_message(phone, body.text)
 
@@ -551,14 +538,11 @@ async def resend_failed_chat_message(
     log.error_details = None
     log.status_updated_at = now
     await db.commit()
-    await publish_event("new_message", {
-        "phone": phone,
-        "role": log.role,
-        "content": text,
-        "id": chat_log_id,
-        "delivery_status": "sending",
-        "organization_id": org_id,
-    })
+    from app.services.trace_context import publish_chat_event
+    await publish_chat_event(
+        phone=phone, role=log.role, content=text,
+        organization_id=org_id, chat_log_id=chat_log_id,
+    )
     wa = await send_message(phone, text)
     evt = await finalize_outbound_delivery(
         db, chat_log_id, wa.ok, provider_message_id=wa.message_id, error_details=wa.error,

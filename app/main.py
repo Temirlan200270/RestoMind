@@ -23,7 +23,13 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.api.admin import auth_router as admin_auth_router
 from app.api.admin import router as admin_router
 from app.api.admin import ws_router as admin_ws_router
+from app.api.admin.analytics import router as admin_analytics_router
+from app.api.admin.menu import router as admin_menu_router
+from app.api.admin.orders import router as admin_orders_router
+from app.api.admin.organization import router as admin_organization_router
+from app.api.admin.rules import router as admin_rules_router
 from app.api.admin.intelligence import router as admin_intelligence_router
+from app.api.iiko_webhook import router as iiko_webhook_router
 from app.api.admin.marketing import loyalty_router as admin_loyalty_router
 from app.api.admin.marketing import router as admin_marketing_router
 from app.api.payment_webhook import router as payment_webhook_router
@@ -671,12 +677,18 @@ app.include_router(webhooks_router, prefix="/api")
 app.include_router(payment_webhook_router, prefix="/api")
 app.include_router(admin_auth_router, prefix="/api")
 app.include_router(admin_router, prefix="/api")
+app.include_router(admin_analytics_router, prefix="/api")
+app.include_router(admin_menu_router, prefix="/api")
+app.include_router(admin_orders_router, prefix="/api")
+app.include_router(admin_organization_router, prefix="/api")
+app.include_router(admin_rules_router, prefix="/api")
 app.include_router(admin_intelligence_router, prefix="/api")
 app.include_router(admin_marketing_router, prefix="/api")
 app.include_router(admin_loyalty_router, prefix="/api")
 app.include_router(admin_ws_router, prefix="/api")
 app.include_router(superadmin_router, prefix="/api")
 app.include_router(telegram_webhook_router, prefix="/api")
+app.include_router(iiko_webhook_router)  # prefix="/api/iiko" уже задан внутри роутера
 
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

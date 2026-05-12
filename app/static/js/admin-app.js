@@ -4882,6 +4882,18 @@ function adminMixinWebSocketEvents() {
                 }
             } else if (type === 'state_changed') {
                 this.onStateChanged(data);
+            } else if (type === 'stoplist_updated') {
+                // iiko обновил стоп-лист → перезагрузить меню если вкладка открыта
+                this._pushDashLiveFeed(type, `Стоп-лист обновлён (iiko)${data.ok === false ? ' ⚠️ ошибка' : ''}`);
+                if (this.currentTab === 'menu') {
+                    void this.loadMenu?.();
+                }
+            } else if (type === 'menu_updated') {
+                // iiko обновил меню → перезагрузить меню если вкладка открыта
+                this._pushDashLiveFeed(type, `Меню обновлено (iiko)${data.ok === false ? ' ⚠️ ошибка' : ''}`);
+                if (this.currentTab === 'menu') {
+                    void this.loadMenu?.();
+                }
             }
         },
 

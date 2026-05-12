@@ -322,6 +322,19 @@ class Settings(BaseSettings):
         ),
     )
 
+    # --- iiko Webhook ---
+    iiko_webhook_secret: str = Field(
+        default="",
+        validation_alias=AliasChoices("IIKO_WEBHOOK_SECRET", "iiko_webhook_secret"),
+        description="Секрет для заголовка X-Iiko-Webhook-Secret. Пусто — проверка отключена.",
+    )
+    iiko_webhook_sync_debounce_sec: int = Field(
+        default=30,
+        ge=5,
+        validation_alias=AliasChoices("IIKO_WEBHOOK_SYNC_DEBOUNCE_SEC", "iiko_webhook_sync_debounce_sec"),
+        description="Минимальный интервал между webhook-triggered sync одной орг (дебаунс, сек)",
+    )
+
     # --- iiko Cloud API ---
     iiko_api_login: str = Field(
         default="",

@@ -5,6 +5,8 @@ from unittest.mock import AsyncMock
 
 from app.api.admin import _monolith as admin_api
 from app.api.admin import chats as chats_api
+from app.api.admin import orders as orders_api
+from app.api.admin import rules as rules_api
 from app.db.models import ChatLog, MenuItem, Order, OrderStatus, Organization, User
 from app.services.order_logic import compute_fee_lines
 
@@ -41,7 +43,7 @@ async def test_post_iiko_fulfillment_transition_records_event(db_session, monkey
     async def _noop_publish(*_args, **_kwargs):
         return None
 
-    monkeypatch.setattr(admin_api, "publish_event", _noop_publish)
+    monkeypatch.setattr(orders_api, "publish_event", _noop_publish)
 
     org = Organization(id=2, name="Org", slug="org2")
     user = User(organization_id=2, phone="+77004445566")
@@ -58,10 +60,10 @@ async def test_post_iiko_fulfillment_transition_records_event(db_session, monkey
     await db_session.flush()
 
     req = DummyRequest({"organization_id": 2, "staff_id": 3})
-    out = await admin_api.patch_order_status(
+    out = await orders_api.patch_order_status(
         req,
         int(order.id),
-        admin_api.OrderPatchBody(status=OrderStatus.IN_TRANSIT.value, expected_version=1),
+        orders_api.OrderPatchBody(status=OrderStatus.IN_TRANSIT.value, expected_version=1),
         db_session,
     )
 
@@ -91,10 +93,10 @@ async def test_upsell_feedback_creates_anti_rule_tag(db_session) -> None:
     await db_session.flush()
 
     req = DummyRequest({"organization_id": 3, "staff_id": 9})
-    out = await admin_api.create_upsell_rule_from_order_feedback(
+    out = await rules_api.create_upsell_rule_from_order_feedback(
         req,
         int(order.id),
-        admin_api.UpsellFeedbackBody(mode="forbid"),
+        rules_api.UpsellFeedbackBody(mode="forbid"),
         db_session,
     )
 

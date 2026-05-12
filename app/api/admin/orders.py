@@ -791,19 +791,20 @@ async def patch_order_status(
     cur = (order.status or "").lower()
 
     async def _emit(upd: Order, **extra) -> dict:
+        from app.services.trace_context import publish_order_event
         created_at_iso = upd.created_at.isoformat() if getattr(upd, "created_at", None) else None
-        await publish_event(
+        await publish_order_event(
             "order_updated",
-            {
-                "order_id": upd.id,
-                "status": upd.status,
-                "phone": phone_s,
-                "total_price": float(upd.total_price),
-                "iiko_last_error": upd.iiko_last_error,
-                "organization_id": org_id,
-                **({"created_at": created_at_iso} if created_at_iso else {}),
-                **extra,
-            },
+            order_id=upd.id,
+            status=upd.status,
+            phone=phone_s,
+            total_price=float(upd.total_price),
+            iiko_last_error=upd.iiko_last_error,
+            organization_id=org_id,
+            trace_id=None,          # admin-initiated: trace недоступен
+            conversation_id=None,
+            **({"created_at": created_at_iso} if created_at_iso else {}),
+            **extra,
         )
         return {
             "ok": True,
@@ -932,17 +933,18 @@ async def patch_order_status(
                 "row_version": int(getattr(locked, "row_version", 1) or 1),
                 "payment_split_warning": _check_mixed_payment_split(items_json, float(locked.total_price)),
             }
-            await publish_event(
+            from app.services.trace_context import publish_order_event
+            await publish_order_event(
                 "order_updated",
-                {
-                    "order_id": locked.id,
-                    "status": locked.status,
-                    "phone": phone_s,
-                    "total_price": float(locked.total_price),
-                    "iiko_last_error": locked.iiko_last_error,
-                    "organization_id": org_id,
-                    "order": order_public,
-                },
+                order_id=locked.id,
+                status=locked.status,
+                phone=phone_s,
+                total_price=float(locked.total_price),
+                iiko_last_error=locked.iiko_last_error,
+                organization_id=org_id,
+                trace_id=None,
+                conversation_id=None,
+                order=order_public,
             )
             return {
                 "ok": True,
@@ -1454,8 +1456,9 @@ async def bulk_delete_orders(
     r_del = await db.execute(sql_delete(Order).where(Order.id.in_(ids)))
     await db.commit()
     deleted = _sql_delete_rowcount(r_del)
+    from app.services.trace_context import publish_order_event
     for oid in ids:
-        await publish_event("order_deleted", {"order_id": oid, "organization_id": org_id})
+        await publish_order_event("order_deleted", order_id=oid, organization_id=org_id)
     logger.warning("Админ: удалено заказов (bulk): %s", ids)
     return {"ok": True, "deleted": deleted, "order_ids": ids}
 
@@ -1492,7 +1495,8 @@ async def delete_single_order(
     await _clear_redis_pending_if_matches(phone, order.id, organization_id=org_id)
     await db.execute(sql_delete(Order).where(Order.id == order_id))
     await db.commit()
-    await publish_event("order_deleted", {"order_id": order_id, "organization_id": org_id})
+    from app.services.trace_context import publish_order_event
+    await publish_order_event("order_deleted", order_id=order_id, organization_id=org_id)
     logger.warning("Админ: удалён заказ #%s", order_id)
     return {"ok": True, "id": order_id}
 
@@ -1540,17 +1544,18 @@ async def bulk_cancel_orders(
         to_emit.append((order.id, phone, float(order.total_price)))
 
     await db.commit()
+    from app.services.trace_context import publish_order_event
     for oid, phone, total in to_emit:
-        await publish_event(
+        await publish_order_event(
             "order_updated",
-            {
-                "order_id": oid,
-                "status": OrderStatus.CANCELLED.value,
-                "phone": phone,
-                "total_price": total,
-                "iiko_last_error": None,
-                "organization_id": org_id,
-            },
+            order_id=oid,
+            status=OrderStatus.CANCELLED.value,
+            phone=phone,
+            total_price=total,
+            iiko_last_error=None,
+            organization_id=org_id,
+            trace_id=None,
+            conversation_id=None,
         )
     logger.warning("Админ: массовая отмена заказов: ids=%s, отменено=%d, уже были отменены=%d", ids, cancelled, skipped)
     return {"ok": True, "cancelled": cancelled, "skipped_already_cancelled": skipped, "order_ids": ids}

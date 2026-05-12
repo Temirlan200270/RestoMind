@@ -23,6 +23,16 @@
 }
 
 /*
+ * Scrollbar gutter fix: резервируем место под скроллбар всегда.
+ * Без этого на Windows/Linux с native scrollbar sticky-шапки с `-mx-*`
+ * не доходят до правого края (gap = ширина скроллбара ~17px).
+ * scrollbar-gutter: stable — Chrome 94+, Firefox 97+, Safari 15.4+.
+ */
+#admin-content-scroll {
+    scrollbar-gutter: stable;
+}
+
+/*
  * Карточные пресеты админки (единый вид секций).
  * rm-card-surface — основная белая карточка (rounded-2xl).
  * rm-card-spotlight — акцентные блоки / превью (rounded-3xl).
@@ -63,9 +73,9 @@
     .ds-segmented {
         @apply inline-flex flex-wrap gap-1 rounded-xl bg-slate-100 px-1 py-0.5 ring-1 ring-slate-900/5;
     }
-    /* U6: touch target ≥ 44×44px (WCAG 2.5.5) */
+    /* U6: touch target — контейнер py-0.5 (4px) + кнопка 40px = 44px итого (WCAG 2.5.5) */
     .ds-segmented > button {
-        @apply min-h-[44px] px-3 py-2 rounded-lg text-xs sm:text-sm font-semibold transition text-slate-600 hover:text-slate-900;
+        @apply min-h-[40px] px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition text-slate-600 hover:text-slate-900;
     }
     .ds-segmented > button.ds-segmented-active {
         @apply bg-white text-slate-900 shadow-sm ring-1 ring-slate-900/10;
