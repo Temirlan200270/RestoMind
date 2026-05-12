@@ -144,17 +144,44 @@ async def assert_arq_reachable_for_prod_startup() -> None:
         logger.warning("ARQ probe: pool.close failed", exc_info=True)
 
 
+def _get_background_fn(job_name: str) -> Any:
+    """Возвращает callable для запуска задачи без ARQ (BackgroundTasks fallback)."""
+    import importlib
+
+    _map = {
+        "whatsapp_process_text": ("app.api.webhooks", "process_with_retry"),
+        "whatsapp_process_voice": ("app.api.webhooks", "process_voice_message"),
+        "whatsapp_process_statuses": ("app.api.webhooks", "_process_whatsapp_status_batch"),
+        "payment_notify_customer": ("app.services.payment_notify", "run_payment_received_customer_notify"),
+        "send_review_request": ("app.services.review_requests", "run_send_review_request"),
+        "send_blast_batch": ("app.services.marketing", "run_send_blast_batch"),
+        "iiko_stoplist_sync": ("app.services.iiko_sync_tasks", "run_stoplist_sync"),
+        "iiko_menu_sync": ("app.services.iiko_sync_tasks", "run_menu_sync"),
+    }
+    if job_name not in _map:
+        return None
+    module_path, fn_name = _map[job_name]
+    module = importlib.import_module(module_path)
+    return getattr(module, fn_name, None)
+
+
 async def dispatch_arq_or_background(
     job_name: str,
     background_tasks: BackgroundTasks,
     **kwargs: Any,
 ) -> None:
-    """
-    Поставить задачу в ARQ.
+    """Ставит задачу в ARQ, при недоступности — запускает через BackgroundTasks."""
+    if arq_can_run():
+        try:
+            await enqueue_job(job_name, **kwargs)
+            logger.debug("ARQ: task %s enqueued", job_name)
+            return
+        except TaskQueueEnqueueError:
+            pass
 
-    Параметр background_tasks оставлен для совместимости вызовов (в т.ч. payment webhook);
-    не используется — фоновая обработка только через worker.
-    """
-    _ = background_tasks
-    await enqueue_job(job_name, **kwargs)
-    logger.debug("ARQ: task %s enqueued", job_name)
+    fn = _get_background_fn(job_name)
+    if fn is None:
+        logger.error("dispatch_arq_or_background: no fallback for job=%s", job_name)
+        return
+    background_tasks.add_task(fn, **kwargs)
+    logger.debug("BackgroundTasks fallback: task %s scheduled", job_name)

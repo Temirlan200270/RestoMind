@@ -3,7 +3,7 @@
      x-data="marketingTab()" x-init="$watch('currentTab', v => v === 'marketing' && init())">
 
     <!-- Подвкладки -->
-    <div class="sticky top-0 z-[40] bg-white border-b px-4 py-2 flex gap-2">
+    <div class="sticky top-0 bg-white border-b px-4 py-2 flex gap-2">
         <button type="button" @click="subTab = 'blasts'"
             class="px-4 py-2 rounded-xl text-sm font-medium transition"
             :class="subTab === 'blasts' ? 'bg-slate-800 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'">
