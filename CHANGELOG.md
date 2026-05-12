@@ -6,6 +6,10 @@
 
 ## [Unreleased] — 2026-03-20
 
+### Добавлено (2026-05-12)
+
+- **Диалог / observability:** модуль [`app/services/conversation_state.py`](app/services/conversation_state.py), [`app/services/trace_context.py`](app/services/trace_context.py); доработки [`dialog_mgr.py`](app/services/dialog_mgr.py), [`intent_router.py`](app/services/intent_router.py), [`webhooks.py`](app/api/webhooks.py); админ-эндпоинты в [`chats.py`](app/api/admin/chats.py), [`customers.py`](app/api/admin/customers.py), [`orders.py`](app/api/admin/orders.py); документы [`docs/CONTROL_PLANE.md`](docs/CONTROL_PLANE.md), [`docs/STATE_MACHINE.md`](docs/STATE_MACHINE.md); тесты [`test_conversation_state.py`](tests/test_conversation_state.py), [`test_dialog_state_events.py`](tests/test_dialog_state_events.py); правки [`test_admin_readiness.py`](tests/test_admin_readiness.py), [`test_booking_preorder.py`](tests/test_booking_preorder.py).
+
 ### Изменено (2026-05-12)
 
 - **E0.1 / админ-API:** продолжен раскол [`app/api/admin/_monolith.py`](app/api/admin/_monolith.py): маршруты заказов и failed tasks вынесены в [`orders.py`](app/api/admin/orders.py), меню/поиск/интеграции — в [`menu.py`](app/api/admin/menu.py), организация/staff/payment config — в [`organization.py`](app/api/admin/organization.py), правила upsell/packaging — в [`rules.py`](app/api/admin/rules.py), аналитика/readiness/incidents/exports — в [`analytics.py`](app/api/admin/analytics.py). Роутеры подключены через `router.include_router(...)`; дубли маршрутов `/api/admin/*` не обнаружены, публичные реэкспорты `app.api.admin` сохранены.

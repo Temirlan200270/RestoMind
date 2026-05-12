@@ -1,7 +1,7 @@
 import pytest
 
 from app.api.admin import admin_readiness
-from app.db.models import ChatLog, Order, Organization, PaymentEvent, User
+from app.db.models import ChatLog, Order, Organization, PaymentEvent, SystemEvent, User
 
 
 class DummyRequest:
@@ -69,3 +69,57 @@ async def test_admin_order_timeline_sorts_and_includes_payment(db_session):
     assert "payment" in kinds
     assert "chat" in kinds
     assert any(e.get("kind") == "current_status" for e in data["events"])
+
+
+@pytest.mark.asyncio
+async def test_admin_order_timeline_includes_trace_metadata_and_system_events(db_session):
+    from app.api.admin import admin_order_timeline
+
+    org = Organization(name="TT", slug="tt")
+    db_session.add(org)
+    await db_session.flush()
+    user = User(organization_id=int(org.id), phone="+77009998877")
+    db_session.add(user)
+    await db_session.flush()
+    order = Order(
+        organization_id=int(org.id),
+        user_id=int(user.id),
+        status="draft",
+        total_price=500,
+        items_json={"items": []},
+    )
+    db_session.add(order)
+    await db_session.flush()
+    db_session.add(
+        ChatLog(
+            organization_id=int(org.id),
+            user_id=int(user.id),
+            role="assistant",
+            content="trace msg",
+            meta_json={"trace_id": "trace-1", "conversation_id": "conv-1"},
+        ),
+    )
+    db_session.add(
+        SystemEvent(
+            organization_id=int(org.id),
+            event_type="conversation_state_changed",
+            source="webhooks.process_message",
+            payload_json={
+                "phone": user.phone,
+                "from_state": "chatting",
+                "to_state": "confirming_order",
+                "trace_id": "trace-1",
+                "conversation_id": "conv-1",
+            },
+        ),
+    )
+    await db_session.flush()
+
+    req = DummyRequest(int(org.id))
+    data = await admin_order_timeline(req, int(order.id), db_session)
+    chat_event = next(e for e in data["events"] if e.get("kind") == "chat")
+    assert chat_event["meta"]["trace_id"] == "trace-1"
+    assert chat_event["meta"]["conversation_id"] == "conv-1"
+    sys_event = next(e for e in data["events"] if e.get("kind") == "system_event")
+    assert sys_event["meta"]["trace_id"] == "trace-1"
+    assert sys_event["meta"]["conversation_id"] == "conv-1"

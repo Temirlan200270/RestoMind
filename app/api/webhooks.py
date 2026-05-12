@@ -96,6 +96,7 @@ from app.services.whatsapp_idempotency import (
     try_start_whatsapp_inbound_in_db,
 )
 from app.services.tts_edge import synthesize_speech_mp3
+from app.services.trace_context import build_conversation_id, build_trace_id, merge_trace_meta, trace_payload
 
 logger = logging.getLogger(__name__)
 
@@ -257,6 +258,8 @@ async def _save_chat_log(
     *,
     organization_id: int,
     outbound_whatsapp: bool = True,
+    trace_id: str | None = None,
+    conversation_id: str | None = None,
 ) -> int | None:
     """
     Сохраняет пару сообщений (user + assistant) в ChatLog.
@@ -269,6 +272,13 @@ async def _save_chat_log(
             user_id=user.id,
             role="user",
             content=user_text,
+            meta_json=(
+                trace_payload(
+                    trace_id=trace_id,
+                    conversation_id=conversation_id,
+                )
+                if trace_id and conversation_id else None
+            ),
         ),
     )
     now = datetime.now(timezone.utc)
@@ -277,7 +287,14 @@ async def _save_chat_log(
         "user_id": user.id,
         "role": "assistant",
         "content": reply_text,
-        "meta_json": assistant_meta,
+        "meta_json": (
+            merge_trace_meta(
+                assistant_meta,
+                trace_id=trace_id,
+                conversation_id=conversation_id,
+            )
+            if trace_id and conversation_id else assistant_meta
+        ),
     }
     if outbound_whatsapp:
         assistant_kwargs["delivery_status"] = "sending"
@@ -452,7 +469,12 @@ async def _send_order_to_iiko(
 
 
 async def handle_confirmation(
-    phone: str, message_text: str, organization_id: int,
+    phone: str,
+    message_text: str,
+    organization_id: int,
+    *,
+    trace_id: str = "",
+    conversation_id: str = "",
 ) -> str | None:
     """
     Обработка ответа на подтверждение заказа.
@@ -484,7 +506,13 @@ async def handle_confirmation(
                             )
                             return await append_prepayment_legal_disclaimer(db, organization_id, core)
 
-            order = await confirm_order(db, order_id)
+            order = await confirm_order(
+                db,
+                order_id,
+                trace_id=trace_id,
+                conversation_id=conversation_id,
+                source="webhooks.handle_confirmation",
+            )
             await db.commit()
 
         if not order:
@@ -498,6 +526,8 @@ async def handle_confirmation(
             "total_price": float(order.total_price),
             "iiko_last_error": None,
             "organization_id": organization_id,
+            "trace_id": trace_id or None,
+            "conversation_id": conversation_id or None,
             **({"created_at": order.created_at.isoformat()} if getattr(order, "created_at", None) else {}),
         })
 
@@ -514,7 +544,13 @@ async def handle_confirmation(
 
     if word in CANCEL_WORDS:
         async with async_session_factory() as db:
-            await cancel_order(db, order_id)
+            await cancel_order(
+                db,
+                order_id,
+                trace_id=trace_id,
+                conversation_id=conversation_id,
+                source="webhooks.handle_confirmation",
+            )
             await db.commit()
 
         await publish_event("order_updated", {
@@ -522,6 +558,8 @@ async def handle_confirmation(
             "status": OrderStatus.CANCELLED,
             "phone": phone,
             "organization_id": organization_id,
+            "trace_id": trace_id or None,
+            "conversation_id": conversation_id or None,
         })
 
         await clear_pending_order(redis_client, phone, organization_id=organization_id)
@@ -536,7 +574,12 @@ async def handle_confirmation(
 
 
 async def handle_booking_confirmation(
-    phone: str, message_text: str, organization_id: int,
+    phone: str,
+    message_text: str,
+    organization_id: int,
+    *,
+    trace_id: str = "",
+    conversation_id: str = "",
 ) -> str:
     """
     Обработка подтверждения бронирования.
@@ -551,7 +594,13 @@ async def handle_booking_confirmation(
 
     if word in CONFIRM_WORDS:
         async with async_session_factory() as db:
-            booking, err = await confirm_booking(db, booking_id)
+            booking, err = await confirm_booking(
+                db,
+                booking_id,
+                trace_id=trace_id,
+                conversation_id=conversation_id,
+                source="webhooks.handle_booking_confirmation",
+            )
             await db.commit()
 
         if err == "vip_conflict":
@@ -575,7 +624,13 @@ async def handle_booking_confirmation(
 
     if word in CANCEL_WORDS:
         async with async_session_factory() as db:
-            await cancel_booking(db, booking_id)
+            await cancel_booking(
+                db,
+                booking_id,
+                trace_id=trace_id,
+                conversation_id=conversation_id,
+                source="webhooks.handle_booking_confirmation",
+            )
             await db.commit()
 
         await clear_pending_booking(redis_client, phone, organization_id=organization_id)
@@ -596,7 +651,12 @@ _PAYMENT_LABEL_RU = {
 
 
 async def handle_order_payment_choice(
-    phone: str, message_text: str, organization_id: int,
+    phone: str,
+    message_text: str,
+    organization_id: int,
+    *,
+    trace_id: str = "",
+    conversation_id: str = "",
 ) -> str | None:
     """
     После черновика заказа: фиксируем способ оплаты в items_json, затем переход к Да/Нет.
@@ -611,13 +671,21 @@ async def handle_order_payment_choice(
 
     if word in CANCEL_WORDS:
         async with async_session_factory() as db:
-            await cancel_order(db, order_id)
+            await cancel_order(
+                db,
+                order_id,
+                trace_id=trace_id,
+                conversation_id=conversation_id,
+                source="webhooks.handle_order_payment_choice",
+            )
             await db.commit()
         await publish_event("order_updated", {
             "order_id": order_id,
             "status": OrderStatus.CANCELLED,
             "phone": phone,
             "organization_id": organization_id,
+            "trace_id": trace_id or None,
+            "conversation_id": conversation_id or None,
         })
         await clear_pending_order(redis_client, phone, organization_id=organization_id)
         return (
@@ -854,6 +922,8 @@ async def process_message(
     """
     try:
         pipe_sw = pipeline_sw or PipelineStopwatch()
+        conversation_id = build_conversation_id(organization_id, phone)
+        trace_id = build_trace_id(whatsapp_message_id)
         state = await get_user_state(redis_client, phone, organization_id=organization_id)
         if message_text and _is_plain_greeting(message_text):
             if state == UserState.CHATTING and voice_audio is None:
@@ -866,6 +936,8 @@ async def process_message(
                         message_text,
                         quick_reply,
                         organization_id=organization_id,
+                        trace_id=trace_id,
+                        conversation_id=conversation_id,
                     )
                     await db_quick.commit()
                 await append_to_history(redis_client, phone, "user", message_text, organization_id=organization_id)
@@ -877,6 +949,8 @@ async def process_message(
                     "id": outbound_id_quick,
                     "delivery_status": "sending",
                     "organization_id": organization_id,
+                    "trace_id": trace_id,
+                    "conversation_id": conversation_id,
                 })
                 await send_customer_text(phone, quick_reply, outbound_chat_log_id=outbound_id_quick)
                 return
@@ -942,6 +1016,8 @@ async def process_message(
             "role": "user",
             "content": user_evt,
             "organization_id": organization_id,
+            "trace_id": trace_id,
+            "conversation_id": conversation_id,
         })
 
         # ─── HUMAN_MODE / ai_paused / ai_snooze: AI молчит, только логируем ─────────
@@ -956,6 +1032,8 @@ async def process_message(
                     "[OPERATOR_ONLY — AI не отвечает]",
                     organization_id=organization_id,
                     outbound_whatsapp=False,
+                    trace_id=trace_id,
+                    conversation_id=conversation_id,
                 )
                 await db.commit()
             await append_to_history(
@@ -973,7 +1051,11 @@ async def process_message(
         # ─── AWAITING_ORDER_PAYMENT: способ оплаты, правка заказа или Да/Нет ───
         if state == UserState.AWAITING_ORDER_PAYMENT:
             final_reply = await handle_order_payment_choice(
-                phone, message_text, organization_id,
+                phone,
+                message_text,
+                organization_id,
+                trace_id=trace_id,
+                conversation_id=conversation_id,
             )
 
             if final_reply is not None:
@@ -981,6 +1063,7 @@ async def process_message(
                 async with async_session_factory() as db:
                     outbound_id = await _save_chat_log(
                         db, phone, message_text, final_reply, organization_id=organization_id,
+                        trace_id=trace_id, conversation_id=conversation_id,
                     )
                     await db.commit()
 
@@ -997,6 +1080,8 @@ async def process_message(
                     "id": outbound_id,
                     "delivery_status": "sending",
                     "organization_id": organization_id,
+                    "trace_id": trace_id,
+                    "conversation_id": conversation_id,
                 })
                 await send_customer_text(
                     phone, final_reply, outbound_chat_log_id=outbound_id,
@@ -1008,13 +1093,20 @@ async def process_message(
                 phone=phone,
                 organization_id=organization_id,
                 new_state=UserState.CHATTING,
+                source="webhooks.process_message",
+                reason="payment_choice_unrecognized_reenter_llm",
+                context=trace_payload(trace_id=trace_id, conversation_id=conversation_id),
             )
             state = UserState.CHATTING
 
         # ─── CONFIRMING_ORDER: ждём Да/Нет или правку заказа ──────
         if state == UserState.CONFIRMING_ORDER:
             final_reply = await handle_confirmation(
-                phone, message_text, organization_id,
+                phone,
+                message_text,
+                organization_id,
+                trace_id=trace_id,
+                conversation_id=conversation_id,
             )
 
             if final_reply is not None:
@@ -1022,6 +1114,7 @@ async def process_message(
                 async with async_session_factory() as db:
                     outbound_id_o = await _save_chat_log(
                         db, phone, message_text, final_reply, organization_id=organization_id,
+                        trace_id=trace_id, conversation_id=conversation_id,
                     )
                     await db.commit()
 
@@ -1038,6 +1131,8 @@ async def process_message(
                     "id": outbound_id_o,
                     "delivery_status": "sending",
                     "organization_id": organization_id,
+                    "trace_id": trace_id,
+                    "conversation_id": conversation_id,
                 })
                 await send_customer_text(
                     phone, final_reply, outbound_chat_log_id=outbound_id_o,
@@ -1049,19 +1144,27 @@ async def process_message(
                 phone=phone,
                 organization_id=organization_id,
                 new_state=UserState.CHATTING,
+                source="webhooks.process_message",
+                reason="order_confirmation_unrecognized_reenter_llm",
+                context=trace_payload(trace_id=trace_id, conversation_id=conversation_id),
             )
             state = UserState.CHATTING
 
         # ─── CONFIRMING_BOOKING: ждём Да/Нет ─────────────────
         if state == UserState.CONFIRMING_BOOKING:
             final_reply = await handle_booking_confirmation(
-                phone, message_text, organization_id,
+                phone,
+                message_text,
+                organization_id,
+                trace_id=trace_id,
+                conversation_id=conversation_id,
             )
 
             outbound_id_b: int | None = None
             async with async_session_factory() as db:
                 outbound_id_b = await _save_chat_log(
                     db, phone, message_text, final_reply, organization_id=organization_id,
+                    trace_id=trace_id, conversation_id=conversation_id,
                 )
                 await db.commit()
 
@@ -1078,6 +1181,8 @@ async def process_message(
                 "id": outbound_id_b,
                 "delivery_status": "sending",
                 "organization_id": organization_id,
+                "trace_id": trace_id,
+                "conversation_id": conversation_id,
             })
             await send_customer_text(
                 phone, final_reply, outbound_chat_log_id=outbound_id_b,
@@ -1117,6 +1222,8 @@ async def process_message(
                     message_text,
                     ack_reply,
                     organization_id=organization_id,
+                    trace_id=trace_id,
+                    conversation_id=conversation_id,
                 )
                 await db_ack.commit()
             await append_to_history(
@@ -1129,6 +1236,8 @@ async def process_message(
                 "id": outbound_ack,
                 "delivery_status": "sending",
                 "organization_id": organization_id,
+                "trace_id": trace_id,
+                "conversation_id": conversation_id,
             })
             await send_customer_text(phone, ack_reply, outbound_chat_log_id=outbound_ack)
             if settings.pipeline_timing_enabled:
@@ -1248,6 +1357,8 @@ async def process_message(
                 inbound_message_id=wmid,
                 sales_gastro_hint=sales_gastro_hint,
                 sales_target_iiko_ids=sales_target_iiko_ids,
+                trace_id=trace_id,
+                conversation_id=conversation_id,
             )
             log_pipeline_stage(
                 "route_ok",
@@ -1263,6 +1374,9 @@ async def process_message(
                 "phone": phone,
                 "organization_id": organization_id,
                 "current_state": (result.new_state.value if result.new_state else None),
+                "transition_source": "webhooks.process_message",
+                "transition_reason": f"intent:{ai_response.intent}",
+                "transition_context": trace_payload(trace_id=trace_id, conversation_id=conversation_id),
             }
             if result.pending_order_id is not None:
                 db_state_kwargs["current_pending_order_id"] = (
@@ -1292,6 +1406,8 @@ async def process_message(
                 result.reply_text,
                 assistant_meta,
                 organization_id=organization_id,
+                trace_id=trace_id,
+                conversation_id=conversation_id,
             )
             if result.new_state == UserState.HUMAN_MODE:
                 db.add(
@@ -1342,6 +1458,8 @@ async def process_message(
             await set_pending_booking(redis_client, phone, post_commit_pending_booking, organization_id=organization_id)
 
         for evt_type, evt_data in (result.events or []):
+            evt_data.setdefault("trace_id", trace_id)
+            evt_data.setdefault("conversation_id", conversation_id)
             await publish_event(evt_type, evt_data)
 
         await append_to_history(
@@ -1355,6 +1473,8 @@ async def process_message(
             "id": outbound_id_chat,
             "delivery_status": "sending",
             "organization_id": organization_id,
+            "trace_id": trace_id,
+            "conversation_id": conversation_id,
         })
         # E8: интерактивное сообщение (кнопки или CTA) вместо plain text если задано
         _sent_interactive = False
@@ -1411,6 +1531,8 @@ async def process_message(
                 "user_message": (user_log_text or "")[:500],
                 "intent": ai_response.intent,
                 "organization_id": organization_id,
+                "trace_id": trace_id,
+                "conversation_id": conversation_id,
             })
             try:
                 await send_tg_fallback_alert(

@@ -3,11 +3,17 @@
 from datetime import date, timedelta
 
 import pytest
+from sqlalchemy import select
 
+from app.db.models import Booking, Order, SystemEvent
 from app.schemas.ai_schemas import AIBrainResponse, BookingDetails, OrderItem
 from app.services.dialog_mgr import UserState
 from app.services.intent_router import _handle_order, confirm_order, route_intent
-from app.db.models import Booking, Order
+
+
+class DummyRequest:
+    def __init__(self, organization_id: int) -> None:
+        self.session = {"admin_ok": True, "organization_id": organization_id}
 
 
 @pytest.mark.asyncio
@@ -87,10 +93,33 @@ async def test_confirm_order_confirms_linked_booking(db_with_menu) -> None:
     order = await db_with_menu.get(Order, r.pending_order_id)
     assert order and order.booking_id
 
-    o2 = await confirm_order(db_with_menu, order.id)
+    o2 = await confirm_order(
+        db_with_menu,
+        order.id,
+        trace_id="trace-booking-1",
+        conversation_id="conv-booking-1",
+        source="tests.booking_preorder",
+    )
     assert o2 is not None
     assert o2.status == "confirmed"
 
     bk = await db_with_menu.get(Booking, order.booking_id)
     assert bk is not None
     assert bk.status == "confirmed"
+    events = (
+        await db_with_menu.execute(
+            select(SystemEvent).where(
+                SystemEvent.event_type.in_(("order_confirmed", "booking_confirmed")),
+            ).order_by(SystemEvent.id.asc()),
+        )
+    ).scalars().all()
+    assert len(events) == 2
+    assert all((ev.payload_json or {}).get("trace_id") == "trace-booking-1" for ev in events)
+    assert all((ev.payload_json or {}).get("conversation_id") == "conv-booking-1" for ev in events)
+
+    from app.api.admin import admin_order_timeline
+
+    timeline = await admin_order_timeline(DummyRequest(int(order.organization_id)), int(order.id), db_with_menu)
+    system_titles = [event.get("title") for event in timeline["events"] if event.get("kind") == "system_event"]
+    assert "order_confirmed" in system_titles
+    assert "booking_confirmed" in system_titles

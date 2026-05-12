@@ -23,7 +23,11 @@ from app.db.models import ChatLog, Organization, User
 from app.db.session import get_db, redis_client
 from app.integrations.whatsapp import send_message
 from app.services.chat_delivery import finalize_outbound_delivery
-from app.services.dialog_mgr import UserState, get_user_state, set_user_state
+from app.services.dialog_mgr import (
+    UserState,
+    get_user_state,
+    set_user_state_durable,
+)
 from app.services.events import publish_event
 from app.services.intent_router import get_or_create_user
 
@@ -265,7 +269,14 @@ async def takeover_chat(request: Request, phone: str, db: AsyncSession = Depends
     Устанавливает флаг HUMAN_MODE в Redis.
     """
     org_id = admin_org_from_session(request)
-    await set_user_state(redis_client, phone, UserState.HUMAN_MODE, organization_id=org_id)
+    await set_user_state_durable(
+        redis_client,
+        phone=phone,
+        organization_id=org_id,
+        new_state=UserState.HUMAN_MODE,
+        source="admin.chats",
+        reason="operator_takeover",
+    )
     await publish_event("state_changed", {
         "phone": phone,
         "state": UserState.HUMAN_MODE,
@@ -291,7 +302,14 @@ async def release_chat(request: Request, phone: str) -> dict:
     Возвращает состояние в CHATTING.
     """
     org_id = admin_org_from_session(request)
-    await set_user_state(redis_client, phone, UserState.CHATTING, organization_id=org_id)
+    await set_user_state_durable(
+        redis_client,
+        phone=phone,
+        organization_id=org_id,
+        new_state=UserState.CHATTING,
+        source="admin.chats",
+        reason="operator_release",
+    )
     await publish_event("state_changed", {
         "phone": phone,
         "state": UserState.CHATTING,
@@ -342,7 +360,14 @@ async def set_chat_ai_snooze(
         user.ai_snoozed_until = None
         user.ai_paused = True
         await db.commit()
-        await set_user_state(redis_client, phone, UserState.HUMAN_MODE, organization_id=org_id)
+        await set_user_state_durable(
+            redis_client,
+            phone=phone,
+            organization_id=org_id,
+            new_state=UserState.HUMAN_MODE,
+            source="admin.chats",
+            reason="ai_pause_forever",
+        )
         await publish_event(
             "state_changed",
             {"phone": phone, "state": UserState.HUMAN_MODE.value, "organization_id": org_id},
@@ -353,7 +378,14 @@ async def set_chat_ai_snooze(
     until = snooze_until_for_preset(preset, tz)  # type: ignore[arg-type]
     user.ai_snoozed_until = until
     await db.commit()
-    await set_user_state(redis_client, phone, UserState.CHATTING, organization_id=org_id)
+    await set_user_state_durable(
+        redis_client,
+        phone=phone,
+        organization_id=org_id,
+        new_state=UserState.CHATTING,
+        source="admin.chats",
+        reason="ai_pause_temporary",
+    )
     await publish_event(
         "state_changed",
         {"phone": phone, "state": UserState.CHATTING.value, "organization_id": org_id},

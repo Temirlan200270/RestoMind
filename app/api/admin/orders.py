@@ -12,7 +12,7 @@ from sqlalchemy import and_, delete as sql_delete, func, or_, select, update
 from sqlalchemy.orm import joinedload
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Booking, ChatLog, FailedTask, Order, OrderStatus, Organization, PaymentEvent, User
+from app.db.models import Booking, ChatLog, FailedTask, Order, OrderStatus, Organization, PaymentEvent, SystemEvent, User
 from app.db.session import async_session_factory, get_db, redis_client
 from app.services.events import publish_event
 from app.services.order_logic import (
@@ -573,7 +573,85 @@ async def admin_order_timeline(
                     "kind": "chat",
                     "title": f"Чат ({log.role})",
                     "detail": ct + extra,
-                    "meta": {"role": log.role, "delivery_status": log.delivery_status},
+                    "meta": {
+                        "role": log.role,
+                        "delivery_status": log.delivery_status,
+                        "trace_id": (
+                            dict(log.meta_json or {}).get("trace_id")
+                            if isinstance(log.meta_json, dict) else None
+                        ),
+                        "conversation_id": (
+                            dict(log.meta_json or {}).get("conversation_id")
+                            if isinstance(log.meta_json, dict) else None
+                        ),
+                    },
+                },
+            ),
+        )
+
+    user = await db.get(User, int(order.user_id))
+    phone = (user.phone or "").strip() if user is not None else ""
+    order_system_rows = (
+        await db.execute(
+            select(SystemEvent)
+            .where(
+                SystemEvent.organization_id == org_id,
+                SystemEvent.entity_type == "order",
+                SystemEvent.entity_id == str(order.id),
+            )
+            .order_by(SystemEvent.created_at.asc(), SystemEvent.id.asc()),
+        )
+    ).scalars().all()
+    booking_system_rows: list[SystemEvent] = []
+    if order.booking_id:
+        booking_system_rows = (
+            await db.execute(
+                select(SystemEvent)
+                .where(
+                    SystemEvent.organization_id == org_id,
+                    SystemEvent.entity_type == "booking",
+                    SystemEvent.entity_id == str(order.booking_id),
+                )
+                .order_by(SystemEvent.created_at.asc(), SystemEvent.id.asc()),
+            )
+        ).scalars().all()
+    state_system_rows = (
+        await db.execute(
+            select(SystemEvent)
+            .where(
+                SystemEvent.organization_id == org_id,
+                SystemEvent.event_type == "conversation_state_changed",
+            )
+            .order_by(SystemEvent.created_at.asc(), SystemEvent.id.asc()),
+        )
+    ).scalars().all()
+    system_rows = list(order_system_rows)
+    system_rows.extend(booking_system_rows)
+    system_rows.extend(
+        ev for ev in state_system_rows
+        if isinstance(ev.payload_json, dict) and str(ev.payload_json.get("phone") or "").strip() == phone
+    )
+    for ev in system_rows:
+        payload = dict(ev.payload_json or {}) if isinstance(ev.payload_json, dict) else {}
+        raw_events.append(
+            (
+                ev.created_at,
+                {
+                    "kind": "system_event",
+                    "title": ev.event_type,
+                    "detail": (
+                        f"{payload.get('from_state')} -> {payload.get('to_state')}"
+                        if ev.event_type == "conversation_state_changed"
+                        else ""
+                    ),
+                    "meta": {
+                        "source": ev.source,
+                        "entity_type": ev.entity_type,
+                        "entity_id": ev.entity_id,
+                        "trace_id": payload.get("trace_id"),
+                        "conversation_id": payload.get("conversation_id"),
+                        "reason": payload.get("reason"),
+                    },
                 },
             ),
         )

@@ -11,6 +11,12 @@ import logging
 from enum import StrEnum
 from typing import Any
 
+from app.services.conversation_state import (
+    ConversationState,
+    check_conversation_transition,
+    normalize_conversation_state,
+)
+
 _NOCHANGE = object()
 
 logger = logging.getLogger(__name__)
@@ -81,19 +87,35 @@ async def update_user_session_fields_in_db(
     current_state: str | None = None,
     current_pending_order_id: int | None | object = _NOCHANGE,
     current_pending_booking_id: int | None | object = _NOCHANGE,
+    transition_source: str = "session_update",
+    transition_reason: str | None = None,
+    transition_context: dict[str, Any] | None = None,
 ) -> None:
     """
     Обновляет durable-поля сессии в таблице User *в рамках текущей DB-транзакции*.
     Никаких отдельный сессий/commit здесь быть не должно: иначе возможен рассинхрон Redis↔БД при падении.
     """
+    from sqlalchemy import select as sa_select
     from sqlalchemy import update as sa_update
 
     from app.db.models import User
+    from app.services.system_events import emit_system_event
 
     org = _effective_org(organization_id)
     patch: dict[str, Any] = {}
+    prev_state_raw: str | None = None
+    user_id: int | None = None
     if current_state is not None:
-        patch["current_state"] = str(current_state)
+        row = await db.execute(
+            sa_select(User.id, User.current_state)
+            .where(User.phone == phone, User.organization_id == org)
+            .limit(1),
+        )
+        existing = row.first()
+        if existing is not None:
+            user_id = int(existing[0])
+            prev_state_raw = str(existing[1] or "")
+        patch["current_state"] = normalize_conversation_state(current_state).value
     if current_pending_order_id is not _NOCHANGE:
         patch["current_pending_order_id"] = current_pending_order_id
     if current_pending_booking_id is not _NOCHANGE:
@@ -105,6 +127,56 @@ async def update_user_session_fields_in_db(
         .where(User.phone == phone, User.organization_id == org)
         .values(**patch),
     )
+    if current_state is not None:
+        prev_state = normalize_conversation_state(prev_state_raw)
+        next_state = normalize_conversation_state(current_state)
+        if prev_state != next_state:
+            await emit_system_event(
+                db,
+                organization_id=org,
+                event_type="conversation_state_changed",
+                source=transition_source,
+                entity_type="user",
+                entity_id=user_id or phone,
+                payload={
+                    "phone": phone,
+                    "from_state": prev_state.value,
+                    "to_state": next_state.value,
+                    "reason": (transition_reason or "").strip() or None,
+                    "context": transition_context or {},
+                },
+            )
+
+
+async def set_user_state_durable(
+    redis: Any,
+    *,
+    phone: str,
+    organization_id: int,
+    new_state: UserState,
+    source: str = "session_update",
+    reason: str | None = None,
+    context: dict[str, Any] | None = None,
+) -> None:
+    """Persist and validate a state transition before updating Redis."""
+    current_state = await get_user_state(redis, phone, organization_id=organization_id)
+    check = check_conversation_transition(current_state.value, new_state.value)
+    if not check.allowed:
+        raise ValueError(check.reason)
+    from app.db.session import async_session_factory
+
+    async with async_session_factory() as db:
+        await update_user_session_fields_in_db(
+            db,
+            phone=phone,
+            organization_id=organization_id,
+            current_state=check.to_state.value,
+            transition_source=source,
+            transition_reason=reason,
+            transition_context=context,
+        )
+        await db.commit()
+    await set_user_state(redis, phone, new_state, organization_id=organization_id)
 
 
 async def sync_user_dialog_state_to_db_then_redis(
@@ -113,22 +185,23 @@ async def sync_user_dialog_state_to_db_then_redis(
     phone: str,
     organization_id: int,
     new_state: UserState,
+    source: str = "session_update",
+    reason: str | None = None,
+    context: dict[str, Any] | None = None,
 ) -> None:
     """
     Durable state first: одна короткая транзакция User.current_state → commit → кэш в Redis.
     Паттерн как в process_message после route_intent (без открытой LLM-транзакции).
     """
-    from app.db.session import async_session_factory
-
-    async with async_session_factory() as db:
-        await update_user_session_fields_in_db(
-            db,
-            phone=phone,
-            organization_id=organization_id,
-            current_state=new_state.value,
-        )
-        await db.commit()
-    await set_user_state(redis, phone, new_state, organization_id=organization_id)
+    await set_user_state_durable(
+        redis,
+        phone=phone,
+        organization_id=organization_id,
+        new_state=new_state,
+        source=source,
+        reason=reason,
+        context=context,
+    )
 
 
 async def _db_recover_session(phone: str, redis: Any, organization_id: int | None) -> UserState:
@@ -151,10 +224,7 @@ async def _db_recover_session(phone: str, redis: Any, organization_id: int | Non
                 return UserState.CHATTING
 
             state_raw = getattr(user, "current_state", None) or "chatting"
-            try:
-                state = UserState(state_raw)
-            except ValueError:
-                state = UserState.CHATTING
+            state = UserState(normalize_conversation_state(state_raw).value)
 
             await redis.set(_state_key(org, phone), state.value, ex=STATE_TTL)
 
@@ -228,7 +298,7 @@ async def get_user_state(redis: Any, phone: str, organization_id: int | None = N
             raw = raw_old
     if raw is not None:
         try:
-            return UserState(raw)
+            return UserState(normalize_conversation_state(raw).value)
         except ValueError:
             return UserState.CHATTING
     return await _db_recover_session(phone, redis, organization_id)
