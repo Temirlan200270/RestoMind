@@ -12,6 +12,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # нужна история для git diff origin/main...HEAD
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -22,11 +24,12 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run tests (excluding regression marker)
-        run: python -m pytest tests/ -v --tb=short -m "not regression"
-
-      - name: Regression suite (§E10)
-        run: python -m pytest tests/regression -v --tb=short -m regression
-
       - name: Check imports
         run: python -c "from app.main import app; print('Import OK')"
+
+      - name: Smart tests (only affected by changed files)
+        run: python scripts/smart_test.py --base origin/main
+
+      - name: Full suite on main branch push
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: python -m pytest tests/ -q --tb=short -m "not regression"

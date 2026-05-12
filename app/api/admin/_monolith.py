@@ -102,6 +102,7 @@ from .chats import admin_send_message, chats_router
 from .customers import customers_router
 from .knowledge import knowledge_router
 from .menu_bulk import menu_bulk_router
+from .menu_schemas import ClearMenuBody
 from .schemas import TextRequest
 from .system import system_router
 
