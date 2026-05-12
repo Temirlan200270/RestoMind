@@ -34,6 +34,8 @@ class IntelligenceQueryBody(BaseModel):
 
 class InsightPatchBody(BaseModel):
     status: str = Field(..., pattern="^(new|seen|resolved|dismissed)$")
+    was_useful: bool | None = Field(default=None, description="Оператор отметил инсайт полезным (true) или нет (false)")
+    notes: str | None = Field(default=None, max_length=500, description="Заметка оператора при закрытии")
 
 
 class SimulationBody(BaseModel):
@@ -44,14 +46,20 @@ class SimulationBody(BaseModel):
 
 
 def _insight_public(row: OperationalInsight) -> dict:
+    payload = row.payload_json or {}
     return {
         "id": row.id,
         "insight_type": row.insight_type,
         "severity": row.severity,
         "title": row.title,
         "summary": row.summary,
-        "payload": row.payload_json or {},
+        "payload": payload,
+        "cause_hypotheses": payload.get("cause_hypotheses") or [],
+        "recommended_actions": payload.get("recommended_actions") or [],
+        "weekday_baseline": payload.get("weekday_baseline"),
         "status": row.status,
+        "was_useful": getattr(row, "was_useful", None),
+        "notes": getattr(row, "notes", None),
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "resolved_at": row.resolved_at.isoformat() if row.resolved_at else None,
     }
@@ -123,6 +131,10 @@ async def patch_intelligence_insight(
     row.status = body.status
     if body.status == "resolved":
         row.resolved_at = datetime.now(timezone.utc)
+    if body.was_useful is not None:
+        row.was_useful = body.was_useful
+    if body.notes is not None:
+        row.notes = (body.notes or "").strip() or None
     await db.commit()
     return {"ok": True, "item": _insight_public(row)}
 

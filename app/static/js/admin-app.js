@@ -8411,6 +8411,18 @@ function marketingTab() {
         adjustPoints: 0,
         adjustNote: '',
         adjustResult: '',
+        confirm: { open: false, title: '', body: '', danger: false, _resolve: null },
+
+        openConfirm(title, body, danger = false) {
+            return new Promise(resolve => {
+                this.confirm = { open: true, title, body, danger, _resolve: resolve };
+            });
+        },
+        doConfirm(ok) {
+            const resolve = this.confirm._resolve;
+            this.confirm.open = false;
+            if (resolve) resolve(ok);
+        },
 
         async init() {
             await this.loadBlasts();
@@ -8458,7 +8470,8 @@ function marketingTab() {
         },
 
         async sendBlast(id) {
-            if (!confirm('Запустить рассылку? Действие необратимо.')) return;
+            const ok = await this.openConfirm('Запустить рассылку?', 'Сообщения уйдут получателям. Отменить отправку будет невозможно.', true);
+            if (!ok) return;
             try {
                 await fetch(`/api/admin/marketing/blasts/${id}/send`, { method: 'POST' });
                 await this.loadBlasts();
@@ -8466,7 +8479,8 @@ function marketingTab() {
         },
 
         async deleteBlast(id) {
-            if (!confirm('Удалить черновик?')) return;
+            const ok = await this.openConfirm('Удалить черновик?', 'Рассылка и список получателей будут удалены безвозвратно.');
+            if (!ok) return;
             try {
                 await fetch(`/api/admin/marketing/blasts/${id}`, { method: 'DELETE' });
                 await this.loadBlasts();

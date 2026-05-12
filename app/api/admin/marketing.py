@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -99,18 +99,26 @@ async def get_blast(
 async def send_blast(
     blast_id: int,
     request: Request,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     from app.db.models import MarketingBlast
-    from app.services.task_queue import enqueue_job
+    from app.services.marketing import run_send_blast_batch
+    from app.services.task_queue import TaskQueueEnqueueError, arq_can_run, enqueue_job
     org_id = admin_org_from_session(request)
     blast = await db.get(MarketingBlast, blast_id)
     if blast is None or int(blast.organization_id) != int(org_id):
         raise HTTPException(status_code=404, detail="Blast not found")
     if blast.status not in ("draft",):
         raise HTTPException(status_code=400, detail=f"Рассылка уже в статусе «{blast.status}»")
-    await enqueue_job("send_blast_batch", blast_id=blast_id)
-    return {"ok": True, "blast_id": blast_id}
+    if arq_can_run():
+        try:
+            await enqueue_job("send_blast_batch", blast_id=blast_id)
+            return {"ok": True, "blast_id": blast_id, "mode": "arq"}
+        except TaskQueueEnqueueError:
+            pass
+    background_tasks.add_task(run_send_blast_batch, blast_id=blast_id)
+    return {"ok": True, "blast_id": blast_id, "mode": "background"}
 
 
 @router.delete("/blasts/{blast_id}")

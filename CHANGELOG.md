@@ -6,6 +6,26 @@
 
 ## [Unreleased] — 2026-03-20
 
+### Добавлено (2026-05-15)
+
+- **AI Operations / Decision Intelligence (Phase 2):** `OperationalInsight` расширен полями `was_useful` (bool, оценка оператора) и `notes` (str, заметка) — миграция `20260515_insight_feedback`. `PATCH /insights/{id}` принимает `was_useful` и `notes`. `_insight_public` возвращает новые поля + `cause_hypotheses`, `recommended_actions`, `weekday_baseline` из payload.
+- **Temporal baselines:** `generate_revenue_order_insights` теперь сравнивает не только с duration-match периодом, но и с тем же днём предыдущей недели (weekday baseline). Результат сохраняется в `payload_json["weekday_baseline"]` с `comparison_label` (например «vs прошлый Monday»).
+- **Causal attribution (v1):** при генерации `revenue_drop`/`orders_drop` инсайтов функция `_build_cause_hypotheses` проверяет коррелирующие сигналы (high_cancellation_rate, kitchen_overload, stoplist_growth, ai_escalation_spike) → `payload_json["cause_hypotheses"]`.
+- **Linked actions:** функция `_build_recommended_actions` добавляет конкретные шаги в `payload_json["recommended_actions"]` (стоп-лист, отмены, потерянная выручка).
+- **Документация:** [`docs/AI_OPERATIONS.md`](docs/AI_OPERATIONS.md) полностью переписан: актуальный API, полная структура payload_json, разграничение Intelligence vs Analytics, temporal baseline model, causal attribution, feedback loop, roadmap Phase 3.
+
+### Добавлено (2026-05-14)
+
+- **CI / Smart test runner:** [`scripts/smart_test.py`](scripts/smart_test.py) — автоматически определяет какие файлы изменились и запускает только связанные тесты (UI → 6 тестов, payments → 8, admin API → 17, infra/db → полный прогон). `.github/workflows/ci.yml` обновлён: на PR запускается `smart_test.py --base origin/main`, на push в `main` — полный прогон. Локально: `python scripts/smart_test.py [--dry|--all|--base <ref>]`.
+
+### Исправлено (2026-05-14)
+
+- **CI / `ClearMenuBody` NameError:** при E0.1-расколе монолита из `_monolith.py` был удалён импорт `ClearMenuBody`, но endpoint `POST /settings/clear-menu-and-stop-snapshot` остался в монолите и использовал его — `NameError` при коллекции тестов. Исправлено добавлением `from .menu_schemas import ClearMenuBody` в `_monolith.py`.
+- **E0.1 / дублирующиеся маршруты:** `_monolith.py` содержал оригинальные роуты параллельно с include_router — FastAPI обслуживал monolith-версии (первая регистрация). Удалено ~4 700 строк дублей; монолит сжат до 1 199 строк. Split-роутеры зарегистрированы в `main.py` напрямую на уровне `/api`. [`app/api/admin/__init__.py`](app/api/admin/__init__.py) переключён на импорты из split-модулей (`admin_incidents`, `analytics`, `retry_failed_task`, `admin_ai_value`).
+- **Night preorder / booking orders:** добавлена явная проверка `booking_row is None` в `intent_router._handle_order()` — заказы с бронированием в зал больше не помечались `kind='night_preorder'` когда ресторан закрыт (гость едет к конкретному времени брони, а не «прямо сейчас»).
+- **UI / `.ds-segmented` высота:** контейнер `py-0.5` (4px padding) + кнопки `min-h-[44px]` давали 48px вместо целевых 44px. Исправлено: `min-h-[40px]` для кнопок → 2 + 40 + 2 = 44px в сумме.
+- **UI / scrollbar gap на Windows:** sticky-шапки вкладок (меню, заказы) использовали паттерн `-mx-*` чтобы выйти за padding контейнера. На Windows native scrollbar (14-17px) создавал белую полосу у правого края. Исправлено одной строкой CSS: `scrollbar-gutter: stable` для `#admin-content-scroll` — браузер всегда резервирует место под скроллбар.
+
 ### Добавлено (2026-05-12)
 
 - **Диалог / observability:** модуль [`app/services/conversation_state.py`](app/services/conversation_state.py), [`app/services/trace_context.py`](app/services/trace_context.py); доработки [`dialog_mgr.py`](app/services/dialog_mgr.py), [`intent_router.py`](app/services/intent_router.py), [`webhooks.py`](app/api/webhooks.py); админ-эндпоинты в [`chats.py`](app/api/admin/chats.py), [`customers.py`](app/api/admin/customers.py), [`orders.py`](app/api/admin/orders.py); документы [`docs/CONTROL_PLANE.md`](docs/CONTROL_PLANE.md), [`docs/STATE_MACHINE.md`](docs/STATE_MACHINE.md); тесты [`test_conversation_state.py`](tests/test_conversation_state.py), [`test_dialog_state_events.py`](tests/test_dialog_state_events.py); правки [`test_admin_readiness.py`](tests/test_admin_readiness.py), [`test_booking_preorder.py`](tests/test_booking_preorder.py).

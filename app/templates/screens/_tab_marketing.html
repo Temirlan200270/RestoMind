@@ -161,4 +161,41 @@
             </div>
         </template>
     </div>
+
+    <!-- Кастомная модалка подтверждения -->
+    <template x-teleport="body">
+        <div x-show="confirm.open" x-transition.opacity
+             class="fixed inset-0 z-[200] flex items-center justify-center p-4"
+             style="background:rgba(0,0,0,.45)">
+            <div @click.stop x-show="confirm.open" x-transition
+                 class="w-full max-w-sm rounded-2xl bg-white shadow-xl p-6 space-y-4">
+                <div class="flex items-start gap-3">
+                    <div class="shrink-0 w-9 h-9 rounded-full flex items-center justify-center"
+                         :class="confirm.danger ? 'bg-red-100' : 'bg-amber-100'">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5"
+                             :class="confirm.danger ? 'text-red-600' : 'text-amber-600'"
+                             fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round"
+                                  d="M12 9v3m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <p class="font-semibold text-gray-900 text-sm" x-text="confirm.title"></p>
+                        <p class="text-xs text-gray-500 mt-1 leading-relaxed" x-text="confirm.body"></p>
+                    </div>
+                </div>
+                <div class="flex justify-end gap-2 pt-1">
+                    <button type="button" @click="doConfirm(false)"
+                            class="px-4 py-2 rounded-xl border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 transition">
+                        Отмена
+                    </button>
+                    <button type="button" @click="doConfirm(true)"
+                            class="px-4 py-2 rounded-xl text-sm font-medium text-white transition"
+                            :class="confirm.danger ? 'bg-red-600 hover:bg-red-700' : 'bg-slate-800 hover:bg-slate-700'">
+                        Подтвердить
+                    </button>
+                </div>
+            </div>
+        </div>
+    </template>
 </div>

@@ -3,7 +3,6 @@ from __future__ import annotations
 import pytest
 from unittest.mock import AsyncMock
 
-from app.api.admin import _monolith as admin_api
 from app.api.admin import chats as chats_api
 from app.api.admin import orders as orders_api
 from app.api.admin import rules as rules_api

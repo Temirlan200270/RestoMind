@@ -663,6 +663,12 @@ class DeleteSingleOrderBody(BaseModel):
     confirm: bool = Field(False, description="Должно быть true")
 
 
+class RetentionRunBody(BaseModel):
+    """Разовый запуск политики ретеншна chat_logs вручную."""
+
+    confirm: bool = Field(False, description="Должно быть true")
+
+
 def _sql_delete_rowcount(res) -> int:
     n = res.rowcount
     return int(n) if n is not None and n >= 0 else 0

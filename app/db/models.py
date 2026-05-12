@@ -1113,6 +1113,8 @@ class OperationalInsight(Base):
     summary: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
     payload_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="new", server_default="new", index=True)
+    was_useful: Mapped[bool | None] = mapped_column(Boolean, nullable=True, comment="Оператор отметил инсайт полезным/бесполезным")
+    notes: Mapped[str | None] = mapped_column(String(500), nullable=True, comment="Заметка оператора при закрытии инсайта")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

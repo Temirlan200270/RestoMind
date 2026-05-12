@@ -65,6 +65,65 @@ def _period_bounds(period: str) -> tuple[datetime, datetime, datetime, datetime,
     return start, end, start - duration, start, label
 
 
+def _period_bounds_same_weekday(now: datetime | None = None) -> tuple[datetime, datetime, datetime, datetime]:
+    """Текущий день vs тот же день предыдущей недели (weekday baseline)."""
+    if now is None:
+        now = datetime.now(timezone.utc)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    elapsed = now - today_start
+    prev_week_start = today_start - timedelta(days=7)
+    return today_start, now, prev_week_start, prev_week_start + elapsed
+
+
+def _build_cause_hypotheses(
+    *,
+    cancel_rate_pct: float,
+    kitchen_load: float | None = None,
+    stoplist_count: int = 0,
+    prev_stoplist_count: int | None = None,
+    escalation_rate: float | None = None,
+) -> list[str]:
+    """Эвристические гипотезы о причинах проблем — для payload_json['cause_hypotheses']."""
+    causes: list[str] = []
+    if cancel_rate_pct > 15:
+        causes.append("high_cancellation_rate")
+    if kitchen_load is not None and kitchen_load > 80:
+        causes.append("kitchen_overload")
+    if prev_stoplist_count is not None and stoplist_count > prev_stoplist_count * 1.3:
+        causes.append("stoplist_growth")
+    if escalation_rate is not None and escalation_rate > 0.2:
+        causes.append("ai_escalation_spike")
+    return causes
+
+
+def _build_recommended_actions(
+    insight_type: str,
+    *,
+    stoplist_count: int = 0,
+    cancel_rate_pct: float = 0,
+    lost_revenue: float = 0,
+) -> list[str]:
+    """Простые текстовые рекомендации для payload_json['recommended_actions']."""
+    if insight_type == "revenue_drop":
+        actions = ["Проверить стоп-лист и наличие топовых позиций"]
+        if cancel_rate_pct > 10:
+            actions.append(f"Снизить долю отмен — сейчас {cancel_rate_pct:.0f}%, потери ~{lost_revenue:.0f} ₸")
+        if stoplist_count > 0:
+            actions.append(f"Стоп-лист: {stoplist_count} позиций — уточнить у кухни")
+        return actions
+    if insight_type == "orders_drop":
+        return [
+            "Проверить расписание работы и наличие ресурсов",
+            "Рассмотреть акцию на популярные блюда",
+        ]
+    if insight_type == "cancellations_up":
+        return [
+            "Проверить загрузку кухни и операторов",
+            f"Оценить потерянную выручку: ~{lost_revenue:.0f} ₸",
+        ]
+    return []
+
+
 def detect_language(text: str) -> str:
     t = text or ""
     if re.search(r"[а-яА-ЯёЁ]", t):
@@ -276,9 +335,64 @@ async def generate_revenue_order_insights(db: AsyncSession, org_id: int) -> list
     summary = await revenue_orders_summary(db, org_id, "today")
     ch = summary["changes"]
     cur = summary["current"]
+    lost_rev = float(summary.get("lost_revenue_estimate") or 0)
+    cancel_rate = float(cur.get("cancel_rate_pct") or 0)
+
+    # Weekday baseline — сравниваем с тем же днём прошлой недели
+    now_utc = datetime.now(timezone.utc)
+    wd_start, wd_end, wd_prev_start, wd_prev_end = _period_bounds_same_weekday(now_utc)
+    wd_start_sql = _sql_dt_for_filter(wd_start)
+    wd_end_sql = _sql_dt_for_filter(wd_end)
+    wd_prev_start_sql = _sql_dt_for_filter(wd_prev_start)
+    wd_prev_end_sql = _sql_dt_for_filter(wd_prev_end)
+    org_orders = orders_tenant_clause(org_id)
+    not_cancelled = Order.status != OrderStatus.CANCELLED.value
+
+    wd_cur = (await db.execute(
+        select(func.count(Order.id), func.coalesce(func.sum(Order.total_price), 0))
+        .where(not_cancelled, org_orders, Order.created_at >= wd_start_sql, Order.created_at < wd_end_sql)
+    )).one()
+    wd_prev = (await db.execute(
+        select(func.count(Order.id), func.coalesce(func.sum(Order.total_price), 0))
+        .where(not_cancelled, org_orders, Order.created_at >= wd_prev_start_sql, Order.created_at < wd_prev_end_sql)
+    )).one()
+    wd_rev_pct = pct_change(float(wd_cur[1] or 0), float(wd_prev[1] or 0))
+
+    # Стоп-лист (для cause_hypotheses)
+    stoplist_count = int(await db.scalar(
+        select(func.count(MenuItem.id)).where(
+            MenuItem.organization_id == org_id, MenuItem.is_available.is_(False)
+        )
+    ) or 0)
+
+    weekday_label = now_utc.strftime("%A")  # "Monday", etc.
+
     insights: list[OperationalInsight] = []
 
     def add(insight_type: str, severity: str, title: str, text: str) -> None:
+        causes = _build_cause_hypotheses(
+            cancel_rate_pct=cancel_rate,
+            stoplist_count=stoplist_count,
+        )
+        actions = _build_recommended_actions(
+            insight_type,
+            stoplist_count=stoplist_count,
+            cancel_rate_pct=cancel_rate,
+            lost_revenue=lost_rev,
+        )
+        payload = dict(summary)
+        payload["baseline_type"] = "duration_match"
+        payload["weekday_baseline"] = {
+            "baseline_type": "same_weekday_7d",
+            "comparison_label": f"vs прошлый {weekday_label}",
+            "current_revenue": round(float(wd_cur[1] or 0), 2),
+            "baseline_revenue": round(float(wd_prev[1] or 0), 2),
+            "pct_change": wd_rev_pct,
+        }
+        if causes:
+            payload["cause_hypotheses"] = causes
+        if actions:
+            payload["recommended_actions"] = actions
         insights.append(
             OperationalInsight(
                 organization_id=org_id,
@@ -286,7 +400,7 @@ async def generate_revenue_order_insights(db: AsyncSession, org_id: int) -> list
                 severity=severity,
                 title=title,
                 summary=text,
-                payload_json=summary,
+                payload_json=payload,
             )
         )
 
@@ -309,7 +423,7 @@ async def generate_revenue_order_insights(db: AsyncSession, org_id: int) -> list
             "cancellations_up",
             "critical",
             "Выросла доля отмен",
-            f"Доля отмен выросла на {ch['cancel_rate_pp']} п.п.; потерянная выручка оценивается в {summary['lost_revenue_estimate']:.0f} ₸.",
+            f"Доля отмен выросла на {ch['cancel_rate_pp']} п.п.; потерянная выручка оценивается в {lost_rev:.0f} ₸.",
         )
     if not insights:
         add(

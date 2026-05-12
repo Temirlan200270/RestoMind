@@ -5,7 +5,6 @@ from fastapi import Response
 import pytest
 
 from app.api.admin import analytics
-from app.api.admin import _monolith as admin_api
 import importlib
 analytics_module = importlib.import_module("app.api.admin.analytics")
 from app.db.models import Order, Organization, User
