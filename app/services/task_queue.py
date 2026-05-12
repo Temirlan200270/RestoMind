@@ -170,14 +170,16 @@ async def dispatch_arq_or_background(
     background_tasks: BackgroundTasks,
     **kwargs: Any,
 ) -> None:
-    """Ставит задачу в ARQ, при недоступности — запускает через BackgroundTasks."""
+    """Ставит задачу в ARQ если настроен, иначе — через BackgroundTasks.
+
+    Если ARQ настроен (arq_can_run=True) но enqueue падает — ошибка пробрасывается
+    наверх без fallback (Redis сконфигурирован, но недостижим — нужно знать об этом).
+    Fallback на BackgroundTasks работает только когда Redis вообще не настроен.
+    """
     if arq_can_run():
-        try:
-            await enqueue_job(job_name, **kwargs)
-            logger.debug("ARQ: task %s enqueued", job_name)
-            return
-        except TaskQueueEnqueueError:
-            pass
+        await enqueue_job(job_name, **kwargs)
+        logger.debug("ARQ: task %s enqueued", job_name)
+        return
 
     fn = _get_background_fn(job_name)
     if fn is None:

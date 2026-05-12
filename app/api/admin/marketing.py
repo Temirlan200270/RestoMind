@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -31,6 +33,7 @@ class BlastCreateBody(BaseModel):
     segment_type: str = Field(..., pattern="^(inactive_30d|frequent|all_active|custom)$")
     message_text: str = Field(..., min_length=5, max_length=4000)
     template_name: str | None = Field(default=None, max_length=120)
+    scheduled_for: datetime | None = Field(default=None)
 
 
 def _blast_public(blast: object) -> dict:
@@ -77,6 +80,7 @@ async def create_blast(
         segment_type=body.segment_type,
         message_text=body.message_text,
         template_name=body.template_name,
+        scheduled_for=body.scheduled_for,
     )
     return {"ok": True, "item": _blast_public(blast)}
 
@@ -121,6 +125,24 @@ async def send_blast(
     return {"ok": True, "blast_id": blast_id, "mode": "background"}
 
 
+@router.post("/blasts/{blast_id}/cancel")
+async def cancel_blast(
+    blast_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    from app.db.models import MarketingBlast
+    org_id = admin_org_from_session(request)
+    blast = await db.get(MarketingBlast, blast_id)
+    if blast is None or int(blast.organization_id) != int(org_id):
+        raise HTTPException(status_code=404, detail="Blast not found")
+    if blast.status not in ("draft", "sending"):
+        raise HTTPException(status_code=400, detail=f"Нельзя отменить рассылку в статусе «{blast.status}»")
+    blast.status = "cancelled"
+    await db.commit()
+    return {"ok": True}
+
+
 @router.delete("/blasts/{blast_id}")
 async def delete_blast(
     blast_id: int,
@@ -133,7 +155,7 @@ async def delete_blast(
     if blast is None or int(blast.organization_id) != int(org_id):
         raise HTTPException(status_code=404, detail="Blast not found")
     if blast.status == "sending":
-        raise HTTPException(status_code=400, detail="Рассылка отправляется — нельзя удалить")
+        raise HTTPException(status_code=400, detail="Рассылка отправляется — сначала отмените её")
     await db.delete(blast)
     await db.commit()
     return {"ok": True}

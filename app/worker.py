@@ -98,6 +98,11 @@ async def send_blast_batch(
     await run_send_blast_batch(blast_id=blast_id)
 
 
+async def scheduled_blasts_tick(ctx: dict[str, Any]) -> None:
+    from app.services.marketing import run_scheduled_blasts
+    await run_scheduled_blasts()
+
+
 async def iiko_stoplist_sync(
     ctx: dict[str, Any],
     *,
@@ -127,16 +132,19 @@ class WorkerSettings:
         payment_notify_customer,
         send_review_request,
         send_blast_batch,
+        scheduled_blasts_tick,
         morning_preorders_tick,
         iiko_stoplist_sync,
         iiko_menu_sync,
     ]
     # Digest: 4× в час; биллинг: суточный rollup; ночные предзаказы: каждые 5 мин.
+    # Запланированные рассылки: каждые 5 минут.
     cron_jobs = tuple(
         [
             cron(owner_digest_scheduled_tick, minute={0, 15, 30, 45}),
             cron(billing_usage_daily_scheduled_tick, hour=0, minute=12),
             cron(morning_preorders_tick, minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55}),
+            cron(scheduled_blasts_tick, minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55}),
         ]
         if cron is not None
         else [],

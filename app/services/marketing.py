@@ -81,6 +81,7 @@ async def create_blast(
     segment_type: str,
     message_text: str,
     template_name: str | None = None,
+    scheduled_for: datetime | None = None,
 ) -> Any:
     """Создаёт черновик рассылки и наполняет список получателей."""
     from app.db.models import MarketingBlast, MarketingBlastRecipient
@@ -92,6 +93,7 @@ async def create_blast(
         segment_type=segment_type,
         message_text=message_text,
         template_name=template_name,
+        scheduled_for=scheduled_for,
         status="draft",
         total_recipients=len(recipients),
     )
@@ -175,3 +177,28 @@ async def run_send_blast_batch(*, blast_id: int) -> None:
         await db.commit()
 
     logger.info("blast_id=%s done: sent=%d failed=%d", blast_id, sent, failed)
+
+
+async def run_scheduled_blasts() -> None:
+    """Cron-задача: запускает рассылки, у которых scheduled_for <= now и статус draft."""
+    from app.db.models import MarketingBlast
+    from app.db.session import async_session_factory
+
+    now = datetime.now(timezone.utc)
+    async with async_session_factory() as db:
+        from sqlalchemy import select
+        rows = (await db.execute(
+            select(MarketingBlast)
+            .where(
+                MarketingBlast.status == "draft",
+                MarketingBlast.scheduled_for.isnot(None),
+                MarketingBlast.scheduled_for <= now,
+            )
+        )).scalars().all()
+
+    for blast in rows:
+        logger.info("scheduled blast firing: blast_id=%s", blast.id)
+        try:
+            await run_send_blast_batch(blast_id=blast.id)
+        except Exception as exc:
+            logger.error("scheduled blast failed: blast_id=%s error=%s", blast.id, exc)

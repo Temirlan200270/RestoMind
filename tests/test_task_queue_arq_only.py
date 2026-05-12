@@ -1,4 +1,4 @@
-"""E5: очередь задач не имеет BackgroundTasks fallback."""
+"""E5: когда ARQ настроен — ошибка enqueue пробрасывается без BackgroundTasks fallback."""
 
 from __future__ import annotations
 
@@ -14,9 +14,11 @@ class _BackgroundTasksMustNotRun:
 
 @pytest.mark.asyncio
 async def test_dispatch_propagates_arq_error_without_background_fallback(monkeypatch) -> None:
+    """Если ARQ настроен (arq_can_run=True) но enqueue упал — ошибка пробрасывается."""
     async def _fail_enqueue(_name: str, **_kwargs) -> None:
         raise TaskQueueEnqueueError("redis unavailable")
 
+    monkeypatch.setattr("app.services.task_queue.arq_can_run", lambda: True)
     monkeypatch.setattr("app.services.task_queue.enqueue_job", _fail_enqueue)
 
     with pytest.raises(TaskQueueEnqueueError):

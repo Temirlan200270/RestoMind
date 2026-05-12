@@ -8403,7 +8403,7 @@ function marketingTab() {
         saving: false,
         formError: '',
         segmentCount: null,
-        form: { name: '', segment_type: 'inactive_30d', message_text: '', template_name: '' },
+        form: { name: '', segment_type: 'inactive_30d', message_text: '', template_name: '', scheduled_for: '' },
         loyaltyEnabled: false,
         loyaltyHistory: [],
         loyaltyBalance: 0,
@@ -8458,7 +8458,7 @@ function marketingTab() {
                     body: JSON.stringify(this.form),
                 });
                 if (r.ok) {
-                    this.form = { name: '', segment_type: 'inactive_30d', message_text: '', template_name: '' };
+                    this.form = { name: '', segment_type: 'inactive_30d', message_text: '', template_name: '', scheduled_for: '' };
                     this.segmentCount = null;
                     await this.loadBlasts();
                 } else {
@@ -8470,7 +8470,7 @@ function marketingTab() {
         },
 
         async sendBlast(id) {
-            const ok = await this.openConfirm('Запустить рассылку?', 'Сообщения уйдут получателям. Отменить отправку будет невозможно.', true);
+            const ok = await this.openConfirm('Запустить рассылку?', 'Сообщения уйдут получателям. При необходимости можно отменить кнопкой «Отменить».', true);
             if (!ok) return;
             try {
                 await fetch(`/api/admin/marketing/blasts/${id}/send`, { method: 'POST' });
@@ -8478,8 +8478,29 @@ function marketingTab() {
             } catch(e) {}
         },
 
+        async cancelBlast(id) {
+            const ok = await this.openConfirm('Отменить рассылку?', 'Отправка будет остановлена. Уже отправленные сообщения не отзываются.');
+            if (!ok) return;
+            try {
+                await fetch(`/api/admin/marketing/blasts/${id}/cancel`, { method: 'POST' });
+                await this.loadBlasts();
+            } catch(e) {}
+        },
+
+        duplicateBlast(blast) {
+            this.form = {
+                name: blast.name + ' (копия)',
+                segment_type: blast.segment_type,
+                message_text: blast.message_text,
+                template_name: blast.template_name || '',
+                scheduled_for: '',
+            };
+            this.previewSegment();
+            document.getElementById('rm-tab-marketing')?.scrollIntoView({ behavior: 'smooth' });
+        },
+
         async deleteBlast(id) {
-            const ok = await this.openConfirm('Удалить черновик?', 'Рассылка и список получателей будут удалены безвозвратно.');
+            const ok = await this.openConfirm('Удалить рассылку?', 'Рассылка и список получателей будут удалены безвозвратно.');
             if (!ok) return;
             try {
                 await fetch(`/api/admin/marketing/blasts/${id}`, { method: 'DELETE' });

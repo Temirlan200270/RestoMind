@@ -45,6 +45,24 @@
                     class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm resize-none"></textarea>
                 <p class="text-xs text-gray-400 mt-1" x-text="`${(form.message_text || '').length} / 4000`"></p>
             </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                    <label class="block text-xs font-medium text-gray-500 mb-1">
+                        WhatsApp шаблон <span class="text-gray-400">(необязательно)</span>
+                    </label>
+                    <input type="text" x-model="form.template_name" placeholder="approved_template_name"
+                        class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm font-mono">
+                    <p class="text-xs text-gray-400 mt-1">Если задан — шаблон вместо текста (нужна верификация Meta)</p>
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-500 mb-1">
+                        Запланировать на <span class="text-gray-400">(необязательно)</span>
+                    </label>
+                    <input type="datetime-local" x-model="form.scheduled_for"
+                        class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
+                    <p class="text-xs text-gray-400 mt-1">Оставьте пустым — отправка сразу</p>
+                </div>
+            </div>
             <div class="flex items-center gap-3">
                 <button type="button" @click="createBlast()"
                     :disabled="saving || !form.name || !form.message_text"
@@ -75,20 +93,32 @@
                                         'bg-emerald-100 text-emerald-700': blast.status === 'done',
                                         'bg-red-100 text-red-700': blast.status === 'cancelled',
                                     }"
-                                    x-text="blast.status"></span>
+                                    x-text="{ draft: 'Черновик', sending: 'Отправляется', done: 'Отправлено', cancelled: 'Отменено' }[blast.status] || blast.status"></span>
                             </div>
                             <p class="text-xs text-gray-400 mt-1 line-clamp-1" x-text="blast.message_text"></p>
                             <p class="text-xs text-gray-400 mt-0.5"
                                 x-text="`${blast.segment_type} · ${blast.total_recipients} получателей · отправлено: ${blast.sent_count}`">
                             </p>
+                            <p x-show="blast.scheduled_for" class="text-xs text-blue-500 mt-0.5"
+                                x-text="blast.scheduled_for ? '🕐 Запланировано: ' + new Date(blast.scheduled_for).toLocaleString('ru') : ''"></p>
                         </div>
-                        <div class="flex gap-2 shrink-0">
+                        <div class="flex gap-2 shrink-0 flex-wrap justify-end">
                             <button x-show="blast.status === 'draft'" type="button"
                                 @click="sendBlast(blast.id)"
                                 class="px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 transition">
                                 Отправить
                             </button>
-                            <button x-show="blast.status === 'draft'" type="button"
+                            <button x-show="blast.status === 'sending'" type="button"
+                                @click="cancelBlast(blast.id)"
+                                class="px-3 py-1.5 rounded-xl border border-amber-300 text-amber-700 text-xs font-medium hover:bg-amber-50 transition">
+                                Отменить
+                            </button>
+                            <button x-show="blast.status === 'done' || blast.status === 'cancelled'" type="button"
+                                @click="duplicateBlast(blast)"
+                                class="px-3 py-1.5 rounded-xl border border-gray-200 text-gray-600 text-xs font-medium hover:bg-gray-50 transition">
+                                Повторить
+                            </button>
+                            <button x-show="blast.status !== 'sending'" type="button"
                                 @click="deleteBlast(blast.id)"
                                 class="px-3 py-1.5 rounded-xl border border-red-200 text-red-600 text-xs font-medium hover:bg-red-50 transition">
                                 Удалить
