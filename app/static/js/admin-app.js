@@ -1592,6 +1592,23 @@ function adminMixinMenuOrdersUi() {
             return Number(this.incidents?.total_open || 0);
         },
 
+        /** Подзаголовок баннера: сначала первая причина из «Интеграции degraded», иначе первая группа. */
+        attentionBannerSubtitle() {
+            const a = this.attentionSummary;
+            const groups = a && Array.isArray(a.groups) ? a.groups : [];
+            const integ = groups.find((g) => g && g.id === 'integrations_degraded');
+            if (integ && Array.isArray(integ.items) && integ.items.length) {
+                const t = integ.items[0].title;
+                if (t) return String(t);
+            }
+            const first = groups[0];
+            if (first && Array.isArray(first.items) && first.items.length) {
+                const t = first.items[0].title;
+                if (t) return String(t);
+            }
+            return first && first.title ? String(first.title) : '';
+        },
+
         /** Бейдж пункта «Требует внимания»: открытые задачи помощи + открытые инциденты. */
         inboxTotalOpen() {
             return Number(this.dashStats?.failed_tasks_open || 0) + this.incidentsTotalOpen();
@@ -4473,17 +4490,39 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                 }
                 const ev = await this.apiJsonResponse('/api/admin/integrations/events?limit=40');
                 if (ev.ok) this.integrationEvents = ev.data.events || [];
-                const mOk = data.menu && data.menu.ok;
-                const sOk = data.stop_lists && data.stop_lists.ok;
-                adminLogger.info('[admin] синхронизация iiko', { menu: data.menu, stop_lists: data.stop_lists });
-                if (mOk && sOk) {
-                    this.flashToast('Меню и стоп-листы обновлены из iiko', 'success', 5500);
-                } else if (mOk && !sOk) {
-                    this.flashToast('Меню обновлено; стоп-листы: ошибка (см. журнал ниже)', 'warning', 5500);
-                } else if (!mOk && sOk) {
-                    this.flashToast('Стоп-листы обновлены; меню: ошибка (см. журнал)', 'warning', 5500);
+                if (data.mode === 'background' || data.menu?.pending === true) {
+                    adminLogger.info('[admin] синхронизация iiko в фоне', data);
+                    this.flashToast(
+                        'Синхронизация iiko запущена в фоне. Статус и журнал обновятся через несколько секунд.',
+                        'info',
+                        6500,
+                    );
+                    setTimeout(async () => {
+                        try {
+                            await this.loadIntegrationStatus();
+                            const ev2 = await this.apiJsonResponse('/api/admin/integrations/events?limit=40');
+                            if (ev2.ok) this.integrationEvents = ev2.data.events || [];
+                            this.menuViewRevision += 1;
+                            await this.loadMenu();
+                            if (this.currentTab === 'menu' && this.menuView === 'stoplist') await this.loadStopList();
+                            await this.loadSetupStatus();
+                        } catch (e) {
+                            adminLogger.error('[admin] отложенное обновление после sync', e);
+                        }
+                    }, 5000);
                 } else {
-                    this.flashToast('Синхронизация завершена с предупреждениями — см. журнал', 'warning', 5500);
+                    const mOk = data.menu && data.menu.ok;
+                    const sOk = data.stop_lists && data.stop_lists.ok;
+                    adminLogger.info('[admin] синхронизация iiko', { menu: data.menu, stop_lists: data.stop_lists });
+                    if (mOk && sOk) {
+                        this.flashToast('Меню и стоп-листы обновлены из iiko', 'success', 5500);
+                    } else if (mOk && !sOk) {
+                        this.flashToast('Меню обновлено; стоп-листы: ошибка (см. журнал ниже)', 'warning', 5500);
+                    } else if (!mOk && sOk) {
+                        this.flashToast('Стоп-листы обновлены; меню: ошибка (см. журнал)', 'warning', 5500);
+                    } else {
+                        this.flashToast('Синхронизация завершена с предупреждениями — см. журнал', 'warning', 5500);
+                    }
                 }
                 this.menuViewRevision += 1;
                 await this.loadMenu();

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import delete as sql_delete
 from sqlalchemy import func, or_, select
@@ -21,6 +21,7 @@ from app.services.integration_health import (
     record_stoplist_sync,
 )
 from app.services.iiko_onboarding import setup_organization_iiko, verify_iiko_api_login
+from app.services.iiko_sync_tasks import run_full_iiko_sync_for_org
 from app.services.menu_embeddings import reindex_organization_menu_embeddings
 from app.services.menu_sync import sync_menu_from_iiko, sync_stop_lists
 from app.services.org_iiko import resolve_org_iiko_credentials
@@ -452,10 +453,13 @@ async def setup_status(request: Request, db: AsyncSession = Depends(get_db)) -> 
 @router.post("/integrations/sync")
 async def integrations_sync_now(
     request: Request,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """
-    Принудительно: номенклатура + стоп-листы из iiko (настройки филиала или .env).
+    Запуск полной синхронизации меню + стоп-листов iiko в фоне (не блокирует HTTP-запрос).
+
+    Результат пишется в слоты last_* и журнал интеграций; UI обновляет статус опросом / WS.
     """
     org_id = admin_org_from_session(request)
     creds = await resolve_org_iiko_credentials(db, org_id)
@@ -465,79 +469,19 @@ async def integrations_sync_now(
             detail="Настройте iiko для филиала (ключ и организация) или задайте IIKO_* в .env",
         )
 
-    menu_block: dict = {"ok": False, "stats": None, "error": None}
-    stop_block: dict = {"ok": False, "stats": None, "error": None}
-
-    try:
-        stats_m = await sync_menu_from_iiko(
-            db,
-            creds.api_login,
-            creds.iiko_organization_id,
-            restomind_organization_id=org_id,
-        )
-        invalidate_menu_context_cache(org_id)
-        menu_block = {"ok": True, "stats": stats_m, "error": None}
-        sk = stats_m.get("skipped")
-        detail_m = (
-            f"Синхронизация меню: успешно "
-            f"(всего {stats_m.get('total', 0)}, новых {stats_m.get('created', 0)}, обновлено {stats_m.get('updated', 0)}"
-            + (f", пропущено {sk}" if sk else "")
-            + ")"
-        )
-        await record_menu_sync(db, True, None, detail=detail_m, organization_id=org_id)
-    except Exception as exc:
-        err = str(exc)
-        logger.error("Ручная синхронизация меню iiko: %s", exc, exc_info=True)
-        menu_block = {"ok": False, "stats": None, "error": err}
-        await record_menu_sync(
-            db, False, err, detail=f"Синхронизация меню: ошибка — {err[:400]}", organization_id=org_id,
-        )
-
-    try:
-        stats_s = await sync_stop_lists(
-            db,
-            creds.api_login,
-            creds.iiko_organization_id,
-            terminal_group_id=creds.terminal_group_id or None,
-            menu_organization_id=org_id,
-        )
-        stop_block = {"ok": True, "stats": stats_s, "error": None}
-        detail_s = (
-            f"Стоп-листы: успешно "
-            f"(в стопе: {stats_s.get('stopped', 0)}, восстановлено: {stats_s.get('restored', 0)})"
-        )
-        await record_stoplist_sync(db, True, None, detail=detail_s, organization_id=org_id)
-    except Exception as exc:
-        err = str(exc)
-        logger.error("Ручная синхронизация стоп-листов iiko: %s", exc, exc_info=True)
-        stop_block = {"ok": False, "stats": None, "error": err}
-        await record_stoplist_sync(
-            db, False, err, detail=f"Стоп-листы: ошибка — {err[:400]}", organization_id=org_id,
-        )
-
-    if not menu_block["ok"] and not stop_block["ok"]:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Меню: {menu_block['error']}; стоп-листы: {stop_block['error']}",
-        )
-
+    background_tasks.add_task(run_full_iiko_sync_for_org, int(org_id))
     snap = await build_status_payload(
         db,
         organization_id=int(org_id),
         iiko_configured=await _iiko_effective_configured(db, org_id),
         whatsapp_configured=_whatsapp_env_configured(),
     )
-    logger.info(
-        "Ручная синхронизация iiko завершена: меню ok=%s %s; стоп-листы ok=%s %s",
-        menu_block["ok"],
-        menu_block.get("stats") or menu_block.get("error"),
-        stop_block["ok"],
-        stop_block.get("stats") or stop_block.get("error"),
-    )
+    logger.info("Ручная синхронизация iiko поставлена в фон: org_id=%s", org_id)
     return {
         "ok": True,
-        "menu": menu_block,
-        "stop_lists": stop_block,
+        "mode": "background",
+        "menu": {"ok": None, "stats": None, "error": None, "pending": True},
+        "stop_lists": {"ok": None, "stats": None, "error": None, "pending": True},
         "status": snap,
     }
 

@@ -14,11 +14,17 @@
                     </svg>
                     <span class="text-xs font-semibold"
                         :class="(attentionSummary?.summary?.critical || 0) > 0 ? 'text-red-800' : 'text-amber-800'">
-                        Системные предупреждения:
                         <span x-text="incidentsTotalOpen()"></span>
                         <template x-if="(attentionSummary?.summary?.critical || 0) > 0">
-                            <span> · критических: <span x-text="attentionSummary.summary.critical"></span></span>
+                            <span> критических</span>
                         </template>
+                        <template x-if="!(attentionSummary?.summary?.critical > 0)">
+                            <span> предупреждени<span x-text="incidentsTotalOpen() === 1 ? 'е' : 'я'"></span></span>
+                        </template>
+                    </span>
+                    <span class="text-xs opacity-60 truncate max-w-[min(72vw,420px)]"
+                        :class="(attentionSummary?.summary?.critical || 0) > 0 ? 'text-red-700' : 'text-amber-700'"
+                        x-text="attentionBannerSubtitle()">
                     </span>
                 </div>
                 <div class="flex items-center gap-2 shrink-0">

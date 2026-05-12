@@ -158,8 +158,14 @@ async def delete_blast(
         raise HTTPException(status_code=404, detail="Blast not found")
     if blast.status == "sending":
         raise HTTPException(status_code=400, detail="Рассылка отправляется — сначала отмените её")
+    # Только Core DELETE: ORM delete(MarketingBlast) мог выставлять blast_id=NULL у recipients во flush.
     await db.execute(sa_delete(MarketingBlastRecipient).where(MarketingBlastRecipient.blast_id == blast_id))
-    await db.delete(blast)
+    await db.execute(
+        sa_delete(MarketingBlast).where(
+            MarketingBlast.id == blast_id,
+            MarketingBlast.organization_id == org_id,
+        ),
+    )
     await db.commit()
     return {"ok": True}
 

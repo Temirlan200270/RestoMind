@@ -122,3 +122,9 @@ async def run_menu_sync(org_id: int) -> dict[str, Any]:
 
     logger.info("run_menu_sync org_id=%s ok=%s stats=%s", org_id, ok, stats)
     return {"ok": ok, "error": error, "stats": stats, "org_id": org_id}
+
+
+async def run_full_iiko_sync_for_org(org_id: int) -> None:
+    """Полная ручная синхронизация: номенклатура, затем стоп-листы (для BackgroundTasks)."""
+    await run_menu_sync(org_id)
+    await run_stoplist_sync(org_id)

@@ -6,6 +6,12 @@
 
 ## [Unreleased] — 2026-03-20
 
+### Исправлено (2026-05-12)
+
+- **Маркетинг / DELETE рассылки:** удаление `MarketingBlast` через ORM вызывало `UPDATE marketing_blast_recipients SET blast_id=NULL` и падало по NOT NULL. Теперь оба шага — только Core `DELETE` (сначала получатели, затем кампания) с фильтром по `organization_id`.
+- **Интеграции / ручной sync:** `POST /api/admin/integrations/sync` ставит в очередь `BackgroundTasks` полную синхронизацию меню + стоп-листов (`run_full_iiko_sync_for_org`), ответ сразу возвращает текущий `status` и `mode: background` без долгого HTTP.
+- **Админка / баннер внимания:** подсказка рядом со счётчиком берёт первую причину из группы `integrations_degraded`, а не из первой группы списка.
+
 ### Добавлено (2026-05-15)
 
 - **AI Operations / Decision Intelligence (Phase 2):** `OperationalInsight` расширен полями `was_useful` (bool, оценка оператора) и `notes` (str, заметка) — миграция `20260515_insight_feedback`. `PATCH /insights/{id}` принимает `was_useful` и `notes`. `_insight_public` возвращает новые поля + `cause_hypotheses`, `recommended_actions`, `weekday_baseline` из payload.

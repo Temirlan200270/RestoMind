@@ -496,19 +496,30 @@ async def admin_incidents(
                 "target": {"tab": "settings", "settings_tab": "connections"},
             },
         )
+    _sync_grace = timedelta(hours=2)
     for key, title in (("last_menu_sync", "Синхронизация меню iiko"), ("last_stoplist", "Синхронизация стоп-листа iiko")):
         slot = integ.get(key) if isinstance(integ, dict) else None
-        if slot and slot.get("at") and not slot.get("ok"):
-            integration_items.append(
-                {
-                    "id": f"integration:{key}",
-                    "title": title,
-                    "subtitle": "Последняя синхронизация завершилась ошибкой.",
-                    "detail": _incident_short_text(slot.get("error") or "Ошибка без текста"),
-                    "created_at": slot.get("at"),
-                    "target": {"tab": "settings", "settings_tab": "connections"},
-                },
-            )
+        if not slot or not slot.get("at") or slot.get("ok"):
+            continue
+        try:
+            slot_at = datetime.fromisoformat(slot["at"])
+            if slot_at.tzinfo is None:
+                slot_at = slot_at.replace(tzinfo=timezone.utc)
+        except (ValueError, TypeError):
+            slot_at = None
+        if slot_at and (now_utc - slot_at) > _sync_grace:
+            # Ошибка старше 2 часов — скорее всего воркер не запущен, не падаем в degraded
+            continue
+        integration_items.append(
+            {
+                "id": f"integration:{key}",
+                "title": title,
+                "subtitle": "Последняя синхронизация завершилась ошибкой.",
+                "detail": _incident_short_text(slot.get("error") or "Ошибка без текста"),
+                "created_at": slot.get("at"),
+                "target": {"tab": "settings", "settings_tab": "connections"},
+            },
+        )
     if not integ.get("whatsapp_configured"):
         integration_items.append(
             {
