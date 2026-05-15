@@ -229,7 +229,7 @@
                         @click="uiConfirmTryFormatJson()"
                         :disabled="uiConfirmSubmitting"
                         class="mr-auto py-2.5 px-4 rounded-xl border border-gray-200 text-gray-700 font-semibold text-sm hover:bg-gray-50 disabled:opacity-50">
-                        Форматировать JSON
+                        Отформатировать
                     </button>
                     <button type="button" x-show="uiConfirmShowCancel"
                         @click="uiConfirmCancel()"
@@ -499,7 +499,7 @@
                                     </button>
                                     <button type="button" x-show="!orderCompositionOpen" @click="openOrderCompositionJsonModal()"
                                         class="text-xs font-semibold px-3 py-1.5 rounded-lg border border-brand-200 text-brand-800 bg-white hover:bg-brand-50 shadow-sm">
-                                        JSON…
+                                        Состав…
                                     </button>
                                     <button type="button" x-show="orderCompositionOpen" @click="closeOrderCompositionEditor()"
                                         class="text-xs font-semibold px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50">

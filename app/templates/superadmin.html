@@ -23,7 +23,7 @@
     <section class="rounded-2xl bg-white border border-slate-200 shadow-sm p-5 mb-6">
         <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-4">
             <div>
-                <h2 class="text-lg font-bold text-slate-900">Аудит платежных webhook</h2>
+                <h2 class="text-lg font-bold text-slate-900">Аудит платёжных уведомлений</h2>
                 <p class="text-sm text-slate-500">Только чтение: входящие события, верификация и результат применения.</p>
             </div>
             <div class="flex flex-wrap items-center gap-2">
@@ -32,8 +32,8 @@
                 <select x-model="webhookFilter.applied" @change="loadWebhookEvents()"
                     class="rounded-lg border border-slate-200 px-3 py-2 text-sm bg-white">
                     <option value="">Все</option>
-                    <option value="true">Applied</option>
-                    <option value="false">Not applied</option>
+                    <option value="true">Принято</option>
+                    <option value="false">Не принято</option>
                 </select>
                 <button type="button" @click="loadWebhookEvents()"
                     class="px-3 py-2 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Обновить</button>
@@ -79,7 +79,7 @@
                                 <template x-if="ev.has_payload">
                                     <a :href="'/api/superadmin/payment-webhook-events/' + ev.id + '/payload.bin'" 
                                        download title="Скачать исходные данные"
-                                       aria-label="Скачать сырой payload webhook"
+                                       aria-label="Скачать исходные данные"
                                        class="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-brand-600 transition">
                                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
                                     </a>
@@ -129,10 +129,10 @@
                     </div>
                     <div>
                         <div class="flex items-center justify-between mb-1">
-                            <div class="text-xs font-semibold text-slate-500">Исходные данные (payload)</div>
+                            <div class="text-xs font-semibold text-slate-500">Исходные данные</div>
                             <template x-if="selectedWebhookEvent.payload_text || selectedWebhookEvent.payload_bytes_base64">
                                 <a :href="'/api/superadmin/payment-webhook-events/' + selectedWebhookEvent.id + '/payload.bin'" 
-                                   download class="text-[11px] font-bold text-brand-600 hover:text-brand-700">Скачать raw payload (.bin)</a>
+                                   download class="text-[11px] font-bold text-brand-600 hover:text-brand-700">Скачать (.bin)</a>
                             </template>
                             <template x-if="!(selectedWebhookEvent.payload_text || selectedWebhookEvent.payload_bytes_base64)">
                                 <span class="text-[11px] font-bold text-slate-300 cursor-not-allowed">Данные отсутствуют</span>
@@ -276,6 +276,37 @@
         </div>
     </section>
 
+    <section class="rounded-2xl bg-white border border-slate-200 shadow-sm p-5 mt-6">
+        <div class="flex items-center justify-between gap-3 mb-4">
+            <div>
+                <h2 class="text-lg font-bold text-slate-900">Токены ИИ сегодня</h2>
+                <p class="text-sm text-slate-500" x-text="aiUsageDate ? 'Дата: ' + aiUsageDate : ''"></p>
+            </div>
+            <button type="button" @click="loadAiUsage()" class="px-3 py-2 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Обновить</button>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead class="text-slate-500">
+                <tr class="border-b border-slate-200">
+                    <th class="text-left py-2">Ресторан</th>
+                    <th class="text-right py-2">Токены</th>
+                </tr>
+                </thead>
+                <tbody>
+                <template x-for="row in aiUsage" :key="row.org_id">
+                    <tr class="border-b border-slate-100">
+                        <td class="py-2 font-medium text-slate-900" x-text="row.org_name"></td>
+                        <td class="py-2 text-right font-mono text-slate-700" x-text="row.tokens.toLocaleString('ru-RU')"></td>
+                    </tr>
+                </template>
+                <tr x-show="!aiUsage.length">
+                    <td colspan="2" class="py-6 text-center text-slate-400">Данных за сегодня пока нет.</td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
     <div x-show="scheduleEditorOpen" x-cloak class="fixed inset-0 z-[120] bg-black/40 backdrop-blur-sm p-4 flex items-center justify-center" @click.self="closeScheduleEditor()">
         <div class="w-full max-w-3xl rounded-2xl bg-white border border-slate-200 shadow-2xl overflow-hidden" role="dialog" aria-modal="true" aria-labelledby="superadmin-schedule-editor-title">
             <div class="px-5 py-4 border-b border-slate-200 flex items-center justify-between gap-3">
@@ -371,6 +402,8 @@ function superAdminPage() {
         toast: '',
         organizations: [],
         requests: [],
+        aiUsage: [],
+        aiUsageDate: '',
         webhookEvents: [],
         webhookEventsLoading: false,
         selectedWebhookEvent: null,
@@ -401,7 +434,7 @@ function superAdminPage() {
         async init() {
             const ok = await this.guard();
             if (!ok) return;
-            await Promise.all([this.loadRequests(), this.loadOrganizations(), this.loadWebhookEvents()]);
+            await Promise.all([this.loadRequests(), this.loadOrganizations(), this.loadWebhookEvents(), this.loadAiUsage()]);
         },
         fmtDate(iso) {
             if (!iso) return '—';
@@ -461,6 +494,15 @@ function superAdminPage() {
                 this.organizations = (await this.api('/api/superadmin/organizations')).items || [];
             } catch (e) {
                 this.error = e.message || 'Не удалось загрузить организации';
+            }
+        },
+        async loadAiUsage() {
+            try {
+                const data = await this.api('/api/superadmin/ai-usage');
+                this.aiUsage = data.items || [];
+                this.aiUsageDate = data.date || '';
+            } catch (e) {
+                this.error = e.message || 'Не удалось загрузить данные токенов';
             }
         },
         async loadWebhookEvents() {

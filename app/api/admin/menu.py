@@ -419,23 +419,6 @@ async def setup_status(request: Request, db: AsyncSession = Depends(get_db)) -> 
     ]
     score = int(round(100 * sum(1 for s in steps if s["done"]) / max(len(steps), 1)))
 
-    # Токены за сегодня
-    from datetime import date as _date
-    from sqlalchemy import select as _sel
-    tokens_today: int | None = None
-    try:
-        from app.db.models import AiUsageLog
-        today = _date.today()
-        tok_row = await db.scalar(
-            _sel(AiUsageLog.total_tokens).where(
-                AiUsageLog.organization_id == org_id,
-                AiUsageLog.day == today,
-            )
-        )
-        tokens_today = int(tok_row) if tok_row is not None else 0
-    except Exception:
-        pass
-
     return {
         "score": score,
         "steps": steps,
@@ -443,7 +426,6 @@ async def setup_status(request: Request, db: AsyncSession = Depends(get_db)) -> 
         "packaging_rules": packaging_n,
         "upsell_rules": rules_n,
         "knowledge_items": kb_n,
-        "tokens_today": tokens_today,
     }
 
 

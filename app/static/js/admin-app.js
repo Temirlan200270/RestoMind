@@ -926,7 +926,7 @@ function adminMixinState() {
         integrationSyncLoading: false,
         integrationEvents: [],
         /** Онбординг (GET /api/admin/setup-status). */
-        setupStatus: { score: 0, steps: [], menu_items: 0, upsell_rules: 0, packaging_rules: 0, knowledge_items: 0, tokens_today: null },
+        setupStatus: { score: 0, steps: [], menu_items: 0, upsell_rules: 0, packaging_rules: 0, knowledge_items: 0 },
         iikoOnboardApiLogin: '',
         iikoOnboardOrgs: [],
         iikoOnboardSelectedOrg: '',
@@ -3160,11 +3160,13 @@ function adminMixinAuthKnowledge() {
                 this.staffRole = me.role;
                 this.isSuperadmin = me.is_superadmin;
 
-                await this.loadOrgProfile();
                 this.connectWebSocket();
-                await this.loadTabData();
-                await this.loadIntegrationStatus();
-                await this.loadChatList();
+                await Promise.all([
+                    this.loadOrgProfile(),
+                    this.loadTabData(),
+                    this.loadIntegrationStatus(),
+                    this.loadChatList(),
+                ]);
                 this.setToast('Филиал переключен');
             } catch (e) {
                 adminLogger.error('[admin] selectOrganization', e);
@@ -3202,12 +3204,14 @@ function adminMixinAuthKnowledge() {
                         this._applyParsedHash(parsed);
                     }
                     this._installAdminHashWatch();
-                    await this.refreshDemoStatus();
-                    await this.loadOrgProfile();
                     this.connectWebSocket();
-                    await this.loadTabData();
-                    await this.loadIntegrationStatus();
-                    await this.loadChatList();
+                    await Promise.all([
+                        this.refreshDemoStatus(),
+                        this.loadOrgProfile(),
+                        this.loadTabData(),
+                        this.loadIntegrationStatus(),
+                        this.loadChatList(),
+                    ]);
                     await this._consumePendingHashChatPhone();
                     this.$nextTick(() => this.maybeStartP15CoachTour());
                 } else {
@@ -3260,12 +3264,14 @@ function adminMixinAuthKnowledge() {
                     this._applyParsedHash(parsedLogin);
                 }
                 this._installAdminHashWatch();
-                await this.refreshDemoStatus();
-                await this.loadOrgProfile();
                 this.connectWebSocket();
-                await this.loadTabData();
-                await this.loadIntegrationStatus();
-                await this.loadChatList();
+                await Promise.all([
+                    this.refreshDemoStatus(),
+                    this.loadOrgProfile(),
+                    this.loadTabData(),
+                    this.loadIntegrationStatus(),
+                    this.loadChatList(),
+                ]);
                 await this._consumePendingHashChatPhone();
                 this.$nextTick(() => this.maybeStartP15CoachTour());
             } catch {
@@ -3304,12 +3310,14 @@ function adminMixinAuthKnowledge() {
                     this._applyParsedHash(parsedLogin);
                 }
                 this._installAdminHashWatch();
-                await this.refreshDemoStatus();
-                await this.loadOrgProfile();
                 this.connectWebSocket();
-                await this.loadTabData();
-                await this.loadIntegrationStatus();
-                await this.loadChatList();
+                await Promise.all([
+                    this.refreshDemoStatus(),
+                    this.loadOrgProfile(),
+                    this.loadTabData(),
+                    this.loadIntegrationStatus(),
+                    this.loadChatList(),
+                ]);
                 await this._consumePendingHashChatPhone();
             } catch {
                 this.loginError = 'Не удалось связаться с сервером';
@@ -4301,7 +4309,6 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                         upsell_rules: Number(r.data.upsell_rules) || 0,
                         packaging_rules: Number(r.data.packaging_rules) || 0,
                         knowledge_items: Number(r.data.knowledge_items) || 0,
-                        tokens_today: r.data.tokens_today != null ? Number(r.data.tokens_today) : null,
                     };
                     const sc = Number(this.setupStatus.score ?? 0);
                     if (sc >= 60) this.setupProgressExpanded = false;
@@ -4316,11 +4323,13 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
 
         async loadIntegrationStatus() {
             try {
-                const st = await this.apiJsonResponse('/api/admin/integrations/status');
+                const [st, ev] = await Promise.all([
+                    this.apiJsonResponse('/api/admin/integrations/status'),
+                    this.apiJsonResponse('/api/admin/integrations/events?limit=40'),
+                    this.loadSetupStatus(),
+                ]);
                 if (st.ok) this.mergeIntegrationStatus(st.data);
-                const ev = await this.apiJsonResponse('/api/admin/integrations/events?limit=40');
                 if (ev.ok) this.integrationEvents = ev.data.events || [];
-                await this.loadSetupStatus();
             } catch { /* ignore */ }
         },
 

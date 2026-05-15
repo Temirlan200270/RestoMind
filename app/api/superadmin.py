@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.admin import require_admin_session
 from app.core.config import settings
 from app.core.passwords import hash_password
-from app.db.models import Order, Organization, PaymentWebhookEvent, RegistrationRequest, StaffRole, StaffUser, Tenant
+from app.db.models import AiUsageLog, Order, Organization, PaymentWebhookEvent, RegistrationRequest, StaffRole, StaffUser, Tenant
 from app.db.session import get_db
 from app.services.integration_health import record_menu_sync
 from app.services.menu_sync import sync_menu_from_iiko
@@ -612,6 +612,29 @@ async def superadmin_payment_webhook_event_detail(
 
 
 # ── E1 хвост ── сырой payload для отладки (кнопка в superadmin.html)
+
+
+@router.get("/ai-usage")
+async def superadmin_ai_usage(
+    _staff: StaffUser = Depends(require_superadmin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Токены ИИ за сегодня по всем организациям."""
+    from datetime import date
+    today = date.today()
+    rows = (await db.execute(
+        select(Organization.id, Organization.name, AiUsageLog.total_tokens)
+        .outerjoin(AiUsageLog, (AiUsageLog.organization_id == Organization.id) & (AiUsageLog.day == today))
+        .where(Organization.is_active.is_(True))
+        .order_by(AiUsageLog.total_tokens.desc().nulls_last(), Organization.name)
+    )).all()
+    return {
+        "date": today.isoformat(),
+        "items": [
+            {"org_id": r[0], "org_name": r[1], "tokens": int(r[2]) if r[2] is not None else 0}
+            for r in rows
+        ],
+    }
 
 
 @router.get("/payment-webhook-events/{event_id}/payload.bin")

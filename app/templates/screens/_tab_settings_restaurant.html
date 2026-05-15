@@ -67,9 +67,9 @@
                         </div>
                         <div class="md:col-span-2">
                             <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Telegram: чат персонала (chat_id)</label>
-                            <input type="text" x-model="orgProfile.telegram_ops_chat_id" placeholder="-1001234567890 или числовой id"
+                            <input type="text" x-model="orgProfile.telegram_ops_chat_id" placeholder="-1001234567890 или числовой идентификатор"
                                 class="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm bg-white font-mono">
-                            <p class="text-xs text-gray-500 mt-1.5">SOS при эскалации и сбое AI уходит в этот чат. Пусто — используется <code class="bg-gray-100 text-slate-700 px-1 rounded">TELEGRAM_ADMIN_CHAT_ID</code> из сервера. Нужен <code class="bg-gray-100 text-slate-700 px-1 rounded">TELEGRAM_BOT_TOKEN</code> в окружении и чтобы бот был в группе.</p>
+                            <p class="text-xs text-gray-500 mt-1.5">SOS при эскалации и сбое ИИ-помощника уходит в этот чат. Пусто — используется <code class="bg-gray-100 text-slate-700 px-1 rounded">TELEGRAM_ADMIN_CHAT_ID</code> из сервера. Нужен <code class="bg-gray-100 text-slate-700 px-1 rounded">TELEGRAM_BOT_TOKEN</code> в окружении и чтобы бот был в группе.</p>
                         </div>
                         <div class="md:col-span-2">
                             <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Ссылка на 2GIS для отзывов</label>
@@ -184,7 +184,7 @@
                         <div class="p-5 border-b border-gray-100 flex items-center justify-between shrink-0">
                             <div>
                                 <h3 id="schedule-editor-modal-title" class="font-bold text-gray-900">График работы</h3>
-                                <p class="text-xs text-gray-500">Владелец не видит JSON — только понятные поля.</p>
+                                <p class="text-xs text-gray-500">Владелец видит только понятные поля.</p>
                             </div>
                             <div class="flex items-center gap-2">
                                 <button type="button" @click="applyMondayToWeek()"
@@ -769,7 +769,7 @@
                                         </select>
                                     </div>
                                     <div>
-                                        <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Callback URL (webhook)</label>
+                                        <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">URL уведомления об оплате</label>
                                         <input type="url" x-model="form.callback_url" placeholder="https://your-domain.com/api/webhooks/payment/providers/freedom_pay"
                                             class="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm bg-white font-mono">
                                     </div>

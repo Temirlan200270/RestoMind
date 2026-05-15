@@ -1830,6 +1830,8 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks) -
             if not phone:
                 continue
 
+            logger.debug("[WA webhook] raw from=%r len=%d", phone, len(phone))
+
             if message_id and await redis_whatsapp_inbound_done_cache_hit(message_id):
                 logger.info(
                     "Дубликат WhatsApp message_id=%s от %s (redis после done) — пропущен",
