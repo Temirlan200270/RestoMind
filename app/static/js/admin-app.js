@@ -4785,26 +4785,29 @@ function adminMixinWebSocketEvents() {
                 adminLogger.debug('[WS] Socket open, ждём ws_ready…');
             };
 
-            this.ws.onclose = () => {
+            this.ws.onclose = (ev) => {
                 this._clearWsReadyTimer();
                 this.wsChannelReady = false;
                 this.ws = null;
                 this.wsEpoch++;
-                // Важно для диагностики: если сервер закрывает до accept(), браузер пишет
-                // "WebSocket is closed before the connection is established" без деталей.
-                // CloseEvent.code/reason помогают отличить Unauthorized (4003) от сетевых проблем.
-                try {
-                    const ev = arguments && arguments.length ? arguments[0] : null;
-                    const code = ev && typeof ev.code === 'number' ? ev.code : null;
-                    const reason = ev && typeof ev.reason === 'string' ? ev.reason : '';
-                    if (code != null) {
-                        adminLogger.warn(`[WS] Disconnected code=${code}${reason ? ` reason="${reason}"` : ''}`);
-                    } else {
-                        adminLogger.debug('[WS] Disconnected');
-                    }
-                } catch (_e) {
+
+                const code = ev && typeof ev.code === 'number' ? ev.code : null;
+                const reason = ev && typeof ev.reason === 'string' ? ev.reason : '';
+                if (code != null) {
+                    adminLogger.warn(`[WS] Disconnected code=${code}${reason ? ` reason="${reason}"` : ''}`);
+                } else {
                     adminLogger.debug('[WS] Disconnected');
                 }
+
+                // Если ошибка авторизации (4003) — токен протух, нужно обновить через checkSession
+                if (code === 4003) {
+                    adminLogger.info('[WS] Unauthorized (4003), refreshing token via checkSession...');
+                    this.checkSession().then(() => {
+                        this.scheduleReconnect();
+                    });
+                    return;
+                }
+
                 this.scheduleReconnect();
             };
 
@@ -4828,7 +4831,6 @@ function adminMixinWebSocketEvents() {
             this._wsReconnectTimer = setTimeout(() => {
                 this._wsReconnectTimer = null;
                 if (!this.authenticated) return;
-                this.wsEpoch++;
                 this.wsReconnectDelay = Math.min(this.wsReconnectDelay * 1.5, 15000);
                 this.connectWebSocket();
             }, this.wsReconnectDelay);
@@ -8491,10 +8493,14 @@ function marketingTab() {
             }
             this.saving = true;
             try {
+                const payload = { ...this.form };
+                if (!payload.scheduled_for) payload.scheduled_for = null;
+                if (!payload.template_name) payload.template_name = null;
+
                 const r = await fetch('/api/admin/marketing/blasts', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(this.form),
+                    body: JSON.stringify(payload),
                 });
                 if (r.ok) {
                     this.form = { name: '', segment_type: 'inactive_30d', message_text: '', template_name: '', scheduled_for: '' };

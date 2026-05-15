@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,6 +35,13 @@ class BlastCreateBody(BaseModel):
     message_text: str = Field(..., min_length=5, max_length=4000)
     template_name: str | None = Field(default=None, max_length=120)
     scheduled_for: datetime | None = Field(default=None)
+
+    @field_validator("template_name", "scheduled_for", mode="before")
+    @classmethod
+    def empty_str_to_none(cls, v: Any) -> Any:
+        if v == "":
+            return None
+        return v
 
 
 def _blast_public(blast: object) -> dict:
