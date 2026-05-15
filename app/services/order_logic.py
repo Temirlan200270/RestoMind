@@ -864,13 +864,23 @@ def build_menu_context(db_items: list[MenuItem]) -> str:
     return "\n".join(lines)
 
 
-# org_id → (context_str, timestamp); invalidated on menu edit or after TTL.
-_menu_ctx_cache: dict[int, tuple[str, float]] = {}
+# org_id или "org_id:category_hint" → (context_str, timestamp)
+_menu_ctx_cache: dict[str, tuple[str, float]] = {}
 _MENU_CTX_TTL = 90.0  # seconds
+
+# Категории, которые всегда включаются в полный контекст при smart filter (upsell-кандидаты)
+_SMART_UPSELL_CAT_HINTS = ("напит", "кофе", "чай", "бар", "сок", "десерт", "выпечк", "соус")
+
+
+def _menu_cache_key(org_id: int, category_hint: str | None) -> str:
+    return str(org_id) if not category_hint else f"{org_id}:{category_hint.lower()}"
 
 
 def invalidate_menu_context_cache(organization_id: int) -> None:
-    _menu_ctx_cache.pop(organization_id, None)
+    prefix = str(organization_id)
+    keys_to_remove = [k for k in list(_menu_ctx_cache) if k == prefix or k.startswith(f"{prefix}:")]
+    for k in keys_to_remove:
+        _menu_ctx_cache.pop(k, None)
     try:
         import asyncio
 
@@ -882,24 +892,117 @@ def invalidate_menu_context_cache(organization_id: int) -> None:
         pass
 
 
+def detect_category_hint(message: str, menu_items: list[MenuItem]) -> str | None:
+    """По тексту сообщения определяет, какую категорию меню смотрит гость (string-match, без LLM)."""
+    msg_lower = (message or "").lower()
+    if not msg_lower:
+        return None
+    scores: dict[str, int] = {}
+    for item in menu_items:
+        cat = (item.category or "").strip()
+        if not cat:
+            continue
+        cat_lower = cat.lower()
+        if cat_lower in msg_lower or item.name.lower() in msg_lower:
+            scores[cat] = scores.get(cat, 0) + 1
+    if not scores:
+        return None
+    return max(scores, key=lambda k: scores[k])
+
+
+def build_menu_context_filtered(db_items: list[MenuItem], category_hint: str) -> str:
+    """
+    Smart Category Filter: полный контекст для найденной категории + upsell-позиций,
+    компактный (только name + price) для всего остального.
+    """
+    hint_lower = category_hint.lower()
+    full_items: list[MenuItem] = []
+    compact_items: list[MenuItem] = []
+
+    for item in db_items:
+        cat_lower = (item.category or "").lower()
+        tags_lower = (getattr(item, "tags", None) or "").lower()
+        is_hint_cat = hint_lower in cat_lower or cat_lower in hint_lower
+        is_upsell = (
+            "upsell" in tags_lower
+            or any(h in cat_lower for h in _SMART_UPSELL_CAT_HINTS)
+        )
+        # Стоп-позиции всегда в full — ИИ должен знать о них
+        if is_hint_cat or is_upsell or not item.is_available:
+            full_items.append(item)
+        else:
+            compact_items.append(item)
+
+    result = build_menu_context(full_items) if full_items else ""
+
+    if compact_items:
+        current_cat = ""
+        compact_lines: list[str] = []
+        for item in compact_items:
+            if item.category != current_cat:
+                current_cat = item.category
+                compact_lines.append(f"\n## {current_cat}")
+            stop_tag = " [СТОП]" if not item.is_available else ""
+            compact_lines.append(f"- {item.name}: {float(item.price):.0f} ₸{stop_tag}")
+        compact_str = "\n".join(compact_lines)
+        result = (
+            f"{result}\n\n"
+            f"[Остальные позиции — компактно; детали запроси по названию]\n{compact_str}"
+        )
+
+    if not result.strip():
+        return build_menu_context(db_items)
+
+    total = len(db_items)
+    header = (
+        f"[Smart filter: подробно {len(full_items)} из {total} позиций "
+        f"по теме «{category_hint}»]\n"
+    )
+    return header + result
+
+
 async def build_menu_context_for_ai(menu_items: list[MenuItem], user_query: str) -> str:
     """
-    Текст меню для промпта: при E12 и большом каталоге — семантический срез по запросу гостя.
-    Для non-RAG пути кэширует строку по org_id на 90 с — экономит ~5–15 мс на каждом сообщении.
+    Текст меню для промпта. Два режима:
+    - Smart Category Filter (default): при >= menu_smart_filter_min_items позиций и
+      найденной категории в user_query — полный контекст только для неё + upsell, компакт для остальных.
+    - Полный каталог: кэшируется по org_id через Redis + in-memory 90 с.
     """
     if not settings.menu_rag_enabled:
         org_id: int | None = menu_items[0].organization_id if menu_items else None
-        if org_id is not None:
-            cached = _menu_ctx_cache.get(org_id)
+
+        # Smart Category Filter
+        category_hint: str | None = None
+        if (
+            settings.menu_smart_filter_enabled
+            and len(menu_items) >= settings.menu_smart_filter_min_items
+        ):
+            category_hint = detect_category_hint(user_query, menu_items)
+            if category_hint:
+                logger.debug(
+                    "menu smart filter: category_hint=%r, items %d/%d",
+                    category_hint, 0, len(menu_items),
+                )
+
+        cache_k = _menu_cache_key(org_id, category_hint) if org_id is not None else None
+
+        if cache_k is not None:
+            cached = _menu_ctx_cache.get(cache_k)
             if cached and (time.monotonic() - cached[1]) < _MENU_CTX_TTL:
                 return cached[0]
+
+        if category_hint:
+            ctx = build_menu_context_filtered(menu_items, category_hint)
+            if cache_k is not None:
+                _menu_ctx_cache[cache_k] = (ctx, time.monotonic())
+            return ctx
 
         async def _materialize_full_menu() -> str:
             return build_menu_context(menu_items)
 
         if org_id is not None:
             ctx = await redis_cached_menu_context_string(org_id, _materialize_full_menu)
-            _menu_ctx_cache[org_id] = (ctx, time.monotonic())
+            _menu_ctx_cache[str(org_id)] = (ctx, time.monotonic())
             return ctx
         return build_menu_context(menu_items)
     if len(menu_items) < int(settings.menu_rag_min_items):

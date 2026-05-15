@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import time
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -121,12 +123,59 @@ async def apply_db_upsell_rules(
     in_cart = cart_iiko_ids(items)
     rejected = _rejected_iiko(meta)
 
+    # Ленивый кэш timezone организации (TTL 5 мин) — для trigger_mode=time_of_day
+    _org_tz_str: str | None = None
+
+    async def _get_org_tz() -> str:
+        nonlocal _org_tz_str
+        if _org_tz_str is not None:
+            return _org_tz_str
+        from app.db.models import Organization
+        org = await db.get(Organization, organization_id)
+        _org_tz_str = (getattr(org, "timezone", None) or "UTC") if org else "UTC"
+        return _org_tz_str
+
     for rule in rules:
         trig = (rule.trigger_category or "").strip().lower()
-        if rule.trigger_mode != "missing_category" or not trig:
+        mode = (rule.trigger_mode or "missing_category").strip()
+
+        # --- Проверка условия срабатывания ---
+        triggered = False
+        if mode == "missing_category":
+            if not trig:
+                continue
+            triggered = not any(trig in c for c in cats)
+
+        elif mode == "item_present":
+            # Срабатывает, если указанная категория УЖЕ есть в корзине
+            if not trig:
+                continue
+            triggered = any(trig in c for c in cats)
+
+        elif mode == "time_of_day":
+            # trigger_category используется как диапазон часов: "HH-HH", напр. "17-22"
+            tv = trig  # trigger_category содержит диапазон
+            try:
+                start_h, end_h = (int(p) for p in tv.split("-", 1))
+                tz_str = await _get_org_tz()
+                try:
+                    import zoneinfo
+                    tz = zoneinfo.ZoneInfo(tz_str)
+                except Exception:
+                    from datetime import timezone as _dtz
+                    tz = _dtz.utc
+                current_hour = datetime.now(tz).hour
+                triggered = start_h <= current_hour < end_h
+            except (ValueError, AttributeError):
+                continue
+
+        else:
             continue
-        if any(trig in c for c in cats):
+
+        if not triggered:
             continue
+
+        # --- Проверка суммы заказа ---
         mn = float(rule.min_order_sum or 0)
         if grand_total < mn:
             continue
@@ -163,7 +212,7 @@ async def apply_db_upsell_rules(
             "rule_id": rule.id,
             "offered_iiko_id": iid,
             "offered": pick.name,
-            "reason": f"DB rule #{rule.id} missing_category={trig}",
+            "reason": f"DB rule #{rule.id} {mode}={trig}",
         })
         meta["recommendation_trace"] = trace[-15:]
         new_ij = dict(items_json)

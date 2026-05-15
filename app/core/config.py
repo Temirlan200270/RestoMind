@@ -127,6 +127,18 @@ class Settings(BaseSettings):
         le=200,
         validation_alias=AliasChoices("MENU_RAG_TOP_K", "menu_rag_top_k"),
     )
+    # E12: Smart Category Filter — загружать только категорию из запроса + upsell-позиции
+    # при большом меню (>= menu_smart_filter_min_items). Без embeddings, без векторной БД.
+    menu_smart_filter_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("MENU_SMART_FILTER_ENABLED", "menu_smart_filter_enabled"),
+    )
+    menu_smart_filter_min_items: int = Field(
+        default=60,
+        ge=1,
+        le=50_000,
+        validation_alias=AliasChoices("MENU_SMART_FILTER_MIN_ITEMS", "menu_smart_filter_min_items"),
+    )
 
     # --- AI Engine v2 (provider switch + Gemini) ---
     ai_provider: str = Field(

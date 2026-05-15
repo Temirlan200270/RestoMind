@@ -1290,6 +1290,7 @@ async def process_message(
             decision = build_sales_strategy(
                 cart, total, meta_d, menu_items,
                 u_row.meta_json if u_row is not None else None,
+                user_preferences=read_ctx.user_preferences,
             )
             strategy_ctx = format_strategy_for_prompt(decision)
             sales_gastro_hint = (decision.gastro_hint or "").strip()

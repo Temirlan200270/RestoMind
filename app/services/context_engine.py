@@ -28,6 +28,7 @@ class AIReadContext:
     kb_context: str
     draft_row: Order | None
     customer_ctx: str
+    user_preferences: dict
 
 
 async def fetch_ai_read_context(phone: str, organization_id: int) -> AIReadContext:
@@ -43,7 +44,7 @@ async def fetch_ai_read_context(phone: str, organization_id: int) -> AIReadConte
             # include_unavailable=True: ИИ видит стоп-позиции (с меткой), но не добавляет их в заказ
             return await load_available_menu(db, organization_id=organization_id, include_unavailable=True)
 
-    async def get_user_and_customer_ctx() -> tuple[User | None, str]:
+    async def get_user_and_customer_ctx() -> tuple[User | None, str, dict]:
         async with async_session_factory() as db:
             u = await db.scalar(
                 select(User).where(
@@ -60,7 +61,14 @@ async def fetch_ai_read_context(phone: str, organization_id: int) -> AIReadConte
                         ctx = f"{ctx}\n{loyalty_line}".strip() if ctx else loyalty_line
                 except Exception:
                     pass
-            return u, ctx
+            prefs: dict = {}
+            if u is not None:
+                try:
+                    from app.services.personalization import get_user_preferences
+                    prefs = await get_user_preferences(db, u.id, organization_id)
+                except Exception:
+                    pass
+            return u, ctx, prefs
 
     async def get_org() -> Organization | None:
         async with async_session_factory() as db:
@@ -81,7 +89,7 @@ async def fetch_ai_read_context(phone: str, organization_id: int) -> AIReadConte
         get_kb(),
         get_draft(),
     )
-    u_row, customer_ctx = u_ctx
+    u_row, customer_ctx, user_preferences = u_ctx
     return AIReadContext(
         menu_items=menu_items,
         user=u_row,
@@ -89,4 +97,5 @@ async def fetch_ai_read_context(phone: str, organization_id: int) -> AIReadConte
         kb_context=kb,
         draft_row=draft,
         customer_ctx=customer_ctx,
+        user_preferences=user_preferences,
     )

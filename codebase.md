@@ -67,11 +67,14 @@ RestoMind/
 │   │   ├── message_accounting.py  # telemetry учёт сообщений WhatsApp (inbound/outbound, upsert, fire-and-forget)
 │   │   ├── ai_usage.py            # учёт токенов LLM (upsert по org+day, schedule_log_ai_usage)
 │   │   ├── pipeline_latency.py    # latency baselines, SLA monitor, fire-and-forget
+│   │   ├── personalization.py     # get_user_preferences: never_categories/drinks_freq из истории заказов
 │   │   ├── menu_sync.py           # синхронизация меню из iiko
 │   │   ├── events.py              # Pub/Sub для WS админки
 │   │   ├── notification_router.py # Telegram «SOS», уведомления
 │   │   ├── payment_*.py           # уведомление гостя, webhook-адаптеры, автопечать в iiko после оплаты
 │   │   ├── intelligence.py        # revenue/orders analytics, insights, digital twin snapshots/simulation
+│   │   ├── sales_strategy_engine.py # E11: жёсткие правила до LLM (trace cap, session rejection cap)
+│   │   ├── sales_strategy.py      # build_sales_strategy: tag-pairing, персонализация, heuristics
 │   │   ├── system_events.py       # durable domain events for analytics/audit/AI ops
 │   │   ├── integration_health.py / readiness.py   # диагностика интеграций
 │   │   ├── tenant_scope.py        # ограничения запросов по organization_id

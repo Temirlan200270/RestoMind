@@ -163,9 +163,11 @@ def build_sales_strategy(
     order_meta: dict,
     menu_items: list[MenuItem],
     user_meta: dict | None = None,
+    user_preferences: dict | None = None,
 ) -> StrategyDecision:
     """
     Мозг продаж: до LLM решаем цель и кандидатов; модель формулирует reply_text и JSON.
+    user_preferences — результат personalization.get_user_preferences (опционально).
     """
     meta = order_meta if isinstance(order_meta, dict) else {}
 
@@ -182,6 +184,25 @@ def build_sales_strategy(
         | upsell_rejection_ids_in_cooldown(user_meta, cooldown_hours=48.0)
     )
     skip_names = offered | rejected
+
+    # Персонализация: исключить категории, которые клиент никогда не берёт.
+    # Применяем ТОЛЬКО при наличии реальных данных (user_preferences не пустой dict).
+    prefs = user_preferences if isinstance(user_preferences, dict) and user_preferences else {}
+    never_cats: set[str] = {c.lower() for c in (prefs.get("never_categories") or set()) if c}
+    # drinks_frequency — None если нет истории, чтобы не фильтровать напитки у новых клиентов
+    drinks_freq: float | None = prefs.get("drinks_frequency")
+    if never_cats or (drinks_freq is not None and drinks_freq < 0.1):
+        for m in menu_items:
+            cat_lower = (m.category or "").lower()
+            if never_cats and any(nc in cat_lower for nc in never_cats):
+                iid = (m.iiko_id or "").strip().lower()
+                if iid:
+                    skip_iiko.add(iid)
+                continue
+            if drinks_freq is not None and drinks_freq < 0.1 and any(h in cat_lower for h in _DRINK_CAT_HINTS):
+                iid = (m.iiko_id or "").strip().lower()
+                if iid:
+                    skip_iiko.add(iid)
 
     if not cart_items:
         return StrategyDecision(
