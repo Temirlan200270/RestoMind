@@ -762,6 +762,11 @@ function adminMixinState() {
         intelligenceAnswer: '',
         intelligenceConversationId: null,
         intelligenceData: { summary: null, insights: [], snapshot: null },
+        opEfficiencyData: null,
+        opEfficiencyLoading: false,
+        latencyData: null,
+        latencyLoading: false,
+        latencyExpanded: false,
         intelligenceQuickQuestions: [
             'Почему сегодня меньше заказов?',
             'Почему упала выручка?',
@@ -6695,16 +6700,23 @@ function adminMixinDataChartsSettings() {
         async loadIntelligence() {
             this.intelligenceLoading = true;
             try {
-                const { ok, data } = await this.apiJsonResponse('/api/admin/intelligence/overview');
-                if (!ok) return;
-                this.intelligenceData = {
-                    summary: data.summary || null,
-                    insights: Array.isArray(data.insights) ? data.insights : [],
-                    snapshot: data.snapshot || null,
-                };
-                if (this.intelligenceData.summary?.current?.avg_check) {
-                    this.digitalTwinSim.avg_check = Number(this.intelligenceData.summary.current.avg_check) || this.digitalTwinSim.avg_check;
+                const [mainRes, opRes, latRes] = await Promise.all([
+                    this.apiJsonResponse('/api/admin/intelligence/overview'),
+                    this.apiJsonResponse('/api/admin/intelligence/operator-efficiency?hours=24'),
+                    this.apiJsonResponse('/api/admin/intelligence/latency?hours=24'),
+                ]);
+                if (mainRes.ok) {
+                    this.intelligenceData = {
+                        summary: mainRes.data.summary || null,
+                        insights: Array.isArray(mainRes.data.insights) ? mainRes.data.insights : [],
+                        snapshot: mainRes.data.snapshot || null,
+                    };
+                    if (this.intelligenceData.summary?.current?.avg_check) {
+                        this.digitalTwinSim.avg_check = Number(this.intelligenceData.summary.current.avg_check) || this.digitalTwinSim.avg_check;
+                    }
                 }
+                if (opRes.ok) this.opEfficiencyData = opRes.data;
+                if (latRes.ok) this.latencyData = latRes.data;
             } catch (e) {
                 adminLogger.error('[admin] loadIntelligence', e);
             } finally {

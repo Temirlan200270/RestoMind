@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import base64
 import secrets
-from datetime import datetime, timedelta, timezone
+from collections import defaultdict
+from datetime import date, datetime, timedelta, timezone
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -16,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.admin import require_admin_session
 from app.core.config import settings
 from app.core.passwords import hash_password
-from app.db.models import AiUsageLog, Order, Organization, PaymentWebhookEvent, RegistrationRequest, StaffRole, StaffUser, Tenant
+from app.db.models import AiUsageLog, MessageAccountingLog, Order, Organization, PaymentWebhookEvent, RegistrationRequest, StaffRole, StaffUser, Tenant
 from app.db.session import get_db
 from app.services.integration_health import record_menu_sync
 from app.services.menu_sync import sync_menu_from_iiko
@@ -635,6 +636,82 @@ async def superadmin_ai_usage(
             for r in rows
         ],
     }
+
+
+@router.get("/message-accounting")
+async def superadmin_message_accounting(
+    days: int = 7,
+    _staff: StaffUser = Depends(require_superadmin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Сводка входящих/исходящих сообщений WhatsApp по организациям за N дней."""
+    days = max(1, min(int(days), 90))
+    since = date.today() - timedelta(days=days - 1)
+
+    rows = (await db.execute(
+        select(
+            Organization.id,
+            Organization.name,
+            MessageAccountingLog.direction,
+            MessageAccountingLog.source,
+            MessageAccountingLog.message_type,
+            func.sum(MessageAccountingLog.count).label("total"),
+        )
+        .join(MessageAccountingLog, MessageAccountingLog.organization_id == Organization.id)
+        .where(
+            Organization.is_active.is_(True),
+            MessageAccountingLog.day >= since,
+        )
+        .group_by(
+            Organization.id,
+            Organization.name,
+            MessageAccountingLog.direction,
+            MessageAccountingLog.source,
+            MessageAccountingLog.message_type,
+        )
+        .order_by(Organization.name)
+    )).all()
+
+    # Агрегируем по org_id
+    by_org: dict[int, dict] = defaultdict(lambda: {
+        "org_name": "",
+        "inbound": 0,
+        "outbound_ai": 0,
+        "outbound_operator": 0,
+        "outbound_template": 0,
+        "outbound_other": 0,
+    })
+    for org_id, org_name, direction, source, msg_type, total in rows:
+        e = by_org[org_id]
+        e["org_name"] = org_name
+        n = int(total or 0)
+        if direction == "inbound":
+            e["inbound"] += n
+        elif direction == "outbound":
+            if source == "ai":
+                e["outbound_ai"] += n
+            elif source == "operator":
+                e["outbound_operator"] += n
+            elif source == "system" and msg_type == "template":
+                e["outbound_template"] += n
+            elif source == "system":
+                e["outbound_template"] += n  # text blast тоже в template
+            else:
+                e["outbound_other"] += n
+
+    items = [
+        {
+            "org_id": org_id,
+            "org_name": v["org_name"],
+            "inbound": v["inbound"],
+            "outbound_ai": v["outbound_ai"],
+            "outbound_operator": v["outbound_operator"],
+            "outbound_template": v["outbound_template"],
+            "outbound_total": v["outbound_ai"] + v["outbound_operator"] + v["outbound_template"] + v["outbound_other"],
+        }
+        for org_id, v in sorted(by_org.items(), key=lambda x: x[1]["org_name"])
+    ]
+    return {"period_days": days, "since": since.isoformat(), "items": items}
 
 
 @router.get("/payment-webhook-events/{event_id}/payload.bin")

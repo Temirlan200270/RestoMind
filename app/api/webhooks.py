@@ -67,6 +67,7 @@ from app.services.dialog_mgr import (
     update_user_session_fields_in_db,
 )
 from app.services.ai_usage import schedule_log_ai_error, schedule_log_ai_usage
+from app.services.message_accounting import schedule_log_message
 from app.services.pipeline_latency import schedule_log_pipeline_latency
 from app.services.events import publish_event
 from app.services.billing_guard import tenant_billing_blocks_inbound
@@ -1453,6 +1454,8 @@ async def process_message(
                 )
             await db.commit()
 
+        schedule_log_message(organization_id, "outbound", "ai", "voice" if had_voice else "text")
+
         if settings.pipeline_timing_enabled:
             pipe_sw.split("route")
 
@@ -1860,6 +1863,7 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks) -
                         whatsapp_message_id=message_id,
                         webhook_value=value,
                     )
+                    schedule_log_message(org_id, "inbound", "user", "voice")
                     logger.info("Голосовое от %s поставлено в очередь", phone)
             elif msg_type == "interactive":
                 # E8: кнопки quick-reply — клиент нажал одну из кнопок
@@ -1908,6 +1912,7 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks) -
                         whatsapp_message_id=message_id,
                         webhook_value=value,
                     )
+                    schedule_log_message(org_id, "inbound", "user", "interactive")
                     logger.info(
                         "Interactive (%s) от %s → '%s' поставлено в очередь",
                         interactive_type, phone, message_text,
@@ -1925,6 +1930,7 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks) -
                         whatsapp_message_id=message_id,
                         webhook_value=value,
                     )
+                    schedule_log_message(org_id, "inbound", "user", "text")
                     logger.info("Сообщение от %s поставлено в очередь обработки", phone)
 
     except (IndexError, KeyError, TypeError) as exc:

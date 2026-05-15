@@ -90,6 +90,10 @@
 - [x] **AI business recommendations:** `BusinessRecommendation` (модель + миграция `20260513_biz_recommendations`); `app/services/recommendations.py` — `generate_recommendations` (product_boost / pricing_adj / geo_expansion / stoplist_impact, детерминированно без LLM); фоновый цикл UTC 04:00; `GET/POST /api/admin/intelligence/recommendations`, `PATCH …/{id}`.
 - [ ] Voice AI operator: realtime Twilio Media Streams / OpenAI Realtime or LiveKit.
 - [x] **Multi-tenant security audit:** `tests/test_multitenant_isolation.py` — 9 тестов изоляции по `organization_id` (Order, ChatLog, MenuItem, EscalationEvent, OperationalInsight, AiUsageLog, PipelineLatencyLog, BusinessRecommendation, cross-org phone); отчёт `docs/SECURITY_AUDIT.md`.
+- [x] **Message accounting telemetry:** `MessageAccountingLog` (org + day + direction + source + type, upsert) + [`app/services/message_accounting.py`](app/services/message_accounting.py) (fire-and-forget). Хуки в 4 точках: inbound (text/voice/interactive), outbound AI, outbound operator, outbound blast. `GET /api/superadmin/message-accounting?days=1|7|30` + секция «Сообщения WhatsApp» в суперадминке. Данные только для суперадмина. Миграция `20260515_message_accounting`.
+- [x] **Prompt caching (OpenAI):** порядок секций system prompt оптимизирован под автоматический кэш OpenAI (≥1024 токенов, `base → KB → menu` — стабильный префикс); логирование `cached_tokens` из `prompt_tokens_details` в `openai_p.py`.
+- [x] **Bot pipeline performance:** `customer_reply.py` — finalize_outbound fire-and-forget (−20–50 мс); `webhooks.py` — `known_user_id` в `_save_chat_log` (убран дублирующий SELECT); `admin-app.js` — параллельный init (Promise.all, ~3–4x); LRU-кэш сообщений чатов (15, TTL 5 мин) + prefetch топ-3.
+- [x] **Stop-list visibility для ИИ:** `context_engine` загружает все позиции включая стоп (`include_unavailable=True`); `build_menu_context` помечает `[СТОП]`; `ValidatedOrder.stoplist_items` в `intent_router` — ответ «временно недоступно» вместо «нет в меню», без эскалации.
 
 ---
 

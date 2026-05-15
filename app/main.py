@@ -367,8 +367,10 @@ async def _apply_sqlite_startup_schema_patches() -> None:
     for sql_sqlite in (
         "CREATE TABLE IF NOT EXISTS pipeline_latency_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, organization_id INTEGER NOT NULL, pipeline_type VARCHAR(32) NOT NULL DEFAULT 'whatsapp_text', dedupe_ms INTEGER, context_ms INTEGER, llm_ms INTEGER, route_ms INTEGER, reply_ms INTEGER, total_ms INTEGER, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(organization_id) REFERENCES organizations(id) ON DELETE CASCADE)",
         "CREATE TABLE IF NOT EXISTS business_recommendations (id INTEGER PRIMARY KEY AUTOINCREMENT, organization_id INTEGER NOT NULL, recommendation_type VARCHAR(64) NOT NULL, title VARCHAR(240) NOT NULL, body TEXT NOT NULL DEFAULT '', confidence_pct INTEGER NOT NULL DEFAULT 50, expected_impact_kzt INTEGER, status VARCHAR(20) NOT NULL DEFAULT 'new', data_json TEXT, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(organization_id) REFERENCES organizations(id) ON DELETE CASCADE)",
+        "CREATE TABLE IF NOT EXISTS message_accounting_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, organization_id INTEGER NOT NULL, day DATE NOT NULL, direction VARCHAR(20) NOT NULL, source VARCHAR(32) NOT NULL, message_type VARCHAR(40) NOT NULL, count INTEGER NOT NULL DEFAULT 0, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(organization_id) REFERENCES organizations(id) ON DELETE CASCADE, UNIQUE(organization_id, day, direction, source, message_type))",
         "CREATE INDEX IF NOT EXISTS ix_pipeline_latency_logs_org_created ON pipeline_latency_logs (organization_id, created_at)",
         "CREATE INDEX IF NOT EXISTS ix_business_recommendations_org_created ON business_recommendations (organization_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS ix_msg_acct_org_day ON message_accounting_logs (organization_id, day)",
     ):
         try:
             async with async_engine.begin() as conn:

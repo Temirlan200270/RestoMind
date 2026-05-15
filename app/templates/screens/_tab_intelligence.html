@@ -22,6 +22,31 @@
         </div>
     </div>
 
+    <!-- Эффективность операторов -->
+    <div x-show="opEfficiencyData" x-cloak class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div class="rounded-lg border border-gray-200 bg-white p-4">
+            <div class="text-xs font-semibold uppercase text-gray-500">Эскалаций за 24 ч</div>
+            <div class="mt-2 text-2xl font-bold text-gray-900" x-text="opEfficiencyData?.escalation_count ?? '—'"></div>
+            <div class="mt-1 text-xs text-gray-400" x-text="`${opEfficiencyData?.escalation_rate_pct ?? 0}% от диалогов`"></div>
+        </div>
+        <div class="rounded-lg border border-gray-200 bg-white p-4">
+            <div class="text-xs font-semibold uppercase text-gray-500">Первый ответ</div>
+            <div class="mt-2 text-2xl font-bold text-gray-900"
+                x-text="opEfficiencyData?.avg_first_response_min != null ? opEfficiencyData.avg_first_response_min + ' мин' : '—'"></div>
+            <div class="mt-1 text-xs text-gray-400">среднее после передачи</div>
+        </div>
+        <div class="rounded-lg border border-gray-200 bg-white p-4">
+            <div class="text-xs font-semibold uppercase text-gray-500">Заказы после передачи</div>
+            <div class="mt-2 text-2xl font-bold text-gray-900" x-text="opEfficiencyData?.orders_confirmed_after_escalation ?? '—'"></div>
+            <div class="mt-1 text-xs text-gray-400" x-text="`recovery rate ${opEfficiencyData?.operator_recovery_rate_pct ?? 0}%`"></div>
+        </div>
+        <div class="rounded-lg border border-gray-200 bg-white p-4">
+            <div class="text-xs font-semibold uppercase text-gray-500">Сессий с оператором</div>
+            <div class="mt-2 text-2xl font-bold text-gray-900" x-text="opEfficiencyData?.human_mode_sessions ?? '—'"></div>
+            <div class="mt-1 text-xs text-gray-400" x-text="`из ${opEfficiencyData?.total_dialogs ?? 0} диалогов`"></div>
+        </div>
+    </div>
+
     <div class="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
         <section class="rounded-lg border border-gray-200 bg-white p-4 md:p-5">
             <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -82,4 +107,51 @@
             </div>
         </aside>
     </div>
+
+    <!-- Latency pipeline (коллапсируемый) -->
+    <details class="rounded-lg border border-gray-200 bg-white" x-show="latencyData" x-cloak
+        :open="latencyExpanded" @toggle="latencyExpanded = $event.target.open">
+        <summary class="flex cursor-pointer select-none items-center justify-between gap-3 px-4 py-3 list-none">
+            <div class="flex items-center gap-2">
+                <span class="text-sm font-semibold text-gray-800">Задержки бота (pipeline)</span>
+                <span class="text-xs text-gray-400">p50 / p95 за 24 ч</span>
+            </div>
+            <svg class="h-4 w-4 text-gray-400 transition-transform" :class="latencyExpanded ? 'rotate-180' : ''"
+                fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+            </svg>
+        </summary>
+        <div class="overflow-x-auto border-t border-gray-100 px-4 pb-4 pt-3">
+            <table class="w-full min-w-[480px] text-sm">
+                <thead>
+                    <tr class="text-left text-xs font-semibold uppercase text-gray-400">
+                        <th class="pb-2 pr-4">Этап</th>
+                        <th class="pb-2 pr-4 text-right">p50, мс</th>
+                        <th class="pb-2 text-right">p95, мс</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100">
+                    <template x-for="stage in (latencyData?.stages || [])" :key="stage.stage">
+                        <tr>
+                            <td class="py-2 pr-4 font-medium text-gray-700" x-text="stage.stage"></td>
+                            <td class="py-2 pr-4 text-right font-mono text-gray-600"
+                                x-text="stage.p50_ms != null ? stage.p50_ms : '—'"></td>
+                            <td class="py-2 text-right font-mono"
+                                :class="stage.p95_ms > 2000 ? 'text-rose-600 font-semibold' : stage.p95_ms > 1000 ? 'text-amber-600' : 'text-gray-600'"
+                                x-text="stage.p95_ms != null ? stage.p95_ms : '—'"></td>
+                        </tr>
+                    </template>
+                    <tr x-show="!(latencyData?.stages || []).length">
+                        <td colspan="4" class="py-4 text-center text-gray-400">Данных пока нет — нужно несколько обработанных сообщений.</td>
+                    </tr>
+                </tbody>
+            </table>
+            <div class="mt-2 flex items-center gap-3 text-xs text-gray-400">
+                <span x-text="`Период: ${latencyData?.period_hours ?? 24} ч`"></span>
+                <span x-show="(latencyData?.sla_violations ?? 0) > 0"
+                    class="rounded-full bg-rose-100 px-2 py-0.5 text-rose-700 font-semibold"
+                    x-text="`${latencyData.sla_violations} нарушений SLA`"></span>
+            </div>
+        </div>
+    </details>
 </div>

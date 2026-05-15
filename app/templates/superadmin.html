@@ -307,6 +307,54 @@
         </div>
     </section>
 
+    <section class="rounded-2xl bg-white border border-slate-200 shadow-sm p-5 mt-6">
+        <div class="flex items-center justify-between gap-3 mb-4">
+            <h2 class="text-lg font-bold text-slate-900">Сообщения WhatsApp</h2>
+            <div class="flex items-center gap-2">
+                <select x-model="msgAcctDays" @change="loadMsgAcct()"
+                    class="rounded-lg border border-slate-200 px-3 py-2 text-sm bg-white">
+                    <option value="1">Сегодня</option>
+                    <option value="7">7 дней</option>
+                    <option value="30">30 дней</option>
+                </select>
+                <button type="button" @click="loadMsgAcct()" class="px-3 py-2 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Обновить</button>
+            </div>
+        </div>
+        <p class="text-xs text-slate-400 mb-3" x-show="msgAcctSince" x-text="'С ' + msgAcctSince" x-cloak></p>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead class="text-slate-500">
+                <tr class="border-b border-slate-200">
+                    <th class="text-left py-2">Ресторан</th>
+                    <th class="text-right py-2">Входящих</th>
+                    <th class="text-right py-2">ИИ ответы</th>
+                    <th class="text-right py-2">Оператор</th>
+                    <th class="text-right py-2">Рассылки</th>
+                    <th class="text-right py-2">Итого вых.</th>
+                </tr>
+                </thead>
+                <tbody>
+                <template x-for="row in msgAcct" :key="row.org_id">
+                    <tr class="border-b border-slate-100">
+                        <td class="py-2 font-medium text-slate-900" x-text="row.org_name"></td>
+                        <td class="py-2 text-right font-mono text-slate-700" x-text="row.inbound.toLocaleString('ru-RU')"></td>
+                        <td class="py-2 text-right font-mono text-slate-700" x-text="row.outbound_ai.toLocaleString('ru-RU')"></td>
+                        <td class="py-2 text-right font-mono text-slate-700" x-text="row.outbound_operator.toLocaleString('ru-RU')"></td>
+                        <td class="py-2 text-right font-mono text-slate-700" x-text="row.outbound_template.toLocaleString('ru-RU')"></td>
+                        <td class="py-2 text-right font-mono font-semibold text-slate-900" x-text="row.outbound_total.toLocaleString('ru-RU')"></td>
+                    </tr>
+                </template>
+                <tr x-show="!msgAcct.length && !msgAcctLoading">
+                    <td colspan="6" class="py-6 text-center text-slate-400">Данных за выбранный период пока нет.</td>
+                </tr>
+                <tr x-show="msgAcctLoading">
+                    <td colspan="6" class="py-6 text-center text-slate-400">Загрузка…</td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
     <div x-show="scheduleEditorOpen" x-cloak class="fixed inset-0 z-[120] bg-black/40 backdrop-blur-sm p-4 flex items-center justify-center" @click.self="closeScheduleEditor()">
         <div class="w-full max-w-3xl rounded-2xl bg-white border border-slate-200 shadow-2xl overflow-hidden" role="dialog" aria-modal="true" aria-labelledby="superadmin-schedule-editor-title">
             <div class="px-5 py-4 border-b border-slate-200 flex items-center justify-between gap-3">
@@ -404,6 +452,10 @@ function superAdminPage() {
         requests: [],
         aiUsage: [],
         aiUsageDate: '',
+        msgAcct: [],
+        msgAcctDays: 7,
+        msgAcctSince: '',
+        msgAcctLoading: false,
         webhookEvents: [],
         webhookEventsLoading: false,
         selectedWebhookEvent: null,
@@ -434,7 +486,7 @@ function superAdminPage() {
         async init() {
             const ok = await this.guard();
             if (!ok) return;
-            await Promise.all([this.loadRequests(), this.loadOrganizations(), this.loadWebhookEvents(), this.loadAiUsage()]);
+            await Promise.all([this.loadRequests(), this.loadOrganizations(), this.loadWebhookEvents(), this.loadAiUsage(), this.loadMsgAcct()]);
         },
         fmtDate(iso) {
             if (!iso) return '—';
@@ -503,6 +555,18 @@ function superAdminPage() {
                 this.aiUsageDate = data.date || '';
             } catch (e) {
                 this.error = e.message || 'Не удалось загрузить данные токенов';
+            }
+        },
+        async loadMsgAcct() {
+            this.msgAcctLoading = true;
+            try {
+                const data = await this.api(`/api/superadmin/message-accounting?days=${this.msgAcctDays}`);
+                this.msgAcct = data.items || [];
+                this.msgAcctSince = data.since || '';
+            } catch (e) {
+                this.error = e.message || 'Не удалось загрузить данные сообщений';
+            } finally {
+                this.msgAcctLoading = false;
             }
         },
         async loadWebhookEvents() {

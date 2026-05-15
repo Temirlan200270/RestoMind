@@ -1253,6 +1253,37 @@ class PipelineLatencyLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
 
+class MessageAccountingLog(Base):
+    """Агрегированный учёт сообщений WhatsApp по org/дню/направлению/источнику/типу (upsert)."""
+
+    __tablename__ = "message_accounting_logs"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id", "day", "direction", "source", "message_type",
+            name="uq_msg_acct_org_day_dir_src_type",
+        ),
+        Index("ix_msg_acct_org_day", "organization_id", "day"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    day: Mapped[date] = mapped_column(Date, nullable=False, comment="UTC-дата агрегации")
+    direction: Mapped[str] = mapped_column(
+        String(20), nullable=False, comment="inbound | outbound",
+    )
+    source: Mapped[str] = mapped_column(
+        String(32), nullable=False, comment="user | ai | operator | system",
+    )
+    message_type: Mapped[str] = mapped_column(
+        String(40), nullable=False, comment="text | voice | interactive | template",
+    )
+    count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class BusinessRecommendation(Base):
     """AI-сгенерированная бизнес-рекомендация для ресторана."""
 

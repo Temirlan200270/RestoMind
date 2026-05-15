@@ -205,12 +205,17 @@ async def test_fetch_ai_read_context_integration(
     assert out.org.name == "Org Two"
     assert "Europe" in (out.org.timezone or "")
 
-    # Меню: только org_id=2, is_available, без чужого филиала
+    # Меню: только org_id=2, без чужого филиала.
+    # Стоп-позиции (is_available=False) включены намеренно — ИИ должен знать об их существовании
+    # и сообщать гостям "временно недоступно", а не "нет в меню".
     names = {m.name for m in out.menu_items}
     assert "Борщ целевой" in names
     assert "Чужой филиал Суп" not in names
-    assert "Скрытая пицца" not in names
+    assert "Скрытая пицца" in names  # стоп-позиция включена, но с is_available=False
     assert all(m.organization_id == org_id for m in out.menu_items)
+    # Проверяем что стоп-флаг правильный
+    hidden = next(m for m in out.menu_items if m.name == "Скрытая пицца")
+    assert hidden.is_available is False
 
     # KB
     assert "бесплатно" in (out.kb_context or "").lower()

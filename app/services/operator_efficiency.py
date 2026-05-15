@@ -72,43 +72,44 @@ async def get_operator_efficiency(
         round(escalation_count / total_dialogs * 100, 1) if total_dialogs > 0 else 0.0
     )
 
-    # Среднее время первого ответа после эскалации
+    # Среднее время первого ответа после эскалации — один SQL-запрос вместо N+1 цикла
     avg_first_response_min: float | None = None
     if escalated_phones:
+        from sqlalchemy import text
+        rows = (await db.execute(
+            text("""
+                WITH last_esc AS (
+                    SELECT phone, MAX(created_at) AS last_esc_at
+                    FROM escalation_events
+                    WHERE organization_id = :org_id AND created_at >= :since
+                    GROUP BY phone
+                )
+                SELECT
+                    le.last_esc_at,
+                    MIN(cl.created_at) AS first_reply_at
+                FROM last_esc le
+                JOIN users u ON u.phone = le.phone AND u.organization_id = :org_id
+                JOIN chat_logs cl
+                    ON cl.user_id = u.id
+                    AND cl.organization_id = :org_id
+                    AND cl.role = 'assistant'
+                    AND cl.created_at > le.last_esc_at
+                GROUP BY le.phone, le.last_esc_at
+            """),
+            {"org_id": org_id, "since": since},
+        )).all()
+
         response_deltas: list[float] = []
-        for phone in list(escalated_phones)[:50]:  # ограничение для производительности
-            # Найти последнюю эскалацию этого телефона за период
-            esc = await db.scalar(
-                select(EscalationEvent).where(
-                    EscalationEvent.organization_id == org_id,
-                    EscalationEvent.phone == phone,
-                    EscalationEvent.created_at >= since,
-                ).order_by(EscalationEvent.created_at.desc()).limit(1)
-            )
-            if esc is None:
+        for esc_at, reply_at in rows:
+            if esc_at is None or reply_at is None:
                 continue
-            # Найти user_id по phone + org
-            user_id = await db.scalar(
-                select(User.id).where(
-                    User.phone == phone,
-                    User.organization_id == org_id,
-                ).limit(1)
-            )
-            if user_id is None:
-                continue
-            # Первый ответ бота/оператора ПОСЛЕ эскалации
-            first_reply = await db.scalar(
-                select(ChatLog.created_at).where(
-                    ChatLog.user_id == user_id,
-                    ChatLog.organization_id == org_id,
-                    ChatLog.role == "assistant",
-                    ChatLog.created_at > esc.created_at,
-                ).order_by(ChatLog.created_at.asc()).limit(1)
-            )
-            if first_reply:
-                delta = (first_reply - esc.created_at).total_seconds() / 60.0
-                if 0 < delta < 1440:  # не считаем > 24h
-                    response_deltas.append(delta)
+            if not hasattr(esc_at, "tzinfo"):
+                from datetime import timezone as _tz
+                esc_at = esc_at.replace(tzinfo=_tz.utc)
+                reply_at = reply_at.replace(tzinfo=_tz.utc)
+            delta = (reply_at - esc_at).total_seconds() / 60.0
+            if 0 < delta < 1440:
+                response_deltas.append(delta)
 
         if response_deltas:
             avg_first_response_min = round(sum(response_deltas) / len(response_deltas), 1)

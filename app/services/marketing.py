@@ -151,6 +151,9 @@ async def run_send_blast_batch(*, blast_id: int) -> None:
         )
         recs = (await db.execute(recipients_q)).scalars().all()
 
+        from app.services.message_accounting import schedule_log_message
+        org_id = blast.organization_id
+
         for rec in recs:
             try:
                 if blast.template_name:
@@ -162,6 +165,8 @@ async def run_send_blast_batch(*, blast_id: int) -> None:
                 rec.sent_at = datetime.now(timezone.utc)
                 if ok:
                     sent += 1
+                    msg_type = "template" if blast.template_name else "text"
+                    schedule_log_message(org_id, "outbound", "system", msg_type)
                 else:
                     failed += 1
             except Exception as exc:

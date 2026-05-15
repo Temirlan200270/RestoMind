@@ -103,6 +103,34 @@ async def scheduled_blasts_tick(ctx: dict[str, Any]) -> None:
     await run_scheduled_blasts()
 
 
+async def ai_incidents_hourly_tick(ctx: dict[str, Any]) -> None:
+    """
+    Cron раз в час: запускает detect_ai_incidents для всех активных организаций.
+    Без этого спайки токенов/ошибок/latency обнаруживаются только при открытии
+    вкладки «Инсайты» — а не автоматически.
+    """
+    import logging
+    from sqlalchemy import select as _sel
+    from app.db.models import Organization
+    from app.db.session import async_session_factory
+    from app.services.intelligence import detect_ai_incidents
+
+    logger = logging.getLogger(__name__)
+
+    async with async_session_factory() as db:
+        org_ids = list((await db.execute(
+            _sel(Organization.id).where(Organization.is_active.is_(True))
+        )).scalars().all())
+
+    for org_id in org_ids:
+        try:
+            async with async_session_factory() as db:
+                await detect_ai_incidents(db, org_id)
+                await db.commit()
+        except Exception:
+            logger.exception("ai_incidents_hourly_tick: ошибка для org=%s", org_id)
+
+
 async def iiko_stoplist_sync(
     ctx: dict[str, Any],
     *,
@@ -136,15 +164,17 @@ class WorkerSettings:
         morning_preorders_tick,
         iiko_stoplist_sync,
         iiko_menu_sync,
+        ai_incidents_hourly_tick,
     ]
     # Digest: 4× в час; биллинг: суточный rollup; ночные предзаказы: каждые 5 мин.
-    # Запланированные рассылки: каждые 5 минут.
+    # Запланированные рассылки: каждые 5 минут. AI-инциденты: каждый час в :05.
     cron_jobs = tuple(
         [
             cron(owner_digest_scheduled_tick, minute={0, 15, 30, 45}),
             cron(billing_usage_daily_scheduled_tick, hour=0, minute=12),
             cron(morning_preorders_tick, minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55}),
             cron(scheduled_blasts_tick, minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55}),
+            cron(ai_incidents_hourly_tick, minute=5),
         ]
         if cron is not None
         else [],

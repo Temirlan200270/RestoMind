@@ -506,6 +506,11 @@ async def admin_send_message(
     await db.commit()
     if evt is not None:
         await publish_event("message_status_updated", evt)
+
+    if wa.ok:
+        from app.services.message_accounting import schedule_log_message
+        schedule_log_message(org_id, "outbound", "operator", "text")
+
     logger.info("Оператор отправил сообщение в %s: %s", phone, body.text[:50])
     return {"status": "sent" if wa.ok else "failed", "phone": phone, "chat_log_id": log_id}
 

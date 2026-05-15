@@ -38,7 +38,7 @@ RestoMind/
 │   │   │   └── _monolith.py       # временно: остальной admin API до завершения раскола E0.1
 │   │   ├── webhooks.py            # Meta WhatsApp: verify + входящие → обработка сообщений
 │   │   ├── payment_webhook.py     # внешние провайдеры оплаты (Bearer/HMAC)
-│   │   └── superadmin.py          # организации, заявки, аудит payment-webhook-events, модерация
+│   │   └── superadmin.py          # организации, заявки, аудит платёжных уведомлений, message accounting, AI tokens
 │   │
 │   ├── core/                      # config, rate_limiter, пароли, константы ИИ
 │   ├── db/
@@ -58,10 +58,15 @@ RestoMind/
 │   │
 │   ├── services/                  # бизнес-логика и оркестрация
 │   │   ├── ai_brain.py            # вызов LLM, парсинг в схему
-│   │   ├── ai_engine/             # openai_p, gemini_p, базовые абстракции
-│   │   ├── intent_router.py       # маршрутизация намерений, работа с черновиком заказа
+│   │   ├── ai_engine/             # openai_p (prompt caching order), gemini_p, prompting.py, базовые абстракции
+│   │   ├── intent_router.py       # маршрутизация намерений, черновик заказа, stoplist handling
 │   │   ├── dialog_mgr.py          # состояния чата, Redis, синхронизация с БД
-│   │   ├── order_logic.py         # меню, позиции, цены, черновик
+│   │   ├── order_logic.py         # меню (include_unavailable), ValidatedOrder+stoplist_items, цены, черновик
+│   │   ├── context_engine.py      # параллельный preflight (asyncio.gather), загружает стоп-позиции для ИИ
+│   │   ├── customer_reply.py      # доставка текста/голоса клиенту; finalize_outbound fire-and-forget
+│   │   ├── message_accounting.py  # telemetry учёт сообщений WhatsApp (inbound/outbound, upsert, fire-and-forget)
+│   │   ├── ai_usage.py            # учёт токенов LLM (upsert по org+day, schedule_log_ai_usage)
+│   │   ├── pipeline_latency.py    # latency baselines, SLA monitor, fire-and-forget
 │   │   ├── menu_sync.py           # синхронизация меню из iiko
 │   │   ├── events.py              # Pub/Sub для WS админки
 │   │   ├── notification_router.py # Telegram «SOS», уведомления
@@ -70,7 +75,7 @@ RestoMind/
 │   │   ├── system_events.py       # durable domain events for analytics/audit/AI ops
 │   │   ├── integration_health.py / readiness.py   # диагностика интеграций
 │   │   ├── tenant_scope.py        # ограничения запросов по organization_id
-│   │   └── …                      # booking, analytics, стоп-листы, sales strategy, retention и др.
+│   │   └── …                      # booking, analytics, стоп-листы, sales strategy, loyalty, marketing и др.
 │   │
 │   ├── templates/                 # Jinja2: admin.html (скелет + include), screens/*, components/*, superadmin, onboarding
 │   └── static/
@@ -113,7 +118,7 @@ RestoMind/
 | Админ UI | `templates/` + `static/js/admin-app.js` | `api/admin/` → сервисы, БД |
 | Live-обновления | WS `/api/admin/ws` | `services/events` + Redis Pub/Sub (или in-memory) |
 | Оплата провайдера | `api/payment_webhook.py` | заказ, `PaymentEvent`, фон: автопечать iiko при флаге org |
-| Superadmin | `api/superadmin.py` | организации, заявки, синхронизация меню |
+| Superadmin | `api/superadmin.py` | организации, заявки, синхронизация меню, message accounting, AI-токены |
 
 ---
 
