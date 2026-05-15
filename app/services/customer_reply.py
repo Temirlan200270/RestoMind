@@ -3,6 +3,7 @@
 Контекст звонка задаётся через contextvars на время process_message.
 """
 
+import asyncio
 import contextvars
 import logging
 
@@ -31,6 +32,41 @@ def current_twilio_call_sid() -> str:
     return (_active_twilio_call_sid.get() or "").strip()
 
 
+async def _bg_finalize_whatsapp(outbound_chat_log_id: int, wa_ok: bool, message_id: str | None, error: dict | None) -> None:
+    """Фоновое обновление статуса доставки — не блокирует ответ боту."""
+    from app.db.session import async_session_factory
+    try:
+        async with async_session_factory() as db:
+            evt = await finalize_outbound_delivery(
+                db,
+                outbound_chat_log_id,
+                send_ok=wa_ok,
+                provider_message_id=message_id,
+                error_details=error,
+            )
+            await db.commit()
+        if evt is not None:
+            await publish_event("message_status_updated", evt)
+    except Exception:
+        logger.exception("_bg_finalize_whatsapp: ошибка обновления chat_log id=%d", outbound_chat_log_id)
+
+
+async def _bg_finalize_twilio(outbound_chat_log_id: int, ok: bool) -> None:
+    """Фоновое обновление статуса доставки Twilio."""
+    from app.db.session import async_session_factory
+    try:
+        async with async_session_factory() as db:
+            evt = await finalize_outbound_delivery(
+                db, outbound_chat_log_id, send_ok=ok,
+                error_details=None if ok else {"channel": "twilio", "detail": "speak_failed"},
+            )
+            await db.commit()
+        if evt is not None:
+            await publish_event("message_status_updated", evt)
+    except Exception:
+        logger.exception("_bg_finalize_twilio: ошибка обновления chat_log id=%d", outbound_chat_log_id)
+
+
 async def send_customer_text(
     phone: str,
     text: str,
@@ -39,10 +75,9 @@ async def send_customer_text(
 ) -> None:
     """
     Если открыт контекст Twilio-звонка — озвучить через REST; иначе WhatsApp.
-    При outbound_chat_log_id обновляет chat_logs (sent/failed) и шлёт message_status_updated.
+    При outbound_chat_log_id обновляет chat_logs асинхронно (fire-and-forget),
+    не блокируя pipeline бота.
     """
-    from app.db.session import async_session_factory
-
     sid = current_twilio_call_sid()
     if sid:
         from app.integrations.twilio_client import twilio_speak_on_call
@@ -51,27 +86,11 @@ async def send_customer_text(
         if not ok:
             logger.warning("Не удалось озвучить ответ в Twilio (CallSid=%s)", sid[:8])
         if outbound_chat_log_id is not None:
-            async with async_session_factory() as db:
-                evt = await finalize_outbound_delivery(
-                    db, outbound_chat_log_id, send_ok=ok,
-                    error_details=None if ok else {"channel": "twilio", "detail": "speak_failed"},
-                )
-                await db.commit()
-            if evt is not None:
-                await publish_event("message_status_updated", evt)
+            asyncio.ensure_future(_bg_finalize_twilio(outbound_chat_log_id, ok))
         return
 
     wa = await send_message(phone, text)
-    if outbound_chat_log_id is None:
-        return
-    async with async_session_factory() as db:
-        evt = await finalize_outbound_delivery(
-            db,
-            outbound_chat_log_id,
-            send_ok=wa.ok,
-            provider_message_id=wa.message_id,
-            error_details=wa.error,
+    if outbound_chat_log_id is not None:
+        asyncio.ensure_future(
+            _bg_finalize_whatsapp(outbound_chat_log_id, wa.ok, wa.message_id, wa.error)
         )
-        await db.commit()
-    if evt is not None:
-        await publish_event("message_status_updated", evt)

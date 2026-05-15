@@ -472,6 +472,15 @@ async def _handle_order(
             ai_response.items, menu_items=menu_items, db=db, organization_id=organization_id,
         )
         if not validated.valid_items:
+            if validated.stoplist_items:
+                stop_list = ", ".join(f"«{x}»" for x in validated.stoplist_items)
+                return RouteResult(
+                    reply_text=(
+                        f"{ai_response.reply_text}\n\n"
+                        f"🚫 {stop_list} — сейчас временно недоступно (снято с продажи). "
+                        "Выберите другое блюдо или уточните у оператора, когда появится."
+                    )
+                )
             unknown_list = ", ".join(validated.unknown_items) if validated.unknown_items else "—"
             return RouteResult(
                 reply_text=(
@@ -492,6 +501,15 @@ async def _handle_order(
         return RouteResult(reply_text=ai_response.reply_text)
 
     if not validated.valid_items:
+        if validated.stoplist_items:
+            stop_list = ", ".join(f"«{x}»" for x in validated.stoplist_items)
+            return RouteResult(
+                reply_text=(
+                    f"{ai_response.reply_text}\n\n"
+                    f"🚫 {stop_list} — сейчас временно недоступно (снято с продажи). "
+                    "Выберите другое блюдо или уточните у оператора, когда появится."
+                )
+            )
         unknown_list = ", ".join(validated.unknown_items) if validated.unknown_items else "—"
         return RouteResult(
             reply_text=(
@@ -730,6 +748,9 @@ async def _handle_order(
     reply_core = _sanitize_reply_before_order_card(ai_response.reply_text)
     reply = reply_core + "\n\n" + body_text
 
+    if validated.stoplist_items:
+        stop_list = ", ".join(f"«{x}»" for x in validated.stoplist_items)
+        reply += f"\n\n🚫 {stop_list} — временно недоступно, не добавлено в заказ."
     if validated.unknown_items:
         reply += "\n\nНе нашёл в меню некоторые позиции. Уточните, пожалуйста."
 

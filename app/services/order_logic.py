@@ -188,6 +188,8 @@ class ValidatedOrder:
     summary_text: str
     # Нечёткое сопоставление с меню: similarity = SequenceMatcher по нижнему регистру (0..1).
     fuzzy_match_details: list[dict[str, Any]] = field(default_factory=list)
+    # Позиции, которые есть в меню, но сейчас на стопе (is_available=False).
+    stoplist_items: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -197,25 +199,28 @@ class MenuEntry:
     price: float
     iiko_id: str | None
     category: str = ""
+    is_available: bool = True
 
 
 async def load_available_menu(
     db: AsyncSession,
     *,
     organization_id: int,
+    include_unavailable: bool = False,
 ) -> list[MenuItem]:
     """
-    Один запрос на весь цикл обработки — загрузка доступных позиций.
-
+    Один запрос на весь цикл обработки.
+    include_unavailable=True — загружает также позиции на стопе (is_available=False),
+    чтобы ИИ знал об их существовании и мог корректно отвечать гостям.
     organization_id обязателен: без скоупа возможна утечка меню между филиалами.
     """
     org_id = int(organization_id)
+    where_clauses = [MenuItem.organization_id == org_id]
+    if not include_unavailable:
+        where_clauses.append(MenuItem.is_available.is_(True))
     stmt = (
         select(MenuItem)
-        .where(
-            MenuItem.is_available.is_(True),
-            MenuItem.organization_id == org_id,
-        )
+        .where(*where_clauses)
         .order_by(MenuItem.category, MenuItem.name)
     )
     result = await db.execute(stmt)
@@ -236,7 +241,10 @@ def _build_menu_lookup(
     lookup: dict[str, MenuEntry] = {}
     for mi in db_items:
         lookup[mi.name.lower().strip()] = MenuEntry(
-            price=float(mi.price), iiko_id=mi.iiko_id, category=(mi.category or ""),
+            price=float(mi.price),
+            iiko_id=mi.iiko_id,
+            category=(mi.category or ""),
+            is_available=bool(getattr(mi, "is_available", True)),
         )
     return lookup
 
@@ -295,6 +303,7 @@ async def validate_order(
 
     valid_items: list[dict] = []
     unknown_items: list[str] = []
+    stoplist_items: list[str] = []
     fuzzy_matched: list[str] = []
     fuzzy_match_details: list[dict[str, Any]] = []
     total_price = 0.0
@@ -319,20 +328,25 @@ async def validate_order(
                 logger.info("Fuzzy match: '%s' → '%s'", name_lower, matched_name)
 
         if entry is not None:
-            item_total = entry.price * item.quantity
-            total_price += item_total
-            valid_items.append({
-                "name": item.name,
-                "quantity": item.quantity,
-                "price_per_unit": entry.price,
-                "item_total": item_total,
-                "iiko_id": entry.iiko_id,
-                "category": entry.category,
-                "packaging_plov_1kg": (item.packaging_plov_1kg or "").strip(),
-                "modifiers_ids": list(item.modifiers_ids or []),
-                "modifiers": list(item.modifiers or []),
-                "exclude_ingredients": item.exclude_ingredients,
-            })
+            if not entry.is_available:
+                # Позиция есть в меню, но временно на стопе — нельзя добавить в заказ
+                stoplist_items.append(item.name)
+                logger.info("Стоп-лист: '%s' — не добавлена в заказ", item.name)
+            else:
+                item_total = entry.price * item.quantity
+                total_price += item_total
+                valid_items.append({
+                    "name": item.name,
+                    "quantity": item.quantity,
+                    "price_per_unit": entry.price,
+                    "item_total": item_total,
+                    "iiko_id": entry.iiko_id,
+                    "category": entry.category,
+                    "packaging_plov_1kg": (item.packaging_plov_1kg or "").strip(),
+                    "modifiers_ids": list(item.modifiers_ids or []),
+                    "modifiers": list(item.modifiers or []),
+                    "exclude_ingredients": item.exclude_ingredients,
+                })
         else:
             unknown_items.append(item.name)
 
@@ -348,18 +362,21 @@ async def validate_order(
     summary = "\n".join(lines)
     if fuzzy_matched:
         logger.info("Fuzzy matched items (hidden from customer): %s", "; ".join(fuzzy_matched))
+    if stoplist_items:
+        summary += f"\n\n🚫 Временно недоступно (стоп): {', '.join(stoplist_items)}"
     if unknown_items:
         summary += f"\n\n⚠️ Не нашёл в меню: {', '.join(unknown_items)}"
     summary += f"\n\n💰 Итого: {total_price:.0f} ₸"
 
     logger.info(
-        "Валидация заказа: %d найдено, %d не найдено, итого %.2f ₸",
-        len(valid_items), len(unknown_items), total_price,
+        "Валидация заказа: %d найдено, %d стоп, %d не найдено, итого %.2f ₸",
+        len(valid_items), len(stoplist_items), len(unknown_items), total_price,
     )
 
     return ValidatedOrder(
         valid_items=valid_items,
         unknown_items=unknown_items,
+        stoplist_items=stoplist_items,
         total_price=total_price,
         summary_text=summary,
         fuzzy_match_details=fuzzy_match_details,
@@ -823,6 +840,7 @@ def build_menu_context(db_items: list[MenuItem]) -> str:
             current_category = item.category
             lines.append(f"\n## {current_category}")
         iiko_tag = f" [id: {item.iiko_id}]" if item.iiko_id else ""
+        stop_tag = " [СТОП — временно недоступно, нельзя добавить в заказ]" if not item.is_available else ""
         tags_s = (getattr(item, "tags", None) or "").strip()
         tags_part = f" — теги: {tags_s}" if tags_s else ""
         pk = (getattr(item, "portion_kind", None) or "single").strip().lower()
@@ -839,7 +857,7 @@ def build_menu_context(db_items: list[MenuItem]) -> str:
         dt = (getattr(item, "dietary_tags", None) or "").strip()
         dt_part = f" — диета: {dt}" if dt else ""
         lines.append(
-            f"- {item.name}: {float(item.price):.0f} ₸{iiko_tag}{tags_part} "
+            f"- {item.name}: {float(item.price):.0f} ₸{iiko_tag}{stop_tag}{tags_part} "
             f"({portion_lbl}{serve_part}{al_part}{ing_part}{dt_part})"
         )
 

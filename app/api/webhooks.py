@@ -260,16 +260,22 @@ async def _save_chat_log(
     outbound_whatsapp: bool = True,
     trace_id: str | None = None,
     conversation_id: str | None = None,
+    known_user_id: int | None = None,
 ) -> int | None:
     """
     Сохраняет пару сообщений (user + assistant) в ChatLog.
     Для исходящего ответа в WhatsApp — assistant со статусом sending; возвращает id строки assistant.
+    known_user_id: если передан — пропускает get_or_create_user (уже загружен в preflight).
     """
-    user = await get_or_create_user(db, phone, organization_id)
+    if known_user_id is not None:
+        uid = known_user_id
+    else:
+        user = await get_or_create_user(db, phone, organization_id)
+        uid = user.id
     db.add(
         ChatLog(
             organization_id=organization_id,
-            user_id=user.id,
+            user_id=uid,
             role="user",
             content=user_text,
             meta_json=(
@@ -284,7 +290,7 @@ async def _save_chat_log(
     now = datetime.now(timezone.utc)
     assistant_kwargs: dict[str, Any] = {
         "organization_id": organization_id,
-        "user_id": user.id,
+        "user_id": uid,
         "role": "assistant",
         "content": reply_text,
         "meta_json": (
@@ -1408,6 +1414,7 @@ async def process_message(
                 organization_id=organization_id,
                 trace_id=trace_id,
                 conversation_id=conversation_id,
+                known_user_id=u_row.id if u_row is not None else None,
             )
             if result.new_state == UserState.HUMAN_MODE:
                 db.add(

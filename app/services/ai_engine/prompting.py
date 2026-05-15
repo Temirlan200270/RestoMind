@@ -38,8 +38,16 @@ def build_system_prompt(
     customer_context: str = "",
     current_time_context: str = "",
 ) -> str:
+    # Порядок секций оптимизирован под OpenAI Prompt Caching:
+    # статичные части (base prompt → kb → menu) идут первыми — они формируют
+    # стабильный префикс, который кэшируется автоматически при ≥1024 токенах.
+    # Динамичные части (гость, время, корзина, стратегия) — в конце.
     system_prompt = RESTAURANT_SYSTEM_PROMPT
 
+    if (kb_context or "").strip():
+        system_prompt += f"\n\n# Справочник заведения (база знаний)\n{kb_context.strip()}"
+    if (menu_context or "").strip():
+        system_prompt += f"\n\n# Актуальное меню ресторана\n{menu_context.strip()}"
     if (customer_context or "").strip():
         system_prompt += (
             "\n\n# Досье гостя (только факты с сервера; для тона и узнавания)\n"
@@ -50,10 +58,6 @@ def build_system_prompt(
             "\n\n# Текущее время заведения\n"
             f"{current_time_context.strip()}"
         )
-    if (kb_context or "").strip():
-        system_prompt += f"\n\n# Справочник заведения (база знаний)\n{kb_context.strip()}"
-    if (menu_context or "").strip():
-        system_prompt += f"\n\n# Актуальное меню ресторана\n{menu_context.strip()}"
     if (draft_order_context or "").strip():
         system_prompt += f"\n\n{draft_order_context.strip()}"
     if (sales_strategy_context or "").strip():

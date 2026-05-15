@@ -40,7 +40,8 @@ async def fetch_ai_read_context(phone: str, organization_id: int) -> AIReadConte
 
     async def get_menu() -> list[MenuItem]:
         async with async_session_factory() as db:
-            return await load_available_menu(db, organization_id=organization_id)
+            # include_unavailable=True: ИИ видит стоп-позиции (с меткой), но не добавляет их в заказ
+            return await load_available_menu(db, organization_id=organization_id, include_unavailable=True)
 
     async def get_user_and_customer_ctx() -> tuple[User | None, str]:
         async with async_session_factory() as db:

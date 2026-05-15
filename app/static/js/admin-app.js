@@ -844,6 +844,8 @@ function adminMixinState() {
         chatListHasMore: true,
         chatListCursorAt: null,
         chatListCursorId: null,
+        /** LRU-кэш сообщений: phone → {messages, hasMore, beforeId, ts}. Макс. 15 чатов. */
+        _chatMsgCache: null,
         /** На планшетах/мобилке: выезжающая панель «О клиенте» (на lg — колонка справа) */
         chatMobileInfoOpen: false,
         activeChatState: 'chatting',
@@ -5056,17 +5058,24 @@ function adminMixinWebSocketEvents() {
                 this.unreadChats = this.chatList.filter(c => c.unread).length;
             }
 
+            const newMsg = {
+                id: data.id,
+                role: data.role,
+                content: data.content,
+                created_at: data.created_at || new Date().toISOString(),
+                delivery_status: data.delivery_status ?? null,
+                provider_message_id: data.provider_message_id ?? null,
+                error_details: data.error_details ?? null,
+                status_updated_at: data.status_updated_at ?? null,
+            };
+            // Обновляем кэш чата, даже если он не открыт сейчас
+            const cachedForMsg = this._chatCacheGet(data.phone);
+            if (cachedForMsg) {
+                cachedForMsg.messages.push(newMsg);
+                cachedForMsg.ts = Date.now();
+            }
             if (data.phone === this.activeChatPhone) {
-                this.chatMessages.push({
-                    id: data.id,
-                    role: data.role,
-                    content: data.content,
-                    created_at: data.created_at || new Date().toISOString(),
-                    delivery_status: data.delivery_status ?? null,
-                    provider_message_id: data.provider_message_id ?? null,
-                    error_details: data.error_details ?? null,
-                    status_updated_at: data.status_updated_at ?? null,
-                });
+                this.chatMessages.push(newMsg);
                 this.scrollChatToBottom();
             }
 
@@ -5712,11 +5721,31 @@ function adminMixinLiveChat() {
                 this.chatListCursorAt = data.next_cursor?.cursor_at ?? null;
                 this.chatListCursorId = data.next_cursor?.cursor_id ?? null;
                 this.unreadChats = this.chatList.filter((c) => c.unread).length;
+
+                // Prefetch топ-3 чата (не текущий) — через 600мс чтобы не конкурировать с основными запросами
+                if (reset) this._scheduleChatPrefetch();
             } catch (e) {
                 adminLogger.warn('loadChatList', e);
             } finally {
                 this.chatListLoading = false;
             }
+        },
+
+        _scheduleChatPrefetch() {
+            clearTimeout(this._chatPrefetchTimer);
+            this._chatPrefetchTimer = setTimeout(() => {
+                const toFetch = this.chatList
+                    .filter(c => c.phone && c.phone !== this.activeChatPhone && !this._chatCacheGet(c.phone))
+                    .slice(0, 3);
+                for (const chat of toFetch) {
+                    this.apiFetch(`/api/admin/chats/${encodeURIComponent(chat.phone)}?limit=50`)
+                        .then(r => r.ok ? r.json() : null)
+                        .then(d => {
+                            if (d) this._chatCacheSet(chat.phone, d.messages || [], !!d.has_more, d.next_before_id ?? null);
+                        })
+                        .catch(() => {});
+                }
+            }, 600);
         },
 
         async loadMoreChats() {
@@ -5782,6 +5811,26 @@ function adminMixinLiveChat() {
             }
         },
 
+        _chatCacheGet(phone) {
+            if (!this._chatMsgCache) return null;
+            const entry = this._chatMsgCache.get(phone);
+            if (!entry) return null;
+            // TTL 5 минут — после этого данные устарели
+            if (Date.now() - entry.ts > 300_000) { this._chatMsgCache.delete(phone); return null; }
+            return entry;
+        },
+        _chatCacheSet(phone, messages, hasMore, beforeId) {
+            if (!this._chatMsgCache) this._chatMsgCache = new Map();
+            // Выбрасываем самый старый если >15 чатов
+            if (this._chatMsgCache.size >= 15 && !this._chatMsgCache.has(phone)) {
+                this._chatMsgCache.delete(this._chatMsgCache.keys().next().value);
+            }
+            this._chatMsgCache.set(phone, { messages: [...messages], hasMore, beforeId, ts: Date.now() });
+        },
+        _chatCacheInvalidate(phone) {
+            this._chatMsgCache?.delete(phone);
+        },
+
         async selectChat(phone) {
             if (!phone?.trim()) return;
             phone = phone.trim();
@@ -5794,18 +5843,10 @@ function adminMixinLiveChat() {
             this.chatMessagesLoadingOlder = false;
             this.customerSummaryLoading = true;
             this.customerSummary = {
-                user_exists: false,
-                phone,
-                name: null,
-                total_orders: 0,
-                revenue_orders: 0,
-                total_spent: 0,
-                avg_check: 0,
-                is_blocked: false,
-                ai_paused: false,
-                ai_snoozed_until: null,
-                operator_note: '',
-                last_escalation: null,
+                user_exists: false, phone, name: null,
+                total_orders: 0, revenue_orders: 0, total_spent: 0, avg_check: 0,
+                is_blocked: false, ai_paused: false, ai_snoozed_until: null,
+                operator_note: '', last_escalation: null,
             };
             this.guestContext = { activeOrder: null, activeBooking: null };
             this.guestContextLoading = true;
@@ -5818,40 +5859,81 @@ function adminMixinLiveChat() {
                 this.chatList.unshift({ phone, lastMessage: '', state: 'chatting', unread: false });
             }
 
-            try {
-                const stateRes = await this.apiFetch(`/api/admin/chats/${encodeURIComponent(phone)}/state`);
-                if (this._selectChatRequestId !== requestId || this.activeChatPhone !== phone) return;
-                if (stateRes.ok) {
-                    const stateData = await stateRes.json();
-                    this.activeChatState = stateData.state;
-                    if (stateData.ai_snoozed_until != null && this.customerSummary) {
-                        this.customerSummary.ai_snoozed_until = stateData.ai_snoozed_until;
-                    }
-                    if (chatIdx >= 0) this.chatList[chatIdx].state = stateData.state;
-                }
-            } catch {}
+            // Показываем кэш мгновенно — пока грузятся свежие данные
+            const cached = this._chatCacheGet(phone);
+            if (cached) {
+                this.chatMessages = cached.messages;
+                this.chatMessagesHasMore = cached.hasMore;
+                this.chatMessagesBeforeId = cached.beforeId;
+                this.scrollChatToBottom();
+            }
 
-            try {
-                const res = await this.apiFetch(`/api/admin/chats/${encodeURIComponent(phone)}?limit=50`);
-                if (this._selectChatRequestId !== requestId || this.activeChatPhone !== phone) return;
-                if (res.ok) {
-                    const data = await res.json();
-                    this.chatMessages = data.messages || [];
-                    this.chatMessagesHasMore = !!data.has_more;
-                    this.chatMessagesBeforeId = data.next_before_id ?? null;
-                    const uix = this.chatList.findIndex(c => c.phone === phone);
-                    if (uix >= 0 && data.user_name) {
-                        this.chatList[uix].userName = data.user_name;
-                    }
-                } else {
-                    this.chatMessages = [];
+            const enc = encodeURIComponent(phone);
+            const qo = new URLSearchParams({ q: phone, size: '40', page: '1' });
+            const qb = new URLSearchParams({ q: phone, limit: '40' });
+
+            // Все 5 запросов параллельно — ни один не зависит от другого
+            const [stateRes, msgsRes, summaryRes, ordersRes, bookingsRes] = await Promise.all([
+                this.apiFetch(`/api/admin/chats/${enc}/state`).catch(() => null),
+                this.apiFetch(`/api/admin/chats/${enc}?limit=50`).catch(() => null),
+                this.apiFetch(`/api/admin/customers/${enc}/summary`).catch(() => null),
+                this.apiFetch(`/api/admin/orders?${qo}`).catch(() => null),
+                this.apiFetch(`/api/admin/bookings?${qb}`).catch(() => null),
+            ]);
+
+            if (this._selectChatRequestId !== requestId || this.activeChatPhone !== phone) return;
+
+            // state
+            if (stateRes?.ok) {
+                const d = await stateRes.json();
+                this.activeChatState = d.state;
+                if (d.ai_snoozed_until != null && this.customerSummary) {
+                    this.customerSummary.ai_snoozed_until = d.ai_snoozed_until;
                 }
-            } catch {
+                const uix = this.chatList.findIndex(c => c.phone === phone);
+                if (uix >= 0) this.chatList[uix].state = d.state;
+            }
+
+            // messages
+            if (msgsRes?.ok) {
+                const d = await msgsRes.json();
+                this.chatMessages = d.messages || [];
+                this.chatMessagesHasMore = !!d.has_more;
+                this.chatMessagesBeforeId = d.next_before_id ?? null;
+                const uix = this.chatList.findIndex(c => c.phone === phone);
+                if (uix >= 0 && d.user_name) this.chatList[uix].userName = d.user_name;
+                this._chatCacheSet(phone, this.chatMessages, this.chatMessagesHasMore, this.chatMessagesBeforeId);
+                if (!cached) this.scrollChatToBottom();
+            } else if (!cached) {
                 this.chatMessages = [];
             }
 
-            this.scrollChatToBottom();
-            await this.loadCustomerSummary(phone);
+            // customerSummary
+            if (summaryRes?.ok) {
+                const d = await summaryRes.json();
+                this.customerSummary = {
+                    user_exists: !!d.user_exists, phone: d.phone || phone, name: d.name ?? null,
+                    total_orders: d.total_orders ?? 0, revenue_orders: d.revenue_orders ?? 0,
+                    total_spent: d.total_spent ?? 0, avg_check: d.avg_check ?? 0,
+                    is_blocked: !!d.is_blocked, ai_paused: !!d.ai_paused,
+                    ai_snoozed_until: d.ai_snoozed_until ?? null,
+                    operator_note: d.operator_note ?? '',
+                    last_escalation: d.last_escalation && typeof d.last_escalation === 'object'
+                        ? d.last_escalation : null,
+                };
+            }
+            this.customerSummaryLoading = false;
+
+            // orders + bookings
+            let orders = [], bookings = [];
+            if (ordersRes?.ok) { const d = await ordersRes.json(); orders = Array.isArray(d.items) ? d.items : (d.orders || []); }
+            if (bookingsRes?.ok) { const d = await bookingsRes.json(); bookings = d.bookings || []; }
+            this.guestContext = {
+                activeOrder: this._pickActiveGuestOrder(orders),
+                activeBooking: this._pickActiveGuestBooking(bookings),
+            };
+            this.guestContextLoading = false;
+
             this.syncAdminChatsHash(phone);
         },
 

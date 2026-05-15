@@ -181,12 +181,15 @@ class OpenAIProvider(BaseAIProvider):
                             pt = getattr(us, "prompt_tokens", None)
                             ct = getattr(us, "completion_tokens", None)
                             tt = getattr(us, "total_tokens", None)
+                            details = getattr(us, "prompt_tokens_details", None)
+                            cached = getattr(details, "cached_tokens", None) if details is not None else None
                             logger.info(
-                                "[AI] provider=openai model=%s usage prompt=%s completion=%s total=%s",
+                                "[AI] provider=openai model=%s usage prompt=%s completion=%s total=%s cached=%s",
                                 model,
                                 pt,
                                 ct,
                                 tt,
+                                cached,
                             )
                             object.__setattr__(parsed, "_usage", {
                                 "provider": "openai",
@@ -194,6 +197,7 @@ class OpenAIProvider(BaseAIProvider):
                                 "prompt_tokens": int(pt or 0),
                                 "completion_tokens": int(ct or 0),
                                 "total_tokens": int(tt or 0),
+                                "cached_tokens": int(cached or 0),
                             })
                     except Exception:
                         pass
