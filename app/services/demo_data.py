@@ -9,10 +9,34 @@ from typing import Any
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Booking, ChatLog, Order, OrderStatus, User
+from app.db.models import (
+    AiUsageLog,
+    Booking,
+    BusinessRecommendation,
+    ChatLog,
+    EscalationEvent,
+    FailedTask,
+    IntelligenceConversation,
+    IntelligenceMessage,
+    OperationalInsight,
+    Order,
+    OrderStatus,
+    PaymentEvent,
+    PipelineLatencyLog,
+    RestaurantStateSnapshot,
+    SystemEvent,
+    User,
+)
 from app.db.session import redis_client
 from app.services.dialog_mgr import purge_all_session_keys_for_phone
+from app.services.intelligence import (
+    answer_intelligence_query,
+    build_state_snapshot,
+    detect_ai_incidents,
+    generate_revenue_order_insights,
+)
 from app.services.order_logic import build_demo_order_payload
+from app.services.recommendations import generate_recommendations
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +76,23 @@ def _demo_order(
 ) -> dict:
     """Полный items_json v2 (блюда, fee_lines, order_meta, total_price)."""
     payload, _grand = build_demo_order_payload(
-        list(lines), order_type, payment_method, **meta,
+        list(lines),
+        order_type,
+        payment_method,
+        delivery_address=str(meta.get("delivery_address") or ""),
+        pickup_time_note=str(meta.get("pickup_time_note") or ""),
+        is_preorder=bool(meta.get("is_preorder", False)),
+        booking_time=meta.get("booking_time"),
     )
+    extra_meta = {
+        key: value
+        for key, value in meta.items()
+        if key not in {"delivery_address", "pickup_time_note", "is_preorder", "booking_time"}
+    }
+    if extra_meta:
+        order_meta = payload.setdefault("order_meta", {})
+        if isinstance(order_meta, dict):
+            order_meta.update(extra_meta)
     return payload
 
 
@@ -102,7 +141,24 @@ def _extra_volume_orders(users: list[User]) -> list[tuple[int, str, dict, int]]:
             else:
                 meta["booking_time"] = f"2026-06-{15 + (idx % 10):02d} {19 + slot % 2}:00"
                 meta["is_preorder"] = (idx % 2) == 0
-            payload, _ = build_demo_order_payload(lines, ot, pm, **meta)
+            if idx % 2 == 0:
+                accepted = idx % 6 != 0
+                meta["recommendation_trace"] = [
+                    {
+                        "offered": "Р›РµРїС‘С€РєР°",
+                        "accepted": accepted,
+                        "accepted_revenue_kzt": 350 if accepted else 0,
+                    },
+                ]
+            elif idx % 5 == 0:
+                meta["recommendation_trace"] = [
+                    {
+                        "offered": "Р§Р°Р№ СѓР»СѓРЅ 0,6 Р»",
+                        "accepted": False,
+                        "accepted_revenue_kzt": 0,
+                    },
+                ]
+            payload = _demo_order(*lines, order_type=ot, payment_method=pm, **meta)
             out.append((uid, st, payload, days_ago))
             idx += 1
     return out
@@ -129,9 +185,222 @@ def _extra_month_history_orders(users: list[User]) -> list[tuple[int, str, dict,
             meta["delivery_address"] = "г. Алматы, мкр. Демо-история, 12"
         else:
             meta["pickup_time_note"] = "вечером после 18:00"
-        payload, _ = build_demo_order_payload(lines, ot, pm, **meta)
+        meta["recommendation_trace"] = [
+            {
+                "offered": "РљРѕРјР±Рѕ-РґРµСЃРµСЂС‚",
+                "accepted": days_ago % 4 == 0,
+                "accepted_revenue_kzt": 890 if days_ago % 4 == 0 else 0,
+            },
+        ]
+        payload = _demo_order(*lines, order_type=ot, payment_method=pm, **meta)
         out.append((uid, OrderStatus.COMPLETED.value, payload, days_ago))
     return out
+
+
+def _set_demo_user_profile(user: User, index: int, now: datetime) -> None:
+    notes = [
+        "VIP: любит тихий зал, без острой еды.",
+        "Часто берёт самовывоз после работы.",
+        "Нужен стол подальше от колонки.",
+        "Просит не звонить, только WhatsApp.",
+        "Предпочитает оплату ссылкой заранее.",
+    ]
+    if index < len(notes):
+        user.operator_note = notes[index]
+    user.meta_json = {
+        "demo_segment": "vip" if index in {0, 4, 7} else "regular",
+        "favorite_channel": "whatsapp",
+    }
+    if index == 2:
+        user.ai_paused = True
+    if index == 3:
+        user.ai_snoozed_until = now + timedelta(hours=4)
+    if index == 8:
+        user.marketing_opt_out = True
+
+
+async def _seed_demo_operational_context(
+    db: AsyncSession,
+    *,
+    organization_id: int,
+    demo_users: list[User],
+    demo_orders: list[Order],
+    now: datetime,
+) -> dict[str, int]:
+    created_payments = 0
+    created_system_events = 0
+    created_escalations = 0
+    created_failed_tasks = 0
+    created_ai_usage_rows = 0
+    created_latency_rows = 0
+
+    if demo_orders:
+        payment_specs = [
+            (demo_orders[2], "prepayment_confirmed", "admin", float(demo_orders[2].total_price or 0), "demo-prepay-ok"),
+            (demo_orders[5], "webhook_paid", "webhook", float(demo_orders[5].total_price or 0), "demo-webhook-paid"),
+            (demo_orders[10], "manual_reset", "admin", None, "demo-manual-reset"),
+        ]
+        for order, event_type, actor, amount, note in payment_specs:
+            db.add(
+                PaymentEvent(
+                    order_id=int(order.id),
+                    event_type=event_type,
+                    actor=actor,
+                    amount=amount,
+                    note=note,
+                    created_at=now - timedelta(hours=created_payments + 1),
+                )
+            )
+            created_payments += 1
+
+        demo_orders[2].prepayment_status = "paid"
+        demo_orders[2].payment_provider = "cloudpayments"
+        demo_orders[2].payment_link_url = "https://pay.demo.local/order/3"
+        demo_orders[2].external_payment_id = "demo-cp-0003"
+        demo_orders[2].payment_amount_captured = demo_orders[2].total_price
+        demo_orders[3].iiko_last_error = "Кухня не подтвердила терминальную группу для доставки."
+        demo_orders[5].prepayment_status = "paid"
+        demo_orders[5].payment_provider = "cloudpayments"
+        demo_orders[5].external_payment_id = "demo-cp-0006"
+        demo_orders[5].payment_amount_captured = demo_orders[5].total_price
+        demo_orders[10].kind = "night_preorder"
+
+    escalation_specs = [
+        (demo_users[4], "Клиент попросил менеджера по банкету", "Нужна помощь по большому заказу"),
+        (demo_users[7], "Гость хочет подтвердить предзаказ в зале", "Уточнение по рассадке и торту"),
+        (demo_users[2], "Просьба проверить аллергию", "Нужна ручная консультация по составу"),
+    ]
+    for idx, (user, user_message, reason) in enumerate(escalation_specs):
+        db.add(
+            EscalationEvent(
+                organization_id=organization_id,
+                phone=user.phone,
+                user_message=user_message,
+                reason=reason,
+                created_at=now - timedelta(hours=2 + idx),
+            )
+        )
+        created_escalations += 1
+
+    failed_specs = [
+        (demo_users[5], "Оплата по ссылке не открывается", "ARQ retry exhausted after payment notification timeout", False),
+        (demo_users[1], "Нужно перенести бронь на час позже", "WhatsApp webhook duplicate payload dropped twice", True),
+    ]
+    for idx, (user, message_text, error, resolved) in enumerate(failed_specs):
+        db.add(
+            FailedTask(
+                organization_id=organization_id,
+                phone=user.phone,
+                message_text=message_text,
+                error=error,
+                attempts=3,
+                resolved=resolved,
+                created_at=now - timedelta(hours=6 + idx),
+            )
+        )
+        created_failed_tasks += 1
+
+    system_specs = [
+        (
+            "stoplist_update",
+            "demo.seed",
+            {"items_added_to_stop": ["Р›РµРїС‘С€РєР°", "РЁР°С€Р»С‹Рє РёР· Р±Р°СЂР°РЅРёРЅС‹"], "source": "demo"},
+            now - timedelta(hours=12),
+        ),
+        (
+            "stoplist_update",
+            "demo.seed",
+            {"items_added_to_stop": ["Р›РµРїС‘С€РєР°"], "source": "demo"},
+            now - timedelta(days=1, hours=3),
+        ),
+        (
+            "stoplist_update",
+            "demo.seed",
+            {"items_added_to_stop": ["Р›РµРїС‘С€РєР°"], "source": "demo"},
+            now - timedelta(days=2, hours=1),
+        ),
+        (
+            "payment_webhook_applied",
+            "demo.seed",
+            {"order_id": int(demo_orders[5].id) if len(demo_orders) > 5 else None, "provider": "cloudpayments"},
+            now - timedelta(hours=5),
+        ),
+    ]
+    for idx, (event_type, source, payload_json, created_at) in enumerate(system_specs):
+        db.add(
+            SystemEvent(
+                organization_id=organization_id,
+                event_type=event_type,
+                source=source,
+                entity_type="demo",
+                entity_id=f"demo-{idx}",
+                idempotency_key=f"demo-system-{organization_id}-{idx}",
+                payload_json=payload_json,
+                created_at=created_at,
+            )
+        )
+        created_system_events += 1
+
+    for day_offset in range(7):
+        day = (now - timedelta(days=6 - day_offset)).date()
+        total_tokens = 1800 + day_offset * 220
+        error_count = 0
+        p95_latency_ms = 2600 + day_offset * 130
+        if day_offset == 6:
+            total_tokens = 14500
+            error_count = 5
+            p95_latency_ms = 6900
+        db.add(
+            AiUsageLog(
+                organization_id=organization_id,
+                day=day,
+                provider="openai",
+                model="gpt-4o-mini",
+                prompt_tokens=int(total_tokens * 0.6),
+                completion_tokens=int(total_tokens * 0.4),
+                total_tokens=total_tokens,
+                call_count=18 + day_offset,
+                error_count=error_count,
+                p95_latency_ms=p95_latency_ms,
+            )
+        )
+        created_ai_usage_rows += 1
+
+    for idx in range(8):
+        db.add(
+            PipelineLatencyLog(
+                organization_id=organization_id,
+                pipeline_type="whatsapp_text",
+                dedupe_ms=40 + idx * 3,
+                context_ms=120 + idx * 11,
+                llm_ms=900 + idx * 120,
+                route_ms=80 + idx * 5,
+                reply_ms=110 + idx * 8,
+                total_ms=1400 + idx * 150,
+                created_at=now - timedelta(minutes=idx * 20),
+            )
+        )
+        created_latency_rows += 1
+
+    await db.flush()
+
+    insights = await generate_revenue_order_insights(db, organization_id)
+    ai_incidents = await detect_ai_incidents(db, organization_id)
+    recommendations = await generate_recommendations(db, organization_id)
+    await answer_intelligence_query(db, org_id=organization_id, question="Почему сегодня просела выручка?")
+    await answer_intelligence_query(db, org_id=organization_id, question="Покажи заказы за неделю")
+    await build_state_snapshot(db, organization_id, persist=True)
+
+    return {
+        "payment_events_added": created_payments,
+        "system_events_added": created_system_events,
+        "escalations_added": created_escalations,
+        "failed_tasks_added": created_failed_tasks,
+        "ai_usage_rows_added": created_ai_usage_rows,
+        "latency_rows_added": created_latency_rows,
+        "insights_added": len(insights) + len(ai_incidents),
+        "recommendations_added": len(recommendations),
+    }
 
 
 async def seed_demo_data(db: AsyncSession, *, organization_id: int) -> dict[str, int | bool]:
@@ -189,6 +458,9 @@ async def seed_demo_data(db: AsyncSession, *, organization_id: int) -> dict[str,
 
     def u(i: int) -> User:
         return demo_users[min(i, len(demo_users) - 1)]
+
+    for idx, demo_user in enumerate(demo_users):
+        _set_demo_user_profile(demo_user, idx, now)
 
     # Заказы: разные статусы и даты (аналитика / канбан); суммы и fee_lines — по тарифам v2
     orders_spec: list[tuple[int, str, dict, int]] = [
@@ -295,6 +567,7 @@ async def seed_demo_data(db: AsyncSession, *, organization_id: int) -> dict[str,
     # Секунд с начала «сегодня» UTC до now — заказы за «сегодня» кладём только сюда,
     # иначе при раннем UTC (до 10:00) аналитика «Сегодня» была бы пустой (раньше были часы 10–17).
     elapsed_today = max(120, int((now - utc_midnight).total_seconds()))
+    created_order_rows: list[Order] = []
 
     for idx, (uid, status, items_json, days_ago) in enumerate(orders_spec):
         total = float(items_json["total_price"])
@@ -313,6 +586,9 @@ async def seed_demo_data(db: AsyncSession, *, organization_id: int) -> dict[str,
             sec = (idx * 1567) % 86400
             o.created_at = day_start + timedelta(seconds=sec)
         db.add(o)
+        created_order_rows.append(o)
+
+    await db.flush()
 
     bookings_spec = [
         (u(0).id, today + timedelta(days=1), time(19, 0), 4, "confirmed", "У окна, пожалуйста", "hall_1"),
@@ -392,6 +668,14 @@ async def seed_demo_data(db: AsyncSession, *, organization_id: int) -> dict[str,
         )
         created_logs += 1
 
+    extra_stats = await _seed_demo_operational_context(
+        db,
+        organization_id=org_id,
+        demo_users=demo_users,
+        demo_orders=created_order_rows,
+        now=now,
+    )
+
     await db.commit()
     logger.info(
         "Демо-данные: +users=%s orders=%s bookings=%s logs=%s",
@@ -404,6 +688,7 @@ async def seed_demo_data(db: AsyncSession, *, organization_id: int) -> dict[str,
         "bookings_added": created_bookings,
         "chat_logs_added": created_logs,
         "menu_items_added": 0,
+        **extra_stats,
     }
 
 
@@ -436,6 +721,35 @@ async def clear_demo_data(db: AsyncSession, *, organization_id: int) -> dict[str
         except Exception:
             logger.exception("Не удалось очистить Redis для демо-номера %s", phone)
 
+    order_ids = list(
+        (
+            await db.execute(
+                select(Order.id).where(Order.user_id.in_(user_ids)),
+            )
+        ).scalars().all()
+    )
+    conversation_ids = list(
+        (
+            await db.execute(
+                select(IntelligenceConversation.id).where(IntelligenceConversation.organization_id == org_id),
+            )
+        ).scalars().all()
+    )
+
+    r0 = await db.execute(delete(IntelligenceMessage).where(IntelligenceMessage.organization_id == org_id))
+    if conversation_ids:
+        await db.execute(delete(IntelligenceConversation).where(IntelligenceConversation.id.in_(conversation_ids)))
+    await db.execute(delete(RestaurantStateSnapshot).where(RestaurantStateSnapshot.organization_id == org_id))
+    await db.execute(delete(OperationalInsight).where(OperationalInsight.organization_id == org_id))
+    await db.execute(delete(BusinessRecommendation).where(BusinessRecommendation.organization_id == org_id))
+    await db.execute(delete(PipelineLatencyLog).where(PipelineLatencyLog.organization_id == org_id))
+    await db.execute(delete(AiUsageLog).where(AiUsageLog.organization_id == org_id))
+    await db.execute(delete(SystemEvent).where(SystemEvent.organization_id == org_id))
+    await db.execute(delete(FailedTask).where(FailedTask.organization_id == org_id))
+    await db.execute(delete(EscalationEvent).where(EscalationEvent.organization_id == org_id))
+    if order_ids:
+        await db.execute(delete(PaymentEvent).where(PaymentEvent.order_id.in_(order_ids)))
+
     r1 = await db.execute(delete(ChatLog).where(ChatLog.user_id.in_(user_ids)))
     r2 = await db.execute(delete(Booking).where(Booking.user_id.in_(user_ids)))
     r3 = await db.execute(delete(Order).where(Order.user_id.in_(user_ids)))
@@ -459,4 +773,5 @@ async def clear_demo_data(db: AsyncSession, *, organization_id: int) -> dict[str
         "orders_deleted": _rc(r3),
         "bookings_deleted": _rc(r2),
         "chat_logs_deleted": _rc(r1),
+        "intelligence_messages_deleted": _rc(r0),
     }
