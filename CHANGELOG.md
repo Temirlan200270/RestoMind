@@ -14,6 +14,7 @@
 - **WhatsApp / «отмени всё»:** детерминированная отмена всех черновиков до LLM (`is_cancel_all_message`), без ложного «отменил» от модели.
 - **Промпт / escalate:** короткие отрицания в заказе («не плов») → `order`, не `escalate`; FAQ на «есть X?» без автодобавления в корзину.
 - **HUMAN_MODE:** `clear_pending_order` не сбрасывает эскалацию в CHATTING; сверка с `User.current_state` в БД; шаблон «менеджер ответит» вместо повторных ответов LLM.
+- **Админка / чаты:** при эскалации из WhatsApp — WebSocket `state_changed` (`human_mode`) и обновление `onHumanNeeded`; в ленте — подпись вместо `[OPERATOR_ONLY]`, бейдж «Сбой ИИ» при `meta.technical_fallback`.
 
 ### Исправлено (2026-05-12)
 

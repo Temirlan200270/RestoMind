@@ -5051,6 +5051,23 @@ function adminMixinWebSocketEvents() {
             return { s, label, icon, cls };
         },
 
+        /** Текст в ленте чата: служебные [OPERATOR_ONLY] не показываем сырыми. */
+        formatChatDisplayContent(msg) {
+            const raw = String(msg?.content || '');
+            if (msg?.meta?.operator_only || /^\[OPERATOR_ONLY/i.test(raw)) {
+                return 'ИИ не отвечает (ожидает оператора)';
+            }
+            return raw;
+        },
+
+        chatTechnicalFallbackBadge(msg) {
+            if (msg?.role !== 'assistant' || !msg?.meta?.technical_fallback) return null;
+            return {
+                label: 'Сбой ИИ',
+                cls: 'bg-rose-500/25 text-white border-rose-200/40',
+            };
+        },
+
         onNewMessage(data) {
             const chatIdx = this.chatList.findIndex(c => c.phone === data.phone);
             if (chatIdx >= 0) {
@@ -5082,6 +5099,7 @@ function adminMixinWebSocketEvents() {
                 provider_message_id: data.provider_message_id ?? null,
                 error_details: data.error_details ?? null,
                 status_updated_at: data.status_updated_at ?? null,
+                meta: (data.meta && typeof data.meta === 'object') ? data.meta : null,
             };
             // Обновляем кэш чата, даже если он не открыт сейчас
             const cachedForMsg = this._chatCacheGet(data.phone);
@@ -5145,6 +5163,13 @@ function adminMixinWebSocketEvents() {
                 message: `Чат ${data.phone}: ${hint || (data.reason?.slice(0, 80) || 'Бот не может ответить')}`,
             });
             this.playAlertSound();
+            const chatIdx = this.chatList.findIndex((c) => c.phone === data.phone);
+            if (chatIdx >= 0) {
+                this.chatList[chatIdx].state = 'human_mode';
+            }
+            if (data.phone === this.activeChatPhone) {
+                this.activeChatState = 'human_mode';
+            }
         },
 
         onStateChanged(data) {

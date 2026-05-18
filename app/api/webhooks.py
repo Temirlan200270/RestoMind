@@ -1174,12 +1174,14 @@ async def process_message(
         )
         if operator_only:
             outbound_op: int | None = None
+            operator_meta = {"operator_only": True}
             async with async_session_factory() as db:
                 outbound_op = await _save_chat_log(
                     db,
                     phone,
                     message_text,
                     _OPERATOR_ONLY_REPLY,
+                    operator_meta,
                     organization_id=organization_id,
                     trace_id=trace_id,
                     conversation_id=conversation_id,
@@ -1191,16 +1193,25 @@ async def process_message(
             await append_to_history(
                 redis_client, phone, "assistant", _OPERATOR_ONLY_REPLY, organization_id=organization_id,
             )
-            await publish_event("new_message", {
-                "phone": phone,
-                "role": "assistant",
-                "content": _OPERATOR_ONLY_REPLY,
-                "id": outbound_op,
-                "delivery_status": "sending",
-                "organization_id": organization_id,
-                "trace_id": trace_id,
-                "conversation_id": conversation_id,
-            })
+            from app.services.trace_context import publish_chat_event, publish_state_event
+            await publish_chat_event(
+                phone=phone,
+                role="assistant",
+                content=_OPERATOR_ONLY_REPLY,
+                organization_id=organization_id,
+                chat_log_id=outbound_op,
+                trace_id=trace_id,
+                conversation_id=conversation_id,
+                meta=operator_meta,
+            )
+            if state == UserState.HUMAN_MODE or db_human_mode:
+                await publish_state_event(
+                    phone=phone,
+                    state=UserState.HUMAN_MODE.value,
+                    organization_id=organization_id,
+                    trace_id=trace_id,
+                    conversation_id=conversation_id,
+                )
             await send_customer_text(phone, _OPERATOR_ONLY_REPLY, outbound_chat_log_id=outbound_op)
             logger.info(
                 "operator_only: %s human=%s db_human=%s paused=%s snooze=%s",
@@ -1639,6 +1650,8 @@ async def process_message(
                     "Ответ сформирован моделью (OpenAI)."
                 ),
             }
+            if is_openai_fallback_escalation_reply(result.reply_text):
+                assistant_meta["technical_fallback"] = True
             outbound_id_chat = await _save_chat_log(
                 db,
                 phone,
@@ -1720,6 +1733,7 @@ async def process_message(
             trace_id=trace_id,
             conversation_id=conversation_id,
             intent=ai_response.intent,
+            meta=assistant_meta,
         )
         # E8: интерактивное сообщение (кнопки или CTA) вместо plain text если задано
         _sent_interactive = False
@@ -1770,7 +1784,7 @@ async def process_message(
                 logger.warning("edge-tts / отправка голоса: %s", tts_exc)
 
         if result.new_state == UserState.HUMAN_MODE:
-            from app.services.trace_context import publish_human_event
+            from app.services.trace_context import publish_human_event, publish_state_event
             await publish_human_event(
                 phone=phone,
                 organization_id=organization_id,
@@ -1779,6 +1793,13 @@ async def process_message(
                 trace_id=trace_id,
                 conversation_id=conversation_id,
                 intent=ai_response.intent,
+            )
+            await publish_state_event(
+                phone=phone,
+                state=UserState.HUMAN_MODE.value,
+                organization_id=organization_id,
+                trace_id=trace_id,
+                conversation_id=conversation_id,
             )
             try:
                 await send_tg_fallback_alert(
