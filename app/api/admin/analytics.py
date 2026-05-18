@@ -1042,9 +1042,9 @@ async def dashboard_stats(
 @router.get("/funnel")
 async def admin_funnel(
     request: Request,
-    days: int = Query(7, ge=1, le=90),
-    churn_days: int = Query(30, ge=7, le=180),
     db: AsyncSession = Depends(get_db),
+    days: Annotated[int, Query(ge=1, le=90)] = 7,
+    churn_days: Annotated[int, Query(ge=7, le=180)] = 30,
 ) -> dict[str, Any]:
     """Воронка потерь и отток клиентов за период."""
     org_id = admin_org_from_session(request)
