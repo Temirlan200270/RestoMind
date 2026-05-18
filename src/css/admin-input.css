@@ -156,6 +156,9 @@
     .ds-chat-shell-detail {
         @apply hidden xl:flex w-[320px] flex-shrink-0 flex-col min-h-0 bg-slate-50/80 border-l border-gray-100;
     }
+    .ds-booking-week-day:focus-visible {
+        @apply outline-none ring-2 ring-brand-500 ring-offset-2;
+    }
     /* Drawer */
     .ds-drawer-backdrop {
         @apply fixed inset-0 z-[60] bg-black/40;

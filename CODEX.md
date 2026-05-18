@@ -22,6 +22,7 @@
 - Карта UI-слоя: `docs/UI_MAP.md`.
 - JS: `app/static/js/admin-app.js` (Alpine x-data).
 - UI‑контракт: `docs/UI_DESIGN_SYSTEM.md` (a11y/Lighthouse/`ds-*`).
+- FSM чатов и WebSocket: `docs/STATE_MACHINE.md`, `docs/EVENT_ARCHITECTURE.md` (раздел Realtime).
 
 ## Красные линии (не ломать без явного ТЗ)
 

@@ -21,8 +21,8 @@
 
 - `_tab_inbox.html` — **«Требует внимания»**: под-табы «От клиентов» / «Системные» (объединяет сценарии бывших отдельных экранов очереди и инцидентов, P1.5.0).
 - `_tab_orders.html` — заказы: канбан / список, фильтры, DnD, модалка заказа.
-- `_tab_chats.html` — диалоги: список, лента, панель клиента (mobile drawer).
-- `_tab_bookings.html` — бронирования.
+- `_tab_chats.html` — диалоги: список, лента, панель клиента (mobile drawer). Шапка: бейдж FSM (`activeChatState`: «ИИ отвечает» / «Вы ведёте диалог» / «Подтверждение заказа»). Лента: `formatChatDisplayContent`, бейдж доставки `chatDeliveryBadge`, бейдж «Сбой ИИ» `chatTechnicalFallbackBadge`.
+- `_tab_bookings.html` — бронирования: недельная полоса (`bookingWeekDays`), KPI на неделю, список выбранного дня, справка в `_bookings_sidebar_inner.html` (залы, режим, онбординг). API: `date_from` / `date_to` на `GET /api/admin/bookings`.
 
 ### Управление (`section: management`)
 
@@ -73,6 +73,17 @@
 - `app/static/css/admin.css` — собранный CSS после `npm run build:admin-css`.
 
 ## Current Contracts
+
+### Вкладка «Чаты» (`_tab_chats.html` + `admin-app.js`)
+
+- **Шапка (компактная):** один статус — `chatModeSummary()` + `chatModeToneClass()` (ИИ / вы / пауза / подтверждение заказа); одна главная кнопка «Ответить самому» / «Вернуть боту»; пауза, закрытие, назначение — в меню «⋯».
+- **Состояние диалога:** `activeChatState` — из `GET /api/admin/chats/{phone}/state` при выборе чата; обновляется по WebSocket `state_changed` и при `onHumanNeeded` (эскалация).
+- **Ввод оператора:** заблокирован, пока `chatIsBotActive()` — placeholder через `chatOperatorPlaceholder()`.
+- **Текст в ленте:** `formatChatDisplayContent(msg)` — legacy `[OPERATOR_ONLY …]` и `meta.operator_only` → «ИИ не отвечает (ожидает оператора)»; клиенту в WhatsApp уходит отдельный шаблон из webhook.
+- **Сбой LLM:** `meta.technical_fallback` на исходящих assistant → бейдж «Сбой ИИ» (`chatTechnicalFallbackBadge`). Ставится в `webhooks.py` при совпадении с fallback-текстом `ai_brain._FALLBACK_RESPONSE`.
+- **Realtime:** `new_message` должен пробрасывать `meta` в объект сообщения (`onNewMessage`), иначе бейджи не появятся до перезагрузки истории.
+
+Подробнее про FSM и события: `docs/STATE_MACHINE.md`, `docs/EVENT_ARCHITECTURE.md`.
 
 - Глобальный `_header.html` отвечает за название активной вкладки. Внутри экранов не добавлять второй крупный `section_header` с тем же названием.
 - `docs/ROADMAP.md` — единственный трекер задач и статусов.

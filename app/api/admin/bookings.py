@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -29,20 +31,34 @@ async def list_bookings(
     request: Request,
     status: str | None = Query(None, description="Фильтр по статусу (pending, confirmed, cancelled)"),
     q: str | None = Query(None, description="Поиск по телефону клиента"),
+    date_from: date | None = Query(None, description="Дата брони от (включительно, YYYY-MM-DD)"),
+    date_to: date | None = Query(None, description="Дата брони до (включительно, YYYY-MM-DD)"),
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Список бронирований."""
+    if date_from is not None and date_to is not None and date_from > date_to:
+        raise HTTPException(status_code=400, detail="date_from не может быть позже date_to")
+
     org_id = admin_org_from_session(request)
+    order_cols = (
+        (Booking.booking_date.asc(), Booking.booking_time.asc())
+        if date_from is not None or date_to is not None
+        else (Booking.created_at.desc(),)
+    )
     query = (
         select(Booking, User.phone, User.name, Order.id)
         .join(User, Booking.user_id == User.id)
         .outerjoin(Order, Order.booking_id == Booking.id)
         .where(User.organization_id == org_id)
-        .order_by(Booking.created_at.desc())
+        .order_by(*order_cols)
     )
     if status:
         query = query.where(Booking.status == status)
+    if date_from is not None:
+        query = query.where(Booking.booking_date >= date_from)
+    if date_to is not None:
+        query = query.where(Booking.booking_date <= date_to)
     if q and q.strip():
         query = query.where(User.phone.ilike(f"%{q.strip()}%"))
     query = query.limit(limit)

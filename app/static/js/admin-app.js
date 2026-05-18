@@ -728,6 +728,14 @@ function adminMixinState() {
         ordersHasMore: false,
         bookings: [],
         bookingStatusFilter: 'all',
+        bookingWeekAnchor: '',
+        bookingSelectedDate: '',
+        bookingsLoading: false,
+        bookingHallOptions: [
+            { key: 'hall_1', label: 'Зал 1' },
+            { key: 'hall_2', label: 'Зал 2' },
+            { key: 'vip', label: 'VIP зал' },
+        ],
         menuItems: [],
 
         // Заказы
@@ -2831,13 +2839,114 @@ function adminMixinSearchBookings() {
             return m[h] || (h ? String(h) : 'Зал 1');
         },
 
+        _bookingIsoDate(d) {
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${y}-${m}-${day}`;
+        },
+
+        _bookingParseIso(iso) {
+            const parts = String(iso || '').slice(0, 10).split('-').map(Number);
+            if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) return new Date();
+            return new Date(parts[0], parts[1] - 1, parts[2]);
+        },
+
+        _bookingMondayOf(d) {
+            const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+            const wd = x.getDay();
+            const diff = wd === 0 ? -6 : 1 - wd;
+            x.setDate(x.getDate() + diff);
+            return x;
+        },
+
+        bookingInitWeekIfNeeded() {
+            if (this.bookingWeekAnchor && this.bookingSelectedDate) return;
+            const today = new Date();
+            this.bookingWeekAnchor = this._bookingIsoDate(this._bookingMondayOf(today));
+            this.bookingSelectedDate = this._bookingIsoDate(today);
+        },
+
+        bookingWeekDays() {
+            const anchor = this._bookingParseIso(this.bookingWeekAnchor);
+            const todayIso = this._bookingIsoDate(new Date());
+            const days = [];
+            for (let i = 0; i < 7; i += 1) {
+                const d = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate() + i);
+                const iso = this._bookingIsoDate(d);
+                days.push({
+                    iso,
+                    weekday: d.toLocaleDateString('ru-RU', { weekday: 'short' }),
+                    dayNum: d.getDate(),
+                    isToday: iso === todayIso,
+                    isSelected: iso === this.bookingSelectedDate,
+                    count: this.bookingCountForDay(iso),
+                });
+            }
+            return days;
+        },
+
+        bookingWeekRangeLabel() {
+            const days = this.bookingWeekDays();
+            if (!days.length) return '';
+            const fmt = (iso) => {
+                const d = this._bookingParseIso(iso);
+                return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+            };
+            return `${fmt(days[0].iso)} — ${fmt(days[6].iso)}`;
+        },
+
+        bookingCountForDay(iso) {
+            const key = String(iso || '').slice(0, 10);
+            return this.bookings.filter((b) => String(b.date || '').slice(0, 10) === key).length;
+        },
+
+        bookingSelectedDayLabel() {
+            const d = this._bookingParseIso(this.bookingSelectedDate);
+            return d.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' });
+        },
+
+        bookingShiftWeek(delta) {
+            const anchor = this._bookingParseIso(this.bookingWeekAnchor);
+            anchor.setDate(anchor.getDate() + delta * 7);
+            this.bookingWeekAnchor = this._bookingIsoDate(anchor);
+            void this.loadBookingsForWeek();
+        },
+
+        bookingGoToday() {
+            const today = new Date();
+            this.bookingWeekAnchor = this._bookingIsoDate(this._bookingMondayOf(today));
+            this.bookingSelectedDate = this._bookingIsoDate(today);
+            void this.loadBookingsForWeek();
+        },
+
+        selectBookingDay(iso) {
+            this.bookingSelectedDate = String(iso || '').slice(0, 10);
+        },
+
+        openBookingsSettingsSchedule() {
+            this.navigateToTab('settings', { settingsTab: 'restaurant' });
+        },
+
+        openBookingsBotTest() {
+            this.navigateToTab('settings', { settingsTab: 'bot_test' });
+        },
+
         get filteredBookings() {
-            if (this.bookingStatusFilter === 'all') return this.bookings;
-            return this.bookings.filter(b => b.status === this.bookingStatusFilter);
+            return this.bookingsForSelectedDay;
+        },
+
+        get bookingsForSelectedDay() {
+            const day = String(this.bookingSelectedDate || '').slice(0, 10);
+            let list = this.bookings.filter((b) => String(b.date || '').slice(0, 10) === day);
+            if (this.bookingStatusFilter !== 'all') {
+                list = list.filter((b) => b.status === this.bookingStatusFilter);
+            }
+            return list;
         },
 
         bookingStatsFor(status) {
-            return this.bookings.filter(b => b.status === status).length;
+            return this.bookings.filter((b) => b.status === status).length;
         },
 
         /** Отложенное сохранение зала/статуса брони (debounce — порядок PATCH на сервере стабильнее). */
@@ -5068,6 +5177,58 @@ function adminMixinWebSocketEvents() {
             };
         },
 
+        /** Один статус в шапке чата (без конкурирующих бейджей). */
+        chatModeSummary() {
+            if (this.customerAiSnoozeActive()) {
+                return {
+                    label: 'ИИ на паузе',
+                    subline: `до ${this.customerAiSnoozeUntilLabel()}`,
+                    tone: 'pause',
+                };
+            }
+            if (this.activeChatState === 'confirming_order') {
+                return {
+                    label: 'Подтверждение заказа',
+                    subline: 'Гость подтверждает состав',
+                    tone: 'confirm',
+                };
+            }
+            if (this.activeChatState === 'human_mode' || this.customerSummary?.ai_paused) {
+                const esc = this.customerSummary?.last_escalation;
+                return {
+                    label: 'Отвечаете вы',
+                    subline: esc ? 'Диалог передан от бота' : null,
+                    tone: 'you',
+                };
+            }
+            return {
+                label: 'Отвечает ИИ',
+                subline: null,
+                tone: 'ai',
+            };
+        },
+
+        chatModeToneClass() {
+            const tone = this.chatModeSummary().tone;
+            if (tone === 'you') return 'bg-orange-50 text-orange-800 border-orange-100';
+            if (tone === 'pause') return 'bg-violet-50 text-violet-900 border-violet-100';
+            if (tone === 'confirm') return 'bg-amber-50 text-amber-900 border-amber-100';
+            return 'bg-emerald-50 text-emerald-800 border-emerald-100';
+        },
+
+        chatOperatorPlaceholder() {
+            if (this.chatIsBotActive()) {
+                return 'Чтобы написать гостю, нажмите «Ответить самому»…';
+            }
+            return 'Сообщение гостю (Enter — отправить, Shift+Enter — новая строка)…';
+        },
+
+        chatListStateLabel(state) {
+            if (state === 'human_mode') return 'Вы';
+            if (state === 'confirming_order') return 'Заказ';
+            return 'ИИ';
+        },
+
         onNewMessage(data) {
             const chatIdx = this.chatList.findIndex(c => c.phone === data.phone);
             if (chatIdx >= 0) {
@@ -6417,7 +6578,8 @@ function adminMixinDataChartsSettings() {
                 } else if (this.currentTab === 'orders') {
                     await this.loadOrders();
                 } else if (this.currentTab === 'bookings') {
-                    await this.loadBookings();
+                    this.bookingInitWeekIfNeeded();
+                    await this.loadBookingsForWeek();
                 } else if (this.currentTab === 'menu') {
                     if (this.menuView === 'stoplist') {
                         // loadStopList() уже тянет полный список меню и синхронизирует this.menuItems.
@@ -7426,9 +7588,25 @@ function adminMixinDataChartsSettings() {
         },
 
         async loadBookings() {
+            this.bookingInitWeekIfNeeded();
+            await this.loadBookingsForWeek();
+        },
+
+        async loadBookingsForWeek() {
+            this.bookingInitWeekIfNeeded();
             this.bookingsLoadError = '';
+            this.bookingsLoading = true;
+            const anchor = this._bookingParseIso(this.bookingWeekAnchor);
+            const end = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate() + 6);
+            const dateFrom = this._bookingIsoDate(anchor);
+            const dateTo = this._bookingIsoDate(end);
+            const qs = new URLSearchParams({
+                date_from: dateFrom,
+                date_to: dateTo,
+                limit: '200',
+            });
             try {
-                const { ok, data } = await this.apiJsonResponse('/api/admin/bookings');
+                const { ok, data } = await this.apiJsonResponse(`/api/admin/bookings?${qs.toString()}`);
                 if (!ok) {
                     this.bookings = [];
                     this.bookingsLoadError = this.formatApiError(data) || 'Не удалось загрузить брони';
@@ -7438,6 +7616,8 @@ function adminMixinDataChartsSettings() {
             } catch {
                 this.bookings = [];
                 this.bookingsLoadError = 'Ошибка сети';
+            } finally {
+                this.bookingsLoading = false;
             }
         },
 

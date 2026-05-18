@@ -155,6 +155,7 @@ Operations‑интерфейс должен работать в двух реж
 - **Explainability‑pill**: рядом с AI‑бейджем в заказе/чате — маленький `i` (`role="button"`, `aria-label="Почему ИИ так решил"`); по клику — popover с `recommendation_trace` (источник, причина, gastro‑hint, strategy_logic). Это уже частично реализовано (`salesInsightAiReason`, `salesInsightGastroHint`, `salesInsightStrategyLogic` в [`admin-app.js`](../app/static/js/admin-app.js)) — нужно вынести в общий компонент.
 - **AI Snooze**: «отключить ИИ» — всегда с временным окном (`30 мин / 2 ч / до завтра / навсегда`). После окончания — индикатор «ИИ снова в диалоге» в шапке чата. Никаких «бесшумных» постоянных отключений — это компромисс продукта (ИИ должен возвращаться сам).
 - **Realtime feel**: для AI‑событий (новый ответ ИИ, эскалация, переход в `human_mode`) — пульс‑индикатор `1.5s` в табе и в нав‑бейдже сайдбара, чтобы сигнал был заметен в боковом зрении. Для обычных REST‑обновлений пульс не используем — иначе нивелируется.
+- **Лента чата:** служебные ответы в `human_mode` не показывать сырым `[OPERATOR_ONLY …]` — `formatChatDisplayContent` → «ИИ не отвечает (ожидает оператора)». Сбой LLM (fallback) — бейдж «Сбой ИИ» (`meta.technical_fallback`), не путать с ручным takeover. Шапка FSM должна совпадать с `state_changed` / `onHumanNeeded` (см. `docs/STATE_MACHINE.md`).
 
 ---
 

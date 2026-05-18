@@ -60,8 +60,10 @@ RestoMind/
 │   │   ├── ai_brain.py            # вызов LLM, парсинг в схему
 │   │   ├── ai_engine/             # openai_p (prompt caching order), gemini_p, prompting.py, базовые абстракции
 │   │   ├── intent_router.py       # маршрутизация намерений, черновик заказа, stoplist handling
-│   │   ├── dialog_mgr.py          # состояния чата, Redis, синхронизация с БД
-│   │   ├── order_logic.py         # меню (include_unavailable), ValidatedOrder+stoplist_items, цены, черновик
+│   │   ├── dialog_mgr.py          # состояния чата, Redis, синхронизация с БД; clear_pending_order не сбрасывает HUMAN_MODE
+│   │   ├── stoplist_session.py    # Redis rm:stoplist_seen — diff «только что на стопе» в диалоге
+│   │   ├── trace_context.py       # publish_chat_event / publish_state_event / publish_human_event (WS payload)
+│   │   ├── order_logic.py         # меню (include_unavailable), ValidatedOrder+stoplist_items, цены, черновик, fingerprint стоп-листа в кэше
 │   │   ├── context_engine.py      # параллельный preflight (asyncio.gather), загружает стоп-позиции для ИИ
 │   │   ├── customer_reply.py      # доставка текста/голоса клиенту; finalize_outbound fire-and-forget
 │   │   ├── message_accounting.py  # telemetry учёт сообщений WhatsApp (inbound/outbound, upsert, fire-and-forget)
@@ -117,9 +119,9 @@ RestoMind/
 
 | Направление | Где вход | Куда логика |
 |-------------|----------|-------------|
-| WhatsApp → бот | `api/webhooks.py` | `services/dialog_mgr`, `intent_router`, `ai_brain`, Redis |
-| Админ UI | `templates/` + `static/js/admin-app.js` | `api/admin/` → сервисы, БД |
-| Live-обновления | WS `/api/admin/ws` | `services/events` + Redis Pub/Sub (или in-memory) |
+| WhatsApp → бот | `api/webhooks.py` | preflight: канон. телефон, сброс DRAFT при пустой истории, stoplist_session; `dialog_mgr`, `intent_router`, `ai_brain`; operator_only / эскалация → `trace_context.publish_*` |
+| Админ UI | `templates/` + `static/js/admin-app.js` | `api/admin/` → сервисы, БД; чаты: FSM-бейдж, `formatChatDisplayContent`, takeover/release |
+| Live-обновления | WS `/api/admin/ws` | `services/events` + `trace_context`; события `new_message`, `state_changed`, `human_needed`, `order_updated` |
 | Оплата провайдера | `api/payment_webhook.py` | заказ, `PaymentEvent`, фон: автопечать iiko при флаге org |
 | Superadmin | `api/superadmin.py` | организации, заявки, синхронизация меню, message accounting, AI-токены |
 

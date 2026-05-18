@@ -202,6 +202,17 @@ RestoMind/
 
 - `GET /api/admin/ws?token=...` — live-события (токен из `/auth/login` или `/auth/me`).
 
+Типы событий (см. `app/services/trace_context.py`, подписка в `admin-app.js`):
+
+| Событие | Назначение |
+|---------|------------|
+| `new_message` | Новая строка в чате (`meta`: `operator_only`, `technical_fallback`, `intent`, …) |
+| `state_changed` | FSM диалога (`chatting`, `human_mode`, …) — бейдж и разблокировка ввода оператора |
+| `human_needed` | Эскалация на оператора (алерт + звук) |
+| `order_updated` | Канбан/список заказов |
+
+При эскалации из WhatsApp публикуются `human_needed` и `state_changed` (`human_mode`).
+
 ### WhatsApp
 
 - `GET /api/whatsapp/webhook` — верификация Meta  

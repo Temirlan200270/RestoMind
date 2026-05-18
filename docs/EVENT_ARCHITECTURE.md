@@ -5,6 +5,23 @@ RestoMind now has two event layers:
 1. `app/services/events.py` is realtime Pub/Sub for admin WebSocket updates and staff notifications.
 2. `app/services/system_events.py` is the durable domain event store for analytics, AI operations, audit, billing, ML, and future alerts.
 
+## Realtime admin WebSocket
+
+Транспорт: `GET /api/admin/ws?token=...` (`app/api/admin/ws.py`) подписывается на Pub/Sub из `publish_event`.
+
+Канонические обёртки payload (единые `trace_id` / `conversation_id`): `app/services/trace_context.py`.
+
+| `event_type` | Типичный источник | Поля payload (ядро) |
+|--------------|-------------------|---------------------|
+| `new_message` | `publish_chat_event` — webhook, admin send | `phone`, `role`, `content`, `organization_id`, `id?`, `delivery_status?`, `meta?` |
+| `state_changed` | `publish_state_event` — webhook (эскалация / human_mode), `chats.py` takeover/release | `phone`, `state`, `organization_id` |
+| `human_needed` | `publish_human_event` — эскалация из WhatsApp | `phone`, `reason`, `user_message`, `organization_id`, `intent?` |
+| `order_updated` | `publish_order_event` — заказы, iiko | `order_id`, `organization_id`, `phone?`, `status?`, … |
+
+**Контракт FSM в UI:** при эскалации из WhatsApp обязательно шлются **оба** `human_needed` и `state_changed` (`human_mode`). Только `human_needed` недостаточно — шапка чата и `chatIsBotActive()` завязаны на `activeChatState` из `state_changed` или `GET /api/admin/chats/{phone}/state`.
+
+Клиент: `app/static/js/admin-app.js` — `onNewMessage`, `onStateChanged`, `onHumanNeeded` (fallback `human_mode` если `state_changed` потерян).
+
 ## Durable Stream
 
 The durable stream is stored in `system_events`.
