@@ -20,6 +20,21 @@
 
 ---
 
+## 9. Инварианты OS-архитектуры (агентам обязательно читать)
+
+Три правила вытекают из стратегии перехода RestoMind → AI OS ([`docs/OS_TRANSITION_PLAN.md`](docs/OS_TRANSITION_PLAN.md)). Нарушение любого из них создаёт технический долг уровня Phase 1–3 и блокирует enterprise-продажи.
+
+**Rule 9 — Tenant Isolation Enforcement.**
+Запрещено писать ORM/SQL запросы без явной фильтрации по `organization_id`. Каждый SELECT к таблицам `orders`, `chat_logs`, `bookings`, `menu_items`, `users`, `system_events` обязан содержать `.where(Model.organization_id == org_id)` или аналог. Нет исключений — даже в фоновых задачах и cron-джобах. Crossтенантный доступ (`SELECT * FROM orders`) — критический баг, не технический долг.
+
+**Rule 10 — Event-First.**
+Любое изменение бизнес-состояния (новый заказ, смена статуса, подтверждение брони, эскалация, смена режима ИИ) обязано порождать системное событие через `emit_system_event` из [`app/services/system_events.py`](app/services/system_events.py). Аналитика должна стремиться к чтению из событий (`SystemEvent`), а не напрямую из таблиц сущностей. Запрещено добавлять прямой SQL к `Order`/`ChatLog` в новых аналитических endpoint'ах — использовать агрегаты по `system_events`.
+
+**Rule 11 — AI Context через ContextBuilder.**
+ИИ не должен получать данные из БД напрямую внутри LLM-вызова. Все данные для промпта готовятся слоем `fetch_ai_read_context` → `AIReadContext` в [`app/services/context_engine.py`](app/services/context_engine.py). Сырые SQL-запросы внутри `call_openai` / `call_ai_with_audio` — запрещены. Новые поля контекста добавляются в `AIReadContext`, а не в тело вызова ИИ.
+
+---
+
 ## 8. Инварианты Jinja2/HTML-шаблонов (агентам обязательно читать)
 
 > Нарушение этих правил не детектируется линтерами — только тестами и визуально в браузере.

@@ -1,8 +1,28 @@
-# RestoMind
+# RestoMind OS
 
-AI-оператор для ресторана: принимает заказы и бронирует столики через WhatsApp, используя LLM (**OpenAI** по умолчанию; опционально **Gemini** через `AI_PROVIDER`) — structured output по схеме `AIBrainResponse`; голос — **Whisper**. Интегрируется с **iiko** для синхронизации меню и отправки заказов на кухню.
+**AI-операционная система для ресторанного бизнеса.** Единое ядро управления продажами, маркетингом и операционкой: гость пишет в **WhatsApp**, ответы формирует LLM по структурированной схеме (`AIBrainResponse`); голос — **Whisper**; заказы синхронизируются с **iiko**; аналитика и рекомендации — в Admin-панели владельца.
 
-Подробный список изменений и возможностей — в [CHANGELOG.md](CHANGELOG.md). Правила разработки (инварианты) — в [docs/CONVENTIONS.md](docs/CONVENTIONS.md). **Дерево проекта и суть кодовой базы** — в [codebase.md](codebase.md).
+Подробный список изменений и возможностей — в [CHANGELOG.md](CHANGELOG.md). Правила разработки (инварианты) — в [docs/CONVENTIONS.md](docs/CONVENTIONS.md). **Дерево проекта и суть кодовой базы** — в [codebase.md](codebase.md). Стратегический план перехода → OS — в [docs/OS_TRANSITION_PLAN.md](docs/OS_TRANSITION_PLAN.md).
+
+## Архитектура ядра (OS Layers)
+
+| Слой | Суть | Статус |
+|------|------|--------|
+| **Tenant Isolation** | Каждый запрос фильтруется по `organization_id`; межтенантный доступ запрещён на уровне конвенций | ~90% |
+| **Event-Driven Core** | Бизнес-действия порождают события (`SystemEvent`, `emit_system_event`); основа аналитики и AI-контекста | ~40% |
+| **AI Context Snapshot** | `fetch_ai_read_context` → `AIReadContext`; данные для LLM готовит слой `ContextBuilder`, не raw SQL | ~70% |
+
+Детальная карта переходов — [`docs/OS_TRANSITION_PLAN.md`](docs/OS_TRANSITION_PLAN.md).
+
+## Модули (Add-ons)
+
+Система расширяется независимыми модулями поверх единого ядра:
+
+- **Ordering** — приём заказов, стоп-листы, iiko-интеграция (реализован)
+- **GuestCare** — сбор отзывов, авто-ответы, агрегация из 2GIS/Google (частично)
+- **Marketing** — сегментированные рассылки, лояльность, бонусы (реализован)
+- **Intelligence** — AI-аналитика, инсайты, рекомендации владельцу (реализован)
+- **SupplyMind** — AI-закупки и Foodcost (дорожная карта)
 
 ## Возможности
 

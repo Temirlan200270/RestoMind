@@ -7,14 +7,16 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.db.models import (
     Booking,
+    BusinessRecommendation,
     ChatLog,
+    CustomerFeedback,
     EscalationEvent,
     FailedTask,
     MenuItem,
@@ -35,6 +37,11 @@ from app.services.integration_config import (
     ai_provider_configured,
     iiko_effective_configured,
     whatsapp_effective_configured,
+)
+from app.services.owner_dashboard import (
+    build_recommendation_target,
+    build_week_forecast,
+    fetch_daily_revenue_history,
 )
 from app.services.owner_roi import aggregate_org_window, build_achievements_week, build_today_narrative_ru
 from app.services.readiness import build_admin_readiness_payload
@@ -84,6 +91,51 @@ def _sql_dt_for_filter(dt: datetime) -> datetime:
     if settings.db_mode == "sqlite":
         return u.replace(tzinfo=None)
     return u
+
+
+_COMPLETED_ORDER_STATUSES = (
+    OrderStatus.CONFIRMED.value,
+    OrderStatus.SENT_TO_IIKO.value,
+    OrderStatus.COMPLETED.value,
+)
+
+
+def _linear_week_forecast(
+    daily_series: list[dict[str, Any]],
+    *,
+    today: date | None = None,
+) -> dict[str, Any] | None:
+    """Линейная экстраполяция выручки до конца текущей недели (пн–вс, UTC)."""
+    if not daily_series:
+        return None
+    today = today or datetime.now(tz=timezone.utc).date()
+    week_start = today - timedelta(days=today.weekday())
+    week_end = week_start + timedelta(days=6)
+    week_days = {
+        str(row["date"]): float(row.get("revenue") or 0)
+        for row in daily_series
+        if isinstance(row, dict)
+        and row.get("date")
+        and week_start.isoformat() <= str(row["date"]) <= today.isoformat()
+    }
+    if not week_days:
+        return None
+    days_elapsed = len(week_days)
+    earned = sum(week_days.values())
+    daily_avg = earned / days_elapsed if days_elapsed else 0.0
+    days_remaining = (week_end - today).days
+    forecast = earned + daily_avg * days_remaining
+    confidence = "low" if days_elapsed < 3 else ("medium" if days_elapsed < 5 else "high")
+    return {
+        "forecast_revenue": round(forecast, 2),
+        "earned_so_far": round(earned, 2),
+        "days_remaining": days_remaining,
+        "days_elapsed": days_elapsed,
+        "confidence": confidence,
+        "daily_avg": round(daily_avg, 2),
+        "week_start": week_start.isoformat(),
+        "week_end": week_end.isoformat(),
+    }
 
 
 # ─── Incident constants ──────────────────────────────────
@@ -866,7 +918,79 @@ async def dashboard_stats(
     if ai_time_saved_hours and float(ai_time_saved_hours) > 0 and ai_revenue_today > 0:
         ai_profit_per_saved_hour_kzt = round(float(ai_revenue_today) / float(ai_time_saved_hours), 2)
 
-    return {
+    op_before_order = exists(
+        select(ChatLog.id).where(
+            ChatLog.user_id == Order.user_id,
+            ChatLog.role == "operator",
+            ChatLog.created_at <= func.coalesce(Order.updated_at, Order.created_at),
+        ),
+    )
+    bot_orders_today = int(
+        (
+            await db.execute(
+                select(func.count(Order.id)).where(
+                    not_cancelled,
+                    org_orders,
+                    Order.created_at >= ts_lo,
+                    Order.created_at <= ts_hi,
+                    ~op_before_order,
+                ),
+            )
+        ).scalar()
+        or 0,
+    )
+    escalations_today = int(
+        await db.scalar(
+            select(func.count(EscalationEvent.id)).where(
+                _escalation_tenant_clause(org_id),
+                EscalationEvent.created_at >= ts_lo,
+                EscalationEvent.created_at <= ts_hi,
+            ),
+        )
+        or 0,
+    )
+    dialogs_today = int(
+        await db.scalar(
+            select(func.count(func.distinct(ChatLog.user_id))).where(
+                ChatLog.organization_id == org_id,
+                ChatLog.role == "user",
+                ChatLog.user_id.isnot(None),
+                ChatLog.created_at >= ts_lo,
+                ChatLog.created_at <= ts_hi,
+            ),
+        )
+        or 0,
+    )
+    escalation_rate_pct: float | None = None
+    if dialogs_today > 0:
+        escalation_rate_pct = round(100 * escalations_today / dialogs_today, 1)
+
+    bot_handled_pct: float | None = None
+    if today_orders > 0:
+        bot_handled_pct = round(100 * bot_orders_today / today_orders, 1)
+
+    revenue_history = await fetch_daily_revenue_history(db, org_id, days=28, now_utc=now_utc)
+    week_forecast = build_week_forecast(
+        revenue_history,
+        today=_dt_as_utc(now_utc).date(),
+    ) or _linear_week_forecast(daily_series, today=_dt_as_utc(now_utc).date())
+
+    rec_rows = (
+        await db.execute(
+            select(BusinessRecommendation)
+            .where(
+                BusinessRecommendation.organization_id == org_id,
+                BusinessRecommendation.status.in_(["new", "viewed"]),
+            )
+            .order_by(
+                BusinessRecommendation.expected_impact_kzt.desc().nulls_last(),
+                BusinessRecommendation.created_at.desc(),
+            )
+            .limit(3),
+        )
+    ).scalars().all()
+
+    result: dict[str, Any] = {
         "total_orders": total_orders,
         "today_orders": today_orders,
         "today_revenue": today_revenue,
@@ -876,6 +1000,7 @@ async def dashboard_stats(
         "revenue_change_pct": _pct_change(today_revenue, yesterday_revenue),
         "orders_change_pct": _pct_change(float(today_orders), float(yesterday_orders)),
         "daily_series": daily_series,
+        "week_forecast": week_forecast,
         "bookings": bookings_count,
         "menu_items": menu_count,
         "failed_tasks_open": failed_open,
@@ -892,6 +1017,184 @@ async def dashboard_stats(
         "iiko_errors_today": iiko_errors_today,
         "ai_avg_check_upsell_accepted": ai_avg_check_upsell_accepted,
         "ai_avg_check_no_upsell_offer": ai_avg_check_no_upsell_offer,
+        "bot_orders": bot_orders_today,
+        "bot_handled_pct": bot_handled_pct,
+        "escalations_today": escalations_today,
+        "escalation_rate_pct": escalation_rate_pct,
+        "dialogs_today": dialogs_today,
+        "top_actions": [
+            {
+                "id": r.id,
+                "type": r.recommendation_type,
+                "title": r.title,
+                "body": r.body,
+                "impact_kzt": r.expected_impact_kzt,
+                "confidence_pct": r.confidence_pct,
+                "cta_label": build_recommendation_target(r.recommendation_type).get("label"),
+                "target": build_recommendation_target(r.recommendation_type),
+            }
+            for r in rec_rows
+        ],
+    }
+    return result
+
+
+@router.get("/funnel")
+async def admin_funnel(
+    request: Request,
+    days: int = Query(7, ge=1, le=90),
+    churn_days: int = Query(30, ge=7, le=180),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Воронка потерь и отток клиентов за период."""
+    org_id = admin_org_from_session(request)
+    if not org_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    now_utc = datetime.now(tz=timezone.utc)
+    cutoff = now_utc - timedelta(days=days)
+    cutoff_sql = _sql_dt_for_filter(cutoff)
+    churn_cutoff = now_utc - timedelta(days=churn_days)
+    churn_cutoff_sql = _sql_dt_for_filter(churn_cutoff)
+
+    dialogs_count = int(
+        await db.scalar(
+            select(func.count(func.distinct(ChatLog.user_id))).where(
+                ChatLog.organization_id == org_id,
+                ChatLog.created_at >= cutoff_sql,
+                ChatLog.role == "user",
+                ChatLog.user_id.isnot(None),
+            ),
+        )
+        or 0,
+    )
+    drafts_count = int(
+        await db.scalar(
+            select(func.count(func.distinct(Order.user_id))).where(
+                Order.organization_id == org_id,
+                Order.created_at >= cutoff_sql,
+                Order.user_id.isnot(None),
+            ),
+        )
+        or 0,
+    )
+    completed_count = int(
+        await db.scalar(
+            select(func.count(func.distinct(Order.user_id))).where(
+                Order.organization_id == org_id,
+                Order.created_at >= cutoff_sql,
+                Order.user_id.isnot(None),
+                Order.status.in_(_COMPLETED_ORDER_STATUSES),
+            ),
+        )
+        or 0,
+    )
+
+    recent_buyers = (
+        select(func.distinct(Order.user_id))
+        .where(
+            Order.organization_id == org_id,
+            Order.user_id.isnot(None),
+            Order.status.in_(_COMPLETED_ORDER_STATUSES),
+            Order.created_at >= churn_cutoff_sql,
+        )
+    )
+    churned_count = int(
+        await db.scalar(
+            select(func.count(func.distinct(Order.user_id))).where(
+                Order.organization_id == org_id,
+                Order.user_id.isnot(None),
+                Order.status.in_(_COMPLETED_ORDER_STATUSES),
+                Order.user_id.not_in(recent_buyers),
+            ),
+        )
+        or 0,
+    )
+
+    ordered_users_period = (
+        select(func.distinct(Order.user_id))
+        .where(
+            Order.organization_id == org_id,
+            Order.created_at >= cutoff_sql,
+            Order.user_id.isnot(None),
+        )
+    )
+    dialog_no_order = int(
+        await db.scalar(
+            select(func.count(func.distinct(ChatLog.user_id))).where(
+                ChatLog.organization_id == org_id,
+                ChatLog.created_at >= cutoff_sql,
+                ChatLog.role == "user",
+                ChatLog.user_id.isnot(None),
+                ChatLog.user_id.not_in(ordered_users_period),
+            ),
+        )
+        or 0,
+    )
+
+    feedback_neg = int(
+        await db.scalar(
+            select(func.count(CustomerFeedback.id)).where(
+                CustomerFeedback.organization_id == org_id,
+                CustomerFeedback.created_at >= cutoff_sql,
+                CustomerFeedback.rating == "negative",
+            ),
+        )
+        or 0,
+    )
+    feedback_pos = int(
+        await db.scalar(
+            select(func.count(CustomerFeedback.id)).where(
+                CustomerFeedback.organization_id == org_id,
+                CustomerFeedback.created_at >= cutoff_sql,
+                CustomerFeedback.rating == "positive",
+            ),
+        )
+        or 0,
+    )
+    feedback_total = feedback_neg + feedback_pos
+    feedback_negative_pct: float | None = None
+    if feedback_total > 0:
+        feedback_negative_pct = round(100 * feedback_neg / feedback_total, 1)
+
+    cancellations = int(
+        await db.scalar(
+            select(func.count(Order.id)).where(
+                Order.organization_id == org_id,
+                Order.created_at >= cutoff_sql,
+                Order.status == OrderStatus.CANCELLED.value,
+            ),
+        )
+        or 0,
+    )
+
+    dialog_to_draft = round(100 * drafts_count / dialogs_count, 1) if dialogs_count else None
+    draft_to_order = round(100 * completed_count / drafts_count, 1) if drafts_count else None
+    dialog_to_order = round(100 * completed_count / dialogs_count, 1) if dialogs_count else None
+
+    return {
+        "ok": True,
+        "period_days": days,
+        "funnel": {
+            "dialogs": dialogs_count,
+            "drafts": drafts_count,
+            "completed": completed_count,
+            "dialog_no_order": dialog_no_order,
+            "dialog_to_draft_pct": dialog_to_draft,
+            "draft_to_order_pct": draft_to_order,
+            "dialog_to_order_pct": dialog_to_order,
+        },
+        "churn": {
+            "churned_count": churned_count,
+            "churn_threshold_days": churn_days,
+            "label": f"Не заказывали {churn_days}+ дней",
+        },
+        "losses": {
+            "cancellations": cancellations,
+            "feedback_negative": feedback_neg,
+            "feedback_positive": feedback_pos,
+            "feedback_negative_pct": feedback_negative_pct,
+        },
     }
 
 

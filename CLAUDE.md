@@ -1,7 +1,7 @@
 # RestoMind — ориентация для Claude Code
 
 ## Что это
-AI-оператор для ресторана: WhatsApp → LLM → заказы/брони → iiko. Монорепо: FastAPI backend + Jinja2/Alpine.js/Tailwind фронт + Alembic миграции.
+**RestoMind OS** — AI-операционная система для ресторанного бизнеса: WhatsApp → LLM → заказы/брони → iiko. Монорепо: FastAPI backend + Jinja2/Alpine.js/Tailwind фронт + Alembic миграции. Архитектура строится по 5-фазовому OS Transition Plan ([`docs/OS_TRANSITION_PLAN.md`](docs/OS_TRANSITION_PLAN.md)).
 
 ## Быстрый вход (если времени мало)
 - `CODEX.md` — короткая точка входа: что читать, где трекать задачи, красные линии.
@@ -9,7 +9,8 @@ AI-оператор для ресторана: WhatsApp → LLM → заказы
 ## Ключевые документы (читать перед работой)
 - **README.md** — продукт, быстрый старт, переменные окружения, вход в админку
 - **codebase.md** — карта репозитория, где какая логика живёт
-- **docs/CONVENTIONS.md** — инварианты разработки (контракт): async-first, idempotency, versioning, “Redis ≠ source of truth”
+- **docs/CONVENTIONS.md** — инварианты разработки (контракт): async-first, idempotency, versioning, “Redis ≠ source of truth”; **Rules 9–11** — Tenant Isolation, Event-First, AI Context через ContextBuilder
+- **docs/OS_TRANSITION_PLAN.md** — стратегический план перехода SaaS → OS (5 фаз); текущее состояние каждой фазы; читать перед любой архитектурной правкой
 - **docs/ROADMAP.md** — **единственный** трекер задач/статусов (P0–P4); по завершению: `[x]` в ROADMAP + запись в `CHANGELOG.md`
 - **CHANGELOG.md** — история изменений (дописывать в `## [Unreleased]`)
 - **docs/sprints/** — временные мини‑родмапы/чеклисты на 1–2 недели (оперативка; после спринта удалять/вплавлять; статусы задач всё равно только в `docs/ROADMAP.md`)

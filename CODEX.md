@@ -1,14 +1,17 @@
-# RestoMind — инструкции для Codex
+# RestoMind OS — инструкции для Codex/ИИ-агента
 
 Этот файл — **точка входа** для Codex/ИИ‑агента в репозитории.
+
+**RestoMind OS** — AI-операционная система для ресторанного бизнеса (не просто чат-бот). Архитектура строится послойно: Tenant Isolation → Event Core → AI Context Snapshot → Decision Engine. Перед любой архитектурной правкой читать `docs/OS_TRANSITION_PLAN.md`.
 
 ## Что читать в первую очередь (в этом порядке)
 
 1. `README.md` — что за продукт, как запустить, переменные окружения.
 2. `codebase.md` — карта репозитория: где живёт логика и основные потоки.
-3. `docs/CONVENTIONS.md` — **инварианты разработки (контракт)**.
-4. `docs/ROADMAP.md` — **единственный** трекер задач/статусов (P0–P4).
-5. `CHANGELOG.md` — что уже сделано (дописываем в `## [Unreleased]`).
+3. `docs/CONVENTIONS.md` — **инварианты разработки (контракт)**; Rules 9–11 — OS-инварианты (Tenant Isolation, Event-First, AI Context).
+4. `docs/OS_TRANSITION_PLAN.md` — стратегический план OS, текущее состояние фаз; читать перед архитектурными решениями.
+5. `docs/ROADMAP.md` — **единственный** трекер задач/статусов (P0–P4).
+6. `CHANGELOG.md` — что уже сделано (дописываем в `## [Unreleased]`).
 
 ## Правила работы (важно)
 
@@ -27,7 +30,9 @@
 ## Красные линии (не ломать без явного ТЗ)
 
 - **Платежи**: `app/api/payment_webhook.py`, `app/services/payment_*`, `app/services/payment_adapters.py`.
-- **Multi-tenant**: все выборки/действия должны быть scoped по `organization_id`.
+- **Multi-tenant**: все выборки/действия должны быть scoped по `organization_id` (Rule 9).
 - **Idempotency / versioning**: не убирать `Order.row_version`, дедуп входящих, уникальные ограничения.
 - **Redis ≠ источник истины**: Redis — кэш/сессии/события, истина — БД.
+- **Event-First**: новые бизнес-действия обязаны порождать событие через `emit_system_event` (Rule 10).
+- **AI Context**: данные для LLM только через `fetch_ai_read_context`, не сырой SQL внутри вызова (Rule 11).
 

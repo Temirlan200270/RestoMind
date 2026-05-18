@@ -6,9 +6,23 @@
 
 ## [Unreleased] — 2026-03-20
 
+### Стратегия (2026-05-18)
+
+- **RestoMind OS:** репозиторий официально переходит на концепцию AI Operating System. Позиционирование изменено с «AI-оператор для ресторана» на «AI-операционная система для ресторанного бизнеса». Обновлены [`README.md`](README.md) (разделы «Архитектура ядра» и «Модули»), [`codebase.md`](codebase.md) (суть проекта), [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md) (Rules 9–11: Tenant Isolation, Event-First, AI Context через ContextBuilder).
+- **Утверждён `OS_TRANSITION_PLAN` (5 фаз):** [`docs/OS_TRANSITION_PLAN.md`](docs/OS_TRANSITION_PLAN.md) — честная оценка текущего состояния по каждой фазе, конкретные схемы реализации, антипаттерны.
+- **Запланировано — Franchise / Branch (Phase 1):** иерархия `Tenant → Organization`, флаг `Tenant.is_network`, Branch Switcher, агрегированная аналитика «Вся сеть», матрица ролей Owner/Manager/Operator. Задача в ROADMAP P1: [`docs/ROADMAP.md`](docs/ROADMAP.md).
+- **Запланировано — Event System Stabilization (Phase 2) и AI Context Snapshot (Phase 3):** задачи добавлены в ROADMAP P3.
+
+### Добавлено (2026-05-18)
+
+- **Dialog / `is_cancel_all_message` расширение:** фраза «Отмени эти все заявки» и аналогичные натуральные формулировки (произвольный порядок слов) теперь корректно детектируются до LLM. Добавлены `_CANCEL_VERBS` + `_ALL_MARKERS` keyword-combo проверка и новые фразы в `CANCEL_ALL_PHRASES` в [`app/services/dialog_mgr.py`](app/services/dialog_mgr.py); тесты расширены в [`tests/test_dialog_session_fixes.py`](tests/test_dialog_session_fixes.py) — 16 кейсов (11 позитивных + 5 негативных, включая защиту от «отмени плов»).
+- **Owner Dashboard Spec:** [`docs/OWNER_DASHBOARD_SPEC.md`](docs/OWNER_DASHBOARD_SPEC.md) — полная спецификация для реализации 4 ответов Owner Dashboard: прогноз выручки до конца недели (`_linear_week_forecast` + карточка), метрики эффективности бота на главном экране (`bot_handled_pct`, `escalations_today`), воронка потерь `GET /api/admin/funnel` (диалогов → черновиков → заказов, отток за 30 дней), рекомендации с ROI-ранжированием `top_actions` в `/api/admin/stats`.
+- **OS Transition Plan:** [`docs/OS_TRANSITION_PLAN.md`](docs/OS_TRANSITION_PLAN.md) — стратегический план перехода RestoMind → AI OS по 5 фазам с честной оценкой текущего состояния (Phase 1 ~90%, Phase 2 ~40%, Phase 3 ~70% и т.д.), Strangler Pattern как основной принцип, приоритет Resource-Scope RBAC как ближайшего блокера enterprise-продаж.
+
 ### Исправлено (2026-05-18)
 
 - **Админка / «Требует внимания»:** проверка WhatsApp в инцидентах и `/integrations/status` совпадает с онбордингом — учитывается `phone_number_id` филиала в БД при заданном `WHATSAPP_API_TOKEN`; нет ложного «WhatsApp не настроен».
+- **Админка / дашборд владельца (Q1–Q4):** прогноз выручки до конца недели (`week_forecast` в `/stats`, модель по дням недели + fallback), блок эффективности бота (`bot_handled_pct`, `escalation_rate_pct`), воронка потерь `GET /funnel` (drop-off, отток, отмены, негативные отзывы), топ-3 рекомендации с ROI и переходом по клику (`top_actions` + `openTopAction`).
 - **WhatsApp / стоп-лист:** кэш промпта меню (Redis + in-process) учитывает отпечаток `is_available`; фоновый sync стоп-листов из `main.py` инвалидирует кэш — нет противоречий «в наличии» / «на стопе» между сообщениями.
 - **WhatsApp / смена стопа в диалоге:** `stoplist_session` запоминает стоп-позиции по `(org, phone)`; при новом стопе — блок в промпт для LLM и ответы сервера («только что ушло на стоп», «убрал из заказа»), а не сухое «недоступно».
 - **WhatsApp / корзина:** канонический телефон E.164 на входе; сброс DRAFT при пустой Redis-истории (TTL 24 ч); `current_pending_order_id` сбрасывается в БД вместе с Redis.

@@ -653,6 +653,8 @@ function adminMixinState() {
         dashStats: {},
         dashStatsLoading: false,
         dashStatsLoadedOnce: false,
+        dashFunnel: null,
+        dashFunnelLoading: false,
         _dashboardChartObserver: null,
         /** GET /api/admin/roi/today — нарратив + достижения. */
         dashRoiSummary: null,
@@ -6554,6 +6556,7 @@ function adminMixinDataChartsSettings() {
                     } else {
                         await Promise.all([
                             this.loadDashStats(),
+                            this.loadDashFunnel(),
                             this.loadAttentionSummary(),
                         ]);
                         this.deferIdleWork(async () => {
@@ -6757,6 +6760,18 @@ function adminMixinDataChartsSettings() {
             });
             this.loadTabData();
             this._schedulePushAdminHash();
+        },
+
+        async loadDashFunnel() {
+            this.dashFunnelLoading = true;
+            try {
+                const { ok, data } = await this.apiJsonResponse('/api/admin/funnel?days=7');
+                if (ok) this.dashFunnel = data;
+            } catch (e) {
+                adminLogger.error('[admin] loadDashFunnel', e);
+            } finally {
+                this.dashFunnelLoading = false;
+            }
         },
 
         async loadDashStats() {
@@ -7102,6 +7117,29 @@ function adminMixinDataChartsSettings() {
             this.incidentGo(target);
         },
 
+        async openTopAction(action) {
+            if (!action) return;
+            if (action.id) {
+                try {
+                    await this.apiJsonResponse(
+                        `/api/admin/intelligence/recommendations/${action.id}`,
+                        {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ status: 'viewed' }),
+                        },
+                    );
+                } catch (e) {
+                    adminLogger.warn('[admin] openTopAction patch viewed', e);
+                }
+            }
+            if (action.target && typeof action.target === 'object') {
+                this.incidentGo(action.target);
+                return;
+            }
+            this.navigateToTab('ai_center', { aiCenterTab: 'insights' });
+        },
+
         async copyReadinessLink(kind) {
             const p = this.readinessPayload && this.readinessPayload.links ? this.readinessPayload.links : {};
             let s = '';
@@ -7196,6 +7234,18 @@ function adminMixinDataChartsSettings() {
             }
             if (tab === 'digital_twin') {
                 this.navigateToTab('ai_center', { aiCenterTab: 'load' });
+                return;
+            }
+            if (tab === 'menu') {
+                this.navigateToTab('menu', { menuView: t.menuView || 'catalog' });
+                return;
+            }
+            if (tab === 'dashboard') {
+                this.navigateToTab('dashboard', { dashboardTab: t.dashboardTab || 'overview' });
+                return;
+            }
+            if (tab === 'ai_center') {
+                this.navigateToTab('ai_center', { aiCenterTab: t.aiCenterTab || 'insights' });
                 return;
             }
             this.navigateToTab(tab);

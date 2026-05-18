@@ -69,12 +69,107 @@
                             x-text="(dashStats.ai_revenue_share_pct ?? '—') + (dashStats.ai_revenue_share_pct != null ? '%' : '')"></div>
                         <div class="mt-1 text-[11px] text-slate-500">в выручке</div>
                     </button>
+                    <div class="text-left rounded-2xl bg-sky-50 ring-1 ring-sky-200/80 shadow-sm px-4 py-3 min-h-[96px]"
+                        x-show="dashStats.week_forecast" x-cloak>
+                        <div class="text-[11px] font-bold uppercase text-sky-900/75">Прогноз до конца недели</div>
+                        <div class="mt-2 text-xl font-black text-sky-950 tabular-nums"
+                            x-text="fmt.money(dashStats.week_forecast?.forecast_revenue ?? 0)"></div>
+                        <div class="mt-1 text-[11px] text-sky-800">
+                            Заработано: <span class="tabular-nums" x-text="fmt.money(dashStats.week_forecast?.earned_so_far ?? 0)"></span>
+                            · ещё <span x-text="dashStats.week_forecast?.days_remaining ?? 0"></span> дн.
+                        </div>
+                        <div class="mt-1 text-[10px]"
+                            :class="dashStats.week_forecast?.confidence === 'low' ? 'text-amber-600 font-medium' : 'text-sky-700/80'"
+                            x-text="({low: 'Мало данных (< 3 дней)', medium: 'Средняя точность', high: 'Высокая точность'}[dashStats.week_forecast?.confidence] ?? '') + (dashStats.week_forecast?.method === 'weekday' ? ' · по дням недели' : '')"></div>
+                    </div>
                     <button type="button" class="text-left rounded-2xl bg-emerald-50 ring-1 ring-emerald-200/80 shadow-sm px-4 py-3 min-h-[96px]"
+                        x-show="!dashStats.week_forecast"
                         @click="navigateToTab('chats')">
                         <div class="text-[11px] font-bold uppercase text-emerald-900/75">Время команды</div>
                         <div class="mt-2 text-xl font-black text-emerald-950 tabular-nums" x-text="(dashStats.ai_time_saved_hours ?? 0) + ' ч'"></div>
                         <div class="mt-1 text-[11px] text-emerald-800"><span x-text="dashStats.ai_messages_today ?? 0"></span> сообщений ИИ</div>
                     </button>
+                </div>
+
+                <!-- ИИ-эффективность (Q2) -->
+                <div class="ds-card p-3 flex flex-wrap gap-x-4 gap-y-2 items-center text-sm"
+                    x-show="dashStats.ai_time_saved_hours != null || dashStats.bot_handled_pct != null" x-cloak>
+                    <div class="flex items-center gap-1.5">
+                        <span class="text-slate-500">Бот обработал</span>
+                        <span class="font-bold text-slate-900 tabular-nums" x-text="(dashStats.bot_handled_pct ?? '—') + (dashStats.bot_handled_pct != null ? '%' : '')"></span>
+                        <span class="text-slate-400">заказов</span>
+                    </div>
+                    <div class="hidden sm:block w-px h-4 bg-slate-200" aria-hidden="true"></div>
+                    <div class="flex items-center gap-1.5">
+                        <span class="text-slate-500">Сэкономил команде</span>
+                        <span class="font-bold text-slate-900 tabular-nums" x-text="(dashStats.ai_time_saved_hours ?? 0) + ' ч'"></span>
+                    </div>
+                    <div class="hidden sm:block w-px h-4 bg-slate-200" aria-hidden="true"></div>
+                    <div class="flex items-center gap-1.5">
+                        <span class="text-slate-500">Эскалаций сегодня</span>
+                        <span class="font-bold tabular-nums"
+                            :class="(dashStats.escalations_today ?? 0) > 3 ? 'text-amber-600' : 'text-slate-900'"
+                            x-text="dashStats.escalations_today ?? 0"></span>
+                    </div>
+                    <div class="hidden sm:block w-px h-4 bg-slate-200" aria-hidden="true"></div>
+                    <div class="flex items-center gap-1.5" x-show="dashStats.escalation_rate_pct != null">
+                        <span class="text-slate-500">Доля эскалаций</span>
+                        <span class="font-bold tabular-nums text-slate-900" x-text="(dashStats.escalation_rate_pct ?? 0) + '%'"></span>
+                    </div>
+                </div>
+
+                <!-- Воронка потерь (Q3) -->
+                <div class="ds-card p-4" x-show="dashFunnel || dashFunnelLoading" x-cloak>
+                    <div class="text-sm font-semibold text-slate-700 mb-3">Где теряем клиентов (7 дней)</div>
+                    <div x-show="dashFunnelLoading && !dashFunnel" class="text-sm text-slate-400">Загрузка…</div>
+                    <template x-if="dashFunnel?.funnel">
+                        <div class="space-y-2">
+                            <div class="flex items-center gap-2 text-sm">
+                                <span class="w-28 text-slate-500 shrink-0">Диалогов</span>
+                                <span class="font-bold text-slate-900 tabular-nums" x-text="dashFunnel.funnel.dialogs"></span>
+                            </div>
+                            <div class="flex items-center gap-2 text-sm flex-wrap" x-show="(dashFunnel.funnel?.dialog_no_order ?? 0) > 0">
+                                <span class="w-28 text-slate-500 shrink-0">Без заказа</span>
+                                <span class="font-bold text-amber-700 tabular-nums" x-text="dashFunnel.funnel.dialog_no_order"></span>
+                                <span class="text-xs text-slate-500">написали, не заказали</span>
+                            </div>
+                            <div class="flex items-center gap-2 text-sm flex-wrap">
+                                <span class="w-28 text-slate-500 shrink-0">→ Черновиков</span>
+                                <span class="font-bold tabular-nums" x-text="dashFunnel.funnel.drafts"></span>
+                                <span class="text-xs px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 font-medium"
+                                    x-show="dashFunnel.funnel.dialog_to_draft_pct !== null"
+                                    x-text="(dashFunnel.funnel.dialog_to_draft_pct ?? 0) + '%'"></span>
+                            </div>
+                            <div class="flex items-center gap-2 text-sm flex-wrap">
+                                <span class="w-28 text-slate-500 shrink-0">→ Заказов</span>
+                                <span class="font-bold text-slate-900 tabular-nums" x-text="dashFunnel.funnel.completed"></span>
+                                <span class="text-xs px-1.5 py-0.5 rounded font-medium"
+                                    :class="(dashFunnel.funnel.draft_to_order_pct ?? 0) < 50 ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'"
+                                    x-show="dashFunnel.funnel.draft_to_order_pct !== null"
+                                    x-text="(dashFunnel.funnel.draft_to_order_pct ?? 0) + '%'"></span>
+                            </div>
+                            <div class="mt-3 pt-3 border-t border-slate-100 space-y-1.5 text-sm"
+                                x-show="dashFunnel.losses && ((dashFunnel.losses.cancellations ?? 0) > 0 || (dashFunnel.losses.feedback_negative ?? 0) > 0)">
+                                <div class="flex flex-wrap gap-x-3" x-show="(dashFunnel.losses?.cancellations ?? 0) > 0">
+                                    <span class="text-slate-600">Отмены:</span>
+                                    <span class="font-bold text-red-600 tabular-nums" x-text="dashFunnel.losses.cancellations"></span>
+                                </div>
+                                <div class="flex flex-wrap gap-x-3" x-show="(dashFunnel.losses?.feedback_negative ?? 0) > 0">
+                                    <span class="text-slate-600">Негатив 👎:</span>
+                                    <span class="font-bold text-red-600 tabular-nums" x-text="dashFunnel.losses.feedback_negative"></span>
+                                    <span class="text-xs text-slate-500" x-show="dashFunnel.losses.feedback_negative_pct != null"
+                                        x-text="'(' + dashFunnel.losses.feedback_negative_pct + '% от отзывов)'"></span>
+                                </div>
+                            </div>
+                            <div class="mt-3 pt-3 border-t border-slate-100 flex items-center gap-2 text-sm flex-wrap"
+                                x-show="(dashFunnel.churn?.churned_count ?? 0) > 0">
+                                <span class="text-red-500" aria-hidden="true">⚠</span>
+                                <span class="text-slate-600">Отток:</span>
+                                <span class="font-bold text-red-600 tabular-nums" x-text="dashFunnel.churn?.churned_count"></span>
+                                <span class="text-slate-500" x-text="dashFunnel.churn?.label"></span>
+                            </div>
+                        </div>
+                    </template>
                 </div>
 
                 <!-- Блок «Сейчас»: быстрые переходы по инцидентам — скрыт на мобиле (баннер сверху делает то же самое) -->
@@ -97,6 +192,30 @@
                             </button>
                         </template>
                     </div>
+                    <template x-if="(dashStats.top_actions || []).length > 0">
+                        <div class="mt-3 space-y-2">
+                            <div class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Рекомендации</div>
+                            <template x-for="action in (dashStats.top_actions || [])" :key="'rec-' + action.id">
+                                <button type="button" @click="openTopAction(action)"
+                                    class="w-full flex items-start gap-3 p-2.5 rounded-xl border border-slate-100 bg-slate-50 hover:bg-slate-100/80 text-left transition min-h-[44px]">
+                                    <div class="flex-1 min-w-0">
+                                        <div class="text-sm font-medium text-slate-800 truncate" x-text="action.title"></div>
+                                        <div class="text-xs text-slate-500 mt-0.5 line-clamp-1" x-text="action.body"></div>
+                                        <div class="text-[11px] font-semibold text-brand-700 mt-1" x-text="action.cta_label || 'Открыть'"></div>
+                                    </div>
+                                    <div x-show="action.impact_kzt" class="text-right shrink-0">
+                                        <div class="text-xs font-bold text-emerald-700"
+                                            x-text="'+' + fmt.money(action.impact_kzt)"></div>
+                                        <div class="text-[10px] text-slate-400">прогноз</div>
+                                    </div>
+                                </button>
+                            </template>
+                            <button type="button" @click="navigateToTab('ai_center', { aiCenterTab: 'insights' })"
+                                class="w-full text-xs text-slate-400 hover:text-slate-600 text-center py-1 min-h-[44px]">
+                                Все рекомендации →
+                            </button>
+                        </div>
+                    </template>
                     <p x-show="!attentionSummaryLoading && attentionSummary && !(attentionSummary?.hero_actions || []).length"
                         x-cloak class="mt-4 text-sm text-slate-600">
                         Нет открытых задач по мониторингу — можно продолжать работу.

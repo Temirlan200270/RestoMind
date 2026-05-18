@@ -62,12 +62,27 @@ def test_newly_stopped_names_detects_fresh_stop() -> None:
 
 
 def test_is_cancel_all_message() -> None:
+    # Точные фразы
     assert is_cancel_all_message("отмени всё")
     assert is_cancel_all_message("Отмени все!")
     assert is_cancel_all_message("отмени")
+    assert is_cancel_all_message("отмени заказ")
+    assert is_cancel_all_message("убери всё")
+    assert is_cancel_all_message("начать заново")
+
+    # Натуральные фразы с произвольным порядком слов (keyword-combo)
+    assert is_cancel_all_message("Ты до этого отмени это все эти")
+    assert is_cancel_all_message("Отмени эти все заявки")
+    assert is_cancel_all_message("отмени все заявки")
+    assert is_cancel_all_message("удали все заказы")
+    assert is_cancel_all_message("убери все заказы пожалуйста")
+
+    # Ложные срабатывания НЕ должны происходить
     assert not is_cancel_all_message("есть плов?")
     assert not is_cancel_all_message("нет")
     assert not is_cancel_all_message("отмени плов")
+    assert not is_cancel_all_message("убери плов из заказа")
+    assert not is_cancel_all_message("можно без лука")
 
 
 def test_newly_stopped_empty_on_first_snapshot() -> None:
