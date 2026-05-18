@@ -572,20 +572,20 @@ async def admin_order_timeline(
     ).scalars().all()
     for log in reversed(chat_rows):
         ct = (log.content or "").strip()
+        is_operator_only = ct.startswith("[OPERATOR_ONLY")
         if len(ct) > 160:
             ct = ct[:159] + "…"
-        ds = (log.delivery_status or "").strip()
-        extra = f" · {ds}" if ds and log.role != "user" else ""
         raw_events.append(
             (
                 log.created_at,
                 {
                     "kind": "chat",
                     "title": f"Чат ({log.role})",
-                    "detail": ct + extra,
+                    "detail": ct,
                     "meta": {
                         "role": log.role,
                         "delivery_status": log.delivery_status,
+                        "is_operator_only": is_operator_only,
                         "trace_id": (
                             dict(log.meta_json or {}).get("trace_id")
                             if isinstance(log.meta_json, dict) else None

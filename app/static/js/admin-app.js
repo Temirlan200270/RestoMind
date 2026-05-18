@@ -291,6 +291,14 @@ const adminFormat = {
         }
         return this.date(iso);
     },
+    /** Чистит WhatsApp-разметку для отображения в UI (*bold*, декоративные разделители). */
+    chatText(raw) {
+        if (!raw) return '';
+        return raw
+            .replace(/\*([^*]+)\*/g, '$1')
+            .replace(/[✨━─═]+\s*/g, '')
+            .trim();
+    },
 };
 
 /**

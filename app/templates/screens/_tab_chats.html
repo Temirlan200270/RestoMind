@@ -144,11 +144,16 @@
                                                 </span>
                                             </div>
                                             <div class="rm-chat-actions flex flex-wrap items-center gap-1.5 shrink-0 min-[520px]:justify-end">
+                                                <button type="button" x-show="customerSummary.user_exists && customerAiSnoozeActive()"
+                                                    @click="setChatAiSnoozePreset('off')"
+                                                    class="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-emerald-200 text-emerald-800 bg-white hover:bg-emerald-50 transition touch-manipulation min-h-[44px]">
+                                                    Снять паузу
+                                                </button>
                                                 <details class="relative" x-show="customerSummary.user_exists">
-                                                    <summary class="list-none px-2.5 py-1.5 text-xs font-medium rounded-lg border border-violet-200 text-violet-900 bg-violet-50/80 hover:bg-violet-50 transition cursor-pointer select-none touch-manipulation min-h-[44px] flex items-center">
+                                                    <summary class="list-none px-2.5 py-1.5 text-xs font-medium rounded-lg border border-slate-200 text-slate-700 bg-white hover:bg-slate-50 transition cursor-pointer select-none touch-manipulation min-h-[44px] flex items-center">
                                                         ИИ: пауза ▾
                                                     </summary>
-                                                    <div class="absolute right-0 top-full mt-2 w-56 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl shadow-slate-900/10 z-30">
+                                                    <div class="absolute right-0 top-full mt-2 w-52 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl shadow-slate-900/10 z-30">
                                                         <button type="button" @click="setChatAiSnoozePreset('30m'); $el.closest('details').open = false"
                                                             class="w-full text-left px-3 py-2.5 text-xs font-medium rounded-lg text-slate-700 hover:bg-slate-50 min-h-[44px]">На 30 минут</button>
                                                         <button type="button" @click="setChatAiSnoozePreset('2h'); $el.closest('details').open = false"
@@ -156,9 +161,7 @@
                                                         <button type="button" @click="setChatAiSnoozePreset('until_tomorrow'); $el.closest('details').open = false"
                                                             class="w-full text-left px-3 py-2.5 text-xs font-medium rounded-lg text-slate-700 hover:bg-slate-50 min-h-[44px]">До завтра</button>
                                                         <button type="button" @click="setChatAiSnoozePreset('forever'); $el.closest('details').open = false"
-                                                            class="w-full text-left px-3 py-2.5 text-xs font-medium rounded-lg text-rose-800 hover:bg-rose-50 min-h-[44px]">Навсегда (как «заблокировать ИИ»)</button>
-                                                        <button type="button" @click="setChatAiSnoozePreset('off'); $el.closest('details').open = false"
-                                                            class="w-full text-left px-3 py-2.5 text-xs font-medium rounded-lg text-emerald-800 hover:bg-emerald-50 min-h-[44px]">Снять таймер паузы</button>
+                                                            class="w-full text-left px-3 py-2.5 text-xs font-medium rounded-lg text-rose-700 hover:bg-rose-50 min-h-[44px]">Навсегда</button>
                                                     </div>
                                                 </details>
                                                 <button type="button" @click="toggleTakeover()"
