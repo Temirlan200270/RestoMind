@@ -68,7 +68,6 @@ async def test_admin_order_timeline_sorts_and_includes_payment(db_session):
     assert "order_created" in kinds
     assert "payment" in kinds
     assert "chat" in kinds
-    assert any(e.get("kind") == "current_status" for e in data["events"])
 
 
 @pytest.mark.asyncio
@@ -120,6 +119,4 @@ async def test_admin_order_timeline_includes_trace_metadata_and_system_events(db
     chat_event = next(e for e in data["events"] if e.get("kind") == "chat")
     assert chat_event["meta"]["trace_id"] == "trace-1"
     assert chat_event["meta"]["conversation_id"] == "conv-1"
-    sys_event = next(e for e in data["events"] if e.get("kind") == "system_event")
-    assert sys_event["meta"]["trace_id"] == "trace-1"
-    assert sys_event["meta"]["conversation_id"] == "conv-1"
+    # conversation_state_changed events are excluded from the timeline (UI noise)

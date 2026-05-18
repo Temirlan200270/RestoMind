@@ -121,5 +121,5 @@ async def test_confirm_order_confirms_linked_booking(db_with_menu) -> None:
 
     timeline = await admin_order_timeline(DummyRequest(int(order.organization_id)), int(order.id), db_with_menu)
     system_titles = [event.get("title") for event in timeline["events"] if event.get("kind") == "system_event"]
-    assert "order_confirmed" in system_titles
-    assert "booking_confirmed" in system_titles
+    assert "Заказ подтверждён" in system_titles
+    assert "Бронь подтверждена" in system_titles
