@@ -31,7 +31,11 @@ from app.services.intelligence_analytics import (
     order_meta_from_items_json,
     upsell_stats_from_items_json,
 )
-from app.services.org_iiko import resolve_org_iiko_credentials
+from app.services.integration_config import (
+    ai_provider_configured,
+    iiko_effective_configured,
+    whatsapp_effective_configured,
+)
 from app.services.owner_roi import aggregate_org_window, build_achievements_week, build_today_narrative_ru
 from app.services.readiness import build_admin_readiness_payload
 from app.services.tenant_scope import (
@@ -53,27 +57,6 @@ router = APIRouter(
     tags=["Analytics"],
     dependencies=[Depends(require_admin_session_active)],
 )
-
-
-# ─── Helpers ──────────────────────────────────────────────
-
-
-def _iiko_env_configured() -> bool:
-    return bool(str(settings.iiko_api_login or "").strip() and str(settings.iiko_organization_id or "").strip())
-
-
-async def _iiko_effective_configured(db: AsyncSession, org_id: int) -> bool:
-    c = await resolve_org_iiko_credentials(db, org_id)
-    if c is not None:
-        return True
-    return _iiko_env_configured()
-
-
-def _whatsapp_env_configured() -> bool:
-    return bool(
-        str(settings.whatsapp_api_token or "").strip()
-        and str(settings.whatsapp_phone_number_id or "").strip()
-    )
 
 
 # ─── Даты заказов (UTC) — общие для /stats и /analytics ───
@@ -477,12 +460,13 @@ async def admin_incidents(
             ),
         )
 
-    iiko_configured = await _iiko_effective_configured(db, org_id)
+    iiko_configured = await iiko_effective_configured(db, org_id)
+    wa_configured = await whatsapp_effective_configured(db, org_id)
     integ = await build_status_payload(
         db,
         organization_id=int(org_id),
         iiko_configured=iiko_configured,
-        whatsapp_configured=_whatsapp_env_configured(),
+        whatsapp_configured=wa_configured,
     )
     integration_items: list[dict[str, Any]] = []
     if not integ.get("iiko_configured"):
@@ -532,12 +516,7 @@ async def admin_incidents(
             },
         )
     ai_provider = (settings.ai_provider or "openai").strip().lower()
-    ai_configured = (
-        bool(str(settings.gemini_api_key or "").strip())
-        if ai_provider == "gemini"
-        else bool(str(settings.openai_api_key or "").strip())
-    )
-    if not ai_configured:
+    if not ai_provider_configured():
         integration_items.append(
             {
                 "id": "integration:ai_config",

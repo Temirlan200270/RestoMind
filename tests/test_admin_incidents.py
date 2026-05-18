@@ -169,3 +169,33 @@ async def test_admin_incidents_hides_platform_risks_for_regular_admin(db_session
     assert data["is_superadmin"] is False
     assert data["superadmin_only"] == []
     assert "platform_risks" not in {g["id"] for g in data["groups"]}
+
+
+@pytest.mark.asyncio
+async def test_admin_incidents_whatsapp_ok_with_org_phone_only(db_session, monkeypatch):
+    """Phone Number ID в профиле филиала + токен в .env — без ложного «WhatsApp не настроен»."""
+    from app.core.config import settings
+
+    org = Organization(
+        id=301,
+        name="WA Org",
+        slug="wa-org",
+        whatsapp_phone_number_id="123456789012345",
+    )
+    db_session.add(org)
+    await db_session.flush()
+
+    monkeypatch.setattr(settings, "whatsapp_api_token", "test-token")
+    monkeypatch.setattr(settings, "whatsapp_phone_number_id", "")
+    monkeypatch.setattr(settings, "openai_api_key", "sk-test")
+    monkeypatch.setattr(settings, "ai_provider", "openai")
+    monkeypatch.setattr(settings, "iiko_api_login", "")
+    monkeypatch.setattr(settings, "iiko_organization_id", "")
+
+    req = DummyRequest({"admin_ok": True, "organization_id": 301})
+    data = await admin_incidents(req, db_session)
+
+    integ_group = next((g for g in data["groups"] if g["id"] == "integrations_degraded"), None)
+    if integ_group is not None:
+        titles = {it["title"] for it in integ_group.get("items") or []}
+        assert "WhatsApp не настроен" not in titles

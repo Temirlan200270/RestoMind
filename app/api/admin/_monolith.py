@@ -66,6 +66,11 @@ from app.services.intent_router import (
     get_open_draft_order,
     route_intent,
 )
+from app.services.integration_config import (
+    ai_provider_configured,
+    iiko_effective_configured,
+    whatsapp_effective_configured,
+)
 from app.services.org_iiko import resolve_org_iiko_credentials
 from app.services.tenant_scope import (
     available_organizations_for_admin_session,
@@ -569,24 +574,6 @@ def _check_mixed_payment_split(items_json: dict | None, total_price: float, *, t
     return None
 
 
-def _iiko_env_configured() -> bool:
-    return bool(str(settings.iiko_api_login or "").strip() and str(settings.iiko_organization_id or "").strip())
-
-
-async def _iiko_effective_configured(db: AsyncSession, org_id: int) -> bool:
-    c = await resolve_org_iiko_credentials(db, org_id)
-    if c is not None:
-        return True
-    return _iiko_env_configured()
-
-
-def _whatsapp_env_configured() -> bool:
-    return bool(
-        str(settings.whatsapp_api_token or "").strip()
-        and str(settings.whatsapp_phone_number_id or "").strip()
-    )
-
-
 # ─── Демо-данные (админка) ──────────────────────────────
 
 
@@ -831,11 +818,13 @@ async def settings_environment(request: Request, db: AsyncSession = Depends(get_
     Безопасный снимок окружения для админки (без секретов и полных токенов).
     """
     org_id = admin_org_from_session(request)
+    iiko_ok = await iiko_effective_configured(db, org_id)
+    wa_ok = await whatsapp_effective_configured(db, org_id)
     integ = await build_status_payload(
         db,
         organization_id=int(org_id),
-        iiko_configured=await _iiko_effective_configured(db, org_id),
-        whatsapp_configured=_whatsapp_env_configured(),
+        iiko_configured=iiko_ok,
+        whatsapp_configured=wa_ok,
     )
     org_row = await db.get(Organization, org_id)
     tg_token_ok = bool(str(settings.telegram_bot_token or "").strip())
@@ -857,12 +846,15 @@ async def settings_environment(request: Request, db: AsyncSession = Depends(get_
         "redis_backend": "redis" if settings.redis_enabled else "in_memory",
         "integrations": {
             "iiko": {
-                "configured": _iiko_env_configured(),
+                "configured": iiko_ok,
                 "terminal_group_id_set": bool(str(settings.iiko_terminal_group_id or "").strip()),
             },
             "whatsapp": {
-                "configured": _whatsapp_env_configured(),
-                "phone_number_id_set": bool(str(settings.whatsapp_phone_number_id or "").strip()),
+                "configured": wa_ok,
+                "phone_number_id_set": bool(
+                    str(getattr(org_row, "whatsapp_phone_number_id", "") or "").strip()
+                    or str(settings.whatsapp_phone_number_id or "").strip()
+                ),
             },
             "telegram": {
                 "configured": telegram_staff_reachable,
@@ -872,6 +864,7 @@ async def settings_environment(request: Request, db: AsyncSession = Depends(get_
             },
             "openai": {"configured": bool(str(settings.openai_api_key or "").strip())},
             "gemini": {"configured": bool(str(settings.gemini_api_key or "").strip())},
+            "ai_active_configured": ai_provider_configured(),
             "ai_provider": (settings.ai_provider or "openai").strip().lower(),
             "public_base_url_set": bool(str(settings.public_base_url or "").strip()),
         },

@@ -24,7 +24,7 @@ from app.services.iiko_onboarding import setup_organization_iiko, verify_iiko_ap
 from app.services.iiko_sync_tasks import run_full_iiko_sync_for_org
 from app.services.menu_embeddings import reindex_organization_menu_embeddings
 from app.services.menu_sync import sync_menu_from_iiko, sync_stop_lists
-from app.services.org_iiko import resolve_org_iiko_credentials
+from app.services.integration_config import iiko_effective_configured, whatsapp_effective_configured
 from app.services.order_logic import invalidate_menu_context_cache
 from .deps import (
     _iiko_login_org_for_tenant,
@@ -48,27 +48,6 @@ router = APIRouter(
     tags=["Menu & Integrations"],
     dependencies=[Depends(require_admin_session_active)],
 )
-
-
-# ─── Helpers ──────────────────────────────────────────────
-
-
-def _iiko_env_configured() -> bool:
-    return bool(str(settings.iiko_api_login or "").strip() and str(settings.iiko_organization_id or "").strip())
-
-
-async def _iiko_effective_configured(db: AsyncSession, org_id: int) -> bool:
-    c = await resolve_org_iiko_credentials(db, org_id)
-    if c is not None:
-        return True
-    return _iiko_env_configured()
-
-
-def _whatsapp_env_configured() -> bool:
-    return bool(
-        str(settings.whatsapp_api_token or "").strip()
-        and str(settings.whatsapp_phone_number_id or "").strip()
-    )
 
 
 # ─── Schemas ──────────────────────────────────────────────
@@ -196,12 +175,13 @@ async def integrations_status(
     from app.db.models import Organization
 
     org_id = admin_org_from_session(request)
-    iiko_ok = await _iiko_effective_configured(db, org_id)
+    iiko_ok = await iiko_effective_configured(db, org_id)
+    wa_ok = await whatsapp_effective_configured(db, org_id)
     base = await build_status_payload(
         db,
         organization_id=int(org_id),
         iiko_configured=iiko_ok,
-        whatsapp_configured=_whatsapp_env_configured(),
+        whatsapp_configured=wa_ok,
     )
     pub = (settings.public_base_url or "").strip().rstrip("/")
     webhook_url = f"{pub}/api/whatsapp/webhook" if pub else None
@@ -322,8 +302,7 @@ async def setup_status(request: Request, db: AsyncSession = Depends(get_db)) -> 
 
     org_id = admin_org_from_session(request)
     org = await db.get(Organization, org_id)
-    creds = await resolve_org_iiko_credentials(db, org_id)
-    iiko_ok = creds is not None
+    iiko_ok = await iiko_effective_configured(db, org_id)
     menu_n = int(
         await db.scalar(
             select(func.count()).select_from(MenuItem).where(MenuItem.organization_id == org_id),
@@ -339,11 +318,7 @@ async def setup_status(request: Request, db: AsyncSession = Depends(get_db)) -> 
         )
         or 0,
     )
-    org_wa = ((org.whatsapp_phone_number_id if org else None) or "").strip()
-    wa_ok = bool(org_wa) or (
-        bool((settings.whatsapp_phone_number_id or "").strip())
-        and bool((settings.whatsapp_api_token or "").strip())
-    )
+    wa_ok = await whatsapp_effective_configured(db, org_id)
     rules_n = int(
         await db.scalar(
             select(func.count()).select_from(UpsellRule).where(
@@ -455,8 +430,8 @@ async def integrations_sync_now(
     snap = await build_status_payload(
         db,
         organization_id=int(org_id),
-        iiko_configured=await _iiko_effective_configured(db, org_id),
-        whatsapp_configured=_whatsapp_env_configured(),
+        iiko_configured=await iiko_effective_configured(db, org_id),
+        whatsapp_configured=await whatsapp_effective_configured(db, org_id),
     )
     logger.info("Ручная синхронизация iiko поставлена в фон: org_id=%s", org_id)
     return {
@@ -734,8 +709,8 @@ async def sync_stop_lists_endpoint(
         snap = await build_status_payload(
             db,
             organization_id=int(org_id),
-            iiko_configured=await _iiko_effective_configured(db, org_id),
-            whatsapp_configured=_whatsapp_env_configured(),
+            iiko_configured=await iiko_effective_configured(db, org_id),
+            whatsapp_configured=await whatsapp_effective_configured(db, org_id),
         )
         return {"ok": True, "status": "ok", **stats, "integration_status": snap}
     except Exception as exc:
@@ -780,8 +755,8 @@ async def sync_stop_lists_from_env(
         snap = await build_status_payload(
             db,
             organization_id=int(org_id),
-            iiko_configured=await _iiko_effective_configured(db, org_id),
-            whatsapp_configured=_whatsapp_env_configured(),
+            iiko_configured=await iiko_effective_configured(db, org_id),
+            whatsapp_configured=await whatsapp_effective_configured(db, org_id),
         )
         logger.info("Синхронизация стоп-листов из админки: %s", stats)
         return {"ok": True, "status": "ok", **stats, "integration_status": snap}

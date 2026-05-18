@@ -14,28 +14,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.db.session import InMemoryRedis, redis_client
+from app.services.integration_config import (
+    iiko_effective_configured,
+    whatsapp_effective_configured,
+)
 from app.services.integration_health import build_status_payload
-from app.services.org_iiko import resolve_org_iiko_credentials
 
 logger = logging.getLogger(__name__)
-
-
-def _iiko_env_fallback_configured() -> bool:
-    return bool(str(settings.iiko_api_login or "").strip() and str(settings.iiko_organization_id or "").strip())
-
-
-async def _iiko_effective_configured(db: AsyncSession, org_id: int) -> bool:
-    c = await resolve_org_iiko_credentials(db, org_id)
-    if c is not None:
-        return True
-    return _iiko_env_fallback_configured()
-
-
-def _whatsapp_env_configured() -> bool:
-    return bool(
-        str(settings.whatsapp_api_token or "").strip()
-        and str(settings.whatsapp_phone_number_id or "").strip()
-    )
 
 
 async def build_admin_readiness_payload(db: AsyncSession, org_id: int) -> dict[str, Any]:
@@ -81,8 +66,8 @@ async def build_admin_readiness_payload(db: AsyncSession, org_id: int) -> dict[s
         },
     )
 
-    iiko_ok = await _iiko_effective_configured(db, org_id)
-    wa_ok = _whatsapp_env_configured()
+    iiko_ok = await iiko_effective_configured(db, org_id)
+    wa_ok = await whatsapp_effective_configured(db, org_id)
     integ = await build_status_payload(
         db,
         organization_id=int(org_id),
