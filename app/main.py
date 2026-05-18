@@ -414,6 +414,10 @@ async def _apply_sqlite_startup_schema_patches() -> None:
         "CREATE INDEX IF NOT EXISTS ix_orders_org_kind ON orders (organization_id, kind)",
         "ALTER TABLE operational_insights ADD COLUMN was_useful BOOLEAN",
         "ALTER TABLE operational_insights ADD COLUMN notes VARCHAR(500)",
+        "CREATE TABLE IF NOT EXISTS ai_context_snapshots (id VARCHAR(36) PRIMARY KEY, organization_id INTEGER NOT NULL, phone VARCHAR(50) NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, business_state JSON, customer_state JSON, event_slice JSON, FOREIGN KEY(organization_id) REFERENCES organizations(id) ON DELETE CASCADE)",
+        "CREATE INDEX IF NOT EXISTS ix_ai_ctx_snapshots_org_created ON ai_context_snapshots (organization_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS ix_ai_ctx_snapshots_org_phone ON ai_context_snapshots (organization_id, phone)",
+        "ALTER TABLE organizations ADD COLUMN max_discount_pct INTEGER NOT NULL DEFAULT 0",
     ):
         try:
             async with async_engine.begin() as conn:

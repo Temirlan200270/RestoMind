@@ -30,6 +30,7 @@ from app.services.dialog_mgr import (
 )
 from app.services.events import publish_event
 from app.services.intent_router import get_or_create_user
+from app.services.system_events import BusinessEvent, emit_event
 
 from .deps import admin_actor_key, admin_org_from_session, require_admin_session_active
 from .schemas import TextRequest
@@ -279,6 +280,17 @@ async def takeover_chat(request: Request, phone: str, db: AsyncSession = Depends
     )
     from app.services.trace_context import publish_state_event
     await publish_state_event(phone=phone, state=UserState.HUMAN_MODE.value, organization_id=org_id)
+    await emit_event(
+        db,
+        BusinessEvent(
+            org_id=org_id,
+            type="operator.took_over",
+            actor="operator",
+            entity_type="user",
+            entity_id=phone,
+            payload={"phone": phone, "source": "admin.chats"},
+        ),
+    )
     try:
         await _save_chat_triage(
             request,

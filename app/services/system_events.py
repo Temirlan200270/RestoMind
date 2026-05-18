@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import logging
+import uuid
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import select
@@ -11,6 +14,67 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import SystemEvent
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class BusinessEvent:
+    """Unified business event schema for the Event-First OS layer.
+
+    Fields map to SystemEvent columns:
+      - id           → idempotency_key (UUID string, prevents duplicates)
+      - actor        → source column
+      - location_id  → payload_json._location_id
+      - version      → payload_json._version
+    """
+
+    org_id: int
+    type: str  # e.g. "order.created", "ai.escalated"
+    actor: str  # "ai" | "operator" | "customer" | "system"
+    payload: dict[str, Any] = field(default_factory=dict)
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    timestamp: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
+    location_id: int | None = None
+    entity_type: str | None = None
+    entity_id: str | int | None = None
+    version: int = 1
+
+
+async def emit_event(db: AsyncSession, event: BusinessEvent) -> SystemEvent | None:
+    """Единственный способ записи бизнес-событий через OS Event Layer.
+
+    Оборачивает emit_system_event(), добавляя структурированные поля:
+    actor, version, location_id — хранятся в payload_json под ключами _actor, _version, _location_id.
+
+    После записи в БД вызывает синхронные consumers (analytics_consumer).
+    Не коммитит — вызывается внутри существующей транзакции.
+    """
+    enriched_payload = {
+        **event.payload,
+        "_actor": event.actor,
+        "_version": event.version,
+    }
+    if event.location_id is not None:
+        enriched_payload["_location_id"] = event.location_id
+
+    result = await emit_system_event(
+        db,
+        organization_id=event.org_id,
+        event_type=event.type,
+        payload=enriched_payload,
+        source=event.actor,
+        entity_type=event.entity_type,
+        entity_id=event.entity_id,
+        idempotency_key=event.id,
+    )
+
+    if result is not None:
+        try:
+            from app.services.analytics_consumer import on_business_event
+            await on_business_event(event, db)
+        except Exception:
+            logger.exception("analytics_consumer failed for event type=%s org=%d", event.type, event.org_id)
+
+    return result
 
 
 async def emit_system_event(

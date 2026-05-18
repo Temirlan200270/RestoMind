@@ -8,12 +8,16 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import uuid
 from dataclasses import dataclass
 
 from sqlalchemy import select
 
-from app.db.models import MenuItem, Order, Organization, User
+from app.db.models import AIContextSnapshot, MenuItem, Order, Organization, User
 from app.db.session import async_session_factory
+
+logger = logging.getLogger(__name__)
 from app.services.customer_context import build_customer_context
 from app.services.intent_router import get_open_draft_order
 from app.services.knowledge_context import load_knowledge_context_block
@@ -99,3 +103,53 @@ async def fetch_ai_read_context(phone: str, organization_id: int) -> AIReadConte
         customer_ctx=customer_ctx,
         user_preferences=user_preferences,
     )
+
+
+async def save_ai_context_snapshot(
+    phone: str,
+    organization_id: int,
+    context: AIReadContext,
+) -> str:
+    """Сохраняет снимок AI-контекста перед LLM-вызовом. Возвращает snapshot_id (UUID).
+
+    Открывает собственную сессию и коммитит — не зависит от открытых транзакций.
+    Ошибки не пробрасывает: snapshot — аудит, не критичный путь.
+    """
+    snapshot_id = str(uuid.uuid4())
+    try:
+        business_state = {
+            "org_id": organization_id,
+            "org_name": context.org.name if context.org else None,
+            "menu_items_count": len(context.menu_items),
+            "stoplist_count": sum(1 for m in context.menu_items if not m.is_available),
+            "menu_preview": [
+                {
+                    "name": m.name,
+                    "price": float(m.price or 0),
+                    "available": bool(m.is_available),
+                    "category": m.category,
+                }
+                for m in context.menu_items[:40]
+            ],
+        }
+        customer_state = {
+            "has_draft": context.draft_row is not None,
+            "draft_id": context.draft_row.id if context.draft_row else None,
+            "draft_total": float(context.draft_row.total_price or 0) if context.draft_row else None,
+            "customer_ctx_snippet": (context.customer_ctx or "")[:500],
+            "user_preferences": context.user_preferences,
+        }
+        async with async_session_factory() as db:
+            snap = AIContextSnapshot(
+                id=snapshot_id,
+                organization_id=organization_id,
+                phone=phone,
+                business_state=business_state,
+                customer_state=customer_state,
+                event_slice={},  # Phase 3.2: populate from SystemEvent stream
+            )
+            db.add(snap)
+            await db.commit()
+    except Exception:
+        logger.exception("save_ai_context_snapshot failed for org=%d phone=%s", organization_id, phone)
+    return snapshot_id

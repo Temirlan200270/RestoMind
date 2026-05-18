@@ -42,7 +42,7 @@ from app.services.ai_brain import (
     voice_supported,
 )
 from app.services.chat_delivery import apply_whatsapp_status_webhook
-from app.services.context_engine import fetch_ai_read_context
+from app.services.context_engine import fetch_ai_read_context, save_ai_context_snapshot
 from app.services.restaurant_context_cache import cached_format_org_current_time_block
 from app.services.customer_reply import (
     reset_twilio_call_context,
@@ -74,6 +74,8 @@ from app.services.message_accounting import schedule_log_message
 from app.services.pipeline_latency import schedule_log_pipeline_latency
 from app.services.events import publish_event
 from app.services.billing_guard import tenant_billing_blocks_inbound
+from app.services.system_events import BusinessEvent, emit_event
+from app.services.decision_engine import decision_engine
 from app.services.org_resolve import organization_id_for_whatsapp_value
 from app.services.intent_router import (
     cancel_all_draft_orders_for_phone,
@@ -1545,6 +1547,13 @@ async def process_message(
         if settings.pipeline_timing_enabled:
             pipe_sw.split("context")
 
+        # Phase 3 OS: сохранить снимок контекста до LLM (fire-and-forget, не блокирует)
+        ai_snapshot_id: str | None = None
+        try:
+            ai_snapshot_id = await save_ai_context_snapshot(phone, organization_id, read_ctx)
+        except Exception:
+            pass  # snapshot — аудит; потеря не критична
+
         # 2) OpenAI: без DB-сессии
         if had_voice:
             if voice_bytes is None:
@@ -1592,6 +1601,19 @@ async def process_message(
         # P4: регистрируем транзиентную AI-ошибку (fallback = провайдер недоступен)
         if is_openai_fallback_escalation_reply(ai_response.reply_text):
             schedule_log_ai_error(organization_id)
+
+        # Phase 4 OS: Decision Engine — валидация AI-ответа до исполнения
+        try:
+            de_result = await decision_engine.validate(ai_response, read_ctx, read_ctx.org)
+            if not de_result.is_valid and de_result.corrected_response is not None:
+                logger.info(
+                    "DecisionEngine blocked intent=%s org=%d violations=%s",
+                    ai_response.intent, organization_id,
+                    [v.rule for v in de_result.block_violations],
+                )
+                ai_response = de_result.corrected_response
+        except Exception:
+            logger.exception("DecisionEngine.validate failed, proceeding with original response")
 
         # 3) DB: короткая мутация/запись результатов
         post_commit_state: UserState | None = None
@@ -1652,6 +1674,8 @@ async def process_message(
             }
             if is_openai_fallback_escalation_reply(result.reply_text):
                 assistant_meta["technical_fallback"] = True
+            if ai_snapshot_id:
+                assistant_meta["snapshot_id"] = ai_snapshot_id
             outbound_id_chat = await _save_chat_log(
                 db,
                 phone,
@@ -1670,6 +1694,21 @@ async def process_message(
                         phone=phone,
                         user_message=(user_log_text or "")[:2000],
                         reason=(result.reply_text or "")[:2000],
+                    ),
+                )
+                await emit_event(
+                    db,
+                    BusinessEvent(
+                        org_id=organization_id,
+                        type="ai.escalated",
+                        actor="ai",
+                        entity_type="user",
+                        entity_id=phone,
+                        payload={
+                            "phone": phone,
+                            "reason": (result.reply_text or "")[:500],
+                            "fsm_state": state.value,
+                        },
                     ),
                 )
                 draft_total_str: str | None = None

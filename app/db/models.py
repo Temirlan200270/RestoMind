@@ -169,6 +169,13 @@ class Organization(Base):
         server_default="false",
         comment="Демо-организация для гостевого режима",
     )
+    max_discount_pct: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        server_default="0",
+        nullable=False,
+        comment="Decision Engine: максимальный % скидки, который AI может применить (0 = запрещено)",
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     def __repr__(self) -> str:
@@ -1473,3 +1480,29 @@ class OrganizationIntegrationSync(Base):
     )
     last_menu_sync_ok: Mapped[bool] = mapped_column(Boolean, default=False)
     last_menu_sync_error: Mapped[str] = mapped_column(Text, default="")
+
+
+
+class AIContextSnapshot(Base):
+    """Снимок AI-контекста в момент LLM-вызова — для replay, аудита и отладки решений бота."""
+
+    __tablename__ = "ai_context_snapshots"
+    __table_args__ = (
+        Index("ix_ai_ctx_snapshots_org_created", "organization_id", "created_at"),
+        Index("ix_ai_ctx_snapshots_org_phone", "organization_id", "phone"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)  # UUID
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    phone: Mapped[str] = mapped_column(String(50), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False,
+    )
+    business_state: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    customer_state: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    event_slice: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<AIContextSnapshot id={self.id} org={self.organization_id} phone={self.phone}>"

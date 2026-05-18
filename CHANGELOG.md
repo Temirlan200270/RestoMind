@@ -6,6 +6,26 @@
 
 ## [Unreleased] — 2026-03-20
 
+### Добавлено (2026-05-18) — Sprint D: Decision Engine (Phase 4 OS)
+
+- **`decision_engine.py`:** [`app/services/decision_engine.py`](app/services/decision_engine.py) — `PolicyViolation` (rule, severity block/warn, detail), `ValidationResult` (is_valid, violations, corrected_response), `DecisionEngine` класс с тремя проверками: `_check_force_closed` (блокирует заказы при активном экстренном закрытии), `_check_stoplist_quick` (предупреждение по стоп-позициям без повторного DB-запроса, используя `read_ctx.menu_items`), `_check_pricing_policy` (заглушка Phase 4.1 для будущего поля discount в AIBrainResponse). Singleton `decision_engine` для использования в webhooks.py.
+- **Decision Engine в pipeline:** [`app/api/webhooks.py`](app/api/webhooks.py) — после LLM-вызова (до `route_intent`) вызывается `decision_engine.validate(ai_response, read_ctx, read_ctx.org)`. При blocking-нарушении `ai_response` заменяется на `corrected_response` с объяснением. Ошибка DE логируется, pipeline продолжается с оригинальным ответом.
+- **`max_discount_pct` в Organization:** [`app/db/models.py`](app/db/models.py) — новое поле `max_discount_pct: int = 0` (Policy Engine: максимальный % скидки, 0 = запрещено). Миграция [`20260518_org_max_discount.py`](alembic/versions/20260518_org_max_discount.py) + SQLite-патч в [`app/main.py`](app/main.py).
+
+### Добавлено (2026-05-18) — Sprint C: AI Context Snapshot (Phase 3 OS)
+
+- **`AIContextSnapshot` модель:** [`app/db/models.py`](app/db/models.py) — новая таблица `ai_context_snapshots` (UUID PK, `org_id`, `phone`, `business_state` JSON, `customer_state` JSON, `event_slice` JSON). Миграция [`20260518_ai_context_snapshots.py`](alembic/versions/20260518_ai_context_snapshots.py) + SQLite-патч в [`app/main.py`](app/main.py). Индексы по `(org_id, created_at)` и `(org_id, phone)`.
+- **`save_ai_context_snapshot()`:** [`app/services/context_engine.py`](app/services/context_engine.py) — сохраняет снимок `AIReadContext` перед LLM-вызовом: состояние меню (count, stoplist_count, preview 40 позиций), состояние клиента (draft, history snippet, preferences). Открывает собственную сессию, коммитит. Ошибки логирует без пробрасывания — snapshot не в critical path.
+- **Snapshot в pipeline:** [`app/api/webhooks.py`](app/api/webhooks.py) — перед каждым LLM-вызовом (`call_openai` / `call_ai_with_audio`) вызывается `save_ai_context_snapshot`. Полученный `snapshot_id` (UUID) сохраняется в `ChatLog.meta_json["snapshot_id"]` через `assistant_meta`. Ошибка save не прерывает pipeline.
+- **Replay API:** [`app/api/admin/intelligence.py`](app/api/admin/intelligence.py) — три новых endpoint'а: `GET /admin/intelligence/snapshots` (список последних снимков org), `GET /admin/intelligence/snapshots/{id}` (полный снимок), `POST /admin/intelligence/snapshots/{id}/replay?user_text=...` (воспроизвести решение AI с тем же контекстом без отправки клиенту). Изолировано по `organization_id`.
+
+### Добавлено (2026-05-18) — Sprint B: Event System Stabilization (Phase 2 OS)
+
+- **`BusinessEvent` dataclass + `emit_event()`:** [`app/services/system_events.py`](app/services/system_events.py) — добавлен унифицированный `BusinessEvent` (поля: `org_id`, `type`, `actor`, `payload`, `id`, `timestamp`, `location_id`, `entity_type`, `entity_id`, `version`) и `emit_event(db, event)` как единственный способ записи новых бизнес-событий через OS Event Layer. Маппинг на существующую модель `SystemEvent` без новых миграций: `actor` → `source`, `location_id`/`version` → `payload_json`. Существующие вызовы `emit_system_event()` не тронуты (обратная совместимость).
+- **`ai.escalated` событие:** [`app/api/webhooks.py`](app/api/webhooks.py) — при переходе в `HUMAN_MODE` по эскалации ИИ теперь дополнительно к `EscalationEvent` записывается `BusinessEvent(type="ai.escalated")` через `emit_event()`. Атомарно с коммитом `EscalationEvent`.
+- **`operator.took_over` событие:** [`app/api/admin/chats.py`](app/api/admin/chats.py) — при явном перехвате диалога оператором (`POST /api/admin/chats/{phone}/takeover`) записывается `BusinessEvent(type="operator.took_over")`, коммитится вместе с triage update.
+- **`analytics_consumer.py`:** [`app/services/analytics_consumer.py`](app/services/analytics_consumer.py) — новый consumer, подключённый к `emit_event()`. Текущая реализация — logging stub + TODO-заглушки для будущих агрегатов (`Phase 2.3`); не нагружает critical path. Consumer вызывается синхронно внутри транзакции и не перехватывает исключения — ошибки логируются, но не блокируют запись события.
+
 ### Стратегия (2026-05-18)
 
 - **RestoMind OS:** репозиторий официально переходит на концепцию AI Operating System. Позиционирование изменено с «AI-оператор для ресторана» на «AI-операционная система для ресторанного бизнеса». Обновлены [`README.md`](README.md) (разделы «Архитектура ядра» и «Модули»), [`codebase.md`](codebase.md) (суть проекта), [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md) (Rules 9–11: Tenant Isolation, Event-First, AI Context через ContextBuilder).

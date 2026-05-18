@@ -9,7 +9,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.admin.deps import admin_org_from_session, require_admin_session_active
-from app.db.models import BusinessRecommendation, OperationalInsight
+from sqlalchemy import select
+from app.db.models import AIContextSnapshot, BusinessRecommendation, OperationalInsight
 from app.db.session import get_db
 from app.services.intelligence import (
     SimulationInput,
@@ -273,3 +274,112 @@ async def patch_recommendation(
     row.status = body.status
     await db.commit()
     return {"ok": True, "item": _rec_public(row)}
+
+
+# ─── Phase 3 OS: AI Context Snapshot (Replay) ────────────────────────────────
+
+
+@router.get("/snapshots")
+async def list_ai_snapshots(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    phone: str | None = Query(None, description="Фильтр по телефону гостя"),
+    limit: int = Query(20, ge=1, le=100),
+) -> dict:
+    """Список последних снимков AI-контекста для организации."""
+    org_id = admin_org_from_session(request)
+    stmt = (
+        select(AIContextSnapshot)
+        .where(AIContextSnapshot.organization_id == org_id)
+        .order_by(AIContextSnapshot.created_at.desc())
+        .limit(limit)
+    )
+    if phone:
+        stmt = stmt.where(AIContextSnapshot.phone == phone.strip())
+    rows = (await db.execute(stmt)).scalars().all()
+    return {
+        "ok": True,
+        "items": [
+            {
+                "id": r.id,
+                "phone": r.phone,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "has_business_state": r.business_state is not None,
+                "has_customer_state": r.customer_state is not None,
+                "menu_items_count": (r.business_state or {}).get("menu_items_count"),
+            }
+            for r in rows
+        ],
+    }
+
+
+@router.get("/snapshots/{snapshot_id}")
+async def get_ai_snapshot(
+    snapshot_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Полный снимок AI-контекста по ID — для аудита и отладки решений бота."""
+    org_id = admin_org_from_session(request)
+    row = await db.get(AIContextSnapshot, snapshot_id)
+    if row is None or int(row.organization_id) != int(org_id):
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+    return {
+        "ok": True,
+        "id": row.id,
+        "phone": row.phone,
+        "organization_id": row.organization_id,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "business_state": row.business_state,
+        "customer_state": row.customer_state,
+        "event_slice": row.event_slice,
+    }
+
+
+@router.post("/snapshots/{snapshot_id}/replay")
+async def replay_ai_decision(
+    snapshot_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user_text: str = Query(..., description="Сообщение гостя для воспроизведения"),
+) -> dict:
+    """Воспроизвести решение AI с тем же контекстом что был в момент snapshot.
+
+    Не отправляет ответ клиенту — только возвращает AIBrainResponse для отладки.
+    """
+    org_id = admin_org_from_session(request)
+    row = await db.get(AIContextSnapshot, snapshot_id)
+    if row is None or int(row.organization_id) != int(org_id):
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+
+    from app.services.ai_brain import call_openai
+    from app.services.order_logic import build_menu_context_for_ai, load_available_menu
+
+    # Восстановить меню по org_id (меню может измениться, но контекст снимка сохранён)
+    menu_items = await load_available_menu(db, organization_id=org_id, include_unavailable=True)
+    menu_context = await build_menu_context_for_ai(menu_items, user_text)
+
+    customer_ctx = (row.customer_state or {}).get("customer_ctx_snippet", "")
+
+    try:
+        ai_response = await call_openai(
+            history=[],
+            user_text=user_text,
+            menu_context=menu_context,
+            customer_context=customer_ctx,
+            raise_on_transient=False,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"AI replay failed: {exc}") from exc
+
+    return {
+        "ok": True,
+        "snapshot_id": snapshot_id,
+        "snapshot_created_at": row.created_at.isoformat() if row.created_at else None,
+        "replay_user_text": user_text,
+        "ai_response": {
+            "intent": ai_response.intent,
+            "reply_text": ai_response.reply_text,
+            "order": ai_response.order.model_dump() if ai_response.order else None,
+        },
+    }
