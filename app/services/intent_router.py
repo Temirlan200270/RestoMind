@@ -39,6 +39,7 @@ from app.services.upsell_utils import record_upsell_rejections_on_user
 from app.services.prepayment_legal import append_prepayment_legal_disclaimer
 from app.services.system_events import emit_system_event
 from app.services.trace_context import trace_payload
+from app.services.stoplist_session import compose_stoplist_notice
 from app.services.order_logic import (
     ValidatedOrder,
     applied_order_action_ids_from_items_json,
@@ -419,6 +420,7 @@ async def _handle_order(
     inbound_message_id: str = "",
     sales_gastro_hint: str = "",
     sales_target_iiko_ids: list[str] | None = None,
+    newly_stopped_names: list[str] | None = None,
     trace_id: str = "",
     conversation_id: str = "",
 ) -> RouteResult:
@@ -428,9 +430,20 @@ async def _handle_order(
     При активном черновике и непустом order_actions — merge с items_json (Phase 18).
     """
     if menu_items is None:
-        menu_items = await load_available_menu(db, organization_id=organization_id)
+        menu_items = await load_available_menu(
+            db, organization_id=organization_id, include_unavailable=True,
+        )
 
     existing_draft = await get_open_draft_order(db, phone, organization_id)
+    draft_item_names: list[str] = []
+    if existing_draft and isinstance(existing_draft.items_json, dict):
+        draft_item_names = [
+            str(x.get("name")).strip()
+            for x in (existing_draft.items_json.get("items") or [])
+            if isinstance(x, dict) and x.get("name")
+        ]
+    fresh_stopped = list(newly_stopped_names or [])
+
     use_merge = bool(ai_response.order_actions) and existing_draft is not None
     new_action_ids_batch: list[str] = []
 
@@ -473,14 +486,10 @@ async def _handle_order(
         )
         if not validated.valid_items:
             if validated.stoplist_items:
-                stop_list = ", ".join(f"«{x}»" for x in validated.stoplist_items)
-                return RouteResult(
-                    reply_text=(
-                        f"{ai_response.reply_text}\n\n"
-                        f"🚫 {stop_list} — сейчас временно недоступно (снято с продажи). "
-                        "Выберите другое блюдо или уточните у оператора, когда появится."
-                    )
+                notice = compose_stoplist_notice(
+                    validated.stoplist_items, fresh_stopped, draft_item_names=draft_item_names,
                 )
+                return RouteResult(reply_text=f"{ai_response.reply_text}\n\n{notice}")
             unknown_list = ", ".join(validated.unknown_items) if validated.unknown_items else "—"
             return RouteResult(
                 reply_text=(
@@ -502,14 +511,10 @@ async def _handle_order(
 
     if not validated.valid_items:
         if validated.stoplist_items:
-            stop_list = ", ".join(f"«{x}»" for x in validated.stoplist_items)
-            return RouteResult(
-                reply_text=(
-                    f"{ai_response.reply_text}\n\n"
-                    f"🚫 {stop_list} — сейчас временно недоступно (снято с продажи). "
-                    "Выберите другое блюдо или уточните у оператора, когда появится."
-                )
+            notice = compose_stoplist_notice(
+                validated.stoplist_items, fresh_stopped, draft_item_names=draft_item_names,
             )
+            return RouteResult(reply_text=f"{ai_response.reply_text}\n\n{notice}")
         unknown_list = ", ".join(validated.unknown_items) if validated.unknown_items else "—"
         return RouteResult(
             reply_text=(
@@ -749,8 +754,11 @@ async def _handle_order(
     reply = reply_core + "\n\n" + body_text
 
     if validated.stoplist_items:
-        stop_list = ", ".join(f"«{x}»" for x in validated.stoplist_items)
-        reply += f"\n\n🚫 {stop_list} — временно недоступно, не добавлено в заказ."
+        notice = compose_stoplist_notice(
+            validated.stoplist_items, fresh_stopped, draft_item_names=draft_item_names,
+        )
+        if notice:
+            reply += f"\n\n{notice}"
     if validated.unknown_items:
         reply += "\n\nНе нашёл в меню некоторые позиции. Уточните, пожалуйста."
 
@@ -1104,6 +1112,49 @@ async def cancel_booking(
     return booking
 
 
+async def cancel_all_draft_orders_for_phone(
+    db: AsyncSession,
+    phone: str,
+    organization_id: int,
+    *,
+    trace_id: str = "",
+    conversation_id: str = "",
+    source: str = "intent_router",
+) -> int:
+    """Отменить все DRAFT-заказы пользователя; вернуть число отменённых."""
+    user = await db.scalar(
+        select(User).where(User.phone == phone, User.organization_id == organization_id),
+    )
+    if user is None:
+        return 0
+    result = await db.execute(
+        select(Order).where(
+            Order.user_id == user.id,
+            Order.status == OrderStatus.DRAFT,
+        ),
+    )
+    drafts = list(result.scalars().all())
+    cancelled = 0
+    for order in drafts:
+        order.status = OrderStatus.CANCELLED
+        if order.booking_id:
+            await cancel_booking(
+                db,
+                order.booking_id,
+                trace_id=trace_id,
+                conversation_id=conversation_id,
+                source=source,
+            )
+        cancelled += 1
+    if cancelled:
+        await db.flush()
+        logger.info(
+            "Отменено %d черновиков: org=%s phone=%s",
+            cancelled, organization_id, phone,
+        )
+    return cancelled
+
+
 async def cancel_order(
     db: AsyncSession,
     order_id: int,
@@ -1155,6 +1206,7 @@ async def route_intent(
     inbound_message_id: str = "",
     sales_gastro_hint: str = "",
     sales_target_iiko_ids: list[str] | None = None,
+    newly_stopped_names: list[str] | None = None,
     trace_id: str = "",
     conversation_id: str = "",
 ) -> RouteResult:
@@ -1178,6 +1230,7 @@ async def route_intent(
             inbound_message_id=inbound_message_id,
             sales_gastro_hint=sales_gastro_hint,
             sales_target_iiko_ids=sales_target_iiko_ids,
+            newly_stopped_names=newly_stopped_names,
             trace_id=trace_id,
             conversation_id=conversation_id,
         )

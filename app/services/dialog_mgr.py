@@ -29,7 +29,17 @@ CONFIRM_WORDS = frozenset({
     "да", "yes", "ок", "подтверждаю", "верно", "давай", "aga", "конечно",
 })
 CANCEL_WORDS = frozenset({
-    "нет", "no", "отмена", "отменить", "не надо", "cancel", "стоп",
+    "нет", "no", "отмена", "отменить", "отмени", "отмените",
+    "не надо", "cancel", "стоп", "сбрось", "сбросить",
+})
+
+# Фразы полной отмены корзины / всех черновиков (CHATTING, до LLM)
+CANCEL_ALL_PHRASES = frozenset({
+    "отмени всё", "отмени все", "отмените всё", "отмените все",
+    "отмени заказ", "отменить заказ", "отмените заказ",
+    "сбрось заказ", "сбросить заказ", "очисти корзину", "очистить корзину",
+    "удали заказ", "удалить заказ", "убери всё", "убери все",
+    "начать заново", "с нуля",
 })
 
 
@@ -334,11 +344,68 @@ async def get_pending_order(redis: Any, phone: str, organization_id: int | None 
     return val
 
 
-async def clear_pending_order(redis: Any, phone: str, organization_id: int | None = None) -> None:
-    """Очистить ожидающий заказ и вернуть состояние в CHATTING."""
+def _normalize_cancel_text(text: str) -> str:
+    return (text or "").lower().strip().rstrip("!.,")
+
+
+def is_cancel_all_message(text: str) -> bool:
+    """
+    Запрос полной отмены корзины/черновиков в CHATTING (обрабатывается до LLM).
+
+    Не путать с CANCEL_WORDS для FSM «Да/Нет»: «нет» в свободном чате — не отмена заказа.
+  «отмени плов» — правка позиции (LLM), не полный сброс.
+    """
+    norm = _normalize_cancel_text(text)
+    if not norm:
+        return False
+    if norm in CANCEL_ALL_PHRASES:
+        return True
+    if any(p in norm for p in CANCEL_ALL_PHRASES):
+        return True
+    # Только голое «отмени» / «отмените» без названия блюда
+    if norm in ("отмени", "отмените", "отмена", "отменить"):
+        return True
+    return False
+
+
+async def clear_pending_order(
+    redis: Any,
+    phone: str,
+    organization_id: int | None = None,
+    *,
+    reset_state: bool = True,
+) -> None:
+    """
+    Очистить ожидающий заказ в Redis.
+    По умолчанию возвращает CHATTING, но не трогает HUMAN_MODE (эскалация на оператора).
+    """
     org = _effective_org(organization_id)
     await redis.delete(_pending_order_key(org, phone))
-    await set_user_state(redis, phone, UserState.CHATTING, organization_id=organization_id)
+    if not reset_state:
+        return
+    current = await get_user_state(redis, phone, organization_id=organization_id)
+    if current != UserState.HUMAN_MODE:
+        await set_user_state(redis, phone, UserState.CHATTING, organization_id=organization_id)
+
+
+async def clear_pending_order_durable(
+    redis: Any,
+    db: Any,
+    *,
+    phone: str,
+    organization_id: int,
+    reset_state: bool = True,
+) -> None:
+    """Сброс pending_order_id в БД и Redis (без отдельного commit — в транзакции вызывающего)."""
+    await update_user_session_fields_in_db(
+        db,
+        phone=phone,
+        organization_id=organization_id,
+        current_pending_order_id=None,
+    )
+    await clear_pending_order(
+        redis, phone, organization_id=organization_id, reset_state=reset_state,
+    )
 
 
 async def set_pending_booking(

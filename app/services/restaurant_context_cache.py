@@ -61,16 +61,23 @@ def invalidate_org_time_block_cache(organization_id: int) -> None:
     _time_block_cache.pop(int(organization_id), None)
 
 
-async def redis_cached_menu_context_string(org_id: int, build_fn: Any) -> str:
+async def redis_cached_menu_context_string(
+    org_id: int,
+    build_fn: Any,
+    *,
+    cache_suffix: str = "",
+) -> str:
     """
     Если Redis доступен — пробуем взять готовую строку меню (ключ ``rm:menu_ctx:{org_id}``).
     ``build_fn`` — async callable без аргументов, возвращает свежестроку при промахе.
+    ``cache_suffix`` — отпечаток стоп-листа, чтобы кэш не отдавал устаревшие [СТОП]-метки.
     """
     if not settings.redis_enabled or getattr(settings, "redis_memory_only", False):
         out = await build_fn()
         return str(out)
 
-    key = f"rm:menu_ctx:{int(org_id)}"
+    suffix = (cache_suffix or "").strip()
+    key = f"rm:menu_ctx:{int(org_id)}:{suffix}" if suffix else f"rm:menu_ctx:{int(org_id)}"
     ttl = int(getattr(settings, "restaurant_menu_ctx_redis_ttl_sec", 90))
     try:
         raw = await redis_client.get(key)
@@ -95,8 +102,17 @@ async def redis_bump_menu_ctx_cache_version(org_id: int) -> None:
     """Лучший-effort сброс Redis-ключа меню (синхронные вызовы invalidator могут не дождаться)."""
     if not settings.redis_enabled or getattr(settings, "redis_memory_only", False):
         return
-    key = f"rm:menu_ctx:{int(org_id)}"
+    oid = int(org_id)
+    legacy = f"rm:menu_ctx:{oid}"
+    prefix = f"{legacy}:"
     try:
-        await redis_client.delete(key)
+        await redis_client.delete(legacy)
+        cursor = 0
+        while True:
+            cursor, keys = await redis_client.scan(cursor, match=f"{prefix}*", count=64)
+            if keys:
+                await redis_client.delete(*keys)
+            if cursor == 0:
+                break
     except Exception as exc:
         logger.warning("redis menu ctx delete org=%s: %s", org_id, exc)

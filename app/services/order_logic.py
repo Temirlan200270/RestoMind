@@ -872,8 +872,29 @@ _MENU_CTX_TTL = 90.0  # seconds
 _SMART_UPSELL_CAT_HINTS = ("напит", "кофе", "чай", "бар", "сок", "десерт", "выпечк", "соус")
 
 
-def _menu_cache_key(org_id: int, category_hint: str | None) -> str:
-    return str(org_id) if not category_hint else f"{org_id}:{category_hint.lower()}"
+def menu_stoplist_fingerprint(menu_items: list[MenuItem]) -> str:
+    """
+    Короткий отпечаток стоп-листа: ключ кэша промпта меню инвалидируется при смене is_available.
+    """
+    stopped = sorted(
+        (m.iiko_id or str(m.id) or m.name)
+        for m in menu_items
+        if not m.is_available
+    )
+    avail = sum(1 for m in menu_items if m.is_available)
+    blob = f"a{avail}:s{'|'.join(stopped[:250])}"
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+
+
+def _menu_cache_key(
+    org_id: int,
+    category_hint: str | None,
+    stoplist_fp: str | None = None,
+) -> str:
+    base = str(org_id) if not category_hint else f"{org_id}:{category_hint.lower()}"
+    if stoplist_fp:
+        return f"{base}:sl{stoplist_fp}"
+    return base
 
 
 def invalidate_menu_context_cache(organization_id: int) -> None:
@@ -970,6 +991,7 @@ async def build_menu_context_for_ai(menu_items: list[MenuItem], user_query: str)
     """
     if not settings.menu_rag_enabled:
         org_id: int | None = menu_items[0].organization_id if menu_items else None
+        stoplist_fp = menu_stoplist_fingerprint(menu_items) if menu_items else "empty"
 
         # Smart Category Filter
         category_hint: str | None = None
@@ -984,7 +1006,11 @@ async def build_menu_context_for_ai(menu_items: list[MenuItem], user_query: str)
                     category_hint, 0, len(menu_items),
                 )
 
-        cache_k = _menu_cache_key(org_id, category_hint) if org_id is not None else None
+        cache_k = (
+            _menu_cache_key(org_id, category_hint, stoplist_fp)
+            if org_id is not None
+            else None
+        )
 
         if cache_k is not None:
             cached = _menu_ctx_cache.get(cache_k)
@@ -1001,8 +1027,11 @@ async def build_menu_context_for_ai(menu_items: list[MenuItem], user_query: str)
             return build_menu_context(menu_items)
 
         if org_id is not None:
-            ctx = await redis_cached_menu_context_string(org_id, _materialize_full_menu)
-            _menu_ctx_cache[str(org_id)] = (ctx, time.monotonic())
+            ctx = await redis_cached_menu_context_string(
+                org_id, _materialize_full_menu, cache_suffix=stoplist_fp,
+            )
+            if cache_k is not None:
+                _menu_ctx_cache[cache_k] = (ctx, time.monotonic())
             return ctx
         return build_menu_context(menu_items)
     if len(menu_items) < int(settings.menu_rag_min_items):

@@ -450,6 +450,9 @@ async def _stop_list_sync_loop() -> None:
                             terminal_group_id=tg or None,
                             menu_organization_id=oid,
                         )
+                        from app.services.order_logic import invalidate_menu_context_cache
+
+                        invalidate_menu_context_cache(oid)
                         await record_stoplist_sync(db, True, None, organization_id=oid)
                         logger.info("Стоп-листы org=%s: %s", oid, stats)
                     except Exception as exc:

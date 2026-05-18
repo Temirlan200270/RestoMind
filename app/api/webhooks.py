@@ -56,16 +56,19 @@ from app.services.dialog_mgr import (
     append_to_history,
     clear_pending_booking,
     clear_pending_order,
+    clear_pending_order_durable,
     get_chat_history,
     get_pending_booking,
     get_pending_order,
     get_user_state,
+    is_cancel_all_message,
     set_pending_booking,
     set_pending_order,
     set_user_state,
     sync_user_dialog_state_to_db_then_redis,
     update_user_session_fields_in_db,
 )
+from app.services.conversation_state import ConversationState, normalize_conversation_state
 from app.services.ai_usage import schedule_log_ai_error, schedule_log_ai_usage
 from app.services.message_accounting import schedule_log_message
 from app.services.pipeline_latency import schedule_log_pipeline_latency
@@ -73,10 +76,12 @@ from app.services.events import publish_event
 from app.services.billing_guard import tenant_billing_blocks_inbound
 from app.services.org_resolve import organization_id_for_whatsapp_value
 from app.services.intent_router import (
+    cancel_all_draft_orders_for_phone,
     cancel_booking,
     cancel_order,
     confirm_booking,
     confirm_order,
+    get_open_draft_order,
     get_or_create_user,
     route_intent,
 )
@@ -89,6 +94,12 @@ from app.services.order_logic import (
     merge_total_into_items_json,
 )
 from app.services.sales_strategy import build_sales_strategy, format_strategy_for_prompt
+from app.services.stoplist_session import (
+    format_stoplist_change_for_menu_context,
+    load_seen_stopped_keys,
+    newly_stopped_names,
+    save_seen_stopped_keys,
+)
 from app.services.whatsapp_idempotency import (
     cache_whatsapp_inbound_done_redis,
     mark_whatsapp_inbound_done,
@@ -188,6 +199,15 @@ def _normalize_phone_e164(phone: str) -> str:
     if len(digits) == 10:
         return f"+7{digits}"
     return f"+{digits}"
+
+
+def _canonical_whatsapp_phone(phone: str) -> str:
+    """Единый ключ пользователя в БД/Redis: E.164 с «+» (как в admin/test)."""
+    raw = (phone or "").strip()
+    if not raw:
+        return ""
+    normalized = _normalize_phone_e164(raw)
+    return normalized if normalized else raw
 
 
 def _is_plain_greeting(text: str) -> bool:
@@ -492,7 +512,11 @@ async def handle_confirmation(
     order_id = await get_pending_order(redis_client, phone, organization_id=organization_id)
 
     if not order_id:
-        await clear_pending_order(redis_client, phone, organization_id=organization_id)
+        async with async_session_factory() as db:
+            await clear_pending_order_durable(
+                redis_client, db, phone=phone, organization_id=organization_id,
+            )
+            await db.commit()
         return "Заказ не найден — возможно, истекло время ожидания. Назовите блюда заново."
 
     if word in CONFIRM_WORDS:
@@ -523,7 +547,11 @@ async def handle_confirmation(
             await db.commit()
 
         if not order:
-            await clear_pending_order(redis_client, phone, organization_id=organization_id)
+            async with async_session_factory() as db_clr:
+                await clear_pending_order_durable(
+                    redis_client, db_clr, phone=phone, organization_id=organization_id,
+                )
+                await db_clr.commit()
             return "Заказ не найден. Попробуйте оформить заново."
 
         await publish_event("order_updated", {
@@ -538,7 +566,11 @@ async def handle_confirmation(
             **({"created_at": order.created_at.isoformat()} if getattr(order, "created_at", None) else {}),
         })
 
-        await clear_pending_order(redis_client, phone, organization_id=organization_id)
+        async with async_session_factory() as db_clr:
+            await clear_pending_order_durable(
+                redis_client, db_clr, phone=phone, organization_id=organization_id,
+            )
+            await db_clr.commit()
         ij = order.items_json if isinstance(order.items_json, dict) else {}
         ij = merge_total_into_items_json(ij, float(order.total_price or 0))
         summary_core = build_summary_text_from_stored_items(ij)
@@ -558,6 +590,9 @@ async def handle_confirmation(
                 conversation_id=conversation_id,
                 source="webhooks.handle_confirmation",
             )
+            await clear_pending_order_durable(
+                redis_client, db, phone=phone, organization_id=organization_id,
+            )
             await db.commit()
 
         await publish_event("order_updated", {
@@ -569,7 +604,6 @@ async def handle_confirmation(
             "conversation_id": conversation_id or None,
         })
 
-        await clear_pending_order(redis_client, phone, organization_id=organization_id)
         return (
             "Заказ отменён. Вы можете:\n"
             "  • Назвать новые блюда — я оформлю новый заказ\n"
@@ -671,7 +705,11 @@ async def handle_order_payment_choice(
     """
     order_id = await get_pending_order(redis_client, phone, organization_id=organization_id)
     if not order_id:
-        await clear_pending_order(redis_client, phone, organization_id=organization_id)
+        async with async_session_factory() as db:
+            await clear_pending_order_durable(
+                redis_client, db, phone=phone, organization_id=organization_id,
+            )
+            await db.commit()
         return "Заказ не найден — возможно, истекло время. Назовите блюда заново."
 
     word = message_text.lower().strip().rstrip("!.,")
@@ -685,6 +723,9 @@ async def handle_order_payment_choice(
                 conversation_id=conversation_id,
                 source="webhooks.handle_order_payment_choice",
             )
+            await clear_pending_order_durable(
+                redis_client, db, phone=phone, organization_id=organization_id,
+            )
             await db.commit()
         await publish_event("order_updated", {
             "order_id": order_id,
@@ -694,7 +735,6 @@ async def handle_order_payment_choice(
             "trace_id": trace_id or None,
             "conversation_id": conversation_id or None,
         })
-        await clear_pending_order(redis_client, phone, organization_id=organization_id)
         return (
             "Заказ отменён. Вы можете:\n"
             "  • Назвать новые блюда — я оформлю новый заказ\n"
@@ -709,7 +749,10 @@ async def handle_order_payment_choice(
     async with async_session_factory() as db:
         order = await db.get(Order, order_id)
         if not order or order.status != OrderStatus.DRAFT:
-            await clear_pending_order(redis_client, phone, organization_id=organization_id)
+            await clear_pending_order_durable(
+                redis_client, db, phone=phone, organization_id=organization_id,
+            )
+            await db.commit()
             return "Заказ не найден или уже обработан. Начните оформление заново."
 
         raw_json = order.items_json
@@ -915,6 +958,88 @@ async def process_with_retry(
         pass
 
 
+_OPERATOR_ONLY_REPLY = (
+    "Ваш вопрос уже у менеджера. Он ответит вам здесь в ближайшее время."
+)
+
+
+async def _reset_stale_cart_if_needed(
+    phone: str,
+    organization_id: int,
+    history: list[dict[str, str]],
+    *,
+    trace_id: str = "",
+    conversation_id: str = "",
+) -> bool:
+    """
+    Если Redis-история пуста (TTL 24 ч), а в БД остался DRAFT — сбрасываем «чужую» корзину.
+    """
+    if history:
+        return False
+    async with async_session_factory() as db:
+        draft = await get_open_draft_order(db, phone, organization_id)
+        if draft is None:
+            return False
+        n = await cancel_all_draft_orders_for_phone(
+            db,
+            phone,
+            organization_id,
+            trace_id=trace_id,
+            conversation_id=conversation_id,
+            source="webhooks.stale_cart_reset",
+        )
+        await clear_pending_order_durable(
+            redis_client,
+            db,
+            phone=phone,
+            organization_id=organization_id,
+            reset_state=True,
+        )
+        await db.commit()
+    if n:
+        logger.info(
+            "stale_cart_reset: org=%s phone=%s cancelled_drafts=%d",
+            organization_id, phone, n,
+        )
+    return n > 0
+
+
+async def _handle_cancel_all_in_chatting(
+    phone: str,
+    message_text: str,
+    organization_id: int,
+    *,
+    trace_id: str = "",
+    conversation_id: str = "",
+) -> str:
+    """Детерминированная отмена всех черновиков (без LLM)."""
+    async with async_session_factory() as db:
+        n = await cancel_all_draft_orders_for_phone(
+            db,
+            phone,
+            organization_id,
+            trace_id=trace_id,
+            conversation_id=conversation_id,
+            source="webhooks.cancel_all",
+        )
+        await clear_pending_order_durable(
+            redis_client,
+            db,
+            phone=phone,
+            organization_id=organization_id,
+            reset_state=True,
+        )
+        await db.commit()
+    if n:
+        return (
+            "Хорошо, отменил текущий заказ. Можете собрать новый с нуля — "
+            "просто напишите, что хотите заказать."
+        )
+    return (
+        "Сейчас активного заказа нет. Напишите блюда — оформлю новый заказ."
+    )
+
+
 async def process_message(
     phone: str,
     message_text: str = "",
@@ -927,6 +1052,7 @@ async def process_message(
     """
     Полный цикл обработки входящего сообщения с учётом State Machine.
     """
+    phone = _canonical_whatsapp_phone(phone)
     try:
         pipe_sw = pipeline_sw or PipelineStopwatch()
         conversation_id = build_conversation_id(organization_id, phone)
@@ -981,6 +1107,14 @@ async def process_message(
                 ),
             )
             ai_paused_db = bool(u_row and getattr(u_row, "ai_paused", False))
+            db_human_mode = False
+            if u_row is not None:
+                db_human_mode = (
+                    normalize_conversation_state(
+                        getattr(u_row, "current_state", None) or "",
+                    )
+                    == ConversationState.HUMAN_MODE
+                )
             ai_snooze_active = False
             if u_row is not None:
                 from app.services.ai_snooze import ai_snooze_is_active, clear_ai_snooze_if_expired
@@ -988,6 +1122,10 @@ async def process_message(
                 await clear_ai_snooze_if_expired(db_u, u_row)
                 ai_snooze_active = ai_snooze_is_active(u_row)
                 await db_u.commit()
+
+        if db_human_mode and state != UserState.HUMAN_MODE:
+            state = UserState.HUMAN_MODE
+            await set_user_state(redis_client, phone, UserState.HUMAN_MODE, organization_id=organization_id)
 
         # Голос без мультимодального чата: сначала текст (подтверждения, оператор)
         if voice_bytes is not None and (
@@ -1027,18 +1165,22 @@ async def process_message(
             "conversation_id": conversation_id,
         })
 
-        # ─── HUMAN_MODE / ai_paused / ai_snooze: AI молчит, только логируем ─────────
-        # Состояние в Redis: ключ user:state:{phone} (см. dialog_mgr.get_user_state), не вызываем LLM.
-        # Временная пауза: User.ai_snoozed_until (UTC) — без перевода Redis в HUMAN_MODE; см. app.services.ai_snooze.
-        if state == UserState.HUMAN_MODE or ai_paused_db or ai_snooze_active:
+        # ─── HUMAN_MODE / ai_paused / ai_snooze: AI молчит ─────────
+        operator_only = (
+            state == UserState.HUMAN_MODE
+            or db_human_mode
+            or ai_paused_db
+            or ai_snooze_active
+        )
+        if operator_only:
+            outbound_op: int | None = None
             async with async_session_factory() as db:
-                await _save_chat_log(
+                outbound_op = await _save_chat_log(
                     db,
                     phone,
                     message_text,
-                    "[OPERATOR_ONLY — AI не отвечает]",
+                    _OPERATOR_ONLY_REPLY,
                     organization_id=organization_id,
-                    outbound_whatsapp=False,
                     trace_id=trace_id,
                     conversation_id=conversation_id,
                 )
@@ -1046,10 +1188,25 @@ async def process_message(
             await append_to_history(
                 redis_client, phone, "user", message_text, organization_id=organization_id,
             )
+            await append_to_history(
+                redis_client, phone, "assistant", _OPERATOR_ONLY_REPLY, organization_id=organization_id,
+            )
+            await publish_event("new_message", {
+                "phone": phone,
+                "role": "assistant",
+                "content": _OPERATOR_ONLY_REPLY,
+                "id": outbound_op,
+                "delivery_status": "sending",
+                "organization_id": organization_id,
+                "trace_id": trace_id,
+                "conversation_id": conversation_id,
+            })
+            await send_customer_text(phone, _OPERATOR_ONLY_REPLY, outbound_chat_log_id=outbound_op)
             logger.info(
-                "operator_only: сообщение от %s сохранено, AI не вызван (human=%s paused=%s snooze=%s)",
+                "operator_only: %s human=%s db_human=%s paused=%s snooze=%s",
                 phone,
                 state == UserState.HUMAN_MODE,
+                db_human_mode,
                 ai_paused_db,
                 ai_snooze_active,
             )
@@ -1200,6 +1357,57 @@ async def process_message(
         had_voice = voice_bytes is not None
         history = await get_chat_history(redis_client, phone, organization_id=organization_id)
 
+        await _reset_stale_cart_if_needed(
+            phone,
+            organization_id,
+            history,
+            trace_id=trace_id,
+            conversation_id=conversation_id,
+        )
+
+        if (
+            message_text.strip()
+            and not had_voice
+            and is_cancel_all_message(message_text)
+        ):
+            cancel_reply = await _handle_cancel_all_in_chatting(
+                phone,
+                message_text,
+                organization_id,
+                trace_id=trace_id,
+                conversation_id=conversation_id,
+            )
+            outbound_cancel: int | None = None
+            async with async_session_factory() as db_cancel:
+                outbound_cancel = await _save_chat_log(
+                    db_cancel,
+                    phone,
+                    message_text,
+                    cancel_reply,
+                    organization_id=organization_id,
+                    trace_id=trace_id,
+                    conversation_id=conversation_id,
+                )
+                await db_cancel.commit()
+            await append_to_history(
+                redis_client, phone, "user", message_text, organization_id=organization_id,
+            )
+            await append_to_history(
+                redis_client, phone, "assistant", cancel_reply, organization_id=organization_id,
+            )
+            await publish_event("new_message", {
+                "phone": phone,
+                "role": "assistant",
+                "content": cancel_reply,
+                "id": outbound_cancel,
+                "delivery_status": "sending",
+                "organization_id": organization_id,
+                "trace_id": trace_id,
+                "conversation_id": conversation_id,
+            })
+            await send_customer_text(phone, cancel_reply, outbound_chat_log_id=outbound_cancel)
+            return
+
         if had_voice:
             if not voice_supported():
                 await send_customer_text(
@@ -1266,6 +1474,14 @@ async def process_message(
         read_ctx = await fetch_ai_read_context(phone, organization_id)
         menu_items = read_ctx.menu_items
         menu_context = await build_menu_context_for_ai(menu_items, message_text)
+        prev_stopped_keys = await load_seen_stopped_keys(
+            redis_client, phone, organization_id,
+        )
+        # Первый снимок в диалоге — только база; иначе все стоп-позиции «как новые»
+        if prev_stopped_keys:
+            fresh_stopped = newly_stopped_names(prev_stopped_keys, menu_items)
+        else:
+            fresh_stopped = []
         u_row = read_ctx.user
         customer_ctx = read_ctx.customer_ctx
         org_ent = read_ctx.org
@@ -1279,6 +1495,21 @@ async def process_message(
         draft_ctx = format_draft_order_context_for_prompt(
             draft_row.items_json if draft_row else None,
         )
+        draft_overlap: list[str] = []
+        if fresh_stopped and draft_row and isinstance(draft_row.items_json, dict):
+            _draft_norm = {
+                str(x.get("name", "")).lower().strip()
+                for x in (draft_row.items_json.get("items") or [])
+                if isinstance(x, dict) and x.get("name")
+            }
+            draft_overlap = [
+                n for n in fresh_stopped if n.lower().strip() in _draft_norm
+            ]
+        stoplist_change_ctx = format_stoplist_change_for_menu_context(
+            fresh_stopped, draft_overlap=draft_overlap,
+        )
+        if stoplist_change_ctx:
+            menu_context = f"{menu_context}\n\n{stoplist_change_ctx}"
         if draft_row and isinstance(draft_row.items_json, dict):
             cart = [
                 x for x in (draft_row.items_json.get("items") or [])
@@ -1365,6 +1596,7 @@ async def process_message(
                 inbound_message_id=wmid,
                 sales_gastro_hint=sales_gastro_hint,
                 sales_target_iiko_ids=sales_target_iiko_ids,
+                newly_stopped_names=fresh_stopped,
                 trace_id=trace_id,
                 conversation_id=conversation_id,
             )
@@ -1454,6 +1686,8 @@ async def process_message(
                     pending_booking_id=p_book,
                 )
             await db.commit()
+
+        await save_seen_stopped_keys(redis_client, phone, organization_id, menu_items)
 
         schedule_log_message(organization_id, "outbound", "ai", "voice" if had_voice else "text")
 
@@ -1834,14 +2068,15 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks) -
         for msg in messages:
             if not isinstance(msg, dict):
                 continue
-            phone = (msg.get("from") or "").strip()
+            phone_raw = (msg.get("from") or "").strip()
+            phone = _canonical_whatsapp_phone(phone_raw)
             msg_type = (msg.get("type") or "").strip().lower()
             message_id = (msg.get("id") or "").strip()
 
             if not phone:
                 continue
 
-            logger.debug("[WA webhook] raw from=%r len=%d", phone, len(phone))
+            logger.debug("[WA webhook] raw from=%r canonical=%r", phone_raw, phone)
 
             if message_id and await redis_whatsapp_inbound_done_cache_hit(message_id):
                 logger.info(
