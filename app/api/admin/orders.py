@@ -197,6 +197,16 @@ async def _clear_redis_pending_if_matches(
         logger.exception("Redis: не удалось сбросить pending_order для %s", phone)
 
 
+_SYSTEM_EVENT_LABELS: dict[str, str] = {
+    "order_confirmed": "Заказ подтверждён",
+    "order_cancelled": "Заказ отменён",
+    "order_sent_to_iiko": "Отправлен в iiko",
+    "booking_created": "Бронь создана",
+    "booking_cancelled": "Бронь отменена",
+    "booking_confirmed": "Бронь подтверждена",
+}
+
+
 def _timeline_payment_title(ev: PaymentEvent) -> str:
     et = (ev.event_type or "").strip().lower()
     mapping = {
@@ -589,8 +599,6 @@ async def admin_order_timeline(
             ),
         )
 
-    user = await db.get(User, int(order.user_id))
-    phone = (user.phone or "").strip() if user is not None else ""
     order_system_rows = (
         await db.execute(
             select(SystemEvent)
@@ -615,42 +623,20 @@ async def admin_order_timeline(
                 .order_by(SystemEvent.created_at.asc(), SystemEvent.id.asc()),
             )
         ).scalars().all()
-    state_system_rows = (
-        await db.execute(
-            select(SystemEvent)
-            .where(
-                SystemEvent.organization_id == org_id,
-                SystemEvent.event_type == "conversation_state_changed",
-            )
-            .order_by(SystemEvent.created_at.asc(), SystemEvent.id.asc()),
-        )
-    ).scalars().all()
     system_rows = list(order_system_rows)
     system_rows.extend(booking_system_rows)
-    system_rows.extend(
-        ev for ev in state_system_rows
-        if isinstance(ev.payload_json, dict) and str(ev.payload_json.get("phone") or "").strip() == phone
-    )
     for ev in system_rows:
-        payload = dict(ev.payload_json or {}) if isinstance(ev.payload_json, dict) else {}
         raw_events.append(
             (
                 ev.created_at,
                 {
                     "kind": "system_event",
-                    "title": ev.event_type,
-                    "detail": (
-                        f"{payload.get('from_state')} -> {payload.get('to_state')}"
-                        if ev.event_type == "conversation_state_changed"
-                        else ""
-                    ),
+                    "title": _SYSTEM_EVENT_LABELS.get(ev.event_type, ev.event_type),
+                    "detail": "",
                     "meta": {
                         "source": ev.source,
                         "entity_type": ev.entity_type,
                         "entity_id": ev.entity_id,
-                        "trace_id": payload.get("trace_id"),
-                        "conversation_id": payload.get("conversation_id"),
-                        "reason": payload.get("reason"),
                     },
                 },
             ),
@@ -678,19 +664,6 @@ async def admin_order_timeline(
         return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
     raw_events.sort(key=_sort_key)
-
-    snap_at = order.updated_at or order.created_at
-    raw_events.append(
-        (
-            snap_at,
-            {
-                "kind": "current_status",
-                "title": f"Текущее состояние: {order.status}",
-                "detail": "Фактический статус строки заказа (история переходов в отдельной таблице не хранится).",
-                "meta": {"status": order.status, "prepayment_status": getattr(order, "prepayment_status", None)},
-            },
-        ),
-    )
 
     events_out: list[dict[str, Any]] = []
     for at, payload in raw_events:

@@ -320,20 +320,46 @@
                         </div>
                     </div>
                     <div class="mb-4">
-                        <div class="text-xs font-bold uppercase tracking-wide text-gray-500 mb-2">Хронология</div>
-                        <div x-show="orderTimelineLoading" class="text-sm text-gray-400 py-2">Загрузка…</div>
-                        <div x-show="!orderTimelineLoading && orderTimeline.length" x-cloak class="relative pl-4 border-l-2 border-gray-200 space-y-4">
-                            <template x-for="(ev, tidx) in orderTimeline" :key="'otl-' + tidx + '-' + (ev.kind || '') + '-' + (ev.at || '')">
-                                <div class="relative -ml-px">
-                                    <span class="absolute -left-[21px] top-1.5 h-2.5 w-2.5 rounded-full ring-2 ring-white bg-gray-400" aria-hidden="true"></span>
-                                    <div class="text-[11px] text-gray-400 tabular-nums"
-                                        x-text="ev.at ? (fmt.date(ev.at) + ', ' + fmt.time(ev.at)) : '—'"></div>
-                                    <div class="text-sm font-semibold text-gray-900 mt-0.5" x-text="ev.title"></div>
-                                    <div class="text-xs text-gray-600 mt-1 whitespace-pre-wrap break-words" x-show="ev.detail" x-text="ev.detail"></div>
-                                </div>
-                            </template>
+                        <button type="button" @click="toggleOrderTimeline()"
+                            class="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-gray-400 hover:text-gray-600 transition-colors">
+                            <svg class="w-3 h-3 transition-transform" :class="orderTimelineExpanded ? 'rotate-90' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+                            Хронология
+                        </button>
+                        <div x-show="orderTimelineExpanded" x-cloak class="mt-3">
+                            <div x-show="orderTimelineLoading" class="text-sm text-gray-400 py-2">Загрузка…</div>
+                            <div x-show="!orderTimelineLoading && orderTimeline.length" x-cloak class="space-y-1">
+                                <template x-for="(ev, tidx) in orderTimeline" :key="'otl-' + tidx + '-' + (ev.kind || '') + '-' + (ev.at || '')">
+                                    <div>
+                                        <!-- Пузырь чата -->
+                                        <div x-show="ev.kind === 'chat'" class="flex my-1"
+                                             :class="ev.meta?.role === 'user' ? 'justify-start' : 'justify-end'">
+                                            <div class="max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-snug"
+                                                 :class="ev.meta?.role === 'user'
+                                                    ? 'bg-gray-100 text-gray-900 rounded-tl-sm'
+                                                    : 'bg-blue-50 text-blue-900 rounded-tr-sm'">
+                                                <div class="text-[10px] font-medium mb-1 opacity-60"
+                                                     x-text="ev.meta?.role === 'user' ? 'Клиент' : 'Бот'"></div>
+                                                <div class="whitespace-pre-wrap break-words" x-text="ev.detail || '—'"></div>
+                                                <div class="text-[10px] mt-1 opacity-50 text-right tabular-nums"
+                                                     x-text="ev.at ? fmt.time(ev.at) : ''"></div>
+                                            </div>
+                                        </div>
+                                        <!-- Системное событие — разделитель -->
+                                        <div x-show="ev.kind !== 'chat'" class="flex items-center gap-2 py-1.5">
+                                            <div class="h-px flex-1 bg-gray-100"></div>
+                                            <div class="text-[11px] text-gray-400 shrink-0 text-center leading-tight">
+                                                <span x-text="ev.title"></span>
+                                                <span x-show="ev.detail"> · <span x-text="ev.detail"></span></span>
+                                                <div class="text-[10px] text-gray-300 mt-0.5 tabular-nums"
+                                                     x-text="ev.at ? (fmt.date(ev.at) + ', ' + fmt.time(ev.at)) : ''"></div>
+                                            </div>
+                                            <div class="h-px flex-1 bg-gray-100"></div>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+                            <p x-show="!orderTimelineLoading && !orderTimeline.length" x-cloak class="text-sm text-gray-400">Нет событий для отображения.</p>
                         </div>
-                        <p x-show="!orderTimelineLoading && !orderTimeline.length" x-cloak class="text-sm text-gray-400">Нет событий для отображения.</p>
                     </div>
                     <div x-show="selectedOrder?.iiko_last_error" class="mb-4 flex gap-3 rounded-xl border-2 border-red-400 bg-gradient-to-r from-red-50 to-rose-50 px-4 py-3 shadow-sm" role="alert">
                         <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-600 text-white text-lg font-black shadow-md" aria-hidden="true">!</div>

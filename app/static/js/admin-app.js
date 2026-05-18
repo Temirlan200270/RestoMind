@@ -798,6 +798,7 @@ function adminMixinState() {
         systemBannerDismissed: false,
         orderTimeline: [],
         orderTimelineLoading: false,
+        orderTimelineExpanded: false,
         readinessPayload: adminDefaultReadinessPayload(),
         readinessLoading: false,
         /** Сессия demo-login — read-only для мутаций на бэке; для UI дизейбла кнопок демо */
@@ -1996,8 +1997,9 @@ function adminMixinMenuOrdersUi() {
             this.selectedOrder = fresh || order;
             this.orderCompositionOpen = false;
             this.orderRebuildError = '';
+            this.orderTimelineExpanded = false;
+            this.orderTimeline = [];
             this.showOrderModal = true;
-            void this.loadOrderTimeline(id);
             this.$nextTick(() => {
                 try {
                     this.initOrderRebuildFromSelected();
@@ -4320,8 +4322,8 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                     const sc = Number(this.setupStatus.score ?? 0);
                     if (sc >= 60) this.setupProgressExpanded = false;
                     else if (sc <= 30) this.setupProgressExpanded = true;
-                    if (sc >= 100 && sessionStorage.getItem('restomind_setup_done_toast') !== '1') {
-                        sessionStorage.setItem('restomind_setup_done_toast', '1');
+                    if (sc >= 100 && localStorage.getItem('restomind_setup_done_toast') !== '1') {
+                        localStorage.setItem('restomind_setup_done_toast', '1');
                         void this.showUiAlert('Готово: филиал полностью настроен.', 'Готово');
                     }
                 }
@@ -6876,6 +6878,13 @@ function adminMixinDataChartsSettings() {
                 adminLogger.error('[admin] loadReadiness', e);
             } finally {
                 this.readinessLoading = false;
+            }
+        },
+
+        async toggleOrderTimeline() {
+            this.orderTimelineExpanded = !this.orderTimelineExpanded;
+            if (this.orderTimelineExpanded && !this.orderTimeline.length && !this.orderTimelineLoading) {
+                void this.loadOrderTimeline(this.selectedOrder?.id);
             }
         },
 
