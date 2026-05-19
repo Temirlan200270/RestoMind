@@ -114,7 +114,7 @@ async def update_user_session_fields_in_db(
     from sqlalchemy import update as sa_update
 
     from app.db.models import User
-    from app.services.system_events import emit_system_event
+    from app.services.system_events import BusinessEvent, emit_event
 
     org = _effective_org(organization_id)
     patch: dict[str, Any] = {}
@@ -146,20 +146,22 @@ async def update_user_session_fields_in_db(
         prev_state = normalize_conversation_state(prev_state_raw)
         next_state = normalize_conversation_state(current_state)
         if prev_state != next_state:
-            await emit_system_event(
+            await emit_event(
                 db,
-                organization_id=org,
-                event_type="conversation_state_changed",
-                source=transition_source,
-                entity_type="user",
-                entity_id=user_id or phone,
-                payload={
-                    "phone": phone,
-                    "from_state": prev_state.value,
-                    "to_state": next_state.value,
-                    "reason": (transition_reason or "").strip() or None,
-                    "context": transition_context or {},
-                },
+                BusinessEvent(
+                    org_id=org,
+                    type="conversation.state_changed",
+                    actor=transition_source or "system",
+                    entity_type="user",
+                    entity_id=user_id or phone,
+                    payload={
+                        "phone": phone,
+                        "from_state": prev_state.value,
+                        "to_state": next_state.value,
+                        "reason": (transition_reason or "").strip() or None,
+                        "context": transition_context or {},
+                    },
+                ),
             )
 
 

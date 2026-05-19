@@ -198,12 +198,133 @@ SLA пороги: `SLA_LLM_P95_MS` (default 4000), `SLA_TOTAL_P95_MS` (default 8
 
 ---
 
+## Predictive Analytics (Phase 5 OS)
+
+Все модели в [`app/services/owner_dashboard.py`](../app/services/owner_dashboard.py). Детерминированные — без ML.
+
+### Demand Forecast — `build_demand_forecast(orders_by_date, *, today)`
+
+Линейная экстраполяция объёма заказов до конца текущей недели (Пн–Вс UTC).
+
+```
+confirmed_so_far / days_elapsed → daily_avg → forecast = confirmed + avg × days_remaining
+```
+
+| Поле | Описание |
+|------|----------|
+| `forecast_orders` | Прогноз заказов до конца недели |
+| `confirmed_so_far` | Заказов подтверждено с начала недели |
+| `daily_avg_orders` | Среднедневной темп |
+| `confidence` | `low` (<3 дн), `medium` (3-4 дн), `high` (≥5 дн) |
+
+Источник: `DailyOrgStats.orders_confirmed`. Нет зависимости от `Order` таблицы.
+
+---
+
+### Cancellation Forecast — `build_cancellation_forecast(stats_rows, *, today)`
+
+Риск-скоринг уровня отмен на основе истории DailyOrgStats.
+
+```
+cancel_rate = orders_cancelled / (confirmed + cancelled)
+risk: low → medium → high (≥20% или >1.5× исторический avg)
+```
+
+Возвращает: `{risk_level, cancellation_rate_pct, historical_rate_pct, week_cancelled}`.
+
+---
+
+### Overload Risk — `build_overload_risk(stats_rows, *, today)`
+
+Сравнение текущего дневного темпа заказов с 4-недельным историческим средним по дням недели.
+
+```
+ratio = current_pace / historical_avg
+high ≥ 1.5, medium ≥ 1.2, low < 1.2
+```
+
+Возвращает: `{risk_level, current_pace, historical_avg, overload_ratio}`.
+
+---
+
+### Autopilot Pricing — `build_autopilot_pricing(stats_rows, *, today)`
+
+Ценовой сигнал: сравнение текущей недели с предыдущей по revenue/orders.
+
+| Тактика | Условие | `price_adj_pct` |
+|---------|---------|-----------------|
+| `demand_up` | revenue ×1.2+ и orders ×1.1+ | +7% |
+| `demand_down` | revenue ×0.8- и orders ×0.85- | −10% |
+| `upsell_needed` | orders +15%, avg_check −10% | 0% (upsell) |
+| `avg_check_up` | revenue stable, orders −5% | 0% |
+| `stable` | всё в норме | 0% |
+
+Рекомендации создаются автоматически в UTC 04:00 через `generate_autopilot_pricing_recommendation()`.  
+Применяются через `POST /api/admin/intelligence/apply-pricing/{rec_id}` (обновляет `MenuItem.price`).
+
+---
+
+## Self-Healing Actions (Phase 5 OS)
+
+[`app/services/healing_actions.py`](../app/services/healing_actions.py). Вызывается из `ai_incidents_hourly_tick` каждый час.
+
+### Детекторы
+
+| Детектор | Порог | Действие |
+|----------|-------|---------|
+| **Escalation spike** | ≥5 эскалаций за сегодня | `OperationalInsight` severity=warning/critical |
+| **Payment failed spike** | ≥3 failed-платежей за сегодня | `OperationalInsight` severity=critical |
+| **Cancellation surge** | ≥25% отмен за 7 дней | `OperationalInsight` + auto-trigger `generate_recommendations` |
+| **AI message drop** | −70% AI-ответов vs предыдущая неделя | `OperationalInsight` severity=critical |
+
+Дедупликация: не создаёт повторный инсайт если аналогичный есть за последние N часов.
+
+---
+
+## Audit Trail (Phase 5 OS)
+
+[`app/services/audit_consumer.py`](../app/services/audit_consumer.py) + `AuditLog` table.
+
+Вызывается из `emit_event()` для **всех** событий (кроме высокочастотных технических).
+
+```http
+GET /api/admin/intelligence/audit-log?limit=50&action=order.confirmed&actor=ai
+```
+
+`get_audit_log()` объединяет два источника:
+1. **`AuditLog`** — события через `emit_event` (primary)
+2. **`SystemEvent`** — legacy/system события не через emit_event (secondary)
+
+---
+
+## OS Dashboard — `GET /os-dashboard`
+
+Единый event-driven endpoint для «Автопилот» вкладки. Нет SQL к `Order`/`ChatLog`.
+
+```json
+{
+  "source": "event_driven",
+  "today": { "orders_confirmed": 12, "revenue_kzt": 34500, "escalations": 1 },
+  "week_forecast": { "forecast_revenue": 245000, "confidence": "high" },
+  "demand_forecast": { "forecast_orders": 87, "daily_avg_orders": 14.5 },
+  "cancellation_risk": { "risk_level": "low", "cancellation_rate_pct": 5.2 },
+  "overload_risk": { "risk_level": "medium", "current_pace": 18.5 },
+  "autopilot_pricing": { "tactic": "demand_up", "price_adj_pct": 7 },
+  "incidents": [...],
+  "top_recommendations": [...]
+}
+```
+
+---
+
 ## Границы и эволюция
 
-**Сейчас (Phase 2):** observational + decision support — инсайты с причинами и рекомендациями.
+**Сейчас (Phase 5):** observational + predictive + self-healing — система сама детектирует и эскалирует проблемы, даёт ценовые рекомендации, строит прогнозы.
 
-**Следующий уровень (Phase 3):**
+**Следующий уровень (Phase 6 — Visibility):**
+- Audit Log Feed в UI (лента решений ОС)
+- Websocket push при новых AuditLog entries
+- Digest Email/Telegram: утренняя сводка OS-действий
 - Hourly baselines (нужен накопленный датасет)
 - Causal graph (корреляции между метриками)
 - Feedback calibration (автокалибровка порогов по `was_useful`)
-- Scenario simulation с constraint-моделью кухни

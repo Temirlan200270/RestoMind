@@ -101,6 +101,29 @@ async def finalize_outbound_delivery(
             log.error_details = error_details
     log.status_updated_at = now
     await db.flush()
+    if not send_ok and log.organization_id:
+        try:
+            from app.services.system_events import BusinessEvent, emit_event
+
+            await emit_event(
+                db,
+                BusinessEvent(
+                    id=f"integration.whatsapp.failed:{chat_log_id}",
+                    org_id=int(log.organization_id),
+                    type="integration.whatsapp.failed",
+                    actor="system",
+                    location_id=getattr(log, "location_id", None),
+                    entity_type="chat_log",
+                    entity_id=chat_log_id,
+                    payload={
+                        "chat_log_id": chat_log_id,
+                        "phone": phone_s,
+                        "error_details": error_details,
+                    },
+                ),
+            )
+        except Exception:
+            logger.exception("emit integration.whatsapp.failed chat_log=%s", chat_log_id)
     if not phone_s:
         return None
     return {

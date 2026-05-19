@@ -24,7 +24,7 @@ Rules:
 
 Durable event emitted on change:
 
-- `conversation_state_changed` (аудит/аналитика в БД)
+- `conversation.state_changed` (аудит/аналитика в БД)
 
 Payload fields:
 

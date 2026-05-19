@@ -32,6 +32,8 @@ HANDLED_EVENT_TYPES = frozenset({
     "payment.failed",
     "payment.expired",
     "ai.escalated",
+    "ai.response.generated",
+    "ai.dialog.started",
     "operator.took_over",
 })
 
@@ -46,6 +48,8 @@ _EVENT_COLUMN: dict[str, str] = {
     "payment.failed": "payments_failed",
     "payment.expired": "payments_failed",  # expired → same counter as failed for analytics
     "ai.escalated": "escalations",
+    "ai.response.generated": "ai_messages_count",
+    "ai.dialog.started": "dialogs_count",
     "operator.took_over": "operator_takeovers",
 }
 
@@ -128,7 +132,8 @@ async def get_event_stats(
             day, orders_created, orders_confirmed, orders_cancelled,
             bookings_created, bookings_confirmed, bookings_cancelled,
             payments_completed, payments_failed, revenue_kzt,
-            escalations, operator_takeovers, updated_at
+            escalations, operator_takeovers,
+            ai_messages_count, dialogs_count, updated_at
         FROM daily_org_stats
         WHERE organization_id = :org_id
           AND day >= CURRENT_DATE - :days
@@ -150,6 +155,48 @@ async def get_event_stats(
             "revenue_kzt": float(r["revenue_kzt"] or 0),
             "escalations": int(r["escalations"] or 0),
             "operator_takeovers": int(r["operator_takeovers"] or 0),
+            "ai_messages_count": int(r["ai_messages_count"] or 0),
+            "dialogs_count": int(r["dialogs_count"] or 0),
+        }
+        for r in rows
+    ]
+
+
+async def get_event_stats_for_range(
+    db: "AsyncSession",
+    org_id: int,
+    *,
+    start_date: "date",
+    end_date: "date",
+) -> list[dict]:
+    """Читает агрегаты из DailyOrgStats за произвольный диапазон дат (start..end включительно)."""
+    from datetime import date as _date
+    sql = text("""
+        SELECT
+            day, orders_created, orders_confirmed, orders_cancelled,
+            payments_completed, payments_failed, revenue_kzt,
+            escalations, operator_takeovers, ai_messages_count, dialogs_count
+        FROM daily_org_stats
+        WHERE organization_id = :org_id
+          AND day >= :start_date
+          AND day <= :end_date
+        ORDER BY day ASC
+    """)
+    result = await db.execute(sql, {
+        "org_id": org_id,
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+    })
+    rows = result.mappings().all()
+    return [
+        {
+            "date": str(r["day"]),
+            "orders_confirmed": int(r["orders_confirmed"] or 0),
+            "orders_cancelled": int(r["orders_cancelled"] or 0),
+            "revenue_kzt": float(r["revenue_kzt"] or 0),
+            "escalations": int(r["escalations"] or 0),
+            "ai_messages_count": int(r["ai_messages_count"] or 0),
+            "dialogs_count": int(r["dialogs_count"] or 0),
         }
         for r in rows
     ]
@@ -165,7 +212,8 @@ async def get_today_event_summary(
             orders_created, orders_confirmed, orders_cancelled,
             bookings_created, bookings_confirmed,
             payments_completed, payments_failed, revenue_kzt,
-            escalations, operator_takeovers
+            escalations, operator_takeovers,
+            ai_messages_count, dialogs_count
         FROM daily_org_stats
         WHERE organization_id = :org_id
           AND day = CURRENT_DATE
@@ -177,6 +225,7 @@ async def get_today_event_summary(
         "bookings_created": 0, "bookings_confirmed": 0,
         "payments_completed": 0, "payments_failed": 0, "revenue_kzt": 0.0,
         "escalations": 0, "operator_takeovers": 0,
+        "ai_messages_count": 0, "dialogs_count": 0,
         "source": "event_driven",
     }
     if row is None:
@@ -192,5 +241,7 @@ async def get_today_event_summary(
         "revenue_kzt": float(row["revenue_kzt"] or 0),
         "escalations": int(row["escalations"] or 0),
         "operator_takeovers": int(row["operator_takeovers"] or 0),
+        "ai_messages_count": int(row["ai_messages_count"] or 0),
+        "dialogs_count": int(row["dialogs_count"] or 0),
         "source": "event_driven",
     }

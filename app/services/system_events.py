@@ -74,6 +74,30 @@ async def emit_event(db: AsyncSession, event: BusinessEvent) -> SystemEvent | No
         except Exception:
             logger.exception("analytics_consumer failed for event type=%s org=%d", event.type, event.org_id)
 
+        # Phase 5 OS: audit_consumer — иммутабельный лог действий
+        try:
+            from app.services.audit_consumer import on_business_event as _audit_on_event
+            await _audit_on_event(event, db)
+        except Exception:
+            logger.exception("audit_consumer failed for event type=%s org=%d", event.type, event.org_id)
+
+        # Phase 5 OS: websocket_consumer — публикуем в Pub/Sub для real-time UI
+        try:
+            import asyncio
+            from app.services.events import publish_event as _ws_publish
+            asyncio.create_task(
+                _ws_publish(
+                    event.type,
+                    {
+                        "org_id": event.org_id,
+                        "type": event.type,
+                        "payload": {k: v for k, v in event.payload.items() if not k.startswith("_")},
+                    },
+                )
+            )
+        except Exception:
+            logger.debug("websocket_consumer skipped for event type=%s", event.type)
+
     return result
 
 

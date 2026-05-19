@@ -284,7 +284,7 @@ class TestEventSlice:
         mock_db = MagicMock()
         mock_db.execute = AsyncMock(side_effect=Exception("DB error"))
 
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             _load_recent_event_slice(mock_db, 1, minutes=15)
         )
 

@@ -18,7 +18,7 @@ Status: in progress.
 Implemented:
 
 - formal conversation state rules in `app/services/conversation_state.py`;
-- durable `conversation_state_changed` events emitted from session updates;
+- durable `conversation.state_changed` events emitted from session updates;
 - admin takeover/release and persistent AI pause now update DB state durably, not Redis only.
 
 Remaining:

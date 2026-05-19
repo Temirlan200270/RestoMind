@@ -221,7 +221,7 @@ async def create_upsell_rule_from_order_feedback(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     org_id = admin_org_from_session(request)
-    order = await _order_in_org(db, order_id, org_id)
+    order = await _order_in_org(db, order_id, org_id, request=request)
     items_json = order.items_json if isinstance(order.items_json, dict) else {}
     foods = items_json.get("items") if isinstance(items_json.get("items"), list) else []
     first_food = next((x for x in foods if isinstance(x, dict)), {})

@@ -1432,6 +1432,18 @@ async def process_message(
             await append_to_history(
                 redis_client, phone, "user", message_text, organization_id=organization_id,
             )
+            try:
+                from app.services.dialog_events import emit_dialog_started_once
+
+                async with async_session_factory() as db_dialog:
+                    await emit_dialog_started_once(
+                        db_dialog,
+                        organization_id=organization_id,
+                        phone=phone,
+                    )
+                    await db_dialog.commit()
+            except Exception:
+                logger.debug("emit_dialog_started_once skipped", exc_info=True)
 
         if (
             settings.whatsapp_fast_ack_enabled
@@ -1694,6 +1706,21 @@ async def process_message(
                 conversation_id=conversation_id,
                 known_user_id=u_row.id if u_row is not None else None,
             )
+            # Phase 5 OS: счётчик AI-ответов для event-driven аналитики
+            _usage = getattr(ai_response, "_usage", None)
+            await emit_event(
+                db,
+                BusinessEvent(
+                    org_id=organization_id,
+                    type="ai.response.generated",
+                    actor="ai",
+                    payload={
+                        "intent": ai_response.intent,
+                        "tokens": getattr(_usage, "total_tokens", None),
+                    },
+                ),
+            )
+
             if result.new_state == UserState.HUMAN_MODE:
                 db.add(
                     EscalationEvent(

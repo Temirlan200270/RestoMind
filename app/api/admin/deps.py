@@ -34,7 +34,10 @@ from app.services.billing_guard import (
     billing_suspended_http_exception,
     tenant_billing_blocks_inbound,
 )
-from app.services.tenant_scope import organization_id_allowed_for_admin_session
+from app.services.tenant_scope import (
+    location_id_allowed_for_staff,
+    organization_id_allowed_for_admin_session,
+)
 from app.services.tenant_scope import phones_subquery_for_org as _phones_subquery_for_org
 
 logger = logging.getLogger(__name__)
@@ -190,10 +193,16 @@ def admin_actor_key(request: Request) -> str:
     return "staff:session"
 
 
-async def _order_in_org(db: AsyncSession, order_id: int, org_id: int) -> Order:
+async def _order_in_org(
+    db: AsyncSession,
+    order_id: int,
+    org_id: int,
+    *,
+    request: Request | None = None,
+) -> Order:
     """
     Заказ принадлежит филиалу: либо Order.organization_id совпадает, либо (legacy) NULL и user в этом org.
-    Иначе 404 — без утечки «существует ли id у чужого арендатора».
+    Phase 1.1: operator/manager с assigned_location_ids не видят чужие точки.
     """
     order = await db.get(Order, order_id)
     if order is None:
@@ -202,11 +211,61 @@ async def _order_in_org(db: AsyncSession, order_id: int, org_id: int) -> Order:
     if oid is not None:
         if int(oid) != int(org_id):
             raise HTTPException(status_code=404, detail="Заказ не найден")
-        return order
-    u = await db.get(User, order.user_id) if order.user_id else None
-    if u is None or int(u.organization_id) != int(org_id):
-        raise HTTPException(status_code=404, detail="Заказ не найден")
+    else:
+        u = await db.get(User, order.user_id) if order.user_id else None
+        if u is None or int(u.organization_id) != int(org_id):
+            raise HTTPException(status_code=404, detail="Заказ не найден")
+    if request is not None:
+        staff = await _session_staff_user(request, db)
+        is_super = await _session_is_superadmin(request, db)
+        if not await location_id_allowed_for_staff(
+            db,
+            staff=staff,
+            org_id=int(org_id),
+            location_id=getattr(order, "location_id", None),
+            is_superadmin=is_super,
+        ):
+            raise HTTPException(status_code=404, detail="Заказ не найден")
     return order
+
+
+async def _chat_phone_in_org(
+    db: AsyncSession,
+    phone: str,
+    org_id: int,
+    *,
+    request: Request | None = None,
+) -> None:
+    """Проверка доступа к чату по phone: org scope + location последнего user message."""
+    from app.db.models import ChatLog
+
+    user = await db.scalar(
+        select(User).where(User.organization_id == int(org_id), User.phone == phone).limit(1)
+    )
+    if user is None:
+        raise HTTPException(status_code=404, detail="Чат не найден")
+    if request is None:
+        return
+    last_loc = await db.scalar(
+        select(ChatLog.location_id)
+        .where(
+            ChatLog.organization_id == int(org_id),
+            ChatLog.user_id == int(user.id),
+            ChatLog.location_id.isnot(None),
+        )
+        .order_by(ChatLog.id.desc())
+        .limit(1)
+    )
+    staff = await _session_staff_user(request, db)
+    is_super = await _session_is_superadmin(request, db)
+    if not await location_id_allowed_for_staff(
+        db,
+        staff=staff,
+        org_id=int(org_id),
+        location_id=int(last_loc) if last_loc is not None else None,
+        is_superadmin=is_super,
+    ):
+        raise HTTPException(status_code=404, detail="Чат не найден")
 
 
 async def _iiko_login_org_for_tenant(

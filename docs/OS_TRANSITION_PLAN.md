@@ -6,17 +6,26 @@
 
 ---
 
-## Текущее состояние (честная оценка)
+## Текущее состояние (актуально на 2026-05-19)
 
-| Фаза | Что | Готовность | Где в коде |
-|------|-----|------------|-----------|
-| Phase 1: Tenant Isolation | `organization_id` в каждом запросе, запрет межтенантного доступа | ~90% | CLAUDE.md как жёсткий запрет; везде в `app/api/` и `app/services/` |
-| Phase 2: RBAC | `admin_ok` в сессии, роли существуют | ~60% | `app/api/admin/`; resource-scope (какой оператор видит какой чат) — слабо |
-| Phase 3: Event System | `SystemEvent` модель, `emit_system_event`, `publish_event` | ~40% | `app/db/models.py`, `app/services/system_events.py`, `app/services/trace_context.py` |
-| Phase 4: AI Context Layer | `fetch_ai_read_context`, `AIReadContext`, сборка контекста для LLM | ~70% | `app/services/context_engine.py` |
-| Phase 5: Decision Engine | `validate_order` в intent_router — тактический seed | ~30% | `app/services/intent_router.py` |
+| Фаза | Что реализовано | Готовность | Ключевые файлы |
+|------|----------------|------------|----------------|
+| Phase 1: Franchise / Tenant | `Tenant.is_network`, Branch Switcher, `/network/*` endpoints, `Manager` роль, `assigned_org_ids`, `location_id` на шине | **~98%** | `app/api/admin/network.py`, `app/services/tenant_scope.py`, `_header.html` |
+| Phase 2: Event System | 12 типов на шине через `emit_event(BusinessEvent)`, `DailyOrgStats` (13 колонок), backfill-сервис, websocket_consumer, `audit_log` table | **~92%** | `app/services/system_events.py`, `analytics_consumer.py`, `audit_consumer.py`, `analytics_backfill.py` |
+| Phase 3: AI Context Snapshot | `AIContextSnapshot` table, `save_ai_context_snapshot()`, frozen `menu_context_text`, `event_slice`, replay endpoint, `menu_prices_snapshot` | **~85%** | `app/services/context_engine.py`, `app/api/admin/intelligence.py` |
+| Phase 4: Decision Engine + AI Context | `DecisionEngine` (8 правил: billing_suspended, force_closed, empty_order, all_items_hallucinated, stoplist_quick, delivery_no_address, order_anomaly, pricing_policy), `AIReadContext` с `tenant`, DE интегрирован в `webhooks.py` | **~95%** | `app/services/decision_engine.py`, `app/services/context_engine.py` |
+| Phase 5: Full OS Behavior | Event-first аналитика (~92%), predictive insights (demand/cancellation/overload/autopilot_pricing), auto-recommendations (UTC 04:00), self-healing (4 детектора), audit trail, `POST /apply-pricing` | **~98%** | `app/services/healing_actions.py`, `app/services/owner_dashboard.py`, `app/api/admin/intelligence.py` |
 
-**Главный вывод:** система уже не MVP. Это Early Production SaaS с зачатками OS-архитектуры. Задача — замкнуть нервную систему, а не перестраивать скелет.
+**Главный вывод (2026-05-19):** RestoMind OS вышел из Early Production в **Industrial Platform**. Event loop замкнут (~92%), система детектирует проблемы и даёт автономные рекомендации. Launch Window открыто.
+
+### Что остаётся для 100%
+
+| Компонент | Статус | Комментарий |
+|-----------|--------|-------------|
+| `audit_consumer` для `conversation.state_changed` / `ai.response.generated` | Намеренно пропущен | Высокочастотные события — шум без бизнес-пользы |
+| Auto-price без подтверждения | Не реализован | Изменение цен требует явного `POST /apply-pricing` от владельца |
+| `websocket_consumer` полный (org-scoped channel) | ~70% | Fire-and-forget publish работает; org-specific fanout — будущий спринт |
+| `audit_consumer` для admin-действий (вне emit_event) | Не реализован | Изменения настроек, меню вручную — вне event bus |
 
 ---
 

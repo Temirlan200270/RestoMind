@@ -237,6 +237,12 @@ class AIBrainResponse(BaseModel):
         default_factory=PaymentSplit,
         description="При payment_mode=mixed: сколько наличными / картой / удалённо (сумма трёх полей = итог)",
     )
+    discount_pct: float = Field(
+        default=0.0,
+        ge=0,
+        le=100,
+        description="Предложенная ИИ скидка в % (Policy Engine: сравнение с org.max_discount_pct)",
+    )
     is_preorder: bool = Field(
         default=False,
         description="Предзаказ блюд к визиту (актуально для зала)",

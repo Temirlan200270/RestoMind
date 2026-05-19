@@ -157,14 +157,18 @@ async def save_ai_context_snapshot(
             # Frozen menu text passed to LLM — используется в replay для точного воспроизведения
             "menu_context_text": menu_context_text,
         }
-        customer_state = {
-            "has_draft": context.draft_row is not None,
-            "draft_id": context.draft_row.id if context.draft_row else None,
-            "draft_total": float(context.draft_row.total_price or 0) if context.draft_row else None,
-            "customer_ctx_snippet": (context.customer_ctx or "")[:500],
-            "user_preferences": context.user_preferences,
-        }
         async with async_session_factory() as db:
+            chat_history_slice = await _load_chat_history_slice(
+                db, organization_id, phone, limit=20,
+            )
+            customer_state = {
+                "has_draft": context.draft_row is not None,
+                "draft_id": context.draft_row.id if context.draft_row else None,
+                "draft_total": float(context.draft_row.total_price or 0) if context.draft_row else None,
+                "customer_ctx_snippet": (context.customer_ctx or "")[:500],
+                "user_preferences": context.user_preferences,
+                "chat_history_slice": chat_history_slice,
+            }
             event_slice = await _load_recent_event_slice(db, organization_id, minutes=15)
             snap = AIContextSnapshot(
                 id=snapshot_id,
@@ -179,6 +183,44 @@ async def save_ai_context_snapshot(
     except Exception:
         logger.exception("save_ai_context_snapshot failed for org=%d phone=%s", organization_id, phone)
     return snapshot_id
+
+
+async def _load_chat_history_slice(
+    db,
+    organization_id: int,
+    phone: str,
+    *,
+    limit: int = 20,
+) -> list[dict[str, str]]:
+    """Последние сообщения диалога из ChatLog для replay (хронологический порядок)."""
+    from app.db.models import ChatLog, User
+
+    user = await db.scalar(
+        select(User).where(
+            User.organization_id == int(organization_id),
+            User.phone == phone,
+        ).limit(1)
+    )
+    if user is None:
+        return []
+    rows = (
+        await db.execute(
+            select(ChatLog.role, ChatLog.content)
+            .where(ChatLog.user_id == int(user.id))
+            .order_by(desc(ChatLog.id))
+            .limit(limit)
+        )
+    ).all()
+    out: list[dict[str, str]] = []
+    for role, content in reversed(rows):
+        r = (role or "").strip().lower()
+        if r not in ("user", "assistant", "operator"):
+            continue
+        text = (content or "").strip()
+        if not text:
+            continue
+        out.append({"role": "assistant" if r == "operator" else r, "content": text})
+    return out
 
 
 async def _load_recent_event_slice(

@@ -18,8 +18,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 def _make_ai_response(intent="order", reply_text="Ваш заказ принят"):
     """Создаёт минимальный AIBrainResponse для тестов."""
-    from app.schemas.ai_schemas import AIBrainResponse
-    return AIBrainResponse(intent=intent, reply_text=reply_text)
+    from app.schemas.ai_schemas import AIBrainResponse, OrderItem
+    resp = AIBrainResponse(intent=intent, reply_text=reply_text)
+    if intent == "order":
+        resp.items = [OrderItem(name="Плов", quantity=1)]
+    return resp
 
 
 def _make_org(force_closed_until=None, force_closed_reason="", max_discount_pct=0):
@@ -373,9 +376,9 @@ class TestAIContextSnapshot:
             mock_cm.__aexit__ = AsyncMock(return_value=False)
             mock_factory.return_value = mock_cm
 
-            snap_id = asyncio.get_event_loop().run_until_complete(
-                save_ai_context_snapshot("+7700", 1, ctx)
-            )
+        snap_id = asyncio.run(
+            save_ai_context_snapshot("+7700", 1, ctx)
+        )
 
         # Ошибка не должна пробросить исключение, ID всё равно возвращается
         assert snap_id is not None
@@ -475,7 +478,7 @@ class TestDecisionEngineNewRules:
 
         proposal = _make_ai_response("order")
         proposal.items = []
-        proposal.order_actions = [OrderAction(action="add", name="Плов", quantity=1)]
+        proposal.order_actions = [OrderAction(item_id="Плов", action="add", quantity=1)]
         ctx = _make_context()
         org = _make_org()
 

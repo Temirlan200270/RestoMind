@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Order, OrderStatus, Organization, Tenant
 from app.db.session import get_db
+from app.services.analytics_consumer import get_today_event_summary
 from app.services.tenant_scope import _tenant_org_list, orders_tenant_clause
 
 from .deps import admin_org_from_session, require_admin_session_active
@@ -82,21 +83,53 @@ async def network_stats(request: Request, db: AsyncSession = Depends(get_db)) ->
     now_utc = datetime.now(tz=timezone.utc)
     today_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
 
+    # Phase 5 OS: event-first для per-org статистики сегодня
+    per_org: list[dict[str, Any]] = []
+    net_today_orders = 0
+    net_today_revenue = 0.0
+    any_event_active = False
+
+    for oid in org_ids:
+        ev = await get_today_event_summary(db, oid)
+        if ev["orders_confirmed"] > 0 or ev["revenue_kzt"] > 0:
+            any_event_active = True
+        per_org.append({
+            "organization_id": oid,
+            "today_orders": ev["orders_confirmed"],
+            "today_revenue": ev["revenue_kzt"],
+            "source": "event_driven",
+        })
+        net_today_orders += ev["orders_confirmed"]
+        net_today_revenue += ev["revenue_kzt"]
+
+    # SQL fallback для сети если event-данных нет
+    if not any_event_active:
+        not_cancelled = Order.status != OrderStatus.CANCELLED.value
+        per_org = []
+        net_today_orders = 0
+        net_today_revenue = 0.0
+        for oid in org_ids:
+            row = (await db.execute(
+                select(
+                    func.count(Order.id),
+                    func.coalesce(func.sum(Order.total_price), 0),
+                ).where(
+                    not_cancelled,
+                    Order.organization_id == oid,
+                    Order.created_at >= today_start,
+                )
+            )).one()
+            per_org.append({
+                "organization_id": oid,
+                "today_orders": int(row[0]),
+                "today_revenue": float(row[1]),
+                "source": "sql",
+            })
+            net_today_orders += int(row[0])
+            net_today_revenue += float(row[1])
+
+    # Кумулятивные итоги — всегда SQL (нет event-aggregate для all-time)
     not_cancelled = Order.status != OrderStatus.CANCELLED.value
-
-    # Сегодня по всей сети
-    today_row = (await db.execute(
-        select(
-            func.count(Order.id),
-            func.coalesce(func.sum(Order.total_price), 0),
-        ).where(
-            not_cancelled,
-            Order.organization_id.in_(org_ids),
-            Order.created_at >= today_start,
-        )
-    )).one()
-
-    # Всего по всей сети
     total_row = (await db.execute(
         select(
             func.count(Order.id),
@@ -107,34 +140,15 @@ async def network_stats(request: Request, db: AsyncSession = Depends(get_db)) ->
         )
     )).one()
 
-    # Статистика по филиалам за сегодня
-    per_org: list[dict[str, Any]] = []
-    for oid in org_ids:
-        clause = orders_tenant_clause(oid)
-        row = (await db.execute(
-            select(
-                func.count(Order.id),
-                func.coalesce(func.sum(Order.total_price), 0),
-            ).where(
-                not_cancelled,
-                Order.organization_id == oid,
-                Order.created_at >= today_start,
-            )
-        )).one()
-        per_org.append({
-            "organization_id": oid,
-            "today_orders": int(row[0]),
-            "today_revenue": float(row[1]),
-        })
-
     return {
         "ok": True,
         "tenant_id": tenant.id,
         "tenant_name": tenant.name,
         "orgs_count": len(org_ids),
+        "source": "event_driven" if any_event_active else "sql",
         "network": {
-            "today_orders": int(today_row[0]),
-            "today_revenue": float(today_row[1]),
+            "today_orders": net_today_orders,
+            "today_revenue": round(net_today_revenue, 2),
             "total_orders": int(total_row[0]),
             "total_revenue": float(total_row[1]),
         },

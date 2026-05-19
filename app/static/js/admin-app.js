@@ -776,6 +776,17 @@ function adminMixinState() {
         aiValueLoading: false,
         aiValueData: null,
         aiValueSource: '',
+        /** Phase 5 OS: OS Autopilot dashboard data from /intelligence/os-dashboard */
+        osDashboardData: null,
+        osDashboardLoading: false,
+        /** Phase 5 OS: Audit log feed (OS Decision Feed) */
+        auditLog: [],
+        auditLogLoading: false,
+        auditLogDetail: null,
+        guestCareReviews: [],
+        guestCareLoading: false,
+        guestCareImportUrl: '',
+        applyPricingBulkLoading: false,
         intelligenceLoading: false,
         intelligenceAsking: false,
         intelligenceQuestion: '',
@@ -1321,6 +1332,10 @@ function adminMixinMenuOrdersUi() {
             }
 
             await this.checkSession();
+
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.register('/static/sw.js').catch(() => {});
+            }
 
             // AudioContext unlock: браузеры блокируют звук до user gesture.
             // Разблокируем по первому клику/тапу, затем можно безопасно играть уведомления.
@@ -5119,7 +5134,48 @@ function adminMixinWebSocketEvents() {
                 if (this.currentTab === 'menu') {
                     void this.loadMenu?.();
                 }
+            } else if (type === 'os.audit') {
+                const orgId = Number(this.orgProfile?.organization_id || 0);
+                if (!orgId || Number(data?.org_id) === orgId) {
+                    this._prependAuditEntry(data);
+                    this._pushDashLiveFeed(type, data?.title || data?.action || 'ОС');
+                    this.scheduleDashStatsRefreshDebounced();
+                }
+            } else if (
+                type === 'order.created'
+                || type === 'order.confirmed'
+                || type === 'order.cancelled'
+                || type === 'payment.completed'
+                || type === 'payment.failed'
+                || type === 'payment.expired'
+                || type === 'booking.created'
+                || type === 'booking.confirmed'
+                || type === 'booking.cancelled'
+            ) {
+                this.scheduleDashStatsRefreshDebounced();
+                const label = this._osActionLabel(type);
+                this._pushDashLiveFeed(type, label);
+                if (this.currentTab === 'ai_center' && this.aiCenterTab === 'os') {
+                    void this.loadOsDashboard();
+                }
+                if (this.currentTab === 'ai_center' && this.aiCenterTab === 'os' && !this.auditLog?.length) {
+                    void this.loadAuditLog();
+                }
             }
+        },
+
+        _prependAuditEntry(data) {
+            if (!data || !data.action) return;
+            const row = {
+                id: `ws-${Date.now()}`,
+                actor: data.actor || 'system',
+                action: data.action,
+                entity_type: data.entity_type,
+                entity_id: data.entity_id,
+                created_at: data.created_at || new Date().toISOString(),
+                source: 'websocket',
+            };
+            this.auditLog = [row, ...(this.auditLog || [])].slice(0, 50);
         },
 
         async resendFailedChatMessage(msg) {
@@ -6616,6 +6672,10 @@ function adminMixinDataChartsSettings() {
                         await this.loadIntelligence();
                     } else if (this.aiCenterTab === 'load') {
                         await this.loadDigitalTwin();
+                    } else if (this.aiCenterTab === 'os') {
+                        await this.loadOsDashboard();
+                    } else if (this.aiCenterTab === 'guestcare') {
+                        await this.loadGuestCareReviews();
                     } else {
                         await this.loadAiValue();
                     }
@@ -7296,6 +7356,140 @@ function adminMixinDataChartsSettings() {
                 return;
             }
             this.navigateToTab(tab);
+        },
+
+        async loadOsDashboard() {
+            if (this.osDashboardLoading) return;
+            this.osDashboardLoading = true;
+            try {
+                const { ok, data } = await this.apiJsonResponse('/api/admin/intelligence/os-dashboard');
+                if (ok && data?.ok) this.osDashboardData = data;
+            } catch (_e) { /* noop */ } finally {
+                this.osDashboardLoading = false;
+            }
+            if (!this.auditLog.length) void this.loadAuditLog();
+        },
+
+        async loadOsDecisionFeed() {
+            return this.loadAuditLog();
+        },
+
+        async applyAutopilotPricingBulk() {
+            if (this.applyPricingBulkLoading) return;
+            const ap = this.osDashboardData?.autopilot_pricing;
+            if (!ap || ap.tactic === 'stable' || !ap.price_adj_pct) {
+                void this.showUiAlert('Нет активной ценовой рекомендации для применения.', 'Автопилот');
+                return;
+            }
+            const okConfirm = window.confirm(
+                `Применить корректировку цен ${ap.price_adj_pct > 0 ? '+' : ''}${ap.price_adj_pct}% ко всем активным позициям?`,
+            );
+            if (!okConfirm) return;
+            this.applyPricingBulkLoading = true;
+            try {
+                const { ok, data } = await this.apiJsonResponse(
+                    '/api/admin/intelligence/apply-pricing/bulk',
+                    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
+                );
+                if (!ok) {
+                    void this.showUiAlert((data && data.detail) || 'Не удалось применить цены', 'Автопилот');
+                    return;
+                }
+                void this.showUiAlert(
+                    `Обновлено позиций: ${data.items_updated || 0}`,
+                    'Автопилот',
+                );
+                await this.loadOsDashboard();
+                void this.loadAuditLog();
+            } finally {
+                this.applyPricingBulkLoading = false;
+            }
+        },
+
+        async loadGuestCareReviews() {
+            if (this.guestCareLoading) return;
+            this.guestCareLoading = true;
+            try {
+                const { ok, data } = await this.apiJsonResponse('/api/admin/intelligence/reviews/external');
+                if (ok && data?.items) this.guestCareReviews = data.items;
+            } catch (_e) { /* noop */ } finally {
+                this.guestCareLoading = false;
+            }
+        },
+
+        async importGuestCareReview() {
+            const url = (this.guestCareImportUrl || '').trim();
+            if (!url) return;
+            const { ok, data } = await this.apiJsonResponse(
+                '/api/admin/intelligence/reviews/external/import',
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url }),
+                },
+            );
+            if (ok && data?.item) {
+                this.guestCareReviews = [data.item, ...(this.guestCareReviews || [])];
+                this.guestCareImportUrl = '';
+            }
+        },
+
+        async draftGuestCareReply(reviewId) {
+            const { ok, data } = await this.apiJsonResponse(
+                `/api/admin/intelligence/reviews/external/${encodeURIComponent(reviewId)}/reply-draft`,
+                { method: 'POST' },
+            );
+            if (ok && data?.reply_draft) {
+                this.guestCareReviews = (this.guestCareReviews || []).map((r) => (
+                    String(r.id) === String(reviewId)
+                        ? { ...r, reply_draft: data.reply_draft }
+                        : r
+                ));
+            }
+        },
+
+        async loadAuditLog({ more = false } = {}) {
+            if (this.auditLogLoading) return;
+            this.auditLogLoading = true;
+            try {
+                const limit = more ? 50 : 20;
+                const { ok, data } = await this.apiJsonResponse(
+                    `/api/admin/intelligence/audit-log?limit=${limit}`
+                );
+                if (ok && data?.entries) {
+                    this.auditLog = more
+                        ? [...(this.auditLog || []), ...data.entries]
+                        : data.entries;
+                }
+            } catch (_e) { /* noop */ } finally {
+                this.auditLogLoading = false;
+            }
+        },
+
+        _osActionLabel(action) {
+            const labels = {
+                'order.created':       'Новый заказ',
+                'order.confirmed':     'Заказ подтверждён',
+                'order.cancelled':     'Заказ отменён',
+                'booking.created':     'Новое бронирование',
+                'booking.confirmed':   'Бронирование подтверждено',
+                'payment.completed':   'Оплата получена',
+                'payment.failed':      'Ошибка оплаты',
+                'payment.expired':     'Оплата истекла',
+                'ai.escalated':        'ОС эскалировала диалог',
+                'operator.took_over':  'Оператор подключился',
+                'system.sla_violated': 'ОС: нарушен SLA',
+                'system.pricing_adjusted': 'ОС: цены скорректированы',
+                'system.healing_wa_sent': 'ОС: WA-напоминание об оплате',
+                'integration.iiko.failed': 'ОС: ошибка iiko',
+                'integration.whatsapp.failed': 'ОС: сбой WhatsApp',
+                'ai.dialog.started': 'ОС: новый диалог',
+                'cancellation_surge':  'ОС: обнаружен рост отмен',
+                'escalation_spike':    'ОС: всплеск эскалаций',
+                'payment_spike':       'ОС: всплеск ошибок оплаты',
+                'ai_message_drop':     'ОС: падение AI-ответов',
+            };
+            return labels[action] || action.replace('.', ': ').replace('_', ' ');
         },
 
         async loadDashRoiSummary() {

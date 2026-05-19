@@ -146,16 +146,18 @@ async def check_sla_thresholds(db: AsyncSession, org_id: int) -> None:
         if p95 > threshold:
             idempotency_key = f"sla_violation:{org_id}:{stage}:{datetime.now(timezone.utc).strftime('%Y%m%d%H')}"
             try:
-                from app.services.system_events import emit_system_event
-                await emit_system_event(
+                from app.services.system_events import BusinessEvent, emit_event
+                await emit_event(
                     db,
-                    organization_id=org_id,
-                    event_type="sla_violation",
-                    source="pipeline_latency",
-                    entity_type="pipeline_stage",
-                    entity_id=stage,
-                    idempotency_key=idempotency_key,
-                    payload={"stage": stage, "p95_ms": p95, "threshold_ms": threshold},
+                    BusinessEvent(
+                        id=idempotency_key,
+                        org_id=org_id,
+                        type="system.sla_violated",
+                        actor="system",
+                        entity_type="pipeline_stage",
+                        entity_id=stage,
+                        payload={"stage": stage, "p95_ms": p95, "threshold_ms": threshold},
+                    ),
                 )
                 logger.warning("SLA violation: org=%s stage=%s p95=%dms threshold=%dms", org_id, stage, p95, threshold)
             except Exception as exc:

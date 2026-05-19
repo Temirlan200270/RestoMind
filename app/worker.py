@@ -104,16 +104,15 @@ async def scheduled_blasts_tick(ctx: dict[str, Any]) -> None:
 
 
 async def ai_incidents_hourly_tick(ctx: dict[str, Any]) -> None:
-    """
-    Cron раз в час: запускает detect_ai_incidents для всех активных организаций.
-    Без этого спайки токенов/ошибок/latency обнаруживаются только при открытии
-    вкладки «Инсайты» — а не автоматически.
-    """
+    """Cron раз в час: AI-инциденты + SLA-check + авто-эскалация (Phase 5.3)."""
     import logging
+    from datetime import datetime, timedelta, timezone
     from sqlalchemy import select as _sel
-    from app.db.models import Organization
+    from app.db.models import OperationalInsight, Organization
     from app.db.session import async_session_factory
     from app.services.intelligence import detect_ai_incidents
+    from app.services.pipeline_latency import check_sla_thresholds
+    from app.services.healing_actions import run_healing_actions
 
     logger = logging.getLogger(__name__)
 
@@ -126,9 +125,35 @@ async def ai_incidents_hourly_tick(ctx: dict[str, Any]) -> None:
         try:
             async with async_session_factory() as db:
                 await detect_ai_incidents(db, org_id)
+                await check_sla_thresholds(db, org_id)
+
+                # Phase 5 OS: self-healing actions — детект инцидентов + автодействия
+                healing_done = await run_healing_actions(db, org_id)
+                if healing_done:
+                    logger.info("Phase5 healing actions org=%s: %s", org_id, healing_done)
+
+                # Auto-escalation: инсайты "new" старше 2 часов → critical
+                stale_cutoff = datetime.now(tz=timezone.utc) - timedelta(hours=2)
+                stale = (await db.execute(
+                    _sel(OperationalInsight).where(
+                        OperationalInsight.organization_id == org_id,
+                        OperationalInsight.status == "new",
+                        OperationalInsight.severity != "critical",
+                        OperationalInsight.created_at < stale_cutoff,
+                    ).limit(10)
+                )).scalars().all()
+                for insight in stale:
+                    insight.severity = "critical"
+                    logger.warning(
+                        "Phase5.3 auto-escalate org=%s insight=%s: %s",
+                        org_id, insight.id, insight.title,
+                    )
+
                 await db.commit()
         except Exception:
             logger.exception("ai_incidents_hourly_tick: ошибка для org=%s", org_id)
+
+    logger.info("Phase5.3 hourly_tick: %d orgs processed", len(org_ids))
 
 
 async def iiko_stoplist_sync(

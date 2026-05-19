@@ -240,6 +240,7 @@ class TestDoDThree:
             ms = MagicMock()
             ms.add = lambda x: captured.update({"snap": x})
             ms.commit = AsyncMock()
+            ms.scalar = AsyncMock(return_value=None)
             ms.execute = AsyncMock(
                 return_value=MagicMock(mappings=lambda: MagicMock(all=lambda: []))
             )

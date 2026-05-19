@@ -17,8 +17,231 @@
                                 class="min-h-[44px] px-3 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap"
                                 :class="aiCenterTab === 'load' ? 'ds-segmented-active' : ''"
                                 @click="navigateToTab('ai_center', { aiCenterTab: 'load' })">Нагрузка</button>
+                            <button type="button"
+                                class="min-h-[44px] px-3 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap"
+                                :class="aiCenterTab === 'os' ? 'ds-segmented-active' : ''"
+                                @click="navigateToTab('ai_center', { aiCenterTab: 'os' }); loadOsDashboard()">
+                                <span class="text-indigo-600">⚡</span> Автопилот
+                            </button>
+                            <button type="button"
+                                class="min-h-[44px] px-3 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap"
+                                :class="aiCenterTab === 'guestcare' ? 'ds-segmented-active' : ''"
+                                @click="navigateToTab('ai_center', { aiCenterTab: 'guestcare' }); loadGuestCareReviews()">
+                                GuestCare
+                            </button>
                         </div>
                         {% endcall %}
                     </div>
+                </div>
+            </div>
+
+            <!-- Phase 5 OS: OS Autopilot tab -->
+            <div x-show="currentTab === 'ai_center' && aiCenterTab === 'os'" x-cloak class="fade-in space-y-4">
+                <div class="flex items-center gap-2">
+                    <span class="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-200 px-2.5 py-1 rounded-full">
+                        <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd"/></svg>
+                        Event bus — нет SQL к Order/ChatLog
+                    </span>
+                    <span x-show="osDashboardLoading" class="text-xs text-slate-400">Загрузка…</span>
+                </div>
+
+                <div x-show="osDashboardLoading && !osDashboardData" class="h-32 rounded-2xl bg-slate-100 animate-pulse"></div>
+
+                <template x-if="osDashboardData">
+                    <div class="space-y-4">
+                        <!-- Today summary -->
+                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                            <div class="ds-card p-4">
+                                <div class="text-[11px] font-bold uppercase text-slate-500">Заказов</div>
+                                <div class="text-2xl font-black text-slate-900 tabular-nums mt-1" x-text="osDashboardData.today?.orders_confirmed ?? 0"></div>
+                                <div class="text-xs text-slate-400 mt-0.5">event bus</div>
+                            </div>
+                            <div class="ds-card p-4">
+                                <div class="text-[11px] font-bold uppercase text-slate-500">Выручка</div>
+                                <div class="text-2xl font-black text-slate-900 tabular-nums mt-1" x-text="fmt.money(osDashboardData.today?.revenue_kzt ?? 0)"></div>
+                                <div class="text-xs text-slate-400 mt-0.5">от оплат</div>
+                            </div>
+                            <div class="ds-card p-4">
+                                <div class="text-[11px] font-bold uppercase text-slate-500">Эскалации</div>
+                                <div class="text-2xl font-black tabular-nums mt-1"
+                                    :class="(osDashboardData.today?.escalations ?? 0) > 3 ? 'text-amber-600' : 'text-slate-900'"
+                                    x-text="osDashboardData.today?.escalations ?? 0"></div>
+                            </div>
+                            <div class="ds-card p-4">
+                                <div class="text-[11px] font-bold uppercase text-slate-500">Оплат</div>
+                                <div class="text-2xl font-black text-emerald-700 tabular-nums mt-1" x-text="osDashboardData.today?.payments_completed ?? 0"></div>
+                            </div>
+                        </div>
+
+                        <!-- Forecasts -->
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div class="ds-card p-4" x-show="osDashboardData.week_forecast">
+                                <div class="text-xs font-semibold text-slate-700 mb-2">Прогноз выручки (до конца недели)</div>
+                                <div class="text-xl font-black text-sky-900 tabular-nums" x-text="fmt.money(osDashboardData.week_forecast?.forecast_revenue ?? 0)"></div>
+                                <div class="text-xs text-slate-500 mt-1">
+                                    Заработано: <span class="tabular-nums" x-text="fmt.money(osDashboardData.week_forecast?.earned_so_far ?? 0)"></span>
+                                    · ещё <span x-text="osDashboardData.week_forecast?.days_remaining ?? 0"></span> дн.
+                                </div>
+                                <div class="text-[10px] mt-1"
+                                    :class="osDashboardData.week_forecast?.confidence === 'low' ? 'text-amber-600' : 'text-sky-700'"
+                                    x-text="({low:'Мало данных',medium:'Средняя точность',high:'Высокая точность'})[osDashboardData.week_forecast?.confidence] ?? ''"></div>
+                            </div>
+                            <div class="ds-card p-4" x-show="osDashboardData.demand_forecast">
+                                <div class="text-xs font-semibold text-slate-700 mb-2">Прогноз заказов (до конца недели)</div>
+                                <div class="text-xl font-black text-indigo-900 tabular-nums" x-text="(osDashboardData.demand_forecast?.forecast_orders ?? 0) + ' заказов'"></div>
+                                <div class="text-xs text-slate-500 mt-1">
+                                    Сейчас: <span x-text="osDashboardData.demand_forecast?.confirmed_so_far ?? 0"></span>
+                                    · ср/день: <span x-text="osDashboardData.demand_forecast?.daily_avg_orders ?? 0"></span>
+                                </div>
+                                <div class="text-[10px] mt-1"
+                                    :class="osDashboardData.demand_forecast?.confidence === 'low' ? 'text-amber-600' : 'text-indigo-700'"
+                                    x-text="({low:'Мало данных',medium:'Средняя точность',high:'Высокая точность'})[osDashboardData.demand_forecast?.confidence] ?? ''"></div>
+                            </div>
+                        </div>
+
+                        <!-- Incidents -->
+                        <template x-if="(osDashboardData.incidents || []).length > 0">
+                            <div class="ds-card p-4">
+                                <div class="text-xs font-semibold text-slate-700 mb-2">Активные инциденты</div>
+                                <div class="space-y-2">
+                                    <template x-for="inc in (osDashboardData.incidents || [])" :key="inc.id">
+                                        <div class="flex items-center gap-2 text-sm min-h-[44px]">
+                                            <span class="text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0"
+                                                :class="inc.severity === 'critical' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'"
+                                                x-text="inc.severity"></span>
+                                            <span class="text-slate-700" x-text="inc.title"></span>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                        </template>
+
+                        <!-- Autopilot Pricing Signal -->
+                        <template x-if="osDashboardData.autopilot_pricing && osDashboardData.autopilot_pricing.tactic !== 'stable'">
+                            <div class="ds-card p-4 border-l-4"
+                                :class="osDashboardData.autopilot_pricing?.price_adj_pct > 0 ? 'border-emerald-400' : (osDashboardData.autopilot_pricing?.price_adj_pct < 0 ? 'border-amber-400' : 'border-sky-400')">
+                                <div class="flex items-center justify-between gap-2 mb-1">
+                                    <div class="text-xs font-semibold text-slate-700">⚡ Autopilot Pricing</div>
+                                    <span class="text-[10px] font-bold px-1.5 py-0.5 rounded"
+                                        :class="osDashboardData.autopilot_pricing?.confidence === 'high' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'"
+                                        x-text="({high:'Высокая точность',medium:'Средняя точность',low:'Мало данных'})[osDashboardData.autopilot_pricing?.confidence] ?? ''"></span>
+                                </div>
+                                <div class="text-sm text-slate-800" x-text="osDashboardData.autopilot_pricing?.suggestion"></div>
+                                <div class="flex items-center gap-3 mt-2 text-xs text-slate-500">
+                                    <span>Выручка: ×<span x-text="osDashboardData.autopilot_pricing?.revenue_ratio"></span></span>
+                                    <span>Заказы: ×<span x-text="osDashboardData.autopilot_pricing?.orders_ratio"></span></span>
+                                    <span x-show="osDashboardData.autopilot_pricing?.price_adj_pct !== 0"
+                                        class="font-bold"
+                                        :class="osDashboardData.autopilot_pricing?.price_adj_pct > 0 ? 'text-emerald-600' : 'text-amber-600'"
+                                        x-text="(osDashboardData.autopilot_pricing?.price_adj_pct > 0 ? '+' : '') + osDashboardData.autopilot_pricing?.price_adj_pct + '%'"></span>
+                                </div>
+                                <button type="button"
+                                    x-show="osDashboardData.autopilot_pricing?.price_adj_pct !== 0"
+                                    class="mt-3 ds-btn ds-btn-primary ds-btn-sm w-full"
+                                    :disabled="applyPricingBulkLoading"
+                                    @click="applyAutopilotPricingBulk()">
+                                    <span x-text="applyPricingBulkLoading ? 'Применяем…' : 'Применить рекомендацию по ценам'"></span>
+                                </button>
+                            </div>
+                        </template>
+
+                        <template x-if="(osDashboardData.stock_alerts || []).length > 0">
+                            <div class="ds-card p-4 border-l-4 border-amber-300">
+                                <div class="text-xs font-semibold text-slate-700 mb-2">Прогноз запасов (прокси)</div>
+                                <template x-for="alert in (osDashboardData.stock_alerts || [])" :key="alert.ingredient">
+                                    <div class="text-sm text-slate-700" x-text="alert.message"></div>
+                                    <div class="text-[10px] text-amber-700 mt-1"
+                                        x-text="'~' + (alert.days_until_runout || '?') + ' дн.'"></div>
+                                </template>
+                            </div>
+                        </template>
+
+                        <!-- Recommendations -->
+                        <template x-if="(osDashboardData.top_recommendations || []).length > 0">
+                            <div class="ds-card p-4">
+                                <div class="text-xs font-semibold text-slate-700 mb-2">Рекомендации (auto-generated ежедневно)</div>
+                                <div class="space-y-1">
+                                    <template x-for="rec in (osDashboardData.top_recommendations || [])" :key="rec.id">
+                                        <div class="flex items-center justify-between gap-3 py-1.5">
+                                            <div class="text-sm text-slate-800" x-text="rec.title"></div>
+                                            <div x-show="rec.impact_kzt" class="text-xs font-bold text-emerald-700 shrink-0"
+                                                x-text="'+' + fmt.money(rec.impact_kzt)"></div>
+                                        </div>
+                                    </template>
+                                </div>
+                                <button type="button" @click="navigateToTab('ai_center', { aiCenterTab: 'insights' })"
+                                    class="mt-2 w-full text-xs text-slate-400 hover:text-slate-600 text-center py-1">
+                                    Все рекомендации →
+                                </button>
+                            </div>
+                        </template>
+
+                        <!-- OS Decision Feed (Лента решений) -->
+                        <div class="ds-card p-4">
+                            <div class="flex items-center justify-between mb-3">
+                                <div class="text-xs font-semibold text-slate-700">Лента решений ОС</div>
+                                <button type="button" @click="loadAuditLog()"
+                                    class="text-[10px] text-slate-400 hover:text-indigo-600 transition">
+                                    Обновить
+                                </button>
+                            </div>
+                            <div x-show="auditLogLoading" class="h-12 rounded-lg bg-slate-100 animate-pulse"></div>
+                            <template x-if="!auditLogLoading && (auditLog || []).length === 0">
+                                <div class="text-xs text-slate-400 py-2 text-center">Решений пока нет</div>
+                            </template>
+                            <div class="space-y-2">
+                                <template x-for="entry in (auditLog || [])" :key="entry.id + '_' + entry.created_at">
+                                    <div class="flex items-start gap-2 min-h-[40px]">
+                                        <!-- Actor icon -->
+                                        <span class="text-base shrink-0 mt-0.5"
+                                            x-text="entry.actor === 'ai' ? '🤖' : entry.actor === 'operator' ? '👤' : entry.actor === 'customer' ? '👥' : '⚙️'"></span>
+                                        <div class="flex-1 min-w-0">
+                                            <div class="text-xs text-slate-800 truncate" x-text="_osActionLabel(entry.action)"></div>
+                                            <div class="text-[10px] text-slate-400 mt-0.5" x-text="fmt.timeAgo(entry.created_at)"></div>
+                                        </div>
+                                        <span class="text-[9px] font-bold px-1 py-0.5 rounded shrink-0 bg-slate-100 text-slate-500"
+                                            x-text="entry.action.split('.')[0]"></span>
+                                    </div>
+                                </template>
+                            </div>
+                            <template x-if="(auditLog || []).length >= 20">
+                                <button type="button" @click="loadAuditLog({ more: true })"
+                                    class="mt-2 w-full text-xs text-slate-400 hover:text-slate-600 text-center py-1">
+                                    Загрузить ещё →
+                                </button>
+                            </template>
+                        </div>
+                    </div>
+                </template>
+            </div>
+
+            <!-- GuestCare External -->
+            <div x-show="currentTab === 'ai_center' && aiCenterTab === 'guestcare'" x-cloak class="fade-in space-y-4">
+                <div class="ds-card p-4">
+                    <div class="text-xs font-semibold text-slate-700 mb-2">Импорт отзыва (2GIS / Google URL)</div>
+                    <div class="flex flex-col sm:flex-row gap-2">
+                        <input type="url" class="ds-input flex-1 min-h-[44px]" placeholder="https://2gis.kz/…"
+                            x-model="guestCareImportUrl" />
+                        <button type="button" class="ds-btn ds-btn-primary ds-btn-md shrink-0"
+                            @click="importGuestCareReview()">Импорт</button>
+                    </div>
+                </div>
+                <div x-show="guestCareLoading" class="h-16 rounded-xl bg-slate-100 animate-pulse"></div>
+                <template x-if="!guestCareLoading && (guestCareReviews || []).length === 0">
+                    <div class="text-sm text-slate-400 text-center py-6">Нет внешних отзывов</div>
+                </template>
+                <div class="space-y-3">
+                    <template x-for="rev in (guestCareReviews || [])" :key="rev.id">
+                        <div class="ds-card p-4">
+                            <div class="flex items-center justify-between gap-2 mb-1">
+                                <span class="text-[10px] font-bold uppercase text-slate-500" x-text="rev.source"></span>
+                                <a :href="rev.url" target="_blank" rel="noopener" class="text-[10px] text-indigo-600">Открыть</a>
+                            </div>
+                            <div class="text-sm text-slate-800" x-text="rev.text"></div>
+                            <button type="button" class="mt-2 ds-btn ds-btn-secondary ds-btn-sm"
+                                @click="draftGuestCareReply(rev.id)">Сгенерировать ответ</button>
+                            <p x-show="rev.reply_draft" class="mt-2 text-xs text-slate-600 whitespace-pre-wrap" x-text="rev.reply_draft"></p>
+                        </div>
+                    </template>
                 </div>
             </div>

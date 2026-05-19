@@ -169,6 +169,11 @@ class Organization(Base):
         nullable=True,
         comment="Ссылка на страницу 2GIS для отзывов (отправляется клиенту после 👍)",
     )
+    meta_json: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON,
+        nullable=True,
+        comment="Расширяемые org-настройки без отдельной таблицы; MVP GuestCare External хранит импорт отзывов",
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_demo: Mapped[bool] = mapped_column(
         Boolean,
@@ -187,6 +192,28 @@ class Organization(Base):
 
     def __repr__(self) -> str:
         return f"<Organization id={self.id} name='{self.name}'>"
+
+
+class Location(Base):
+    """Под-точка внутри филиала (зал, касса, dark kitchen). Phase 1.1 OS."""
+
+    __tablename__ = "locations"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "slug", name="uq_locations_org_slug"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    slug: Mapped[str] = mapped_column(String(80), default="main", server_default="main")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    meta_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    def __repr__(self) -> str:
+        return f"<Location id={self.id} org={self.organization_id} name='{self.name}'>"
 
 
 class StaffRole(StrEnum):
@@ -366,6 +393,13 @@ class Order(Base):
     organization_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("organizations.id"), nullable=True, index=True,
     )
+    location_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("locations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="Под-точка филиала; NULL = не привязано к конкретной location",
+    )
     user_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -488,6 +522,12 @@ class ChatLog(Base):
         Integer, ForeignKey("organizations.id"), nullable=False, index=True,
         comment="Денормализация для фильтров админки",
     )
+    location_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("locations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     user_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -572,6 +612,12 @@ class Booking(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     organization_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("organizations.id"), nullable=True, index=True,
+    )
+    location_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("locations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
     user_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
@@ -1549,9 +1595,41 @@ class DailyOrgStats(Base):
     revenue_kzt: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0, server_default="0")
     escalations: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     operator_takeovers: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    ai_messages_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    dialogs_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(),
     )
 
     def __repr__(self) -> str:
         return f"<DailyOrgStats org={self.organization_id} day={self.day}>"
+
+
+class AuditLog(Base):
+    """Иммутабельный аудит-лог бизнес-событий (Phase 5 OS).
+
+    Пишется audit_consumer при каждом emit_event().
+    Запрещено редактировать/удалять (immutable append-only).
+    """
+
+    __tablename__ = "audit_log"
+    __table_args__ = (
+        Index("ix_audit_log_org_created", "organization_id", "created_at"),
+        Index("ix_audit_log_org_action", "organization_id", "action"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    actor: Mapped[str] = mapped_column(String(50), nullable=False)
+    action: Mapped[str] = mapped_column(String(100), nullable=False)
+    entity_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    entity_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False,
+    )
+
+    def __repr__(self) -> str:
+        return f"<AuditLog id={self.id} org={self.organization_id} action={self.action}>"

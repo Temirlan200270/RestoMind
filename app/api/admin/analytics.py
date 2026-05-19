@@ -38,6 +38,11 @@ from app.services.integration_config import (
     iiko_effective_configured,
     whatsapp_effective_configured,
 )
+from app.services.analytics_consumer import (
+    get_event_stats,
+    get_event_stats_for_range,
+    get_today_event_summary,
+)
 from app.services.owner_dashboard import (
     build_recommendation_target,
     build_week_forecast,
@@ -739,6 +744,19 @@ async def dashboard_stats(
     not_cancelled = Order.status != OrderStatus.CANCELLED
     org_orders = _orders_tenant_clause(org_id)
 
+    # Phase 5 OS: event-first metrics — получаем данные из DailyOrgStats первыми
+    _event_summary = await get_today_event_summary(db, org_id)
+    _event_rows_2d = await get_event_stats(db, org_id, days=2)
+    _event_data_active = (
+        _event_summary.get("orders_confirmed", 0) > 0
+        or _event_summary.get("revenue_kzt", 0) > 0
+    )
+    _yesterday_event = next(
+        (r for r in _event_rows_2d if r["date"] == (now_utc.date() - timedelta(days=1)).isoformat()),
+        None,
+    )
+
+    # Кумулятивные метрики (all-time) — только SQL, не хранится в events
     total_q = await db.execute(
         select(func.count(Order.id), func.coalesce(func.sum(Order.total_price), 0))
         .where(not_cancelled, org_orders)
@@ -747,48 +765,58 @@ async def dashboard_stats(
     total_orders = total_row[0]
     total_revenue = float(total_row[1])
 
-    today_q = await db.execute(
-        select(func.count(Order.id), func.coalesce(func.sum(Order.total_price), 0))
-        .where(
-            not_cancelled,
-            org_orders,
-            Order.created_at >= ts_lo,
-            Order.created_at <= ts_hi,
+    # Сегодняшние метрики — event-first, SQL как fallback
+    if _event_data_active:
+        today_orders = _event_summary["orders_confirmed"]
+        today_revenue = _event_summary["revenue_kzt"]
+    else:
+        today_q = await db.execute(
+            select(func.count(Order.id), func.coalesce(func.sum(Order.total_price), 0))
+            .where(
+                not_cancelled,
+                org_orders,
+                Order.created_at >= ts_lo,
+                Order.created_at <= ts_hi,
+            )
         )
-    )
-    today_row = today_q.one()
-    today_orders = today_row[0]
-    today_revenue = float(today_row[1])
+        today_row = today_q.one()
+        today_orders = today_row[0]
+        today_revenue = float(today_row[1])
 
-    yesterday_q = await db.execute(
-        select(func.count(Order.id), func.coalesce(func.sum(Order.total_price), 0))
-        .where(
-            not_cancelled,
-            org_orders,
-            Order.created_at >= ys_lo,
-            Order.created_at < ts_lo,
+    # Вчерашние метрики — event-first, SQL как fallback
+    if _yesterday_event is not None:
+        yesterday_orders = _yesterday_event["orders_confirmed"]
+        yesterday_revenue = _yesterday_event["revenue_kzt"]
+    else:
+        yesterday_q = await db.execute(
+            select(func.count(Order.id), func.coalesce(func.sum(Order.total_price), 0))
+            .where(
+                not_cancelled,
+                org_orders,
+                Order.created_at >= ys_lo,
+                Order.created_at < ts_lo,
+            )
         )
-    )
-    yesterday_row = yesterday_q.one()
-    yesterday_orders = yesterday_row[0]
-    yesterday_revenue = float(yesterday_row[1])
+        yesterday_row = yesterday_q.one()
+        yesterday_orders = yesterday_row[0]
+        yesterday_revenue = float(yesterday_row[1])
 
     def _pct_change(current: float, previous: float) -> float | None:
         if previous <= 0:
             return None if current <= 0 else 100.0
         return round((current - previous) / previous * 100, 1)
 
-    # 7 дней по UTC: корзины в Python (7× SQL по суткам на SQLite с naive created_at давали нули при живых KPI)
+    # Phase 5 OS: daily_series — event-first для revenue/orders, SQL только для ai_profit
     valid_keys: list[str] = [
         (today_start - timedelta(days=6 - i)).strftime("%Y-%m-%d") for i in range(7)
     ]
     valid_set = set(valid_keys)
-    bucket: dict[str, dict[str, float | int]] = defaultdict(
-        lambda: {"revenue": 0.0, "orders": 0, "ai_profit": 0.0},
-    )
+
+    # Получаем ai_profit из SQL (единственная метрика требующая Order.items_json)
+    ai_profit_bucket: dict[str, float] = defaultdict(float)
     week_floor_sql = _sql_dt_for_filter(today_start - timedelta(days=6))
     week_rows = await db.execute(
-        select(Order.created_at, Order.total_price, Order.items_json)
+        select(Order.created_at, Order.items_json)
         .where(
             not_cancelled,
             org_orders,
@@ -796,24 +824,48 @@ async def dashboard_stats(
             Order.created_at >= week_floor_sql,
         )
     )
-    for created_at, total_price, items_json in week_rows:
+    for created_at, items_json in week_rows:
         dk = _order_day_key_utc(created_at)
         if dk and dk in valid_set:
-            bucket[dk]["revenue"] += float(total_price or 0)
-            bucket[dk]["orders"] += 1
             _off, _acc, rev_ai = upsell_stats_from_items_json(
                 items_json if isinstance(items_json, dict) else None,
             )
-            bucket[dk]["ai_profit"] += float(rev_ai or 0.0)
-    daily_series = [
-        {
+            ai_profit_bucket[dk] += float(rev_ai or 0.0)
+
+    # Event-driven revenue/orders для daily_series
+    event_rows_7d = await get_event_stats(db, org_id, days=7)
+    event_rev_map = {r["date"]: (r["revenue_kzt"], r["orders_confirmed"]) for r in event_rows_7d}
+
+    # SQL fallback для дней без event-данных
+    sql_bucket: dict[str, dict[str, float | int]] = defaultdict(
+        lambda: {"revenue": 0.0, "orders": 0},
+    )
+    if not event_rev_map:
+        for created_at, total_price, items_json in (
+            await db.execute(
+                select(Order.created_at, Order.total_price, Order.items_json)
+                .where(not_cancelled, org_orders, Order.created_at.isnot(None), Order.created_at >= week_floor_sql)
+            )
+        ):
+            dk = _order_day_key_utc(created_at)
+            if dk and dk in valid_set:
+                sql_bucket[dk]["revenue"] += float(total_price or 0)
+                sql_bucket[dk]["orders"] += 1
+
+    daily_series = []
+    for k in valid_keys:
+        if k in event_rev_map:
+            rev, ords = event_rev_map[k]
+        elif k in sql_bucket:
+            rev, ords = sql_bucket[k]["revenue"], sql_bucket[k]["orders"]
+        else:
+            rev, ords = 0.0, 0
+        daily_series.append({
             "date": k,
-            "revenue": float(bucket[k]["revenue"]),
-            "orders": int(bucket[k]["orders"]),
-            "ai_profit": round(float(bucket[k]["ai_profit"]), 2),
-        }
-        for k in valid_keys
-    ]
+            "revenue": float(rev),
+            "orders": int(ords),
+            "ai_profit": round(float(ai_profit_bucket.get(k, 0.0)), 2),
+        })
 
     bookings_result = await db.execute(
         select(func.count(Booking.id)).where(_bookings_tenant_clause(org_id)),
@@ -900,17 +952,21 @@ async def dashboard_stats(
     if today_revenue > 0 and ai_revenue_today > 0:
         ai_revenue_share_pct = round(ai_revenue_today / today_revenue * 100, 1)
 
-    ai_messages_today = int(
-        await db.scalar(
-            select(func.count(ChatLog.id)).where(
-                ChatLog.organization_id == org_id,
-                ChatLog.role == "assistant",
-                ChatLog.created_at >= ts_lo,
-                ChatLog.created_at <= ts_hi,
-            ),
+    # Phase 5 OS: ai_messages_today — event-first (ai_messages_count), SQL как fallback
+    if _event_data_active and _event_summary.get("ai_messages_count", 0) > 0:
+        ai_messages_today = _event_summary["ai_messages_count"]
+    else:
+        ai_messages_today = int(
+            await db.scalar(
+                select(func.count(ChatLog.id)).where(
+                    ChatLog.organization_id == org_id,
+                    ChatLog.role == "assistant",
+                    ChatLog.created_at >= ts_lo,
+                    ChatLog.created_at <= ts_hi,
+                ),
+            )
+            or 0,
         )
-        or 0,
-    )
     # Продуктовая метрика: одно сообщение ассистента экономит ~1.5 минуты ручного набора текста.
     minutes_per_message = 1.5
     ai_time_saved_minutes = round(ai_messages_today * minutes_per_message, 1)
@@ -941,16 +997,20 @@ async def dashboard_stats(
         ).scalar()
         or 0,
     )
-    escalations_today = int(
-        await db.scalar(
-            select(func.count(EscalationEvent.id)).where(
-                _escalation_tenant_clause(org_id),
-                EscalationEvent.created_at >= ts_lo,
-                EscalationEvent.created_at <= ts_hi,
-            ),
+    # Phase 5 OS: escalations_today — event-first, SQL как fallback
+    if _event_data_active:
+        escalations_today = _event_summary["escalations"]
+    else:
+        escalations_today = int(
+            await db.scalar(
+                select(func.count(EscalationEvent.id)).where(
+                    _escalation_tenant_clause(org_id),
+                    EscalationEvent.created_at >= ts_lo,
+                    EscalationEvent.created_at <= ts_hi,
+                ),
+            )
+            or 0,
         )
-        or 0,
-    )
     dialogs_today = int(
         await db.scalar(
             select(func.count(func.distinct(ChatLog.user_id))).where(
@@ -1050,14 +1110,8 @@ async def dashboard_stats(
         ],
     }
 
-    # Phase 2.3 OS: обогащение event-driven агрегатами (параллельно с SQL-источниками)
-    try:
-        from app.services.analytics_consumer import get_today_event_summary
-        event_summary = await get_today_event_summary(db, org_id)
-        result["event_driven_stats"] = event_summary
-    except Exception:
-        logger.exception("event_driven_stats fetch failed for org=%d", org_id)
-        result["event_driven_stats"] = None
+    # Phase 5 OS: event_driven_stats уже вычислен выше (_event_summary)
+    result["event_driven_stats"] = _event_summary
 
     return result
 
@@ -1080,17 +1134,31 @@ async def admin_funnel(
     churn_cutoff = now_utc - timedelta(days=churn_days)
     churn_cutoff_sql = _sql_dt_for_filter(churn_cutoff)
 
-    dialogs_count = int(
-        await db.scalar(
-            select(func.count(func.distinct(ChatLog.user_id))).where(
-                ChatLog.organization_id == org_id,
-                ChatLog.created_at >= cutoff_sql,
-                ChatLog.role == "user",
-                ChatLog.user_id.isnot(None),
-            ),
-        )
-        or 0,
+    # Phase 5 OS: funnel — event-first для dialogs и completed (orders_confirmed)
+    _funnel_event_rows = await get_event_stats_for_range(
+        db, org_id,
+        start_date=(now_utc.date() - timedelta(days=days - 1)),
+        end_date=now_utc.date(),
     )
+    _funnel_dialogs_event = sum(r["dialogs_count"] for r in _funnel_event_rows)
+    _funnel_completed_event = sum(r["orders_confirmed"] for r in _funnel_event_rows)
+    _funnel_event_active = _funnel_completed_event > 0 or _funnel_dialogs_event > 0
+
+    if _funnel_event_active and _funnel_dialogs_event > 0:
+        dialogs_count = _funnel_dialogs_event
+    else:
+        dialogs_count = int(
+            await db.scalar(
+                select(func.count(func.distinct(ChatLog.user_id))).where(
+                    ChatLog.organization_id == org_id,
+                    ChatLog.created_at >= cutoff_sql,
+                    ChatLog.role == "user",
+                    ChatLog.user_id.isnot(None),
+                ),
+            )
+            or 0,
+        )
+
     drafts_count = int(
         await db.scalar(
             select(func.count(func.distinct(Order.user_id))).where(
@@ -1101,17 +1169,21 @@ async def admin_funnel(
         )
         or 0,
     )
-    completed_count = int(
-        await db.scalar(
-            select(func.count(func.distinct(Order.user_id))).where(
-                Order.organization_id == org_id,
-                Order.created_at >= cutoff_sql,
-                Order.user_id.isnot(None),
-                Order.status.in_(_COMPLETED_ORDER_STATUSES),
-            ),
+
+    if _funnel_event_active and _funnel_completed_event > 0:
+        completed_count = _funnel_completed_event
+    else:
+        completed_count = int(
+            await db.scalar(
+                select(func.count(func.distinct(Order.user_id))).where(
+                    Order.organization_id == org_id,
+                    Order.created_at >= cutoff_sql,
+                    Order.user_id.isnot(None),
+                    Order.status.in_(_COMPLETED_ORDER_STATUSES),
+                ),
+            )
+            or 0,
         )
-        or 0,
-    )
 
     recent_buyers = (
         select(func.distinct(Order.user_id))
@@ -1536,110 +1608,142 @@ async def dashboard_activity(
 ) -> dict:
     """
     Activity feed для CEO/Staff: последние события, читаемые "за 1 секунду".
-    Возвращает единый список, отсортированный по времени (desc).
+    Phase 5 OS: event-first через SystemEvent (один запрос), SQL для delivery_failed.
     """
+    from app.db.models import SystemEvent
+
     org_id = admin_org_from_session(request)
     now_utc = datetime.now(tz=timezone.utc)
     since = _sql_dt_for_filter(now_utc - timedelta(days=7))
 
     items: list[dict[str, Any]] = []
 
-    # Последние заказы
-    o_rows = await db.execute(
-        select(Order.id, Order.status, Order.total_price, Order.created_at).where(
-            _orders_tenant_clause(org_id),
-            Order.created_at.isnot(None),
-            Order.created_at >= since,
-        )
-        .order_by(Order.created_at.desc())
-        .limit(limit),
+    # Phase 5 OS: читаем из SystemEvent — один запрос вместо 4
+    _ACTIVITY_EVENT_TYPES = (
+        "order.created", "order.confirmed", "order.cancelled",
+        "booking.created", "booking.confirmed",
+        "ai.escalated", "operator.took_over",
+        "payment.completed", "payment.failed",
+        "system.sla_violated",
     )
-    for oid, st, total, ts in o_rows.all():
-        if ts is None:
-            continue
-        items.append(
-            {
-                "ts": _dt_as_utc(ts).isoformat(),
-                "kind": "order",
-                "title": f"Новый заказ #{oid}",
-                "subtitle": f"{OrderStatus(st).value if hasattr(st, 'value') else st} · {float(total or 0):.0f} ₸",
-                "ref": {"tab": "orders", "order_id": int(oid)},
-            }
+    ev_rows = (await db.execute(
+        select(SystemEvent.event_type, SystemEvent.entity_id, SystemEvent.payload_json, SystemEvent.created_at)
+        .where(
+            SystemEvent.organization_id == org_id,
+            SystemEvent.event_type.in_(_ACTIVITY_EVENT_TYPES),
+            SystemEvent.created_at.isnot(None),
+            SystemEvent.created_at >= since,
         )
+        .order_by(SystemEvent.created_at.desc())
+        .limit(limit * 2)  # берём с запасом для дедупликации
+    )).all()
 
-    # Эскалации (бот попросил помощи)
-    e_rows = await db.execute(
-        select(EscalationEvent.phone, EscalationEvent.created_at, EscalationEvent.reason).where(
-            _escalation_tenant_clause(org_id),
-            EscalationEvent.created_at.isnot(None),
-            EscalationEvent.created_at >= since,
-        )
-        .order_by(EscalationEvent.created_at.desc())
-        .limit(limit),
-    )
-    for phone, ts, reason in e_rows.all():
+    for ev_type, entity_id, payload, ts in ev_rows:
         if ts is None:
             continue
-        items.append(
-            {
-                "ts": _dt_as_utc(ts).isoformat(),
-                "kind": "help",
+        p = payload or {}
+        ts_iso = _dt_as_utc(ts).isoformat()
+        if ev_type in ("order.created", "order.confirmed"):
+            oid = entity_id or p.get("order_id") or "?"
+            total = p.get("total_price") or p.get("amount") or 0
+            items.append({
+                "ts": ts_iso, "kind": "order",
+                "title": f"Заказ #{oid}",
+                "subtitle": f"{ev_type.split('.')[1]} · {float(total or 0):.0f} ₸",
+                "ref": {"tab": "orders", "order_id": int(oid) if str(oid).isdigit() else None},
+                "source": "event_driven",
+            })
+        elif ev_type == "order.cancelled":
+            oid = entity_id or p.get("order_id") or "?"
+            items.append({
+                "ts": ts_iso, "kind": "order_cancelled",
+                "title": f"Заказ #{oid} отменён",
+                "subtitle": str(p.get("reason") or "")[:80],
+                "ref": {"tab": "orders"},
+                "source": "event_driven",
+            })
+        elif ev_type in ("booking.created", "booking.confirmed"):
+            bid = entity_id or p.get("booking_id") or "?"
+            items.append({
+                "ts": ts_iso, "kind": "booking",
+                "title": f"Бронирование #{bid}",
+                "subtitle": ev_type.split(".")[1],
+                "ref": {"tab": "bookings"},
+                "source": "event_driven",
+            })
+        elif ev_type == "ai.escalated":
+            phone = p.get("phone") or str(entity_id or "")
+            reason = str(p.get("reason") or "")[:80]
+            items.append({
+                "ts": ts_iso, "kind": "help",
                 "title": "Нужна помощь клиенту",
-                "subtitle": f"{(phone or '').strip()} · {(reason or '')[:80]}".strip(" ·"),
-                "ref": {"tab": "operator_queue", "phone": (phone or "").strip()},
-            }
-        )
+                "subtitle": f"{phone.strip()} · {reason}".strip(" ·"),
+                "ref": {"tab": "operator_queue", "phone": phone.strip()},
+                "source": "event_driven",
+            })
+        elif ev_type == "operator.took_over":
+            phone = p.get("phone") or str(entity_id or "")
+            items.append({
+                "ts": ts_iso, "kind": "operator",
+                "title": "Оператор подключился",
+                "subtitle": phone.strip(),
+                "ref": {"tab": "chats", "phone": phone.strip()},
+                "source": "event_driven",
+            })
+        elif ev_type == "payment.completed":
+            amount = p.get("amount") or 0
+            items.append({
+                "ts": ts_iso, "kind": "payment",
+                "title": "Оплата получена",
+                "subtitle": f"{float(amount or 0):.0f} ₸",
+                "ref": {"tab": "orders"},
+                "source": "event_driven",
+            })
+        elif ev_type == "payment.failed":
+            items.append({
+                "ts": ts_iso, "kind": "payment_failed",
+                "title": "Ошибка оплаты",
+                "subtitle": str(p.get("error") or "")[:80],
+                "ref": {"tab": "orders"},
+                "source": "event_driven",
+            })
+        elif ev_type == "system.sla_violated":
+            stage = p.get("stage") or str(entity_id or "")
+            p95 = p.get("p95_ms") or 0
+            items.append({
+                "ts": ts_iso, "kind": "sla_violation",
+                "title": f"SLA нарушен: {stage}",
+                "subtitle": f"p95={p95}ms",
+                "ref": {"tab": "ai_center", "aiCenterTab": "load"},
+                "source": "event_driven",
+            })
 
-    # Не доставленные сообщения (failed)
+    # Delivery failed — только из ChatLog (нет в event bus)
     f_rows = await db.execute(
-        select(ChatLog.user_id, ChatLog.id, ChatLog.created_at).where(
+        select(ChatLog.id, ChatLog.created_at).where(
             ChatLog.organization_id == org_id,
             ChatLog.delivery_status == "failed",
             ChatLog.created_at.isnot(None),
             ChatLog.created_at >= since,
         )
         .order_by(ChatLog.created_at.desc())
-        .limit(limit),
+        .limit(10),
     )
-    for _uid, cid, ts in f_rows.all():
+    for cid, ts in f_rows.all():
         if ts is None:
             continue
-        items.append(
-            {
-                "ts": _dt_as_utc(ts).isoformat(),
-                "kind": "delivery_failed",
-                "title": "Сообщение не доставлено",
-                "subtitle": f"ID сообщения #{int(cid)}",
-                "ref": {"tab": "chats"},
-            }
-        )
-
-    # Бронирования
-    b_rows = await db.execute(
-        select(Booking.id, Booking.created_at).where(
-            _bookings_tenant_clause(org_id),
-            Booking.created_at.isnot(None),
-            Booking.created_at >= since,
-        )
-        .order_by(Booking.created_at.desc())
-        .limit(limit),
-    )
-    for bid, ts in b_rows.all():
-        if ts is None:
-            continue
-        items.append(
-            {
-                "ts": _dt_as_utc(ts).isoformat(),
-                "kind": "booking",
-                "title": f"Новое бронирование #{int(bid)}",
-                "subtitle": "",
-                "ref": {"tab": "bookings"},
-            }
-        )
+        items.append({
+            "ts": _dt_as_utc(ts).isoformat(),
+            "kind": "delivery_failed",
+            "title": "Сообщение не доставлено",
+            "subtitle": f"ID #{int(cid)}",
+            "ref": {"tab": "chats"},
+            "source": "sql",
+        })
 
     items.sort(key=lambda x: x.get("ts") or "", reverse=True)
     items = items[: int(limit)]
-    return {"items": items}
+    return {"items": items, "source": "event_driven"}
 
 
 # ─── Аналитика ──────────────────────────────────────────
@@ -1729,22 +1833,37 @@ async def analytics(
 
     not_cancelled = Order.status != OrderStatus.CANCELLED
 
-    # Агрегаты текущего периода (SQL)
-    cur_q = await db.execute(
-        select(
-            func.count(Order.id),
-            func.coalesce(func.sum(Order.total_price), 0),
-        )
-        .where(
-            not_cancelled,
-            org_orders,
-            Order.created_at >= start_sql,
-            Order.created_at <= end_sql,
-        )
+    # Phase 5 OS: event-first для revenue/orders по периоду
+    _analytics_event_rows = await get_event_stats_for_range(
+        db, org_id,
+        start_date=_dt_as_utc(start).date(),
+        end_date=_dt_as_utc(end).date(),
     )
-    cur_row = cur_q.one()
-    current_count = cur_row[0]
-    current_revenue = float(cur_row[1])
+    _analytics_event_map: dict[str, dict] = {r["date"]: r for r in _analytics_event_rows}
+    _analytics_event_orders = sum(r["orders_confirmed"] for r in _analytics_event_rows)
+    _analytics_event_revenue = sum(r["revenue_kzt"] for r in _analytics_event_rows)
+    _analytics_event_active = _analytics_event_orders > 0 or _analytics_event_revenue > 0
+
+    if _analytics_event_active:
+        current_count = _analytics_event_orders
+        current_revenue = _analytics_event_revenue
+    else:
+        # SQL fallback если event-данных нет (новые org без backfill)
+        cur_q = await db.execute(
+            select(
+                func.count(Order.id),
+                func.coalesce(func.sum(Order.total_price), 0),
+            )
+            .where(
+                not_cancelled,
+                org_orders,
+                Order.created_at >= start_sql,
+                Order.created_at <= end_sql,
+            )
+        )
+        cur_row = cur_q.one()
+        current_count = cur_row[0]
+        current_revenue = float(cur_row[1])
 
     # Агрегаты предыдущего периода (SQL)
     prev_q = await db.execute(
@@ -1848,12 +1967,20 @@ async def analytics(
     walk = start_d
     while walk <= end_d:
         key = walk.isoformat()
-        entry = daily.get(key, {"revenue": 0.0, "orders": 0})
+        # Phase 5 OS: event-first для revenue/orders; SQL как fallback
+        if key in _analytics_event_map:
+            ev = _analytics_event_map[key]
+            rev = ev["revenue_kzt"]
+            ords = ev["orders_confirmed"]
+        else:
+            sql_entry = daily.get(key, {"revenue": 0.0, "orders": 0})
+            rev = sql_entry["revenue"]
+            ords = sql_entry["orders"]
         daily_data.append(
             {
                 "date": key,
-                "revenue": entry["revenue"],
-                "orders": entry["orders"],
+                "revenue": float(rev),
+                "orders": int(ords),
                 "ai_profit": round(float(daily_ai_profit.get(key, 0.0)), 2),
             },
         )

@@ -433,6 +433,11 @@ async def _apply_sqlite_startup_schema_patches() -> None:
         "ALTER TABLE daily_org_stats ADD COLUMN payments_completed INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE daily_org_stats ADD COLUMN payments_failed INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE daily_org_stats ADD COLUMN revenue_kzt NUMERIC(14,2) NOT NULL DEFAULT 0",
+        "CREATE TABLE IF NOT EXISTS locations (id INTEGER PRIMARY KEY AUTOINCREMENT, organization_id INTEGER NOT NULL, name VARCHAR(120) NOT NULL, slug VARCHAR(80) NOT NULL DEFAULT 'main', is_active INTEGER NOT NULL DEFAULT 1, meta_json TEXT, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(organization_id) REFERENCES organizations(id) ON DELETE CASCADE, UNIQUE(organization_id, slug))",
+        "ALTER TABLE orders ADD COLUMN location_id INTEGER",
+        "ALTER TABLE chat_logs ADD COLUMN location_id INTEGER",
+        "ALTER TABLE bookings ADD COLUMN location_id INTEGER",
+        "ALTER TABLE organizations ADD COLUMN meta_json TEXT",
     ):
         try:
             async with async_engine.begin() as conn:

@@ -211,9 +211,9 @@ class DecisionEngine:
         proposal: "AIBrainResponse",
         org: "Organization | None",
     ) -> PolicyViolation | None:
-        """Заказ блокируется пока ресторан на экстренном закрытии."""
-        if proposal.intent != "order":
-            return None  # FAQ/book/escalate разрешены
+        """Заказ и бронь блокируются пока ресторан на экстренном закрытии."""
+        if proposal.intent not in ("order", "book"):
+            return None  # FAQ/escalate разрешены
         if org is None:
             return None
         fc_until = getattr(org, "force_closed_until", None)

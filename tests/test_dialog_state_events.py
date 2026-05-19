@@ -33,7 +33,7 @@ async def test_state_change_writes_durable_system_event(db_session) -> None:
     assert refreshed.current_state == "human_mode"
 
     event = await db_session.scalar(
-        select(SystemEvent).where(SystemEvent.event_type == "conversation_state_changed"),
+        select(SystemEvent).where(SystemEvent.event_type == "conversation.state_changed"),
     )
     assert event is not None
     assert event.source == "admin.chats"
@@ -66,6 +66,6 @@ async def test_same_state_update_does_not_emit_transition_event(db_session) -> N
     await db_session.flush()
 
     count = await db_session.scalar(
-        select(SystemEvent.id).where(SystemEvent.event_type == "conversation_state_changed"),
+        select(SystemEvent.id).where(SystemEvent.event_type == "conversation.state_changed"),
     )
     assert count is None

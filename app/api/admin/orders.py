@@ -29,13 +29,17 @@ from app.services.payment_autoprint_iiko import run_auto_send_to_iiko_after_paym
 from app.services.payment_notify import run_payment_received_customer_notify
 from app.services.intelligence_analytics import order_meta_from_items_json
 from app.services.tenant_scope import (
+    allowed_location_ids_for_staff,
     failed_tasks_tenant_clause as _failed_tasks_tenant_clause,
+    orders_location_clause as _orders_location_clause,
     orders_tenant_clause as _orders_tenant_clause,
 )
 from app.schemas.ai_schemas import AIBrainResponse, BookingDetails, OrderItem, PaymentSplit
 from app.api.webhooks import _normalize_phone_e164
 from .deps import (
     _order_in_org,
+    _session_is_superadmin,
+    _session_staff_user,
     _pick_seed_menu_item,
     admin_actor_key,
     admin_org_from_session,
@@ -199,11 +203,16 @@ async def _clear_redis_pending_if_matches(
 
 _SYSTEM_EVENT_LABELS: dict[str, str] = {
     "order_confirmed": "Заказ подтверждён",
+    "order.confirmed": "Заказ подтверждён",
     "order_cancelled": "Заказ отменён",
+    "order.cancelled": "Заказ отменён",
     "order_sent_to_iiko": "Отправлен в iiko",
     "booking_created": "Бронь создана",
+    "booking.created": "Бронь создана",
     "booking_cancelled": "Бронь отменена",
+    "booking.cancelled": "Бронь отменена",
     "booking_confirmed": "Бронь подтверждена",
+    "booking.confirmed": "Бронь подтверждена",
 }
 
 
@@ -334,13 +343,21 @@ async def list_orders(
     from datetime import timedelta
 
     org_id = admin_org_from_session(request)
+    staff = await _session_staff_user(request, db)
+    is_super = await _session_is_superadmin(request, db)
+    allowed_location_ids = await allowed_location_ids_for_staff(
+        db,
+        staff=staff,
+        org_id=org_id,
+        is_superadmin=is_super,
+    )
     base_query = (
         select(Order, User.phone, User.name)
         .join(User, Order.user_id == User.id)
         .options(joinedload(Order.booking))
         .where(
             User.organization_id == org_id,
-            _orders_tenant_clause(org_id),
+            _orders_location_clause(org_id, allowed_location_ids),
         )
     )
     if status:
@@ -515,7 +532,7 @@ async def admin_order_timeline(
 ) -> dict:
     """Хронология заказа: создание, оплаты, чат, ошибка iiko, текущий статус (без полной истории смен статусов в БД)."""
     org_id = admin_org_from_session(request)
-    order = await _order_in_org(db, order_id, org_id)
+    order = await _order_in_org(db, order_id, org_id, request=request)
 
     raw_events: list[tuple[datetime | None, dict[str, Any]]] = []
 
@@ -686,7 +703,7 @@ async def patch_order_payment_meta(
     if body.prepayment_status is None and body.payment_link_url is None:
         raise HTTPException(status_code=400, detail="Укажите prepayment_status и/или payment_link_url")
 
-    order = await _order_in_org(db, order_id, admin_org_from_session(request))
+    order = await _order_in_org(db, order_id, admin_org_from_session(request), request=request)
 
     old_status = (order.prepayment_status or "").strip().lower()
     notify_paid = False
@@ -754,7 +771,7 @@ async def patch_order_status(
     from .schemas import TextRequest
 
     org_id = admin_org_from_session(request)
-    order = await _order_in_org(db, order_id, org_id)
+    order = await _order_in_org(db, order_id, org_id, request=request)
     if body.expected_version is not None and int(order.row_version or 0) != int(body.expected_version):
         raise HTTPException(status_code=409, detail="Заказ изменился. Обновите список.")
     phone = await db.scalar(select(User.phone).where(User.id == order.user_id))
@@ -839,7 +856,7 @@ async def patch_order_status(
         )
 
         async with async_session_factory() as db2:
-            locked = await _order_in_org(db2, order.id, org_id)
+            locked = await _order_in_org(db2, order.id, org_id, request=request)
             if sent_to_iiko:
                 locked.status = OrderStatus.SENT_TO_IIKO.value
                 locked.iiko_last_error = None
@@ -873,6 +890,19 @@ async def patch_order_status(
             else:
                 locked.status = OrderStatus.CONFIRMED.value
                 locked.iiko_last_error = iiko_err or "iiko: неизвестная ошибка"
+                try:
+                    from app.services.integration_events import emit_integration_iiko_failed
+
+                    await emit_integration_iiko_failed(
+                        db2,
+                        org_id=int(locked.organization_id or org_id),
+                        order_id=int(locked.id),
+                        error=locked.iiko_last_error or "",
+                        phone=phone_s or None,
+                        location_id=getattr(locked, "location_id", None),
+                    )
+                except Exception:
+                    logger.exception("emit iiko failed event order=%s", locked.id)
             locked.row_version = int(locked.row_version or 0) + 1
             await db2.commit()
             items_json = locked.items_json if isinstance(locked.items_json, dict) else None
@@ -969,7 +999,7 @@ async def rebuild_order_draft(
 
     Доступно для **draft** и **confirmed** (правка до отправки в iiko). После **sent_to_iiko** — нельзя.
     """
-    order = await _order_in_org(db, order_id, admin_org_from_session(request))
+    order = await _order_in_org(db, order_id, admin_org_from_session(request), request=request)
     st = (order.status or "").lower()
     if st not in (OrderStatus.DRAFT.value, OrderStatus.CONFIRMED.value):
         raise HTTPException(
@@ -1065,7 +1095,7 @@ async def patch_order_payment_split(
     """
     Ручная правка способа оплаты в order_meta после смены суммы (состав, доставка и т.п.).
     """
-    order = await _order_in_org(db, order_id, admin_org_from_session(request))
+    order = await _order_in_org(db, order_id, admin_org_from_session(request), request=request)
     st = (order.status or "").lower()
     if st not in (OrderStatus.DRAFT.value, OrderStatus.CONFIRMED.value):
         raise HTTPException(

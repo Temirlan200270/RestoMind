@@ -102,5 +102,10 @@ async def test_emit_event_defaults_location_id_to_org(db_session):
 
 
 def test_event_revenue_history_usable_threshold():
-    assert event_revenue_history_usable({"2026-05-01": 0, "2026-05-02": 100, "2026-05-03": 50})
+    assert event_revenue_history_usable({
+        "2026-05-01": 0,
+        "2026-05-02": 100,
+        "2026-05-03": 50,
+        "2026-05-04": 10,
+    })
     assert not event_revenue_history_usable({"2026-05-01": 0, "2026-05-02": 0})

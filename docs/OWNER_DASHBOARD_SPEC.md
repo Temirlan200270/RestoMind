@@ -1,5 +1,9 @@
 # Owner Dashboard — Техническое задание для реализации
 
+> **[FULFILLED — 2026-05-19]** Все требования этого ТЗ реализованы в рамках Sprint A (Owner Dashboard) и Phase 5 (OS Behavior). Актуальное состояние: [`docs/OS_TRANSITION_PLAN.md`](OS_TRANSITION_PLAN.md), трекер задач: [`docs/ROADMAP.md`](ROADMAP.md). Этот документ сохранён как исторический артефакт — не редактировать.
+
+---
+
 ## Контекст
 
 RestoMind — мультитенантный FastAPI-бэкенд + Alpine.js/Jinja2 фронт.

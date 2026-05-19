@@ -1,0 +1,18 @@
+{
+  "name": "RestoMind Admin",
+  "short_name": "RestoMind",
+  "description": "Панель управления RestoMind OS",
+  "start_url": "/admin",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#4f46e5",
+  "lang": "ru",
+  "icons": [
+    {
+      "src": "/static/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

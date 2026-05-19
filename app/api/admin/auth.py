@@ -67,6 +67,26 @@ async def _resolve_network_info(
         return False, []
 
 
+async def _resolve_is_network(
+    db: AsyncSession,
+    _staff: StaffUser | None,
+    org_id: int,
+) -> bool:
+    """Совместимость с тестами Sprint G: только флаг сети для org."""
+    is_network, _ = await _resolve_network_info(db, int(org_id))
+    return is_network
+
+
+async def _resolve_network_orgs(
+    db: AsyncSession,
+    _staff: StaffUser | None,
+    org_id: int,
+) -> list[dict[str, int | str]]:
+    """Совместимость с тестами Sprint G: список филиалов сети."""
+    _, orgs = await _resolve_network_info(db, int(org_id))
+    return orgs
+
+
 class LoginBody(BaseModel):
     """Данные формы входа: email staff или legacy username + пароль."""
 

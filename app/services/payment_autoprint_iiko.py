@@ -165,6 +165,19 @@ async def run_auto_send_to_iiko_after_payment(order_id: int) -> None:
         else:
             locked.status = OrderStatus.CONFIRMED.value
             locked.iiko_last_error = iiko_err or "iiko: неизвестная ошибка"
+            try:
+                from app.services.integration_events import emit_integration_iiko_failed
+
+                await emit_integration_iiko_failed(
+                    db2,
+                    org_id=int(locked.organization_id or org_id),
+                    order_id=int(locked.id),
+                    error=locked.iiko_last_error or "",
+                    phone=phone_s or None,
+                    location_id=getattr(locked, "location_id", None),
+                )
+            except Exception:
+                logger.exception("emit iiko failed event order=%s", locked.id)
         locked.row_version = int(locked.row_version or 0) + 1
         await db2.commit()
         phone_out = (

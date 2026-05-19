@@ -11,7 +11,7 @@ from typing import Any
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import FailedTask, Order, Organization, StaffRole, StaffUser, Tenant, User
+from app.db.models import FailedTask, Location, Order, Organization, StaffRole, StaffUser, Tenant, User
 
 
 def phones_subquery_for_org(org_id: int):
@@ -266,3 +266,117 @@ async def organization_id_allowed_for_admin_session(
     )
     target = int(target_organization_id)
     return any(int(x["id"]) == target for x in allowed)
+
+
+# ─── Phase 1.1: Location resource scope ─────────────────────────────────────
+
+
+def staff_assigned_location_ids(staff: StaffUser) -> list[int] | None:
+    """Филиалы/точки для operator/manager из meta_json. None — не фильтровать."""
+    meta = getattr(staff, "meta_json", None)
+    if not isinstance(meta, dict):
+        return None
+    raw = meta.get("assigned_location_ids")
+    if raw is None:
+        return None
+    if not isinstance(raw, list):
+        return None
+    out: list[int] = []
+    for x in raw:
+        try:
+            lid = int(x)
+        except (TypeError, ValueError):
+            continue
+        if lid > 0:
+            out.append(lid)
+    return out
+
+
+async def list_locations_for_org(db: AsyncSession, org_id: int) -> list[Location]:
+    res = await db.execute(
+        select(Location)
+        .where(
+            Location.organization_id == int(org_id),
+            Location.is_active.is_(True),
+        )
+        .order_by(Location.id.asc()),
+    )
+    return list(res.scalars().all())
+
+
+async def ensure_default_location(db: AsyncSession, org_id: int) -> Location:
+    """Создаёт точку «Основная» если у филиала ещё нет locations."""
+    existing = await list_locations_for_org(db, org_id)
+    if existing:
+        return existing[0]
+    loc = Location(
+        organization_id=int(org_id),
+        name="Основная",
+        slug="main",
+        is_active=True,
+    )
+    db.add(loc)
+    await db.flush()
+    return loc
+
+
+async def allowed_location_ids_for_staff(
+    db: AsyncSession,
+    *,
+    staff: StaffUser | None,
+    org_id: int,
+    is_superadmin: bool,
+) -> set[int] | None:
+    """None = все точки org; пустой set = доступ запрещён."""
+    if is_superadmin or staff is None:
+        return None
+    role = staff_role_normalized(staff)
+    if role == StaffRole.ADMIN.value:
+        return None
+    locs = await list_locations_for_org(db, org_id)
+    all_ids = {int(x.id) for x in locs}
+    if not all_ids:
+        default = await ensure_default_location(db, org_id)
+        all_ids = {int(default.id)}
+    assigned = staff_assigned_location_ids(staff)
+    if role == StaffRole.OPERATOR.value:
+        if assigned is not None:
+            return {x for x in assigned if x in all_ids}
+        return all_ids if len(all_ids) <= 1 else set()
+    if role == StaffRole.MANAGER.value:
+        if assigned is not None:
+            return {x for x in assigned if x in all_ids}
+        return all_ids
+    return None
+
+
+async def location_id_allowed_for_staff(
+    db: AsyncSession,
+    *,
+    staff: StaffUser | None,
+    org_id: int,
+    location_id: int | None,
+    is_superadmin: bool,
+) -> bool:
+    """Проверка доступа к ресурсу с location_id (NULL = legacy, разрешено всем staff org)."""
+    if location_id is None:
+        return True
+    allowed = await allowed_location_ids_for_staff(
+        db, staff=staff, org_id=org_id, is_superadmin=is_superadmin,
+    )
+    if allowed is None:
+        return True
+    return int(location_id) in allowed
+
+
+def orders_location_clause(org_id: int, allowed_location_ids: set[int] | None):
+    """Доп. фильтр заказов по location_id для operator/manager."""
+    base = orders_tenant_clause(org_id)
+    if allowed_location_ids is None:
+        return base
+    if not allowed_location_ids:
+        return and_(base, Order.id == -1)
+    return and_(
+        base,
+        or_(Order.location_id.is_(None), Order.location_id.in_(list(allowed_location_ids))),
+    )

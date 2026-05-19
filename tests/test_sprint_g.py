@@ -348,6 +348,7 @@ class TestSnapshotG3:
             mock_session = MagicMock()
             mock_session.add = lambda x: captured_snap.update({"snap": x})
             mock_session.commit = AsyncMock()
+            mock_session.scalar = AsyncMock(return_value=None)
             mock_session.execute = AsyncMock(return_value=MagicMock(mappings=lambda: MagicMock(all=lambda: [])))
             mock_cm.__aenter__ = AsyncMock(return_value=mock_session)
             mock_cm.__aexit__ = AsyncMock(return_value=False)
@@ -363,8 +364,10 @@ class TestSnapshotG3:
         bs = snap.business_state
         assert "menu_prices_snapshot" in bs
         assert len(bs["menu_prices_snapshot"]) == 1
-        assert bs["menu_prices_snapshot"][0]["name"] == "Плов"
+        assert bs["menu_prices_snapshot"][0]["iiko_id"] == "uuid-plov"
         assert bs["menu_prices_snapshot"][0]["price"] == 2790.0
+        assert bs["menu_prices_snapshot"][0]["is_available"] is True
+        assert "name" not in bs["menu_prices_snapshot"][0]
         assert bs["menu_context_text"] == "Меню: Плов 2790₸"
 
     @pytest.mark.asyncio
@@ -400,6 +403,7 @@ class TestSnapshotG3:
             mock_session = MagicMock()
             mock_session.add = lambda x: captured_snap.update({"snap": x})
             mock_session.commit = AsyncMock()
+            mock_session.scalar = AsyncMock(return_value=None)
             mock_session.execute = AsyncMock(return_value=MagicMock(mappings=lambda: MagicMock(all=lambda: [])))
             mock_cm.__aenter__ = AsyncMock(return_value=mock_session)
             mock_cm.__aexit__ = AsyncMock(return_value=False)
@@ -430,12 +434,13 @@ class TestSnapshotG3:
             mock_session = MagicMock()
             mock_session.add = lambda x: captured.update({"snap": x})
             mock_session.commit = AsyncMock()
+            mock_session.scalar = AsyncMock(return_value=None)
             mock_session.execute = AsyncMock(return_value=MagicMock(mappings=lambda: MagicMock(all=lambda: [])))
             mock_cm.__aenter__ = AsyncMock(return_value=mock_session)
             mock_cm.__aexit__ = AsyncMock(return_value=False)
             mock_factory.return_value = mock_cm
 
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 save_ai_context_snapshot("+7700", 1, ctx)
             )
 

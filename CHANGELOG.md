@@ -6,6 +6,45 @@
 
 ## [Unreleased] — 2026-03-20
 
+### Добавлено (2026-05-19) — Ultimate Platform 2026 (Sprint A/B/C)
+
+- **Phase 1.1 Location:** модель `Location`, `location_id` на Order/ChatLog/Booking, миграция `20260520_locations_phase11`, RBAC в `tenant_scope` + `deps.py`, тесты `tests/test_location_scope.py`.
+- **Full replay:** `chat_history_slice` в `save_ai_context_snapshot`, `replay_ai_decision` с историей диалога.
+- **Audit tail:** `integration.iiko.failed`, `integration.whatsapp.failed`, `ai.dialog.started` (`dialog_events.py`), backfill `dialogs_count`, WS `os.audit`.
+- **OS UI:** лента решений, `dashLiveFeed`, WS handlers для business events, bulk apply pricing, GuestCare External (import + reply draft), PWA `manifest.webmanifest` + `sw.js`.
+- **Autopilot B:** `POST /apply-pricing/bulk`, Self-Healing 2.0 WA nudges, `stock_alerts` на `/os-dashboard`.
+- **Sprint C docs:** [`docs/VOICE_AI_SPIKE.md`](docs/VOICE_AI_SPIKE.md), [`docs/SUPPLYMIND_STAFFMIND.md`](docs/SUPPLYMIND_STAFFMIND.md).
+
+### Добавлено (2026-05-19) — Phase 5 OS: Sprint P5-Complete (~98% Full OS Behavior)
+
+- **Audit consumer полный охват**: все бизнес-события (кроме высокочастотных `ai.response.generated`, `conversation.state_changed`) логируются в `audit_log`. `get_audit_log()` объединяет `AuditLog` + `SystemEvent` (для legacy событий без emit_event) в единый ответ с полем `source`.
+- **Auto-price changes**: `generate_autopilot_pricing_recommendation()` в [`recommendations.py`](app/services/recommendations.py) — создаётся автоматически в UTC 04:00 при tactic≠stable. `POST /api/admin/intelligence/apply-pricing/{rec_id}` — применяет изменение цен ко всем активным позициям меню (is_available=True, price>0), эмитирует `system.pricing_adjusted` с snapshot первых 5 позиций.
+
+### Добавлено (2026-05-19) — Phase 5 OS: Sprint P5-Final (~92% Full OS Behavior)
+
+- **Audit Consumer** [`app/services/audit_consumer.py`](app/services/audit_consumer.py): иммутабельный лог всех бизнес-событий в `audit_log` (новая таблица, миграция [`20260519_audit_log.py`](alembic/versions/20260519_audit_log.py)). Подключён в `emit_event()` после `analytics_consumer`. `GET /api/admin/intelligence/audit-log` (фильтры: action, actor, limit).
+- **Self-healing actions** [`app/services/healing_actions.py`](app/services/healing_actions.py): `run_healing_actions(db, org_id)` — 4 детектора: escalation spike (≥5/день), payment failed spike (≥3/день), cancellation surge (≥25%/7д) + auto-trigger recommendations, AI message drop (−70% от предыдущей недели). Вызывается из `ai_incidents_hourly_tick` в [`worker.py`](app/worker.py).
+- **Autopilot pricing** [`owner_dashboard.py`](app/services/owner_dashboard.py): `build_autopilot_pricing(stats_rows)` — 5 тактик (demand_up/down, upsell_needed, avg_check_up, stable) с конкретным `price_adj_pct`. Добавлен в `/os-dashboard` как `autopilot_pricing`.
+- **`/activity` event-first**: [`analytics.py`](app/api/admin/analytics.py) — один запрос к `SystemEvent` вместо 4 запросов к Order/ChatLog/EscalationEvent/Booking. Delivery failed остался в ChatLog.
+- **Legacy `emit_system_event` мигрированы**: [`dialog_mgr.py`](app/services/dialog_mgr.py) (`conversation.state_changed`) и [`pipeline_latency.py`](app/services/pipeline_latency.py) (`system.sla_violated`) переведены на `emit_event(BusinessEvent(...))`.
+
+### Добавлено (2026-05-19) — Phase 5 OS: Sprint P5-Complete (~85-90% Full OS Behavior)
+
+- **Predictive analytics (P4 ✅):** три алгоритма прогнозирования в [`owner_dashboard.py`](app/services/owner_dashboard.py):
+  - `build_demand_forecast` — объём заказов до конца недели (linear avg)
+  - `build_cancellation_forecast` — риск отмен (low/medium/high) из 28-дн. истории DailyOrgStats
+  - `build_overload_risk` — риск перегрузки: текущий темп заказов vs 4-нед. исторический avg по дням недели
+  Все три поля добавлены в ответ `GET /api/admin/intelligence/os-dashboard`.
+- **Event tracking расширен:** новое событие `ai.response.generated` эмитируется в [`webhooks.py`](app/api/webhooks.py) после каждого AI-ответа → `DailyOrgStats.ai_messages_count` (миграция [`20260519_daily_stats_ai.py`](alembic/versions/20260519_daily_stats_ai.py)). Добавлен тип `ai.dialog.started` для `dialogs_count`.
+- **`/stats` event-first (Phase 5 → ~90% event coverage):** [`analytics.py`](app/api/admin/analytics.py) теперь использует `DailyOrgStats` как основной источник для `today_orders`, `today_revenue`, `yesterday_orders`, `yesterday_revenue`, `escalations_today`, `ai_messages_today`, `daily_series` (revenue/orders). SQL остаётся только для: cumulative totals, upsell details (items_json), bot_orders, dialogs_today, iiko_errors.
+- **DailyOrgStats: 2 новые колонки** `ai_messages_count`, `dialogs_count` (миграция `20260519_daily_stats_ai`). [`analytics_consumer.py`](app/services/analytics_consumer.py): `ai.response.generated` → `ai_messages_count`, `ai.dialog.started` → `dialogs_count`. + новая функция `get_event_stats_for_range(start_date, end_date)` для произвольного диапазона.
+- **Backfill** [`app/services/analytics_backfill.py`](app/services/analytics_backfill.py): заполняет `daily_org_stats` за N дней из Order/ChatLog/EscalationEvent. `GREATEST(existing, backfill)` — живые данные не перетираются. `POST /api/admin/intelligence/backfill-stats`.
+- **websocket_consumer**: `emit_event()` → `asyncio.create_task(publish_event(...))` — все бизнес-события попадают в Pub/Sub (real-time обновление admin UI без polling).
+- **`/analytics` event-first**: revenue/orders из `DailyOrgStats` через `get_event_stats_for_range`. SQL остаётся для ai_profit (items_json), top_items, heatmap.
+- **`/funnel` event-first**: `dialogs_count` и `orders_confirmed` из DailyOrgStats при наличии данных.
+- **`network/stats` event-first**: `get_today_event_summary` для каждого филиала сети; SQL только для all-time cumulative total.
+- **Event-driven recommendations** (новые типы): `cancellation_surge`, `revenue_dip`, `low_conversion` в [`recommendations.py`](app/services/recommendations.py) — читают только DailyOrgStats. Старые типы (product_boost, geo) остаются Order-based.
+
 ### Добавлено (2026-05-19) — Фундамент к пилоту Фазы 5
 
 - **Tenant / RBAC — Manager + `assigned_org_ids`:** роль `manager` в [`StaffRole`](app/db/models.py); колонка `staff_users.meta_json` (миграция [`20260519_staff_meta_json.py`](alembic/versions/20260519_staff_meta_json.py)). [`tenant_scope.py`](app/services/tenant_scope.py) — `staff_assigned_org_ids`, фильтрация `available_organizations_for_admin_session` для manager/operator. `POST /staff` принимает `assigned_org_ids` для manager.

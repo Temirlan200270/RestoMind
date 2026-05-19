@@ -109,7 +109,7 @@ async def test_confirm_order_confirms_linked_booking(db_with_menu) -> None:
     events = (
         await db_with_menu.execute(
             select(SystemEvent).where(
-                SystemEvent.event_type.in_(("order_confirmed", "booking_confirmed")),
+                SystemEvent.event_type.in_(("order.confirmed", "booking.confirmed")),
             ).order_by(SystemEvent.id.asc()),
         )
     ).scalars().all()
