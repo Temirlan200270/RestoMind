@@ -36,9 +36,12 @@
                             <span x-show="taskQueueHealthChecked && !taskQueueHealth" x-cloak class="ds-badge ds-badge-neutral text-[11px]">недоступно</span>
                             <template x-if="taskQueueHealth">
                                 <span class="flex flex-wrap items-center gap-1.5">
-                                    <span class="ds-badge text-[11px]" :class="taskQueueStatusClass(taskQueueHealth.redis)" x-text="'Redis: ' + (taskQueueHealth.redis || '—')"></span>
-                                    <span class="ds-badge text-[11px]" :class="taskQueueStatusClass(taskQueueHealth.arq)" x-text="'ARQ: ' + (taskQueueHealth.arq || '—')"></span>
-                                    <span class="ds-badge text-[11px]" :class="taskQueueStatusClass(taskQueueHealth.worker)" x-text="'Worker: ' + (taskQueueHealth.worker || '—')"></span>
+                                    <span class="ds-badge text-[11px]" :class="taskQueueStatusClass(taskQueueHealth.redis)"
+                                        x-text="'Хранилище: ' + ({ok:'ок',degraded:'проблема',down:'недоступно'}[taskQueueHealth.redis] || taskQueueHealth.redis || '—')"></span>
+                                    <span class="ds-badge text-[11px]" :class="taskQueueStatusClass(taskQueueHealth.arq)"
+                                        x-text="'Очередь: ' + ({ok:'ок',degraded:'проблема',down:'отключена'}[taskQueueHealth.arq] || taskQueueHealth.arq || '—')"></span>
+                                    <span class="ds-badge text-[11px]" :class="taskQueueStatusClass(taskQueueHealth.worker)"
+                                        x-text="'Воркер: ' + ({ok:'работает',degraded:'проблема',down:'недоступен',unknown:'неизвестно'}[taskQueueHealth.worker] || taskQueueHealth.worker || '—')"></span>
                                 </span>
                             </template>
                         </div>
@@ -272,7 +275,7 @@
                                 <div class="min-w-0">
                                     <p class="text-[11px] font-bold uppercase tracking-wide text-emerald-900/75">Допродажи через ИИ</p>
                                     <p class="text-xl sm:text-2xl font-black text-emerald-950 tabular-nums mt-0.5" x-text="fmt.money(dashRoiSummary?.metrics?.upsell_revenue || 0)"></p>
-                                    <p class="text-[11px] text-emerald-900/80 mt-1 leading-snug">Сумма принятых советов бота в заказах за сегодня (UTC).</p>
+                                    <p class="text-[11px] text-emerald-900/80 mt-1 leading-snug">Сумма принятых советов бота в заказах за сегодня.</p>
                                 </div>
                             </div>
                         </div>
@@ -288,7 +291,7 @@
                 {% endcall %}
 
                 <div class="hidden sm:block">
-                {% call card(title='Ценность ИИ (сводка)', subtitle='Эффективность советов бота за сегодня (UTC). KPI соответствуют блоку «AI Value» из продуктового видения и текущим метрикам в админке.', padding_class='p-5 sm:p-6') %}
+                {% call card(title='Вклад ИИ за сегодня', subtitle='KPI бота: допродажи, диалоги и сэкономленное время.', padding_class='p-5 sm:p-6') %}
                     <div x-show="dashStatsLoading && !dashStatsLoadedOnce" class="h-24 rounded-xl bg-slate-100 animate-pulse"></div>
                     <div x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                         {% set dash_kpi_offered %}
@@ -374,7 +377,7 @@
                     <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
                         <div>
                             <h3 class="text-sm font-bold text-slate-900">Динамика за 7 дней</h3>
-                            <p class="text-xs text-slate-500 mt-0.5">UTC · переключите метрику</p>
+                            <p class="text-xs text-slate-500 mt-0.5">Переключите метрику</p>
                         </div>
                         {% call segmented(extra_class='shrink-0') %}
                         <div role="group" aria-label="Метрика графика" class="contents">

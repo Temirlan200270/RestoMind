@@ -7,14 +7,17 @@
                     <h3 class="font-semibold text-lg text-gray-900 mb-1">Подключения</h3>
                     <p class="text-sm text-gray-500 mb-4">Подключите кассу и WhatsApp. Синхронизация меню и наличия выполняется автоматически.</p>
                     <div class="flex flex-wrap items-center gap-2 mb-6 text-xs border-b border-slate-100 pb-4" role="status" aria-live="polite">
-                        <span class="text-slate-500 shrink-0">Очередь задач (E5)</span>
+                        <span class="text-slate-500 shrink-0">Очередь задач</span>
                         <span x-show="!taskQueueHealthChecked" class="text-slate-400">…</span>
                         <span x-show="taskQueueHealthChecked && !taskQueueHealth" x-cloak class="ds-badge ds-badge-neutral text-[11px]">недоступно</span>
                         <template x-if="taskQueueHealth">
                             <span class="flex flex-wrap items-center gap-1.5">
-                                <span class="ds-badge text-[11px]" :class="taskQueueStatusClass(taskQueueHealth.redis)" x-text="'Redis: ' + (taskQueueHealth.redis || '—')"></span>
-                                <span class="ds-badge text-[11px]" :class="taskQueueStatusClass(taskQueueHealth.arq)" x-text="'ARQ: ' + (taskQueueHealth.arq || '—')"></span>
-                                <span class="ds-badge text-[11px]" :class="taskQueueStatusClass(taskQueueHealth.worker)" x-text="'Worker: ' + (taskQueueHealth.worker || '—')"></span>
+                                <span class="ds-badge text-[11px]" :class="taskQueueStatusClass(taskQueueHealth.redis)"
+                                    x-text="'Хранилище: ' + ({ok:'ок',degraded:'проблема',down:'недоступно'}[taskQueueHealth.redis] || taskQueueHealth.redis || '—')"></span>
+                                <span class="ds-badge text-[11px]" :class="taskQueueStatusClass(taskQueueHealth.arq)"
+                                    x-text="'Очередь: ' + ({ok:'ок',degraded:'проблема',down:'отключена'}[taskQueueHealth.arq] || taskQueueHealth.arq || '—')"></span>
+                                <span class="ds-badge text-[11px]" :class="taskQueueStatusClass(taskQueueHealth.worker)"
+                                    x-text="'Воркер: ' + ({ok:'работает',degraded:'проблема',down:'недоступен',unknown:'неизвестно'}[taskQueueHealth.worker] || taskQueueHealth.worker || '—')"></span>
                             </span>
                         </template>
                     </div>
@@ -44,7 +47,7 @@
                             <div>
                                 <div class="text-sm font-semibold text-gray-900">Авто-печать на кухню после оплаты (iiko)</div>
                                 <p class="text-xs text-gray-600 mt-1 leading-relaxed">
-                                    При успешном вебхуке оплаты заказ автоматически подтверждается и отправляется в iiko (deliveries/create), без ручного шага «На кухню».
+                                    При успешном получении оплаты заказ автоматически подтверждается и отправляется в iiko, без ручного шага «На кухню».
                                     Уведомление в Telegram персоналу приходит так же, как при подтверждении заказа клиентом.
                                 </p>
                             </div>
@@ -93,7 +96,7 @@
                                 </button>
                             </div>
                             <p class="text-[10px] text-amber-800" x-show="integrationStatus.iiko_secrets_encrypt_ready === false">
-                                После шага «Сохранить и импортировать меню» ключ попадёт в БД. С шифрованием (APP_SECRETS_FERNET_KEY) — защищённо; без него — в открытом виде (как в старых инсталляциях). В поле ввода ключ снова не показываем — это нормально.
+                                После сохранения ключ попадёт в базу данных. Если шифрование включено — ключ хранится в защищённом виде. Повторно в поле ввода ключ не отображается — это нормально.
                             </p>
                             <p class="text-[10px] text-slate-600" x-show="integrationStatus.iiko_configured">
                                 iiko уже привязан к этому филиалу. Поле выше нужно только если меняете ключ или переподключаете другую организацию.

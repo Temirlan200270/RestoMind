@@ -91,7 +91,7 @@ async def build_admin_readiness_payload(db: AsyncSession, org_id: int) -> dict[s
             "id": "whatsapp_api",
             "ok": wa_ok,
             "label": "WhatsApp Cloud API",
-            "detail": "Токен и phone_number_id заданы" if wa_ok else "Задайте WHATSAPP_API_TOKEN и WHATSAPP_PHONE_NUMBER_ID",
+            "detail": "Токен и номер телефона заданы" if wa_ok else "Задайте токен и ID номера WhatsApp в настройках",
         },
     )
     checks.append(
@@ -104,17 +104,14 @@ async def build_admin_readiness_payload(db: AsyncSession, org_id: int) -> dict[s
     )
 
     ai_provider = (settings.ai_provider or "openai").strip().lower()
-    ai_ok = (
-        bool(str(settings.gemini_api_key or "").strip())
-        if ai_provider == "gemini"
-        else bool(str(settings.openai_api_key or "").strip())
-    )
+    ai_ok = bool(str(settings.gemini_api_key or "").strip()) or bool(str(settings.openai_api_key or "").strip())
+    ai_provider_label = "Gemini" if ai_provider == "gemini" or bool(str(settings.gemini_api_key or "").strip()) else "OpenAI"
     checks.append(
         {
             "id": "ai_provider",
             "ok": ai_ok,
-            "label": f"AI ({ai_provider})",
-            "detail": "Ключ задан" if ai_ok else "Задайте ключ провайдера",
+            "label": f"Искусственный интеллект ({ai_provider_label})",
+            "detail": "Ключ настроен" if ai_ok else "Задайте ключ ИИ-провайдера в переменных окружения",
         },
     )
 
@@ -124,8 +121,8 @@ async def build_admin_readiness_payload(db: AsyncSession, org_id: int) -> dict[s
         {
             "id": "public_base_url",
             "ok": pub_ok,
-            "label": "PUBLIC_BASE_URL",
-            "detail": pub if pub_ok else "Не задан — webhook URL в интеграциях будет некорректен",
+            "label": "Публичный адрес сервиса",
+            "detail": pub if pub_ok else "Не задан — входящие уведомления от WhatsApp не будут работать",
         },
     )
 
@@ -148,8 +145,8 @@ async def build_admin_readiness_payload(db: AsyncSession, org_id: int) -> dict[s
         {
             "id": "whatsapp_app_secret",
             "ok": wa_secret_ok,
-            "label": "WhatsApp App Secret",
-            "detail": "Задано" if wa_secret_ok else ("Рекомендуется в prod-like" if settings.is_prod_like else "Опционально"),
+            "label": "Подпись входящих от WhatsApp",
+            "detail": "Задана" if wa_secret_ok else ("Рекомендуется для защиты" if settings.is_prod_like else "Опционально"),
         },
     )
 
@@ -158,8 +155,8 @@ async def build_admin_readiness_payload(db: AsyncSession, org_id: int) -> dict[s
         {
             "id": "app_secrets_fernet",
             "ok": fernet_ok,
-            "label": "Шифрование секретов (Fernet)",
-            "detail": "Ключ задан" if fernet_ok else "APP_SECRETS_FERNET_KEY не задан",
+            "label": "Шифрование секретов",
+            "detail": "Настроено" if fernet_ok else "Не настроено — ключи iiko хранятся в открытом виде",
         },
     )
 
@@ -169,7 +166,7 @@ async def build_admin_readiness_payload(db: AsyncSession, org_id: int) -> dict[s
             "id": "db_mode_prod",
             "ok": not sqlite_prod_bad,
             "label": "Режим БД для production",
-            "detail": "SQLite при prod-like — риск" if sqlite_prod_bad else f"DB_MODE={settings.db_mode}",
+            "detail": "SQLite не рекомендуется в production — возможна потеря данных" if sqlite_prod_bad else ("PostgreSQL" if settings.db_mode == "postgres" else settings.db_mode),
         },
     )
 

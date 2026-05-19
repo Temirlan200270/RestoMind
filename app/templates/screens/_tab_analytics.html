@@ -11,7 +11,7 @@
                 {% endset %}
                 {% call card(padding_class='p-4 sm:p-6', extra_class='mb-6 !bg-slate-50/90') %}
                     <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
-                        <p class="text-sm text-slate-500">Период в UTC, как на дашборде.</p>
+                        <p class="text-sm text-slate-500">Выберите период для подробного отчёта.</p>
                         {{ analytics_header_actions }}
                     </div>
                     <div class="flex flex-wrap items-center gap-2 min-w-0">
@@ -186,11 +186,11 @@
                     {% endcall %}
                 </div>
 
-                {% call card(title='Заказы по часу суток (UTC)', subtitle='Сводка по времени создания заказа в RestoMind. Сопоставляйте с пиками кухни и логистикой iiko; календарная теплокарта — ниже.', padding_class='p-5', extra_class='mb-6 overflow-x-auto') %}
+                {% call card(title='Заказы по часу суток', subtitle='Сводка по времени создания заказов. Сопоставляйте с пиками кухни и временем доставки.', padding_class='p-5', extra_class='mb-6 overflow-x-auto') %}
                     <table class="w-full text-sm min-w-[360px]">
                         <thead>
                             <tr class="text-left text-gray-500 border-b border-gray-100">
-                                <th class="pb-2 font-medium">Час UTC</th>
+                                <th class="pb-2 font-medium">Час дня</th>
                                 <th class="pb-2 font-medium text-right tabular-nums">Заказов</th>
                                 <th class="pb-2 font-medium text-right tabular-nums">Выручка</th>
                             </tr>

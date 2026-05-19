@@ -1,5 +1,5 @@
             {% from "components/_skeleton.html" import skeleton %}
-            <!-- ========== ПОМОЩЬ КЛИЕНТАМ (Inbox Zero) ========== -->
+            <!-- ========== ПОМОЩЬ КЛИЕНТАМ (Очередь чистая) ========== -->
             <div x-show="currentTab === 'inbox' && inboxTab === 'clients'" x-cloak class="fade-in">
                 {% set op_q_open %}
                     <div class="flex items-center gap-4">
@@ -12,7 +12,7 @@
                     {% call card(padding_class='p-5', extra_class='!border-2 !border-dashed !border-emerald-200 !bg-emerald-50/40 flex items-center gap-3') %}
                         <div class="text-4xl shrink-0" aria-hidden="true">📭</div>
                         <div>
-                            <div class="font-semibold text-emerald-900">Inbox Zero</div>
+                            <div class="font-semibold text-emerald-900">Очередь чистая</div>
                             <p class="text-sm text-emerald-900/80 mt-0.5">Когда список ниже пуст — команда свободна, бот справляется сам.</p>
                         </div>
                     {% endcall %}
@@ -44,7 +44,7 @@
                     <div x-show="failedTasksLoading" class="p-6">{{ skeleton(kind='table', rows=8, extra_class='!p-2') }}</div>
                     <div x-show="!failedTasksLoading && failedTasks.length === 0" class="p-12 text-center text-gray-500">
                         <div class="text-5xl mb-3" aria-hidden="true">✅</div>
-                        <div class="text-lg font-semibold text-gray-800">Inbox Zero</div>
+                        <div class="text-lg font-semibold text-gray-800">Очередь чистая</div>
                         <div class="text-sm mt-1 max-w-md mx-auto">Обращений «нужен человек» сейчас нет — отличный знак.</div>
                         <p class="text-xs text-gray-500 mt-3 max-w-sm mx-auto">Чтобы убедиться, что бот отвечает, загляните в диалоги или напишите ему в WhatsApp с тестового номера.</p>
                         <button type="button" @click="navigateToTab('chats')"
