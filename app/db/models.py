@@ -58,6 +58,13 @@ class Tenant(Base):
         server_default="active",
         comment="active | suspended — блок входа и WhatsApp для всех филиалов tenant",
     )
+    is_network: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default="false",
+        nullable=False,
+        comment="Phase 1 OS: True = сеть/франшиза — включает Branch Switcher и сетевую аналитику",
+    )
 
     def __repr__(self) -> str:
         return f"<Tenant id={self.id} name='{self.name}'>"
@@ -186,6 +193,7 @@ class StaffRole(StrEnum):
     """Роль сотрудника в админке."""
 
     ADMIN = "admin"
+    MANAGER = "manager"
     OPERATOR = "operator"
 
 
@@ -216,6 +224,11 @@ class StaffUser(Base):
         default=False,
         server_default="false",
         comment="Права владельца платформы (доступ к Super Admin)",
+    )
+    meta_json: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON,
+        nullable=True,
+        comment="RBAC: assigned_org_ids для manager; прочие флаги без миграций",
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -1506,3 +1519,39 @@ class AIContextSnapshot(Base):
 
     def __repr__(self) -> str:
         return f"<AIContextSnapshot id={self.id} org={self.organization_id} phone={self.phone}>"
+
+
+class DailyOrgStats(Base):
+    """Дневные агрегаты бизнес-событий по организации. Заполняется analytics_consumer (Phase 2.3).
+
+    Широкая таблица: один ряд = org + day, все метрики как колонки.
+    Первичный ключ (organization_id, day) — upsert через ON CONFLICT.
+    """
+
+    __tablename__ = "daily_org_stats"
+    __table_args__ = (
+        Index("ix_daily_org_stats_org_day", "organization_id", "day"),
+    )
+
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False, primary_key=True,
+    )
+    day: Mapped[date] = mapped_column(Date, nullable=False, primary_key=True)
+    orders_created: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    orders_confirmed: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    orders_cancelled: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    bookings_confirmed: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    bookings_cancelled: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    bookings_created: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    payments_completed: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    payments_failed: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    revenue_kzt: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0, server_default="0")
+    escalations: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    operator_takeovers: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(),
+    )
+
+    def __repr__(self) -> str:
+        return f"<DailyOrgStats org={self.organization_id} day={self.day}>"

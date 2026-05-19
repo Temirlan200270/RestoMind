@@ -29,6 +29,7 @@ from app.api.admin.orders import router as admin_orders_router
 from app.api.admin.organization import router as admin_organization_router
 from app.api.admin.rules import router as admin_rules_router
 from app.api.admin.intelligence import router as admin_intelligence_router
+from app.api.admin.network import network_router as admin_network_router
 from app.api.iiko_webhook import router as iiko_webhook_router
 from app.api.admin.marketing import loyalty_router as admin_loyalty_router
 from app.api.admin.marketing import router as admin_marketing_router
@@ -341,6 +342,13 @@ async def _apply_sqlite_startup_schema_patches() -> None:
 
     try:
         async with async_engine.begin() as conn:
+            sql = "ALTER TABLE staff_users ADD COLUMN meta_json TEXT"
+            await conn.execute(text(sql))
+    except Exception as exc:
+        _ddl_warn(sql, exc)
+
+    try:
+        async with async_engine.begin() as conn:
             sql = "ALTER TABLE integration_events ADD COLUMN organization_id INTEGER"
             await conn.execute(text(sql))
     except Exception as exc:
@@ -418,6 +426,13 @@ async def _apply_sqlite_startup_schema_patches() -> None:
         "CREATE INDEX IF NOT EXISTS ix_ai_ctx_snapshots_org_created ON ai_context_snapshots (organization_id, created_at)",
         "CREATE INDEX IF NOT EXISTS ix_ai_ctx_snapshots_org_phone ON ai_context_snapshots (organization_id, phone)",
         "ALTER TABLE organizations ADD COLUMN max_discount_pct INTEGER NOT NULL DEFAULT 0",
+        "CREATE TABLE IF NOT EXISTS daily_org_stats (organization_id INTEGER NOT NULL, day DATE NOT NULL, orders_created INTEGER NOT NULL DEFAULT 0, orders_confirmed INTEGER NOT NULL DEFAULT 0, orders_cancelled INTEGER NOT NULL DEFAULT 0, bookings_confirmed INTEGER NOT NULL DEFAULT 0, bookings_cancelled INTEGER NOT NULL DEFAULT 0, escalations INTEGER NOT NULL DEFAULT 0, operator_takeovers INTEGER NOT NULL DEFAULT 0, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (organization_id, day), FOREIGN KEY(organization_id) REFERENCES organizations(id) ON DELETE CASCADE)",
+        "CREATE INDEX IF NOT EXISTS ix_daily_org_stats_org_day ON daily_org_stats (organization_id, day)",
+        "ALTER TABLE tenants ADD COLUMN is_network BOOLEAN NOT NULL DEFAULT 0",
+        "ALTER TABLE daily_org_stats ADD COLUMN bookings_created INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE daily_org_stats ADD COLUMN payments_completed INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE daily_org_stats ADD COLUMN payments_failed INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE daily_org_stats ADD COLUMN revenue_kzt NUMERIC(14,2) NOT NULL DEFAULT 0",
     ):
         try:
             async with async_engine.begin() as conn:
@@ -694,6 +709,7 @@ app.include_router(admin_orders_router, prefix="/api")
 app.include_router(admin_organization_router, prefix="/api")
 app.include_router(admin_rules_router, prefix="/api")
 app.include_router(admin_intelligence_router, prefix="/api")
+app.include_router(admin_network_router, prefix="/api")
 app.include_router(admin_marketing_router, prefix="/api")
 app.include_router(admin_loyalty_router, prefix="/api")
 app.include_router(admin_ws_router, prefix="/api")

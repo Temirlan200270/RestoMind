@@ -280,18 +280,20 @@ async def takeover_chat(request: Request, phone: str, db: AsyncSession = Depends
     )
     from app.services.trace_context import publish_state_event
     await publish_state_event(phone=phone, state=UserState.HUMAN_MODE.value, organization_id=org_id)
-    await emit_event(
-        db,
-        BusinessEvent(
-            org_id=org_id,
-            type="operator.took_over",
-            actor="operator",
-            entity_type="user",
-            entity_id=phone,
-            payload={"phone": phone, "source": "admin.chats"},
-        ),
-    )
     try:
+        # emit_event внутри try: если _user_for_chat не найдёт пользователя (404),
+        # оба изменения откатятся вместе — событие не повиснет без triage update.
+        await emit_event(
+            db,
+            BusinessEvent(
+                org_id=org_id,
+                type="operator.took_over",
+                actor="operator",
+                entity_type="user",
+                entity_id=phone,
+                payload={"phone": phone, "source": "admin.chats"},
+            ),
+        )
         await _save_chat_triage(
             request,
             db,

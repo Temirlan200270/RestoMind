@@ -5,13 +5,10 @@ alwaysApply: true
 
 # RestoMind — общие правила работы
 
-## Документы, которые читать первыми
+## Ориентация по докам
 
-- [README.md](mdc:README.md) — что за продукт, стек, быстрый старт.
-- [codebase.md](mdc:codebase.md) — карта репозитория.
-- [docs/CONVENTIONS.md](mdc:docs/CONVENTIONS.md) — инварианты разработки (контракт).
-- [docs/ROADMAP.md](mdc:docs/ROADMAP.md) — **единственный** источник статусов задач/техдолга.
-- [CHANGELOG.md](mdc:CHANGELOG.md) — история (всегда писать в `## [Unreleased]` при изменениях).
+Когда читать какой файл — см. **restomind-onboarding** (lean, без загрузки всего репо в контекст).  
+Трекер задач: только [`docs/ROADMAP.md`](mdc:docs/ROADMAP.md). История: [`CHANGELOG.md`](mdc:CHANGELOG.md) `## [Unreleased]`.
 
 ## Жёсткие запреты
 

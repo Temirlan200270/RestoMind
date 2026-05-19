@@ -74,6 +74,28 @@
                                     x-show="userData?.tenant?.name && String(userData.tenant.name).toLowerCase() !== 'default'"
                                     x-text="String(userData?.tenant?.name || '').toLowerCase() === 'default' ? '' : (userData?.tenant?.name || '')"></div>
                             </div>
+                            <!-- Phase 1 OS: Branch Switcher (только при is_network=true) -->
+                            <template x-if="userData?.is_network && (userData?.network_orgs || []).length > 1">
+                                <div class="relative" x-data="{ netOpen: false }" @click.away="netOpen = false">
+                                    <button @click="netOpen = !netOpen"
+                                        class="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 transition shrink-0"
+                                        title="Переключить филиал сети">
+                                        <span>Сеть</span>
+                                        <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M19 9l-7 7-7-7"/></svg>
+                                    </button>
+                                    <div x-show="netOpen" x-cloak class="absolute left-0 mt-2 w-52 rounded-xl bg-white shadow-2xl ring-1 ring-black/5 z-[70] py-1 border border-gray-100">
+                                        <div class="px-3 py-1.5 text-[10px] font-bold text-gray-400 uppercase tracking-wide border-b border-gray-100 mb-1">Все филиалы</div>
+                                        <template x-for="no in (userData?.network_orgs || [])" :key="no.id">
+                                            <button @click="switchNetworkOrg(no.id); netOpen = false"
+                                                class="w-full px-3 py-2 text-left text-xs transition flex items-center justify-between"
+                                                :class="no.id === orgProfile?.id ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-gray-700 hover:bg-gray-50'">
+                                                <span x-text="no.name"></span>
+                                                <svg x-show="no.id === orgProfile?.id" class="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>
+                                            </button>
+                                        </template>
+                                    </div>
+                                </div>
+                            </template>
                             <div class="text-[10px] text-gray-400 tabular-nums shrink-0"
                                 x-show="(settingsEnv?.app_debug || isSuperadmin) && orgProfile?.organization_id"
                                 x-cloak

@@ -53,8 +53,8 @@ async def emit_event(db: AsyncSession, event: BusinessEvent) -> SystemEvent | No
         "_actor": event.actor,
         "_version": event.version,
     }
-    if event.location_id is not None:
-        enriched_payload["_location_id"] = event.location_id
+    location_id = event.location_id if event.location_id is not None else int(event.org_id)
+    enriched_payload["_location_id"] = location_id
 
     result = await emit_system_event(
         db,

@@ -33,6 +33,6 @@
 - **Multi-tenant**: все выборки/действия должны быть scoped по `organization_id` (Rule 9).
 - **Idempotency / versioning**: не убирать `Order.row_version`, дедуп входящих, уникальные ограничения.
 - **Redis ≠ источник истины**: Redis — кэш/сессии/события, истина — БД.
-- **Event-First**: новые бизнес-действия обязаны порождать событие через `emit_system_event` (Rule 10).
+- **Event-First**: новые бизнес-действия — через `emit_event(BusinessEvent)` в `app/services/system_events.py` (Rule 10).
 - **AI Context**: данные для LLM только через `fetch_ai_read_context`, не сырой SQL внутри вызова (Rule 11).
 

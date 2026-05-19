@@ -14,7 +14,11 @@ from dataclasses import dataclass
 
 from sqlalchemy import select
 
-from app.db.models import AIContextSnapshot, MenuItem, Order, Organization, User
+from datetime import timedelta, timezone
+
+from sqlalchemy import select
+
+from app.db.models import AIContextSnapshot, MenuItem, Order, Organization, SystemEvent, Tenant, User
 from app.db.session import async_session_factory
 
 logger = logging.getLogger(__name__)
@@ -33,6 +37,7 @@ class AIReadContext:
     draft_row: Order | None
     customer_ctx: str
     user_preferences: dict
+    tenant: Tenant | None = None
 
 
 async def fetch_ai_read_context(phone: str, organization_id: int) -> AIReadContext:
@@ -78,6 +83,15 @@ async def fetch_ai_read_context(phone: str, organization_id: int) -> AIReadConte
         async with async_session_factory() as db:
             return await db.get(Organization, organization_id)
 
+    async def get_tenant() -> Tenant | None:
+        async with async_session_factory() as db:
+            row = await db.scalar(
+                select(Tenant)
+                .join(Organization, Organization.tenant_id == Tenant.id)
+                .where(Organization.id == organization_id)
+            )
+            return row
+
     async def get_kb() -> str:
         async with async_session_factory() as db:
             return await load_knowledge_context_block(db, organization_id)
@@ -86,12 +100,13 @@ async def fetch_ai_read_context(phone: str, organization_id: int) -> AIReadConte
         async with async_session_factory() as db:
             return await get_open_draft_order(db, phone_s, organization_id)
 
-    menu_items, u_ctx, org_row, kb, draft = await asyncio.gather(
+    menu_items, u_ctx, org_row, kb, draft, tenant_row = await asyncio.gather(
         get_menu(),
         get_user_and_customer_ctx(),
         get_org(),
         get_kb(),
         get_draft(),
+        get_tenant(),
     )
     u_row, customer_ctx, user_preferences = u_ctx
     return AIReadContext(
@@ -102,6 +117,7 @@ async def fetch_ai_read_context(phone: str, organization_id: int) -> AIReadConte
         draft_row=draft,
         customer_ctx=customer_ctx,
         user_preferences=user_preferences,
+        tenant=tenant_row,
     )
 
 
@@ -109,6 +125,8 @@ async def save_ai_context_snapshot(
     phone: str,
     organization_id: int,
     context: AIReadContext,
+    *,
+    menu_context_text: str | None = None,
 ) -> str:
     """Сохраняет снимок AI-контекста перед LLM-вызовом. Возвращает snapshot_id (UUID).
 
@@ -117,20 +135,27 @@ async def save_ai_context_snapshot(
     """
     snapshot_id = str(uuid.uuid4())
     try:
+        # Минимальный снимок цен: только audit-поля нужные для query «цена X в момент T»
+        # iiko_id — стабильный идентификатор (name может меняться при переименовании)
+        # price + is_available — единственные поля, которые меняются и влияют на решение
+        menu_prices_snapshot = [
+            {
+                "iiko_id": m.iiko_id or "",
+                "price": float(m.price or 0),
+                "is_available": bool(m.is_available),
+            }
+            for m in context.menu_items
+        ]
         business_state = {
             "org_id": organization_id,
             "org_name": context.org.name if context.org else None,
+            "org_timezone": getattr(context.org, "timezone", None) if context.org else None,
             "menu_items_count": len(context.menu_items),
             "stoplist_count": sum(1 for m in context.menu_items if not m.is_available),
-            "menu_preview": [
-                {
-                    "name": m.name,
-                    "price": float(m.price or 0),
-                    "available": bool(m.is_available),
-                    "category": m.category,
-                }
-                for m in context.menu_items[:40]
-            ],
+            # Structured audit: iiko_id + price + availability at decision time
+            "menu_prices_snapshot": menu_prices_snapshot,
+            # Frozen menu text passed to LLM — используется в replay для точного воспроизведения
+            "menu_context_text": menu_context_text,
         }
         customer_state = {
             "has_draft": context.draft_row is not None,
@@ -140,16 +165,79 @@ async def save_ai_context_snapshot(
             "user_preferences": context.user_preferences,
         }
         async with async_session_factory() as db:
+            event_slice = await _load_recent_event_slice(db, organization_id, minutes=15)
             snap = AIContextSnapshot(
                 id=snapshot_id,
                 organization_id=organization_id,
                 phone=phone,
                 business_state=business_state,
                 customer_state=customer_state,
-                event_slice={},  # Phase 3.2: populate from SystemEvent stream
+                event_slice=event_slice,
             )
             db.add(snap)
             await db.commit()
     except Exception:
         logger.exception("save_ai_context_snapshot failed for org=%d phone=%s", organization_id, phone)
     return snapshot_id
+
+
+async def _load_recent_event_slice(
+    db,
+    organization_id: int,
+    minutes: int = 15,
+    limit: int = 20,
+) -> dict:
+    """Phase 3.2: загружает последние N SystemEvent за minutes минут до вызова LLM.
+
+    Даёт AI Context Snapshot "живую" картину ресторана:
+    что происходило (заказы, эскалации, платежи) прямо перед этим решением.
+    Без event_slice невозможно объяснить совет ИИ на 100%.
+    """
+    from datetime import datetime, timedelta, timezone
+    cutoff = datetime.now(tz=timezone.utc) - timedelta(minutes=minutes)
+
+    try:
+        from sqlalchemy import select
+        from app.db.models import SystemEvent
+        rows = (await db.execute(
+            select(
+                SystemEvent.id,
+                SystemEvent.event_type,
+                SystemEvent.source,
+                SystemEvent.entity_type,
+                SystemEvent.entity_id,
+                SystemEvent.created_at,
+                SystemEvent.payload_json,
+            )
+            .where(
+                SystemEvent.organization_id == organization_id,
+                SystemEvent.created_at >= cutoff,
+            )
+            .order_by(SystemEvent.created_at.desc())
+            .limit(limit)
+        )).mappings().all()
+
+        events = [
+            {
+                "id": r["id"],
+                "type": r["event_type"],
+                "source": r["source"],
+                "entity_type": r["entity_type"],
+                "entity_id": r["entity_id"],
+                "ts": r["created_at"].isoformat() if r["created_at"] else None,
+                "payload": {
+                    k: v for k, v in (r["payload_json"] or {}).items()
+                    if not k.startswith("_")  # убираем служебные _actor, _version
+                },
+            }
+            for r in reversed(rows)  # хронологический порядок
+        ]
+        return {
+            "window_minutes": minutes,
+            "cutoff_utc": cutoff.isoformat(),
+            "events_count": len(events),
+            "events": events,
+        }
+    except Exception as exc:
+        logger.exception("_load_recent_event_slice failed org=%d: %s", organization_id, exc)
+        return {"window_minutes": minutes, "events_count": 0, "events": [], "error": str(exc)}

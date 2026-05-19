@@ -1,0 +1,38 @@
+---
+description: Экономия токенов — когда читать доки и код (не грузить README/ROADMAP в каждый чат).
+alwaysApply: true
+---
+
+# RestoMind — онбординг агента (lean)
+
+## Не делать (лишние токены)
+
+- Не читать целиком `README.md`, `codebase.md`, `docs/ROADMAP.md`, `CHANGELOG.md` «для ориентации», если задача узкая.
+- Не обходить весь репозиторий и не строить полное дерево файлов — используй `grep` / semantic search / `codebase.md` по ссылке.
+- Не перечитывать доки, которые пользователь уже приложил через `@` в сообщении.
+- Не дублировать в ответ длинные выдержки из правил — достаточно ссылок на пути.
+
+## Когда что читать
+
+| Ситуация | Действие |
+|----------|----------|
+| Новый чат, scope неясен | `Read` только [`CODEX.md`](mdc:CODEX.md), затем 1–3 файла по задаче |
+| «Где живёт X?» | `grep` по символу → `Read` найденные файлы; при необходимости — раздел в [`codebase.md`](mdc:codebase.md) |
+| Статус задачи / закрытие epic | [`docs/ROADMAP.md`](mdc:docs/ROADMAP.md); при изменениях — [`CHANGELOG.md`](mdc:CHANGELOG.md) `## [Unreleased]` |
+| OS: события, снапшоты, Decision Engine | [`docs/OS_TRANSITION_PLAN.md`](mdc:docs/OS_TRANSITION_PLAN.md) (не весь — нужный раздел) |
+| Инварианты, контракты API | [`docs/CONVENTIONS.md`](mdc:CONVENTIONS.md) |
+| Админка UI | [`docs/UI_MAP.md`](mdc:docs/UI_MAP.md) + целевой `app/templates/screens/*` |
+| Баг в конкретном файле | `Read` файл + соседи; ROADMAP/README не нужны |
+
+## Указатели по коду (без полного обзора)
+
+- Точка входа агента в репо: [`CODEX.md`](mdc:CODEX.md)
+- WhatsApp pipeline: `app/api/webhooks.py` → `intent_router`
+- Админ API: `app/api/admin/`; статистика: `app/api/admin/analytics.py`
+- Новые бизнес-события: `emit_event(BusinessEvent)` в [`app/services/system_events.py`](mdc:app/services/system_events.py)
+- LLM-контекст: `app/services/context_engine.py`; валидация AI: `app/services/decision_engine.py`
+
+## Память и контекст чата
+
+- Источник правды — **текущий код** и `git`, не summary прошлых сессий.
+- `git_status` в начале чата может устареть — перед коммитом смотри `git status` / `git diff`.

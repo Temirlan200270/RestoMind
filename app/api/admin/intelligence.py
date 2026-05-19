@@ -12,6 +12,7 @@ from app.api.admin.deps import admin_org_from_session, require_admin_session_act
 from sqlalchemy import select
 from app.db.models import AIContextSnapshot, BusinessRecommendation, OperationalInsight
 from app.db.session import get_db
+from app.services.analytics_consumer import get_event_stats
 from app.services.intelligence import (
     SimulationInput,
     answer_intelligence_query,
@@ -276,6 +277,54 @@ async def patch_recommendation(
     return {"ok": True, "item": _rec_public(row)}
 
 
+# ─── Phase 2.3 OS: Event-Driven Aggregates ───────────────────────────────────
+
+
+@router.get("/event-stats")
+async def intelligence_event_stats(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    days: int = Query(7, ge=1, le=90, description="Количество дней истории"),
+) -> dict:
+    """Агрегаты бизнес-событий из DailyOrgStats за последние N дней.
+
+    Данные накапливаются analytics_consumer в реальном времени при каждом emit_event().
+    Не содержит прямых запросов к Order/ChatLog — чистый event-driven источник.
+    """
+    org_id = admin_org_from_session(request)
+    rows = await get_event_stats(db, org_id, days=days)
+
+    # Сводка за весь запрошенный период
+    int_keys = (
+        "orders_created", "orders_confirmed", "orders_cancelled",
+        "bookings_created", "bookings_confirmed", "bookings_cancelled",
+        "payments_completed", "payments_failed",
+        "escalations", "operator_takeovers",
+    )
+    totals: dict[str, int | float] = {k: 0 for k in int_keys}
+    totals["revenue_kzt"] = 0.0
+    for r in rows:
+        for k in int_keys:
+            totals[k] = int(totals[k]) + int(r.get(k, 0) or 0)
+        totals["revenue_kzt"] = float(totals["revenue_kzt"]) + float(r.get("revenue_kzt", 0) or 0)
+
+    conversion_pct: float | None = None
+    if int(totals["orders_created"]) > 0:
+        conversion_pct = round(
+            100 * int(totals["orders_confirmed"]) / int(totals["orders_created"]),
+            1,
+        )
+
+    return {
+        "ok": True,
+        "period_days": days,
+        "source": "event_driven",
+        "totals": {**totals, "conversion_pct": conversion_pct},
+        "daily": rows,
+        "note": "Агрегаты накапливаются с момента включения emit_event (2026-05-18). Исторические данные до этой даты не включены.",
+    }
+
+
 # ─── Phase 3 OS: AI Context Snapshot (Replay) ────────────────────────────────
 
 
@@ -324,13 +373,19 @@ async def get_ai_snapshot(
     row = await db.get(AIContextSnapshot, snapshot_id)
     if row is None or int(row.organization_id) != int(org_id):
         raise HTTPException(status_code=404, detail="Snapshot not found")
+    bs = row.business_state or {}
     return {
         "ok": True,
         "id": row.id,
         "phone": row.phone,
         "organization_id": row.organization_id,
         "created_at": row.created_at.isoformat() if row.created_at else None,
-        "business_state": row.business_state,
+        "business_state": {
+            **{k: v for k, v in bs.items() if k != "menu_context_text"},
+            "has_menu_context_text": bool(bs.get("menu_context_text")),
+            "has_menu_prices_snapshot": bool(bs.get("menu_prices_snapshot")),
+            "menu_prices_count": len(bs.get("menu_prices_snapshot") or []),
+        },
         "customer_state": row.customer_state,
         "event_slice": row.event_slice,
     }
@@ -355,9 +410,18 @@ async def replay_ai_decision(
     from app.services.ai_brain import call_openai
     from app.services.order_logic import build_menu_context_for_ai, load_available_menu
 
-    # Восстановить меню по org_id (меню может измениться, но контекст снимка сохранён)
-    menu_items = await load_available_menu(db, organization_id=org_id, include_unavailable=True)
-    menu_context = await build_menu_context_for_ai(menu_items, user_text)
+    business_state = row.business_state or {}
+
+    # Phase G3: если снапшот содержит frozen menu_context_text — используем его
+    # для точного воспроизведения контекста меню как он был в момент решения.
+    # Иначе — перезагружаем из БД (старые снапшоты до G3).
+    frozen_menu_ctx: str | None = business_state.get("menu_context_text")
+    if frozen_menu_ctx:
+        menu_context = frozen_menu_ctx
+    else:
+        # Fallback: используем текущее меню из БД
+        menu_items = await load_available_menu(db, organization_id=org_id, include_unavailable=True)
+        menu_context = await build_menu_context_for_ai(menu_items, user_text)
 
     customer_ctx = (row.customer_state or {}).get("customer_ctx_snippet", "")
 

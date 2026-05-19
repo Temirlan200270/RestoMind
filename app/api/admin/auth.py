@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.passwords import verify_password
-from app.db.models import Organization, RegistrationRequest, StaffRole, StaffUser
+from app.db.models import Organization, RegistrationRequest, StaffRole, StaffUser, Tenant
 from app.db.session import get_db
 from app.services.admin_tokens import create_admin_ws_token
 from app.services.tenant_scope import (
@@ -36,6 +36,35 @@ logger = logging.getLogger(__name__)
 
 
 auth_router = APIRouter(prefix="/admin/auth", tags=["Admin Auth"])
+
+
+async def _resolve_network_info(
+    db: AsyncSession,
+    org_id: int,
+) -> tuple[bool, list[dict]]:
+    """Один проход — возвращает (is_network, network_orgs).
+
+    Делает: 1 db.get(Org) + 1 db.get(Tenant) + 1 SELECT orgs (только при is_network).
+    Заменяет два отдельных вызова, каждый из которых повторял те же два db.get().
+    """
+    try:
+        org = await db.get(Organization, org_id)
+        if org is None or org.tenant_id is None:
+            return False, []
+        tenant = await db.get(Tenant, int(org.tenant_id))
+        if tenant is None or not bool(getattr(tenant, "is_network", False)):
+            return False, []
+        rows = await db.execute(
+            select(Organization.id, Organization.name)
+            .where(
+                Organization.tenant_id == org.tenant_id,
+                Organization.is_active.is_(True),
+            )
+            .order_by(Organization.name)
+        )
+        return True, [{"id": int(r.id), "name": r.name} for r in rows]
+    except Exception:
+        return False, []
 
 
 class LoginBody(BaseModel):
@@ -309,7 +338,7 @@ async def _admin_auth_me_payload(request: Request, db: AsyncSession) -> dict[str
     if staff_me is not None:
         email_out = str(staff_me.email)
 
-    return {
+    result = {
         "authenticated": True,
         "username": user,
         "organization_id": int(oid),
@@ -332,6 +361,10 @@ async def _admin_auth_me_payload(request: Request, db: AsyncSession) -> dict[str
         "tenant": tenant_payload,
         "branding": branding,
     }
+    is_net, net_orgs = await _resolve_network_info(db, int(oid))
+    result["is_network"] = is_net
+    result["network_orgs"] = net_orgs
+    return result
 
 
 @auth_router.get("/me")

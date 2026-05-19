@@ -1548,9 +1548,12 @@ async def process_message(
             pipe_sw.split("context")
 
         # Phase 3 OS: сохранить снимок контекста до LLM (fire-and-forget, не блокирует)
+        # menu_context уже вычислен выше — передаём для точного replay
         ai_snapshot_id: str | None = None
         try:
-            ai_snapshot_id = await save_ai_context_snapshot(phone, organization_id, read_ctx)
+            ai_snapshot_id = await save_ai_context_snapshot(
+                phone, organization_id, read_ctx, menu_context_text=menu_context,
+            )
         except Exception:
             pass  # snapshot — аудит; потеря не критична
 
@@ -1604,7 +1607,11 @@ async def process_message(
 
         # Phase 4 OS: Decision Engine — валидация AI-ответа до исполнения
         try:
-            de_result = await decision_engine.validate(ai_response, read_ctx, read_ctx.org)
+            de_result = await decision_engine.validate(
+                ai_response, read_ctx, read_ctx.org,
+                tenant=read_ctx.tenant,
+                billing_suspended=getattr(read_ctx.org, "is_active", True) is False,
+            )
             if not de_result.is_valid and de_result.corrected_response is not None:
                 logger.info(
                     "DecisionEngine blocked intent=%s org=%d violations=%s",

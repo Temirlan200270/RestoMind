@@ -6,6 +6,79 @@
 
 ## [Unreleased] — 2026-03-20
 
+### Добавлено (2026-05-19) — Фундамент к пилоту Фазы 5
+
+- **Tenant / RBAC — Manager + `assigned_org_ids`:** роль `manager` в [`StaffRole`](app/db/models.py); колонка `staff_users.meta_json` (миграция [`20260519_staff_meta_json.py`](alembic/versions/20260519_staff_meta_json.py)). [`tenant_scope.py`](app/services/tenant_scope.py) — `staff_assigned_org_ids`, фильтрация `available_organizations_for_admin_session` для manager/operator. `POST /staff` принимает `assigned_org_ids` для manager.
+- **`location_id` на шине:** [`emit_event`](app/services/system_events.py) всегда пишет `_location_id` (явный `location_id` или `org_id` филиала).
+- **Event System — прогноз и totals:** `week_forecast.source` = `event_driven` при ≥3 днях `revenue_kzt` в `DailyOrgStats` ([`owner_dashboard.py`](app/services/owner_dashboard.py), [`analytics.py`](app/api/admin/analytics.py)). `GET /intelligence/event-stats` — полные totals (`bookings_created`, payments, `revenue_kzt`). `payment.expired` на `emit_event` в [`payment_expiry.py`](app/services/payment_expiry.py).
+- **Тесты:** [`tests/test_phase5_foundation.py`](tests/test_phase5_foundation.py).
+
+### Исправлено (2026-05-18) — Sprint H: аудит Phase 5 readiness
+
+- **H1 — DailyOrgStats: 4 новые колонки** ([`app/db/models.py`](app/db/models.py), [`analytics_consumer.py`](app/services/analytics_consumer.py)): `bookings_created`, `payments_completed`, `payments_failed`, `revenue_kzt`. Миграция [`20260518_daily_org_stats_v2.py`](alembic/versions/20260518_daily_org_stats_v2.py) + SQLite-патч. `_EVENT_COLUMN` расширен до всех 10 типов. `payment.completed` дополнительно вызывает `_upsert_daily_revenue(amount)` через новую функцию — выручка от оплат теперь в event-driven агрегатах.
+- **H2 — DE `book` → `faq` при block** ([`decision_engine.py`](app/services/decision_engine.py)): `_build_corrected_response` теперь меняет `intent` на `faq` для `order` **и** `book`. До этого при блокировке брони (billing_suspended, force_closed) `_handle_booking` всё равно создавал DRAFT-бронь.
+- **H3 — `tenant` в `AIReadContext`** ([`context_engine.py`](app/services/context_engine.py)): новое поле `tenant: Tenant | None = None`. `fetch_ai_read_context` загружает `Tenant` параллельно с остальными данными. [`webhooks.py`](app/api/webhooks.py) передаёт `tenant=read_ctx.tenant` в `decision_engine.validate()`. Теперь DE получает реальный `tenant.plan_status` из контекста, а не только `org.is_active` как прокси.
+- **H4 — `event_driven_stats` в UI** ([`_tab_dashboard.html`](app/templates/screens/_tab_dashboard.html)): добавлен бейдж «⚡ event bus» в блоке ИИ-эффективности. Виден только при `event_driven_stats.source === 'event_driven'`, показывает количество оплат из event bus рядом с SQL-данными. Первый KPI использующий event-driven источник вместо SQL.
+- **Тесты Sprint H:** [`tests/test_sprint_h.py`](tests/test_sprint_h.py) — 295 строк, 4 класса: `TestDailyOrgStatsH1` (5 тестов: payment.completed/failed, booking.created, revenue_kzt accumulation, все 10 типов), `TestBookingBlockH2` (2 теста: billing+book→faq, force_closed+book→faq), `TestTenantInContextH3` (3 теста: поле в dataclass, optional default, DE видит tenant.plan_status), `TestEventDrivenStatsUIH4` (2 теста: template содержит event_driven_stats, индикатор payments_completed).
+
+### Исправлено (2026-05-18) — Sprint G Staff Review (DoD)
+
+- **G1 — Hallucination: `isdisjoint()` вместо 5-char prefix** ([`decision_engine.py`](app/services/decision_engine.py)): `_check_all_items_hallucinated` теперь использует `proposed_names.isdisjoint(menu_names)` — точное множественное пересечение O(n+m), нет ложных срабатываний от prefix heuristic. Если хотя бы одна позиция совпала → не блокируем; `validate_order` обработает неизвестные позиции.
+- **G2 — WS явный разрыв при switch** ([`admin-app.js`](app/static/js/admin-app.js)): `switchNetworkOrg` перед переключением явно закрывает текущий WebSocket и сбрасывает `_wsTokenInUse = null`, исключая получение real-time событий чужого заведения в окне между сменой сессии и переподключением WS. После — `selectOrganization` получает новый `ws_token` и пересоздаёт соединение.
+- **G3 — Storage: только `{iiko_id, price, is_available}`** ([`context_engine.py`](app/services/context_engine.py)): `menu_prices_snapshot` хранит 3 поля вместо 5 (убраны `name`, `category`). `iiko_id` — стабильный идентификатор; `name` и `category` исключены — `menu_context_text` (frozen string) уже содержит полную читаемую информацию для replay. Экономия >30% на типичном меню 80 позиций.
+- **DoD тесты** ([`tests/test_sprint_g_dod.py`](tests/test_sprint_g_dod.py)) — 366 строк, 4 класса: `TestDoDOne` (4 теста: force-close+block, suspended+block, faq/escalate разрешены, book+block), `TestDoDTwo` (4 теста: owner видит все branches, single=empty, `userData?.is_network` в шаблоне, `_wsTokenInUse=null` в JS), `TestDoDThree` (3 теста: frozen price in replay, minimal fields, size savings >30%), `TestDoDHallucinationIsdisjoint` (3 теста: partial match, fully unknown, exact vs prefix).
+
+### Добавлено (2026-05-18) — Sprint G: DE 95% + Franchise Phase 1 + Snapshot 80%
+
+**G1 — Decision Engine → ~95%:**
+- **`_check_billing_suspended`** ([`app/services/decision_engine.py`](app/services/decision_engine.py)) — **block** + intent→faq для `order`/`book` при трёх условиях (defense-in-depth): `billing_suspended=True` из webhooks, `tenant.plan_status=suspended`, `org.is_active=False`. FAQ и escalate всегда разрешены.
+- **`_check_all_items_hallucinated`** — **block** + intent→faq если ВСЕ позиции заказа отсутствуют в меню (нечёткое сравнение по первым 5 символам). Предотвращает создание бессмысленного черновика с 100% неизвестными позициями. Если меню не загружено — проверка пропускается.
+- **`_check_pricing_policy` реализован (Phase 4.2):** если `org.max_discount_pct > 0` и AI предлагает `discount_pct > max_pct` → **block**. Также заготовка для estimated_total check.
+- **Billing guard в pipeline:** [`app/api/webhooks.py`](app/api/webhooks.py) — `decision_engine.validate(..., billing_suspended=...)` получает флаг из `org.is_active`.
+
+**G2 — Franchise Phase 1 OS (Tenant → ~95%):**
+- **`Tenant.is_network`** ([`app/db/models.py`](app/db/models.py)) — новое булево поле (default=False). Миграция [`20260518_tenant_is_network.py`](alembic/versions/20260518_tenant_is_network.py) + SQLite-патч.
+- **`GET /api/admin/network/orgs`** — список активных филиалов сети для Branch Switcher. Только при `is_network=True`.
+- **`GET /api/admin/network/stats`** — агрегированная аналитика по всей сети (SUM/COUNT, не сырые данные). Per-org breakdown за сегодня. Изолировано по tenant_id.
+- **`POST /api/admin/network/switch/{org_id}`** — переключение в контекст конкретного филиала с проверкой принадлежности к тенанту.
+- **`GET /api/admin/auth/me`** — обогащён полями `is_network` и `network_orgs`. Вспомогательные функции `_resolve_is_network` / `_resolve_network_orgs` в [`auth.py`](app/api/admin/auth.py).
+- **Branch Switcher UI** — [`app/templates/screens/_header.html`](app/templates/screens/_header.html): кнопка «Сеть ▾» с дропдауном всех филиалов, видна только при `userData.is_network && network_orgs.length > 1`. [`admin-app.js`](app/static/js/admin-app.js): `userData.is_network`, `userData.network_orgs`, метод `switchNetworkOrg(orgId)`.
+
+**G3 — AI Context Snapshot → ~80%:**
+- **Полный снимок цен** ([`app/services/context_engine.py`](app/services/context_engine.py)) — `menu_prices_snapshot` содержит **все** позиции меню (не 40), с полями `name/price/available/category/iiko_id`. Заморозка цен в момент LLM-решения для точного replay.
+- **`menu_context_text`** — строка, переданная LLM (из `build_menu_context_for_ai`), теперь сохраняется в `business_state`. Передаётся из `webhooks.py` через `save_ai_context_snapshot(..., menu_context_text=menu_context)`.
+- **Replay использует frozen context** ([`app/api/admin/intelligence.py`](app/api/admin/intelligence.py)) — если `business_state.menu_context_text` есть → replay воспроизводит LLM с точно тем же контекстом меню. Иначе fallback на текущее меню из БД.
+- **`GET /snapshots/{id}`** — показывает `has_menu_context_text`, `has_menu_prices_snapshot`, `menu_prices_count` без раскрытия полного текста.
+- **Тесты Sprint G:** [`tests/test_sprint_g.py`](tests/test_sprint_g.py) — 445 строк, 3 класса, 20 тестов.
+
+### Добавлено (2026-05-18) — Sprint F: Замыкание шины событий + Phase 3.2 (к Фазе 5)
+
+- **`payment.completed` / `payment.failed` на emit_event (F1):** [`app/services/payment_webhook.py`](app/services/payment_webhook.py) — два последних ключевых события мигрированы с `emit_system_event` на `emit_event(BusinessEvent(...))`. Теперь **все деньги на шине**: `payment.completed` (id = `"payment.completed:{provider}:{payment_id}"`) и `payment.failed`. Idempotency сохранена. Event System: 10 типов из 10 ключевых теперь на `emit_event`.
+- **`booking.created` на шине (F2):** [`app/services/intent_router.py`](app/services/intent_router.py) — при создании DRAFT-брони в `_handle_booking` добавлен `emit_event(BusinessEvent(type="booking.created", ...))`. Полный lifecycle брони теперь на шине: `created → confirmed → cancelled`.
+- **`event_slice` в AI Context Snapshot (F3 / Phase 3.2):** [`app/services/context_engine.py`](app/services/context_engine.py) — добавлена `_load_recent_event_slice(db, org_id, minutes=15)`: запрашивает последние 20 `SystemEvent` за 15 минут, фильтрует служебные ключи `_actor`/`_version`, возвращает в хронологическом порядке. `save_ai_context_snapshot` теперь сохраняет реальный `event_slice` (был `{}`). AI Snapshot: **50% → ~70%** (порог Фазы 5 достигнут).
+- **`analytics_consumer` — 10 типов:** [`app/services/analytics_consumer.py`](app/services/analytics_consumer.py) — `HANDLED_EVENT_TYPES` расширен до 10 типов: добавлены `booking.created`, `payment.completed`, `payment.failed`.
+- **Тесты Sprint F:** [`tests/test_sprint_f.py`](tests/test_sprint_f.py) — 334 строки, 3 класса: `TestPaymentAndBookingEvents` (5 тестов: dotted-нотация, idempotency payment, booking.created, все 10 типов в consumer), `TestEventSlice` (6 тестов: заполнение из SystemEvent, org-isolation, фильтрация _-ключей, time-window, хронологический порядок, fallback при ошибке DB), `TestEventCoverage` (2 теста: таксономия 10 типов, отсутствие legacy underscore).
+
+### Добавлено (2026-05-18) — Phase 2.3: Event-Driven Aggregates (Event System ~80%)
+
+- **`DailyOrgStats` модель:** [`app/db/models.py`](app/db/models.py) — широкая таблица `daily_org_stats` с составным PK `(organization_id, day)`, 7 счётчиков событий: `orders_created/confirmed/cancelled`, `bookings_confirmed/cancelled`, `escalations`, `operator_takeovers`. Миграция [`20260518_daily_org_stats.py`](alembic/versions/20260518_daily_org_stats.py) + SQLite-патч в [`app/main.py`](app/main.py).
+- **`analytics_consumer` — реальный upsert:** [`app/services/analytics_consumer.py`](app/services/analytics_consumer.py) — `on_business_event` теперь реально инкрементирует строку `DailyOrgStats` через `ON CONFLICT DO UPDATE`. Атомично: если транзакция `emit_event` откатится — агрегат тоже не сохранится. Добавлены `get_event_stats(db, org_id, days)` и `get_today_event_summary(db, org_id)`.
+- **`GET /api/admin/intelligence/event-stats`:** [`app/api/admin/intelligence.py`](app/api/admin/intelligence.py) — новый endpoint читает из `DailyOrgStats` (не из Order/ChatLog), возвращает `daily[]` + `totals` + `conversion_pct`. Org-scoped. Явная пометка `source: "event_driven"`.
+- **`/api/admin/stats` → `event_driven_stats`:** [`app/api/admin/analytics.py`](app/api/admin/analytics.py) — ответ обогащён полем `event_driven_stats` (сводка за сегодня из `DailyOrgStats`). При ошибке чтения — `null` (не рвёт endpoint). Позволяет сравнивать SQL-источник и event-driven рядом.
+- **Тесты Phase 2.3:** [`tests/test_os_sprints.py`](tests/test_os_sprints.py) расширен до **803 строк**, добавлен класс `TestDailyOrgStats` — 7 тестов: upsert увеличивает колонку, двойной upsert = 2, маппинг event→column, игнор unknown event, emit_event → consumer → DailyOrgStats (end-to-end), summary с нулями, org-isolation.
+
+### Добавлено (2026-05-18) — Sprint E: Event System + Decision Engine (к Фазе 5)
+
+- **Event System 30% → 70% (E1):** [`app/services/intent_router.py`](app/services/intent_router.py) — 5 ключевых бизнес-событий мигрированы с `emit_system_event()` на `emit_event(BusinessEvent(...))`: `order.created`, `order.confirmed`, `order.cancelled`, `booking.confirmed`, `booking.cancelled`. Детерминированные id (`"order.created:123"`) сохраняют idempotency. Dotted-нотация типов (`order.created` вместо `order_created`). `analytics_consumer.py` расширен под все 7 типов.
+- **Decision Engine 40% → 85% (E2):** [`app/services/decision_engine.py`](app/services/decision_engine.py) — три новых правила: `_check_empty_order` (**block** + intent→faq: LLM сгенерировал «заказ принят» без позиций — пустой черновик не создаётся), `_check_delivery_no_address` (warn: доставка без адреса), `_check_max_order_items` (warn: > 20 позиций — аномалия парсинга). `MAX_ORDER_ITEMS = 20` как классовый атрибут.
+- **Тесты (E3):** [`tests/test_os_sprints.py`](tests/test_os_sprints.py) расширен до 26 тестов: `TestDecisionEngineNewRules` (8 тестов: empty_order block, intent→faq, order_actions не пустой, delivery warn, max_items warn), `TestEventSystemMigration` (4 теста: dotted-нотация, детерминированный idempotency key, сохранение в БД с правильным полями).
+
+### Исправлено (2026-05-18) — OS Sprint post-audit fixes
+
+- **DE критический фикс:** [`app/services/decision_engine.py`](app/services/decision_engine.py) — `_build_corrected_response` теперь при `severity=block` и `intent=order` меняет `intent` на `"faq"`. До этого `route_intent` продолжал создавать черновик заказа даже при force-closed блокировке, т.к. `intent=order` сохранялся.
+- **chats.py атомарность takeover:** [`app/api/admin/chats.py`](app/api/admin/chats.py) — `emit_event("operator.took_over")` перемещён внутрь `try/except` вместе с `_save_chat_triage`. Теперь если пользователь не найден (404 в `_user_for_chat`), оба изменения (событие + triage) откатываются вместе — нет висящих событий без triage update.
+- **Тесты OS Sprints:** [`tests/test_os_sprints.py`](tests/test_os_sprints.py) — 14 тестов для трёх спринтов: `TestDecisionEngine` (8 тестов: force_closed блокирует order, intent меняется на faq, FAQ не блокируется, expired не блокирует, stoplist=warn, org=None, naive datetime); `TestBusinessEvent` (4 теста: UUID генерация, idempotency, actor→source); `TestAIContextSnapshot` (3 теста: org-scope, isolation, сохранение).
+
 ### Добавлено (2026-05-18) — Sprint D: Decision Engine (Phase 4 OS)
 
 - **`decision_engine.py`:** [`app/services/decision_engine.py`](app/services/decision_engine.py) — `PolicyViolation` (rule, severity block/warn, detail), `ValidationResult` (is_valid, violations, corrected_response), `DecisionEngine` класс с тремя проверками: `_check_force_closed` (блокирует заказы при активном экстренном закрытии), `_check_stoplist_quick` (предупреждение по стоп-позициям без повторного DB-запроса, используя `read_ctx.menu_items`), `_check_pricing_policy` (заглушка Phase 4.1 для будущего поля discount в AIBrainResponse). Singleton `decision_engine` для использования в webhooks.py.

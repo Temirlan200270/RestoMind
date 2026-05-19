@@ -65,6 +65,28 @@ async def fetch_daily_revenue_history(
     return dict(bucket)
 
 
+async def fetch_daily_revenue_history_from_events(
+    db: AsyncSession,
+    org_id: int,
+    *,
+    days: int = 28,
+    now_utc: datetime | None = None,
+) -> dict[str, float]:
+    """Выручка по дням из DailyOrgStats.revenue_kzt (event-driven).
+
+    Делегирует в get_event_stats — единственный источник чтения из DailyOrgStats.
+    """
+    from app.services.analytics_consumer import get_event_stats
+    rows = await get_event_stats(db, org_id, days=days)
+    return {r["date"]: float(r["revenue_kzt"] or 0) for r in rows}
+
+
+def event_revenue_history_usable(revenue_by_date: dict[str, float], *, min_days: int = 3) -> bool:
+    """Достаточно event-driven дней с ненулевой выручкой для прогноза."""
+    nonzero = sum(1 for v in revenue_by_date.values() if float(v) > 0)
+    return nonzero >= min_days
+
+
 def build_recommendation_target(rec_type: str) -> dict[str, Any]:
     """Куда вести владельца из top_actions (совместимо с incidentGo)."""
     t = (rec_type or "").strip().lower()

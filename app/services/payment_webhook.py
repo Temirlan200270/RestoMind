@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Order, PaymentEvent, PaymentTransaction, PaymentTxStatus
 from app.core.config import settings
-from app.services.system_events import emit_system_event
+from app.services.system_events import BusinessEvent, emit_event, emit_system_event
 
 PaymentWebhookStatus = Literal["paid", "failed"]
 
@@ -111,15 +111,17 @@ async def apply_payment_webhook(
             paid_at=datetime.now(_tz.utc),
         )
 
-        await emit_system_event(
+        await emit_event(
             db,
-            organization_id=int(organization_id),
-            event_type="payment_completed",
-            source="payment_webhook",
-            entity_type="order",
-            entity_id=order.id,
-            idempotency_key=f"payment_completed:{prov}:{payment_id}",
-            payload={"order_id": order.id, "provider": prov, "payment_id": payment_id, "amount": amt},
+            BusinessEvent(
+                id=f"payment.completed:{prov}:{payment_id}",
+                org_id=int(organization_id),
+                type="payment.completed",
+                actor="payment_webhook",
+                entity_type="order",
+                entity_id=order.id,
+                payload={"order_id": order.id, "provider": prov, "payment_id": payment_id, "amount": amt},
+            ),
         )
         await db.flush()
         pe_id = await db.scalar(
@@ -171,15 +173,17 @@ async def apply_payment_webhook(
     )
 
     await db.flush()
-    await emit_system_event(
+    await emit_event(
         db,
-        organization_id=int(organization_id),
-        event_type="payment_failed",
-        source="payment_webhook",
-        entity_type="order",
-        entity_id=order.id,
-        idempotency_key=f"payment_failed:{prov}:{payment_id}",
-        payload={"order_id": order.id, "provider": prov, "payment_id": payment_id, "amount": amount},
+        BusinessEvent(
+            id=f"payment.failed:{prov}:{payment_id}",
+            org_id=int(organization_id),
+            type="payment.failed",
+            actor="payment_webhook",
+            entity_type="order",
+            entity_id=order.id,
+            payload={"order_id": order.id, "provider": prov, "payment_id": payment_id, "amount": amount},
+        ),
     )
     pe_id_f = await db.scalar(
         select(PaymentEvent.id).where(

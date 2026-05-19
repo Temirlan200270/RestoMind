@@ -37,7 +37,7 @@ from app.schemas.ai_schemas import AIBrainResponse, PaymentSplit
 from app.services.dialog_mgr import UserState
 from app.services.upsell_utils import record_upsell_rejections_on_user
 from app.services.prepayment_legal import append_prepayment_legal_disclaimer
-from app.services.system_events import emit_system_event
+from app.services.system_events import BusinessEvent, emit_event, emit_system_event
 from app.services.trace_context import trace_payload
 from app.services.stoplist_session import compose_stoplist_notice
 from app.services.order_logic import (
@@ -699,18 +699,20 @@ async def _handle_order(
         )
         db.add(order)
         await db.flush()
-        await emit_system_event(
+        await emit_event(
             db,
-            organization_id=int(organization_id),
-            event_type="order_created",
-            source="intent_router",
-            entity_type="order",
-            entity_id=order.id,
-            idempotency_key=f"order_created:{order.id}",
-            payload=trace_payload(
-                trace_id=trace_id,
-                conversation_id=conversation_id,
-                extra={"order_id": order.id, "status": order.status, "total_price": float(order.total_price or 0)},
+            BusinessEvent(
+                id=f"order.created:{order.id}",
+                org_id=int(organization_id),
+                type="order.created",
+                actor="ai",
+                entity_type="order",
+                entity_id=order.id,
+                payload=trace_payload(
+                    trace_id=trace_id,
+                    conversation_id=conversation_id,
+                    extra={"order_id": order.id, "status": order.status, "total_price": float(order.total_price or 0)},
+                ),
             ),
         )
 
@@ -941,6 +943,24 @@ async def _handle_booking(
     )
     db.add(booking)
     await db.flush()
+    await emit_event(
+        db,
+        BusinessEvent(
+            id=f"booking.created:{booking.id}",
+            org_id=organization_id,
+            type="booking.created",
+            actor="ai",
+            entity_type="booking",
+            entity_id=booking.id,
+            payload={
+                "booking_id": booking.id,
+                "date": details.date,
+                "time": details.time,
+                "guests": details.guests,
+                "hall": hall,
+            },
+        ),
+    )
 
     weekday_names = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
     weekday = weekday_names[booking_date.weekday()]
@@ -1019,19 +1039,21 @@ async def confirm_order(
         order.status = OrderStatus.CONFIRMED
         await db.flush()
         if order.organization_id:
-            await emit_system_event(
+            await emit_event(
                 db,
-                organization_id=int(order.organization_id),
-                event_type="order_confirmed",
-                source=source,
-                entity_type="order",
-                entity_id=order.id,
-                idempotency_key=f"order_confirmed:{order.id}",
-                payload={
-                    "order_id": order.id,
-                    "total_price": float(order.total_price or 0),
-                    **trace_payload(trace_id=trace_id, conversation_id=conversation_id),
-                },
+                BusinessEvent(
+                    id=f"order.confirmed:{order.id}",
+                    org_id=int(order.organization_id),
+                    type="order.confirmed",
+                    actor=source,
+                    entity_type="order",
+                    entity_id=order.id,
+                    payload={
+                        "order_id": order.id,
+                        "total_price": float(order.total_price or 0),
+                        **trace_payload(trace_id=trace_id, conversation_id=conversation_id),
+                    },
+                ),
             )
         await sync_recommendation_events_for_order(db, order)
         logger.info("Заказ #%d подтверждён клиентом", order_id)
@@ -1063,18 +1085,20 @@ async def confirm_booking(
     booking.status = "confirmed"
     await db.flush()
     if booking.organization_id:
-        await emit_system_event(
+        await emit_event(
             db,
-            organization_id=int(booking.organization_id),
-            event_type="booking_confirmed",
-            source=source,
-            entity_type="booking",
-            entity_id=booking.id,
-            idempotency_key=f"booking_confirmed:{booking.id}",
-            payload={
-                "booking_id": booking.id,
-                **trace_payload(trace_id=trace_id, conversation_id=conversation_id),
-            },
+            BusinessEvent(
+                id=f"booking.confirmed:{booking.id}",
+                org_id=int(booking.organization_id),
+                type="booking.confirmed",
+                actor=source,
+                entity_type="booking",
+                entity_id=booking.id,
+                payload={
+                    "booking_id": booking.id,
+                    **trace_payload(trace_id=trace_id, conversation_id=conversation_id),
+                },
+            ),
         )
     logger.info("Бронь #%d подтверждена клиентом", booking_id)
     return booking, None
@@ -1095,18 +1119,20 @@ async def cancel_booking(
         booking.status = "cancelled"
         await db.flush()
         if booking.organization_id:
-            await emit_system_event(
+            await emit_event(
                 db,
-                organization_id=int(booking.organization_id),
-                event_type="booking_cancelled",
-                source=source,
-                entity_type="booking",
-                entity_id=booking.id,
-                idempotency_key=f"booking_cancelled:{booking.id}",
-                payload={
-                    "booking_id": booking.id,
-                    **trace_payload(trace_id=trace_id, conversation_id=conversation_id),
-                },
+                BusinessEvent(
+                    id=f"booking.cancelled:{booking.id}",
+                    org_id=int(booking.organization_id),
+                    type="booking.cancelled",
+                    actor=source,
+                    entity_type="booking",
+                    entity_id=booking.id,
+                    payload={
+                        "booking_id": booking.id,
+                        **trace_payload(trace_id=trace_id, conversation_id=conversation_id),
+                    },
+                ),
             )
         logger.info("Бронь #%d отменена клиентом", booking_id)
     return booking
@@ -1179,19 +1205,21 @@ async def cancel_order(
             )
         await db.flush()
         if order.organization_id:
-            await emit_system_event(
+            await emit_event(
                 db,
-                organization_id=int(order.organization_id),
-                event_type="order_cancelled",
-                source=source,
-                entity_type="order",
-                entity_id=order.id,
-                idempotency_key=f"order_cancelled:{order.id}",
-                payload={
-                    "order_id": order.id,
-                    "total_price": float(order.total_price or 0),
-                    **trace_payload(trace_id=trace_id, conversation_id=conversation_id),
-                },
+                BusinessEvent(
+                    id=f"order.cancelled:{order.id}",
+                    org_id=int(order.organization_id),
+                    type="order.cancelled",
+                    actor=source,
+                    entity_type="order",
+                    entity_id=order.id,
+                    payload={
+                        "order_id": order.id,
+                        "total_price": float(order.total_price or 0),
+                        **trace_payload(trace_id=trace_id, conversation_id=conversation_id),
+                    },
+                ),
             )
         logger.info("Заказ #%d отменён клиентом", order_id)
     return order

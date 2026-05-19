@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.passwords import hash_password
 from app.db.models import Organization, OrganizationPaymentConfig, StaffRole, StaffUser
 from app.db.session import get_db
+from app.services.tenant_scope import tenant_org_ids_for_staff_home
 from app.services.time_context import check_operational_status, parse_schedule_json
 from app.services.timezones import normalize_timezone_name
 from .deps import admin_org_from_session, require_admin_session_active, require_staff_admin
@@ -87,8 +88,12 @@ class ForceCloseBody(BaseModel):
 
 class StaffCreateBody(BaseModel):
     email: str = Field(..., min_length=3, max_length=255)
-    role: str = Field(default=StaffRole.OPERATOR.value, description="admin | operator")
+    role: str = Field(default=StaffRole.OPERATOR.value, description="admin | manager | operator")
     password: str = Field(default="", max_length=128, description="Опционально: если пусто — сгенерируем временный")
+    assigned_org_ids: list[int] | None = Field(
+        default=None,
+        description="Филиалы для manager (подмножество сети); без списка — только домашний",
+    )
 
 
 _SUPPORTED_PAYMENT_PROVIDERS = {"freedom_pay", "kaspi", "cloudpayments"}
@@ -320,12 +325,15 @@ async def list_staff(
     ).scalars().all()
     out: list[dict] = []
     for u in rows:
+        meta = u.meta_json if isinstance(u.meta_json, dict) else {}
+        assigned = meta.get("assigned_org_ids") if isinstance(meta.get("assigned_org_ids"), list) else None
         out.append(
             {
                 "id": int(u.id),
                 "email": u.email,
                 "role": u.role,
                 "is_active": bool(u.is_active),
+                "assigned_org_ids": assigned,
                 "created_at": u.created_at.isoformat() if u.created_at else None,
             }
         )
@@ -344,7 +352,11 @@ async def create_staff(
     if not email or "@" not in email:
         raise HTTPException(status_code=400, detail="Укажите корректный email")
     role = (body.role or "").strip().lower() or StaffRole.OPERATOR.value
-    if role not in (StaffRole.ADMIN.value, StaffRole.OPERATOR.value):
+    if role not in (
+        StaffRole.ADMIN.value,
+        StaffRole.MANAGER.value,
+        StaffRole.OPERATOR.value,
+    ):
         raise HTTPException(status_code=400, detail="Некорректная роль")
     pwd = (body.password or "").strip()
     if not pwd:
@@ -357,12 +369,24 @@ async def create_staff(
     if exists_id is not None:
         raise HTTPException(status_code=409, detail="Пользователь с таким email уже существует")
 
+    meta_json: dict | None = None
+    if role == StaffRole.MANAGER.value and body.assigned_org_ids is not None:
+        allowed = await tenant_org_ids_for_staff_home(db, org_id)
+        assigned = [int(x) for x in body.assigned_org_ids if int(x) in allowed]
+        if not assigned:
+            raise HTTPException(
+                status_code=400,
+                detail="assigned_org_ids должны быть активными филиалами вашей сети",
+            )
+        meta_json = {"assigned_org_ids": assigned}
+
     u = StaffUser(
         organization_id=org_id,
         email=email,
         password_hash=hash_password(pwd),
         role=role,
         is_active=True,
+        meta_json=meta_json,
     )
     db.add(u)
     try:

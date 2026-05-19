@@ -701,6 +701,8 @@ function adminMixinState() {
             available_organizations: [],
             tenant: null,
             branding: null,
+            is_network: false,
+            network_orgs: [],
         },
         /** Черновик E2.2.F — синхронизируется с `userData.branding` из `/auth/me`; сохранение через PATCH когда есть E2.2.B. */
         brandingDraft: { brand_name: '', brand_color_hex: '#2563eb' },
@@ -3265,6 +3267,8 @@ function adminMixinAuthKnowledge() {
                 tenant: root.tenant || null,
                 branding: root.branding || null,
                 ws_token: root.ws_token || '',
+                is_network: !!root.is_network,
+                network_orgs: Array.isArray(root.network_orgs) ? root.network_orgs : [],
             };
         },
 
@@ -3300,6 +3304,49 @@ function adminMixinAuthKnowledge() {
                 adminLogger.error('[admin] selectOrganization', e);
             } finally {
                 this.aiValueLoading = false;
+                this.orgSwitchChromeDimmed = false;
+            }
+        },
+
+        /** Phase 1 OS: переключиться в контекст конкретного филиала сети.
+         *
+         * 1. Проверяет принадлежность филиала к сети (network/switch — guard).
+         * 2. Явно закрывает WebSocket ДО переключения — иначе оператор может
+         *    получить real-time события чужого заведения в окне между переключением
+         *    сессии и переподключением WS.
+         * 3. selectOrganization получает новый ws_token и пересоздаёт WS.
+         */
+        async switchNetworkOrg(orgId) {
+            if (!orgId || !this.userData?.is_network) return;
+            if (this.orgProfile && orgId === this.orgProfile.id) return;
+            this.orgSwitchChromeDimmed = true;
+
+            // Явно разрываем WS до переключения — защита от cross-org событий
+            try {
+                if (this.ws) {
+                    this.ws.onopen = null;
+                    this.ws.onclose = null;
+                    this.ws.onerror = null;
+                    this.ws.onmessage = null;
+                    this.ws.close();
+                }
+                this._wsTokenInUse = null; // сбрасываем guard — force reconnect
+            } catch (_e) { /* noop */ }
+
+            try {
+                // Guard: проверяем принадлежность org к сети tenant-а
+                const { ok, status, data } = await this.apiJsonResponse(`/api/admin/network/switch/${orgId}`, {
+                    method: 'POST',
+                });
+                if (!ok) {
+                    void this.showUiAlert(`Не удалось переключить филиал: ${data?.detail || status}`, 'Ошибка');
+                    return;
+                }
+                // selectOrganization: получает новый ws_token → connectWebSocket()
+                await this.selectOrganization(orgId);
+            } catch (e) {
+                adminLogger.error('[admin] switchNetworkOrg', e);
+            } finally {
                 this.orgSwitchChromeDimmed = false;
             }
         },

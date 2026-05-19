@@ -11,7 +11,7 @@ from typing import Any
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import FailedTask, Order, Organization, StaffUser, Tenant, User
+from app.db.models import FailedTask, Order, Organization, StaffRole, StaffUser, Tenant, User
 
 
 def phones_subquery_for_org(org_id: int):
@@ -46,6 +46,64 @@ def branding_empty_payload() -> dict[str, Any | None]:
 
 # Сохраняем старое имя для обратной совместимости импорта (тесты, чужие модули).
 branding_placeholder_e21 = branding_empty_payload
+
+
+def staff_role_normalized(staff: StaffUser) -> str:
+    return (staff.role or StaffRole.ADMIN.value).strip().lower()
+
+
+def staff_assigned_org_ids(staff: StaffUser) -> list[int] | None:
+    """Список филиалов для manager из meta_json. None — не фильтровать по assigned."""
+    meta = getattr(staff, "meta_json", None)
+    if not isinstance(meta, dict):
+        return None
+    raw = meta.get("assigned_org_ids")
+    if raw is None:
+        return None
+    if not isinstance(raw, list):
+        return None
+    out: list[int] = []
+    for x in raw:
+        try:
+            oid = int(x)
+        except (TypeError, ValueError):
+            continue
+        if oid > 0:
+            out.append(oid)
+    return out
+
+
+async def tenant_org_ids_for_staff_home(db: AsyncSession, home_org_id: int) -> set[int]:
+    """ID филиалов сети для домашнего organization_id staff (или только home)."""
+    home = await db.get(Organization, int(home_org_id))
+    if home is None:
+        return set()
+    if home.tenant_id is None:
+        return {int(home.id)}
+    orgs = await _tenant_org_list(db, int(home.tenant_id))
+    return {int(o.id) for o in orgs}
+
+
+async def _tenant_org_list(db: AsyncSession, tenant_id: int) -> list[Organization]:
+    res = await db.execute(
+        select(Organization)
+        .where(
+            Organization.tenant_id == int(tenant_id),
+            Organization.is_active.is_(True),
+        )
+        .order_by(Organization.id.asc()),
+    )
+    return list(res.scalars().all())
+
+
+def _filter_orgs_by_assigned(
+    orgs: list[Organization],
+    assigned_ids: list[int] | None,
+) -> list[Organization]:
+    if assigned_ids is None:
+        return orgs
+    allowed = {int(x) for x in assigned_ids}
+    return [o for o in orgs if int(o.id) in allowed]
 
 
 async def resolve_active_tenant_id(
@@ -121,31 +179,48 @@ async def available_organizations_for_admin_session(
             return []
         return [{"id": int(row.id), "name": str(row.name)}]
 
-    tid = staff.tenant_owner_id
-    if tid is None:
-        row = await db.get(Organization, int(staff.organization_id))
+    role = staff_role_normalized(staff)
+    home_id = int(staff.organization_id)
+
+    if role == StaffRole.OPERATOR.value:
+        row = await db.get(Organization, home_id)
         if row is None:
             return []
         return [{"id": int(row.id), "name": str(row.name)}]
 
-    res = await db.execute(
-        select(Organization)
-        .where(
-            Organization.tenant_id == int(tid),
-            Organization.is_active.is_(True),
-        )
-        .order_by(Organization.id.asc()),
-    )
-    orgs = list(res.scalars().all())
-    home_id = int(staff.organization_id)
-    seen = {int(o.id) for o in orgs}
-    if home_id not in seen:
-        home = await db.get(Organization, home_id)
-        if home is not None and home.tenant_id is not None and int(home.tenant_id) == int(tid):
-            orgs.append(home)
-            orgs.sort(key=lambda o: int(o.id))
+    tid = staff.tenant_owner_id
+    if tid is not None:
+        orgs = await _tenant_org_list(db, int(tid))
+        seen = {int(o.id) for o in orgs}
+        if home_id not in seen:
+            home = await db.get(Organization, home_id)
+            if home is not None and home.tenant_id is not None and int(home.tenant_id) == int(tid):
+                orgs.append(home)
+                orgs.sort(key=lambda o: int(o.id))
+        if role == StaffRole.MANAGER.value:
+            assigned = staff_assigned_org_ids(staff)
+            if assigned is not None:
+                orgs = _filter_orgs_by_assigned(orgs, assigned)
+            else:
+                orgs = [o for o in orgs if int(o.id) == home_id]
+        return [{"id": int(o.id), "name": str(o.name)} for o in orgs]
 
-    return [{"id": int(o.id), "name": str(o.name)} for o in orgs]
+    home = await db.get(Organization, home_id)
+    if home is None:
+        return []
+
+    if role == StaffRole.MANAGER.value:
+        assigned = staff_assigned_org_ids(staff)
+        if assigned is not None and home.tenant_id is not None:
+            tenant_orgs = await _tenant_org_list(db, int(home.tenant_id))
+            orgs = _filter_orgs_by_assigned(tenant_orgs, assigned)
+        elif assigned is not None:
+            orgs = [home] if home_id in {int(x) for x in assigned} else []
+        else:
+            orgs = [home]
+        return [{"id": int(o.id), "name": str(o.name)} for o in orgs]
+
+    return [{"id": int(home.id), "name": str(home.name)}]
 
 
 async def resolve_tenant_summary_for_session(

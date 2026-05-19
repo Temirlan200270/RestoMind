@@ -41,7 +41,9 @@ from app.services.integration_config import (
 from app.services.owner_dashboard import (
     build_recommendation_target,
     build_week_forecast,
+    event_revenue_history_usable,
     fetch_daily_revenue_history,
+    fetch_daily_revenue_history_from_events,
 )
 from app.services.owner_roi import aggregate_org_window, build_achievements_week, build_today_narrative_ru
 from app.services.readiness import build_admin_readiness_payload
@@ -969,11 +971,22 @@ async def dashboard_stats(
     if today_orders > 0:
         bot_handled_pct = round(100 * bot_orders_today / today_orders, 1)
 
-    revenue_history = await fetch_daily_revenue_history(db, org_id, days=28, now_utc=now_utc)
+    # Пробуем event-driven источник первым; fallback на SQL только если данных мало
+    revenue_history_events = await fetch_daily_revenue_history_from_events(
+        db, org_id, days=28, now_utc=now_utc,
+    )
+    if event_revenue_history_usable(revenue_history_events):
+        revenue_for_forecast = revenue_history_events
+        forecast_source = "event_driven"
+    else:
+        revenue_for_forecast = await fetch_daily_revenue_history(db, org_id, days=28, now_utc=now_utc)
+        forecast_source = "sql_orders"
     week_forecast = build_week_forecast(
-        revenue_history,
+        revenue_for_forecast,
         today=_dt_as_utc(now_utc).date(),
     ) or _linear_week_forecast(daily_series, today=_dt_as_utc(now_utc).date())
+    if week_forecast is not None:
+        week_forecast = {**week_forecast, "source": forecast_source}
 
     rec_rows = (
         await db.execute(
@@ -1036,6 +1049,16 @@ async def dashboard_stats(
             for r in rec_rows
         ],
     }
+
+    # Phase 2.3 OS: обогащение event-driven агрегатами (параллельно с SQL-источниками)
+    try:
+        from app.services.analytics_consumer import get_today_event_summary
+        event_summary = await get_today_event_summary(db, org_id)
+        result["event_driven_stats"] = event_summary
+    except Exception:
+        logger.exception("event_driven_stats fetch failed for org=%d", org_id)
+        result["event_driven_stats"] = None
+
     return result
 
 
