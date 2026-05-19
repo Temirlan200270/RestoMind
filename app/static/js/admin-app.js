@@ -7421,8 +7421,9 @@ function adminMixinDataChartsSettings() {
             this.applyPricingBulkLoading = true;
             try {
                 const { ok, data } = await this.apiJsonResponse(
-                    '/api/admin/intelligence/apply-pricing/bulk',
-                    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
+                    '/api/admin/intelligence/apply-pricing-signal',
+                    { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ price_adj_pct: ap.price_adj_pct }) },
                 );
                 if (!ok) {
                     void this.showUiAlert((data && data.detail) || 'Не удалось применить цены', 'Автопилот');

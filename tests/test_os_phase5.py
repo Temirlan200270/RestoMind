@@ -236,9 +236,9 @@ class TestOsAutopilotUI:
         assert "/api/admin/intelligence/os-dashboard" in js
 
     def test_event_bus_badge_in_ui(self):
-        """Бейдж 'Event bus' присутствует в OS Autopilot секции."""
+        """Индикатор event-driven источника в OS Autopilot (язык оператора, не dev-жаргон)."""
         import pathlib
         html = pathlib.Path(
             "app/templates/screens/_tab_ai_center.html"
         ).read_text(encoding="utf-8")
-        assert "event bus" in html.lower() or "Event bus" in html
+        assert "Данные ОС" in html or "по событиям ОС" in html

@@ -99,6 +99,58 @@
                             </div>
                         </div>
 
+                        <!-- Risk assessment: cancellation + overload -->
+                        <template x-if="osDashboardData.cancellation_risk || osDashboardData.overload_risk">
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <template x-if="osDashboardData.cancellation_risk">
+                                    <div class="ds-card p-4 border-l-4"
+                                        :class="{
+                                            'border-red-400':    osDashboardData.cancellation_risk.risk_level === 'high',
+                                            'border-amber-400':  osDashboardData.cancellation_risk.risk_level === 'medium',
+                                            'border-emerald-300':osDashboardData.cancellation_risk.risk_level === 'low'
+                                        }">
+                                        <div class="text-xs font-semibold text-slate-700 mb-1">Риск отмен</div>
+                                        <div class="text-lg font-black tabular-nums"
+                                            :class="{
+                                                'text-red-600':    osDashboardData.cancellation_risk.risk_level === 'high',
+                                                'text-amber-600':  osDashboardData.cancellation_risk.risk_level === 'medium',
+                                                'text-emerald-700':osDashboardData.cancellation_risk.risk_level === 'low'
+                                            }"
+                                            x-text="(osDashboardData.cancellation_risk.cancellation_rate_pct ?? 0) + '%'"></div>
+                                        <div class="text-xs text-slate-500 mt-0.5"
+                                            x-text="osDashboardData.cancellation_risk.description"></div>
+                                        <div class="text-[10px] text-slate-400 mt-1">
+                                            Норма: <span x-text="osDashboardData.cancellation_risk.historical_rate_pct ?? '—'"></span>%
+                                        </div>
+                                    </div>
+                                </template>
+                                <template x-if="osDashboardData.overload_risk">
+                                    <div class="ds-card p-4 border-l-4"
+                                        :class="{
+                                            'border-red-400':    osDashboardData.overload_risk.risk_level === 'high',
+                                            'border-amber-400':  osDashboardData.overload_risk.risk_level === 'medium',
+                                            'border-sky-300':    osDashboardData.overload_risk.risk_level === 'low',
+                                            'border-slate-200':  osDashboardData.overload_risk.risk_level === 'unknown'
+                                        }">
+                                        <div class="text-xs font-semibold text-slate-700 mb-1">Нагрузка на кухню</div>
+                                        <div class="text-lg font-black tabular-nums"
+                                            :class="{
+                                                'text-red-600':   osDashboardData.overload_risk.risk_level === 'high',
+                                                'text-amber-600': osDashboardData.overload_risk.risk_level === 'medium',
+                                                'text-sky-700':   osDashboardData.overload_risk.risk_level === 'low',
+                                                'text-slate-500': osDashboardData.overload_risk.risk_level === 'unknown'
+                                            }"
+                                            x-text="osDashboardData.overload_risk.current_pace ? osDashboardData.overload_risk.current_pace + ' зак/день' : '—'"></div>
+                                        <div class="text-xs text-slate-500 mt-0.5"
+                                            x-text="osDashboardData.overload_risk.description"></div>
+                                        <div class="text-[10px] text-slate-400 mt-1" x-show="osDashboardData.overload_risk.historical_avg">
+                                            Норма: <span x-text="osDashboardData.overload_risk.historical_avg"></span> зак/день
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+                        </template>
+
                         <!-- Incidents -->
                         <template x-if="(osDashboardData.incidents || []).length > 0">
                             <div class="ds-card p-4">
@@ -108,7 +160,7 @@
                                         <div class="flex items-center gap-2 text-sm min-h-[44px]">
                                             <span class="text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0"
                                                 :class="inc.severity === 'critical' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'"
-                                                x-text="inc.severity"></span>
+                                                x-text="{critical:'Критично',warning:'Внимание',info:'Инфо'}[inc.severity] || inc.severity"></span>
                                             <span class="text-slate-700" x-text="inc.title"></span>
                                         </div>
                                     </template>

@@ -300,6 +300,68 @@ async def patch_recommendation(
 # ─── Phase 5 OS: Apply Autopilot Pricing ────────────────────────────────────
 
 
+class ApplyPricingSignalBody(BaseModel):
+    price_adj_pct: int = Field(..., ge=-50, le=50, description="Изменение цены в % (отрицательное = снижение)")
+
+
+@router.post("/apply-pricing-signal")
+async def apply_pricing_signal(
+    body: ApplyPricingSignalBody,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Применяет ценовой сигнал напрямую: изменяет цены активных позиций меню.
+
+    Используется когда рекомендация ещё не создана или владелец применяет сигнал вручную.
+    Автоматически создаёт запись BusinessRecommendation с типом autopilot_pricing и acted_on.
+    """
+    from app.db.models import BusinessRecommendation as BRec
+    from app.services.system_events import BusinessEvent, emit_event
+
+    org_id = admin_org_from_session(request)
+    adj_pct = body.price_adj_pct
+    if adj_pct == 0:
+        raise HTTPException(status_code=400, detail="price_adj_pct не может быть 0")
+
+    multiplier = 1.0 + adj_pct / 100.0
+    items = (await db.execute(
+        select(MenuItem).where(
+            MenuItem.organization_id == org_id,
+            MenuItem.is_available.is_(True),
+            MenuItem.price > 0,
+        )
+    )).scalars().all()
+
+    snapshot: list[dict] = []
+    for item in items:
+        old_price = float(item.price)
+        new_price = max(1.0, round(old_price * multiplier))
+        snapshot.append({"id": item.id, "name": item.name, "old": old_price, "new": new_price})
+        item.price = new_price
+
+    direction = "↑" if adj_pct > 0 else "↓"
+    rec = BRec(
+        organization_id=org_id,
+        recommendation_type="autopilot_pricing",
+        title=f"Ценовой сигнал применён: {direction}{abs(adj_pct)}%",
+        body=f"Применено вручную к {len(items)} активным позициям меню.",
+        confidence_pct=70,
+        status="acted_on",
+        data_json={"price_adj_pct": adj_pct, "items_updated": len(items), "auto_generated": False},
+    )
+    db.add(rec)
+
+    await emit_event(db, BusinessEvent(
+        org_id=org_id,
+        type="system.pricing_adjusted",
+        actor="system",
+        payload={"price_adj_pct": adj_pct, "items_updated": len(items), "snapshot_sample": snapshot[:5]},
+    ))
+
+    await db.commit()
+    return {"ok": True, "price_adj_pct": adj_pct, "items_updated": len(items), "preview": snapshot[:10]}
+
+
 @router.post("/apply-pricing/{rec_id}")
 async def apply_autopilot_pricing(
     rec_id: int,
