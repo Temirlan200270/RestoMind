@@ -283,6 +283,12 @@ high ≥ 1.5, medium ≥ 1.2, low < 1.2
 
 ## Audit Trail (Phase 5 OS)
 
+Status update: Phase 6 Visibility backend is now implemented for audit push and daily digest.
+
+- New `AuditLog` entries emit `os.audit` with `organization_id`, so admin websocket filtering delivers the event to the correct org.
+- Daily OS Digest preview is available at `GET /api/admin/intelligence/daily-os-digest/preview`.
+- Scheduled Telegram delivery runs through `daily_os_digest_scheduled_tick` in the ARQ worker during the 09:00 org-timezone window.
+
 [`app/services/audit_consumer.py`](../app/services/audit_consumer.py) + `AuditLog` table.
 
 Вызывается из `emit_event()` для **всех** событий (кроме высокочастотных технических).

@@ -1,28 +1,34 @@
-# Voice AI Pilot — spike (Sprint C)
+# Voice AI Pilot
 
-## Цель
+## Goal
 
-Оценить Twilio Media Streams ↔ OpenAI Realtime для приёма заказов голосом с reuse `fetch_ai_read_context` / `save_ai_context_snapshot`.
+Accept restaurant calls through Twilio Media Streams and reuse the existing RestoMind AI pipeline: context read, decision engine, snapshot, audit, and customer response.
 
-## Архитектура (черновик)
+## Architecture
 
-1. **Вход:** Twilio `<Connect><Stream>` → WebSocket endpoint `app/api/voice.py`.
-2. **STT/LLM:** OpenAI Realtime API (μ-law 8 kHz) или fallback: существующий `transcribe_voice` + `call_openai`.
-3. **Контекст:** перед ответом — `fetch_ai_read_context(phone, org_id)`; после turn — `save_ai_context_snapshot` + `emit_event(ai.dialog.started)`.
-4. **Исход:** `send_customer_text` / Twilio `<Say>` только для подтверждений; заказ — тот же `intent_router` pipeline.
+1. Incoming call: `POST /api/whatsapp/voice/incoming` returns TwiML with `<Connect><Stream>`.
+2. Audio stream: `WS /api/whatsapp/voice/stream` receives Twilio mu-law 8 kHz chunks.
+3. MVP processing: mu-law -> WAV -> existing `transcribe_voice` -> existing `process_message`.
+4. Future Realtime mode: `Organization.meta_json.voice_ai_mode = realtime` enables the OpenAI Realtime connector path once provider credentials and staging call tests are complete.
 
 ## Guardrails
 
-- Отдельный feature flag `org.meta_json.voice_ai_enabled` (default off).
-- Rate limit по `phone` + org.
-- LLM вне DB session (см. `test_bot.py` pattern).
+- Per-org feature flag: `Organization.meta_json.voice_ai_enabled`, default `false`.
+- Admin status endpoint: `GET /api/admin/intelligence/voice/status`.
+- Admin config endpoint: `POST /api/admin/intelligence/voice/config`.
+- Operational audit: `voice_call_logs` records call lifecycle and transcripts.
+- The LLM/STT path runs outside the request DB transaction.
 
-## DoD spike
+## Implemented MVP
 
-- [ ] Документированный sequence diagram
-- [ ] Прототип WS handler + 1 тестовый звонок в staging
-- [ ] Оценка latency и стоимости мин/звонок
+- Twilio incoming call endpoint.
+- Twilio Media Streams websocket endpoint.
+- Per-org Voice AI enable/disable.
+- Voice readiness/status API.
+- Voice call logging.
 
-## Статус
+## Remaining
 
-Spike — не в production. Реализация после merge Sprint A+B.
+- Native OpenAI Realtime connector behind `voice_ai_mode = realtime`.
+- Staging phone-number test with real Twilio media stream.
+- Latency and cost report per minute/call.

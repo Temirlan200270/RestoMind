@@ -11,6 +11,7 @@ from typing import Any
 
 from app.core.config import settings
 from app.services.billing_rollup import billing_usage_daily_scheduled_tick
+from app.services.daily_os_digest import daily_os_digest_scheduled_tick
 from app.services.night_preorders import morning_preorders_tick
 from app.services.owner_weekly_digest import owner_digest_scheduled_tick
 from app.services.payment_notify import run_payment_received_customer_notify
@@ -190,12 +191,14 @@ class WorkerSettings:
         iiko_stoplist_sync,
         iiko_menu_sync,
         ai_incidents_hourly_tick,
+        daily_os_digest_scheduled_tick,
     ]
     # Digest: 4× в час; биллинг: суточный rollup; ночные предзаказы: каждые 5 мин.
     # Запланированные рассылки: каждые 5 минут. AI-инциденты: каждый час в :05.
     cron_jobs = tuple(
         [
             cron(owner_digest_scheduled_tick, minute={0, 15, 30, 45}),
+            cron(daily_os_digest_scheduled_tick, minute={0, 15, 30, 45}),
             cron(billing_usage_daily_scheduled_tick, hour=0, minute=12),
             cron(morning_preorders_tick, minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55}),
             cron(scheduled_blasts_tick, minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55}),

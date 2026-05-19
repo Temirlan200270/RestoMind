@@ -1959,6 +1959,22 @@ async def _flush_twilio_voice_chunk(phone: str, call_sid: str, mulaw: bytes) -> 
     text = (text or "").strip()
     if not text:
         return
+    try:
+        from app.db.session import async_session_factory
+        from app.services.voice_ai import record_voice_call
+
+        async with async_session_factory() as db:
+            await record_voice_call(
+                db,
+                org_id=int(settings.default_organization_id),
+                call_sid=call_sid,
+                phone=phone,
+                status="transcribed",
+                transcript=text,
+            )
+            await db.commit()
+    except Exception:
+        logger.debug("voice call transcript log skipped callSid=%s", call_sid)
     mid = f"twilio:{call_sid}:{uuid.uuid4().hex}"
     tok = twilio_call_context(call_sid)
     try:
@@ -1991,6 +2007,35 @@ async def twilio_voice_incoming(request: Request) -> Response:
     from_phone = (params.get("From") or "").strip()
     if call_sid and from_phone:
         await _store_twilio_caller(call_sid, from_phone)
+
+    try:
+        from app.db.models import Organization
+        from app.db.session import async_session_factory
+        from app.services.voice_ai import org_voice_enabled, record_voice_call
+
+        async with async_session_factory() as db:
+            org = await db.get(Organization, int(settings.default_organization_id))
+            if not org_voice_enabled(org):
+                return Response(
+                    content="""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say language="ru-RU">Голосовой AI сейчас выключен. Напишите нам в WhatsApp.</Say>
+    <Hangup/>
+</Response>""".strip(),
+                    media_type="application/xml",
+                )
+            if call_sid:
+                await record_voice_call(
+                    db,
+                    org_id=int(settings.default_organization_id),
+                    call_sid=call_sid,
+                    phone=from_phone,
+                    status="started",
+                )
+                await db.commit()
+    except Exception:
+        logger.exception("Voice AI feature flag check failed")
+        return Response(content="Voice AI unavailable", status_code=503)
 
     wss = _twilio_stream_wss_url()
     if not wss:

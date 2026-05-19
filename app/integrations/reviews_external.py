@@ -18,7 +18,14 @@ def detect_review_source(url: str) -> str:
     return "external"
 
 
-def import_review_from_url(url: str, *, note: str | None = None) -> dict[str, Any]:
+def import_review_from_url(
+    url: str,
+    *,
+    note: str | None = None,
+    author: str | None = None,
+    rating: int | None = None,
+    text: str | None = None,
+) -> dict[str, Any]:
     """MVP: сохраняем метаданные URL; полный парсинг API — в следующей итерации."""
     url_s = (url or "").strip()
     if not url_s or not re.match(r"^https?://", url_s, re.I):
@@ -29,9 +36,9 @@ def import_review_from_url(url: str, *, note: str | None = None) -> dict[str, An
         "id": rid,
         "source": source,
         "url": url_s,
-        "author": "Гость",
-        "rating": None,
-        "text": note or f"Импортировано из {source}",
+        "author": (author or "Гость").strip(),
+        "rating": int(rating) if rating is not None else None,
+        "text": (text or note or f"Импортировано из {source}").strip(),
         "imported_at": datetime.now(tz=timezone.utc).isoformat(),
         "reply_draft": None,
     }

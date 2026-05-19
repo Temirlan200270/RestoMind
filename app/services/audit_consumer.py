@@ -64,6 +64,7 @@ def _schedule_os_audit_ws(event: "BusinessEvent", entry: object) -> None:
             publish_event(
                 "os.audit",
                 {
+                    "organization_id": int(event.org_id),
                     "org_id": int(event.org_id),
                     "actor": str(event.actor),
                     "action": str(event.type),
@@ -85,13 +86,23 @@ def _audit_feed_title(event: "BusinessEvent") -> str:
         "order.cancelled": "ОС: заказ отменён",
         "booking.created": "ОС: бронь создана",
         "booking.confirmed": "ОС: бронь подтверждена",
+        "booking.cancelled": "ОС: бронь отменена",
         "payment.completed": "ОС: оплата получена",
         "payment.failed": "ОС: ошибка оплаты",
+        "payment.expired": "ОС: оплата истекла",
         "ai.escalated": "ОС: эскалация к оператору",
+        "ai.dialog.started": "ОС: новый диалог с гостем",
+        "operator.took_over": "ОС: оператор подключился",
+        "system.pricing_adjusted": "ОС: цены скорректированы",
+        "system.healing_wa_sent": "ОС: напоминание об оплате в WhatsApp",
+        "system.sla_violated": "ОС: нарушен SLA",
         "integration.whatsapp.failed": "ОС: сбой доставки WhatsApp",
         "integration.iiko.failed": "ОС: ошибка iiko",
     }
-    return mapping.get(event.type, f"ОС: {event.type}")
+    if event.type in mapping:
+        return mapping[event.type]
+    human = (event.type or "").replace(".", " · ").replace("_", " ")
+    return f"ОС: {human}"
 
 
 async def get_audit_log(

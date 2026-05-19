@@ -1,29 +1,42 @@
-# SupplyMind & StaffMind — epics (Sprint C)
+# SupplyMind & StaffMind epics
 
-## SupplyMind (Backend lead)
+## SupplyMind
 
-**Scope:** iiko Office inventory read → draft накладной.
+Scope: iiko Office inventory read -> draft purchase order.
 
-| Этап | Deliverable |
+| Step | Deliverable |
 |------|-------------|
-| 1 | Read-only остатки по `organization_id` |
-| 2 | `forecast_ingredient_runout` на реальных SKU (замена `stock_alerts` stub) |
-| 3 | Draft накладной в UI |
+| 1 | Read-only stock snapshots by `organization_id` |
+| 2 | `forecast_ingredient_runout` on real SKU data |
+| 3 | Draft purchase order API |
 
-**Зависимости:** Location RBAC, event bus `DailyOrgStats`.
+Dependencies: Location RBAC, event bus `DailyOrgStats`.
 
-**Текущий мостик:** `GET /os-dashboard` → `stock_alerts[]` из `build_stock_alerts_stub()`.
+Implemented bridge:
 
-## StaffMind (Product + Backend)
+- `GET /api/admin/intelligence/os-dashboard` reads `inventory_stock_snapshots` first and returns real `stock_alerts[]`.
+- If no inventory rows exist, OS dashboard falls back to `build_stock_alerts_stub()` as the old proxy signal.
+- `POST /api/admin/intelligence/inventory/snapshots/bulk` upserts the latest stock read model per SKU.
+- `GET /api/admin/intelligence/inventory/stock-alerts` exposes the stock alert feed directly.
+- `POST /api/admin/intelligence/supplymind/drafts` creates a draft purchase order from real stock alerts.
+- `GET /api/admin/intelligence/supplymind/drafts` lists generated drafts.
 
-**Scope:** WhatsApp onboarding flow для персонала (смены, задачи).
+## StaffMind
 
-| Этап | Deliverable |
+Scope: WhatsApp onboarding flow for staff shifts and tasks.
+
+| Step | Deliverable |
 |------|-------------|
-| 1 | `StaffUser.meta_json` роли + `assigned_location_ids` |
-| 2 | Отдельный WA номер / webhook route для staff |
-| 3 | Мини-дашборд смены в админке |
+| 1 | `StaffUser.meta_json` role metadata + `assigned_location_ids` |
+| 2 | Staff onboarding sessions over WhatsApp-compatible API |
+| 3 | Knowledge-base Q&A for new staff |
 
-## Статус
+Implemented bridge:
 
-Epic backlog — старт после закрытия Sprint A+B в `docs/ROADMAP.md`.
+- `POST /api/admin/intelligence/staffmind/onboarding` starts a staff onboarding session.
+- `POST /api/admin/intelligence/staffmind/onboarding/{session_id}/message` answers from `KnowledgeItem`.
+- `GET /api/admin/intelligence/staffmind/onboarding` lists active/recent sessions.
+
+## Status
+
+SupplyMind and StaffMind now have backend MVP APIs. Full iiko Office stock sync and a dedicated admin UI remain backlog items.

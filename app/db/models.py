@@ -1188,6 +1188,160 @@ class OperationalInsight(Base):
         return f"<OperationalInsight id={self.id} org={self.organization_id} severity={self.severity}>"
 
 
+class ExternalReview(Base):
+    """Imported external review for GuestCare workflows."""
+
+    __tablename__ = "external_reviews"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "source", "external_id", name="uq_external_reviews_org_source_id"),
+        Index("ix_external_reviews_org_imported", "organization_id", "imported_at"),
+        Index("ix_external_reviews_org_status", "organization_id", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    source: Mapped[str] = mapped_column(String(40), nullable=False, default="external", server_default="external")
+    external_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    url: Mapped[str] = mapped_column(String(500), nullable=False)
+    author: Mapped[str] = mapped_column(String(160), nullable=False, default="", server_default="")
+    rating: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    text: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="new", server_default="new", index=True)
+    reply_draft: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payload_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    def __repr__(self) -> str:
+        return f"<ExternalReview id={self.id} org={self.organization_id} source={self.source}>"
+
+
+class InventoryStockSnapshot(Base):
+    """Latest known stock level for SupplyMind/OS alerts."""
+
+    __tablename__ = "inventory_stock_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "location_id",
+            "source",
+            "sku",
+            name="uq_inventory_stock_org_location_source_sku",
+        ),
+        Index("ix_inventory_stock_org_updated", "organization_id", "updated_at"),
+        Index("ix_inventory_stock_org_location", "organization_id", "location_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    location_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("locations.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    source: Mapped[str] = mapped_column(String(40), nullable=False, default="manual", server_default="manual")
+    sku: Mapped[str] = mapped_column(String(120), nullable=False)
+    ingredient: Mapped[str] = mapped_column(String(240), nullable=False)
+    unit: Mapped[str] = mapped_column(String(32), nullable=False, default="", server_default="")
+    quantity: Mapped[float] = mapped_column(Numeric(14, 3), nullable=False, default=0, server_default="0")
+    min_quantity: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)
+    reorder_quantity: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)
+    daily_usage_estimate: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)
+    external_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    payload_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    def __repr__(self) -> str:
+        return f"<InventoryStockSnapshot id={self.id} org={self.organization_id} sku={self.sku}>"
+
+
+class SupplyPurchaseDraft(Base):
+    """Draft purchase order generated from low-stock alerts."""
+
+    __tablename__ = "supply_purchase_drafts"
+    __table_args__ = (
+        Index("ix_supply_purchase_drafts_org_status", "organization_id", "status"),
+        Index("ix_supply_purchase_drafts_org_created", "organization_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    location_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("locations.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="draft", server_default="draft")
+    source: Mapped[str] = mapped_column(String(40), nullable=False, default="supplymind", server_default="supplymind")
+    title: Mapped[str] = mapped_column(String(240), nullable=False, default="", server_default="")
+    items_json: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
+    payload_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    def __repr__(self) -> str:
+        return f"<SupplyPurchaseDraft id={self.id} org={self.organization_id} status={self.status}>"
+
+
+class StaffOnboardingSession(Base):
+    """WhatsApp-ready onboarding session for a staff member."""
+
+    __tablename__ = "staff_onboarding_sessions"
+    __table_args__ = (
+        Index("ix_staff_onboarding_org_status", "organization_id", "status"),
+        Index("ix_staff_onboarding_org_phone", "organization_id", "phone"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    staff_user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("staff_users.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    phone: Mapped[str] = mapped_column(String(32), nullable=False, default="", server_default="")
+    role: Mapped[str] = mapped_column(String(80), nullable=False, default="staff", server_default="staff")
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="active", server_default="active")
+    current_step: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    progress_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    last_question: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_answer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    def __repr__(self) -> str:
+        return f"<StaffOnboardingSession id={self.id} org={self.organization_id} status={self.status}>"
+
+
+class VoiceCallLog(Base):
+    """Operational log for voice AI calls."""
+
+    __tablename__ = "voice_call_logs"
+    __table_args__ = (
+        Index("ix_voice_call_logs_org_created", "organization_id", "created_at"),
+        Index("ix_voice_call_logs_call_sid", "call_sid"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    call_sid: Mapped[str] = mapped_column(String(120), nullable=False, default="", server_default="")
+    phone: Mapped[str] = mapped_column(String(32), nullable=False, default="", server_default="")
+    provider: Mapped[str] = mapped_column(String(40), nullable=False, default="twilio", server_default="twilio")
+    mode: Mapped[str] = mapped_column(String(40), nullable=False, default="stt_fallback", server_default="stt_fallback")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="started", server_default="started")
+    transcript: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    payload_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    def __repr__(self) -> str:
+        return f"<VoiceCallLog id={self.id} org={self.organization_id} status={self.status}>"
+
+
 class RestaurantStateSnapshot(Base):
     """Point-in-time operational state used by the Digital Twin and simulations."""
 

@@ -10,7 +10,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.admin.deps import admin_org_from_session, require_admin_session_active
 from sqlalchemy import select
-from app.db.models import AIContextSnapshot, BusinessRecommendation, MenuItem, OperationalInsight, Organization
+from app.db.models import (
+    AIContextSnapshot,
+    BusinessRecommendation,
+    ExternalReview,
+    InventoryStockSnapshot,
+    MenuItem,
+    OperationalInsight,
+    Organization,
+    StaffOnboardingSession,
+    SupplyPurchaseDraft,
+)
 from app.db.session import get_db
 from app.services.analytics_consumer import get_event_stats, get_today_event_summary
 from app.services.owner_dashboard import (
@@ -18,6 +28,7 @@ from app.services.owner_dashboard import (
     build_cancellation_forecast,
     build_demand_forecast,
     build_overload_risk,
+    build_stock_alerts_from_inventory,
     build_stock_alerts_stub,
     build_week_forecast,
     fetch_daily_revenue_history_from_events,
@@ -496,7 +507,15 @@ async def os_dashboard(
     cancellation_risk = build_cancellation_forecast(event_rows, today=now_utc.date())
     overload_risk = build_overload_risk(event_rows, today=now_utc.date())
     autopilot_pricing = build_autopilot_pricing(event_rows, today=now_utc.date())
-    stock_alerts = build_stock_alerts_stub(event_rows, today=now_utc.date())
+    inventory_rows = (await db.execute(
+        select(InventoryStockSnapshot)
+        .where(InventoryStockSnapshot.organization_id == org_id)
+        .order_by(InventoryStockSnapshot.updated_at.desc())
+        .limit(200)
+    )).scalars().all()
+    stock_alerts = build_stock_alerts_from_inventory(inventory_rows)
+    if not stock_alerts:
+        stock_alerts = build_stock_alerts_stub(event_rows, today=now_utc.date())
 
     # Active incidents (lazy: only new insights from last 24h)
     from datetime import timedelta
@@ -563,7 +582,7 @@ async def os_dashboard(
         "stock_alerts": stock_alerts,
         "incidents": incidents,
         "top_recommendations": recommendations,
-        "note": "Все данные из DailyOrgStats (event bus). Нет SQL к Order/ChatLog.",
+        "note": "Данные из дневной статистики ОС (DailyOrgStats), без прямых запросов к заказам и чатам.",
     }
 
 
@@ -621,18 +640,62 @@ async def intelligence_audit_log(
 class ExternalReviewImportBody(BaseModel):
     url: str = Field(..., min_length=8, max_length=500)
     note: str | None = Field(default=None, max_length=500)
+    author: str | None = Field(default=None, max_length=160)
+    rating: int | None = Field(default=None, ge=1, le=5)
+    text: str | None = Field(default=None, max_length=4000)
 
 
-def _guestcare_reviews(org: Organization) -> list[dict]:
-    meta = org.meta_json if isinstance(org.meta_json, dict) else {}
-    raw = meta.get("guestcare_external_reviews")
-    return list(raw) if isinstance(raw, list) else []
+class InventoryStockItemBody(BaseModel):
+    sku: str = Field(..., min_length=1, max_length=120)
+    ingredient: str = Field(..., min_length=1, max_length=240)
+    quantity: float = Field(..., ge=0)
+    unit: str | None = Field(default=None, max_length=32)
+    min_quantity: float | None = Field(default=None, ge=0)
+    reorder_quantity: float | None = Field(default=None, ge=0)
+    daily_usage_estimate: float | None = Field(default=None, ge=0)
+    location_id: int | None = None
+    source: str = Field(default="manual", min_length=1, max_length=40)
+    external_id: str | None = Field(default=None, max_length=160)
+    payload: dict | None = None
 
 
-def _save_guestcare_reviews(org: Organization, reviews: list[dict]) -> None:
-    meta = dict(org.meta_json) if isinstance(org.meta_json, dict) else {}
-    meta["guestcare_external_reviews"] = reviews
-    org.meta_json = meta
+class InventoryStockBulkBody(BaseModel):
+    items: list[InventoryStockItemBody] = Field(default_factory=list, max_length=500)
+
+
+class SupplyDraftBody(BaseModel):
+    location_id: int | None = None
+    cover_days: int = Field(default=7, ge=1, le=30)
+
+
+class StaffOnboardingStartBody(BaseModel):
+    phone: str = Field(..., min_length=5, max_length=32)
+    role: str = Field(default="staff", max_length=80)
+    staff_user_id: int | None = None
+
+
+class StaffOnboardingMessageBody(BaseModel):
+    question: str = Field(..., min_length=1, max_length=1000)
+
+
+class VoiceConfigBody(BaseModel):
+    enabled: bool
+    mode: str = Field(default="stt_fallback", pattern="^(stt_fallback|realtime)$")
+
+
+def _external_review_public(row: ExternalReview) -> dict:
+    return {
+        "id": row.external_id,
+        "db_id": int(row.id),
+        "source": row.source,
+        "url": row.url,
+        "author": row.author,
+        "rating": row.rating,
+        "text": row.text,
+        "status": row.status,
+        "reply_draft": row.reply_draft,
+        "imported_at": row.imported_at.isoformat() if row.imported_at else None,
+    }
 
 
 @router.get("/reviews/external")
@@ -641,10 +704,13 @@ async def list_external_reviews(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     org_id = admin_org_from_session(request)
-    org = await db.get(Organization, org_id)
-    if org is None:
-        raise HTTPException(status_code=404, detail="Organization not found")
-    items = _guestcare_reviews(org)
+    rows = (await db.execute(
+        select(ExternalReview)
+        .where(ExternalReview.organization_id == org_id)
+        .order_by(ExternalReview.imported_at.desc(), ExternalReview.id.desc())
+        .limit(50)
+    )).scalars().all()
+    items = [_external_review_public(r) for r in rows]
     return {"ok": True, "items": items, "count": len(items)}
 
 
@@ -657,19 +723,39 @@ async def import_external_review(
     from app.integrations.reviews_external import import_review_from_url
 
     org_id = admin_org_from_session(request)
-    org = await db.get(Organization, org_id)
-    if org is None:
-        raise HTTPException(status_code=404, detail="Organization not found")
     try:
-        item = import_review_from_url(body.url, note=body.note)
+        item = import_review_from_url(
+            body.url,
+            note=body.note,
+            author=body.author,
+            rating=body.rating,
+            text=body.text,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    reviews = _guestcare_reviews(org)
-    reviews = [r for r in reviews if r.get("id") != item["id"]]
-    reviews.insert(0, item)
-    _save_guestcare_reviews(org, reviews[:50])
+    row = await db.scalar(
+        select(ExternalReview).where(
+            ExternalReview.organization_id == org_id,
+            ExternalReview.source == item["source"],
+            ExternalReview.external_id == item["id"],
+        )
+    )
+    if row is None:
+        row = ExternalReview(
+            organization_id=org_id,
+            source=item["source"],
+            external_id=item["id"],
+            url=item["url"],
+        )
+        db.add(row)
+    row.author = str(item.get("author") or "")
+    row.rating = item.get("rating")
+    row.text = str(item.get("text") or "")
+    row.reply_draft = item.get("reply_draft")
+    row.payload_json = item
     await db.commit()
-    return {"ok": True, "item": item}
+    await db.refresh(row)
+    return {"ok": True, "item": _external_review_public(row)}
 
 
 @router.post("/reviews/external/{review_id}/reply-draft")
@@ -681,20 +767,214 @@ async def external_review_reply_draft(
     from app.integrations.reviews_external import draft_reply_for_review
 
     org_id = admin_org_from_session(request)
+    row = await db.scalar(
+        select(ExternalReview).where(
+            ExternalReview.organization_id == org_id,
+            ExternalReview.external_id == review_id,
+        )
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Review not found")
+    draft = draft_reply_for_review(_external_review_public(row))
+    row.reply_draft = draft
+    row.status = "drafted"
+    await db.commit()
+    return {"ok": True, "review_id": review_id, "reply_draft": draft}
+
+
+@router.post("/inventory/snapshots/bulk")
+async def upsert_inventory_snapshots(
+    body: InventoryStockBulkBody,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Upsert latest inventory read model used by OS stock alerts."""
+    org_id = admin_org_from_session(request)
+    updated = 0
+    for item in body.items:
+        row = await db.scalar(
+            select(InventoryStockSnapshot).where(
+                InventoryStockSnapshot.organization_id == org_id,
+                InventoryStockSnapshot.location_id == item.location_id,
+                InventoryStockSnapshot.source == item.source,
+                InventoryStockSnapshot.sku == item.sku,
+            )
+        )
+        if row is None:
+            row = InventoryStockSnapshot(
+                organization_id=org_id,
+                location_id=item.location_id,
+                source=item.source,
+                sku=item.sku,
+            )
+            db.add(row)
+        row.ingredient = item.ingredient
+        row.quantity = item.quantity
+        row.unit = item.unit or ""
+        row.min_quantity = item.min_quantity
+        row.reorder_quantity = item.reorder_quantity
+        row.daily_usage_estimate = item.daily_usage_estimate
+        row.external_id = item.external_id
+        row.payload_json = item.payload
+        updated += 1
+    await db.commit()
+    return {"ok": True, "updated": updated}
+
+
+@router.get("/inventory/stock-alerts")
+async def inventory_stock_alerts(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    org_id = admin_org_from_session(request)
+    rows = (await db.execute(
+        select(InventoryStockSnapshot)
+        .where(InventoryStockSnapshot.organization_id == org_id)
+        .order_by(InventoryStockSnapshot.updated_at.desc())
+        .limit(200)
+    )).scalars().all()
+    alerts = build_stock_alerts_from_inventory(rows)
+    return {"ok": True, "source": "inventory_stock_snapshots", "items": alerts, "count": len(alerts)}
+
+
+@router.post("/supplymind/drafts")
+async def create_supplymind_draft(
+    body: SupplyDraftBody,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    from app.services.supplymind import build_supplymind_draft, supply_draft_public
+
+    org_id = admin_org_from_session(request)
+    draft = await build_supplymind_draft(
+        db,
+        org_id,
+        location_id=body.location_id,
+        cover_days=body.cover_days,
+    )
+    await db.commit()
+    await db.refresh(draft)
+    return {"ok": True, "item": supply_draft_public(draft)}
+
+
+@router.get("/supplymind/drafts")
+async def list_supplymind_drafts(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    limit: int = Query(20, ge=1, le=100),
+) -> dict:
+    from app.services.supplymind import supply_draft_public
+
+    org_id = admin_org_from_session(request)
+    rows = (await db.execute(
+        select(SupplyPurchaseDraft)
+        .where(SupplyPurchaseDraft.organization_id == org_id)
+        .order_by(SupplyPurchaseDraft.created_at.desc())
+        .limit(limit)
+    )).scalars().all()
+    return {"ok": True, "items": [supply_draft_public(r) for r in rows], "count": len(rows)}
+
+
+@router.post("/staffmind/onboarding")
+async def start_staffmind_onboarding(
+    body: StaffOnboardingStartBody,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    from app.services.staffmind import onboarding_public, start_onboarding_session
+
+    org_id = admin_org_from_session(request)
+    session = await start_onboarding_session(
+        db,
+        org_id,
+        phone=body.phone,
+        role=body.role,
+        staff_user_id=body.staff_user_id,
+    )
+    await db.commit()
+    await db.refresh(session)
+    return {"ok": True, "item": onboarding_public(session)}
+
+
+@router.post("/staffmind/onboarding/{session_id}/message")
+async def staffmind_onboarding_message(
+    session_id: int,
+    body: StaffOnboardingMessageBody,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    from app.services.staffmind import answer_staff_question, onboarding_public
+
+    org_id = admin_org_from_session(request)
+    session = await db.get(StaffOnboardingSession, int(session_id))
+    if session is None or int(session.organization_id) != int(org_id):
+        raise HTTPException(status_code=404, detail="Onboarding session not found")
+    answer = await answer_staff_question(db, session, body.question)
+    await db.commit()
+    await db.refresh(session)
+    return {"ok": True, "answer": answer, "item": onboarding_public(session)}
+
+
+@router.get("/staffmind/onboarding")
+async def list_staffmind_onboarding(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    limit: int = Query(20, ge=1, le=100),
+) -> dict:
+    from app.services.staffmind import onboarding_public
+
+    org_id = admin_org_from_session(request)
+    rows = (await db.execute(
+        select(StaffOnboardingSession)
+        .where(StaffOnboardingSession.organization_id == org_id)
+        .order_by(StaffOnboardingSession.created_at.desc())
+        .limit(limit)
+    )).scalars().all()
+    return {"ok": True, "items": [onboarding_public(r) for r in rows], "count": len(rows)}
+
+
+@router.get("/daily-os-digest/preview")
+async def daily_os_digest_preview(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    from app.services.daily_os_digest import build_daily_os_digest_payload
+
+    org_id = admin_org_from_session(request)
     org = await db.get(Organization, org_id)
     if org is None:
         raise HTTPException(status_code=404, detail="Organization not found")
-    reviews = _guestcare_reviews(org)
-    match = next((r for r in reviews if str(r.get("id")) == review_id), None)
-    if match is None:
-        raise HTTPException(status_code=404, detail="Review not found")
-    draft = draft_reply_for_review(match)
-    for r in reviews:
-        if str(r.get("id")) == review_id:
-            r["reply_draft"] = draft
-    _save_guestcare_reviews(org, reviews)
+    payload = await build_daily_os_digest_payload(db, org)
+    return {"ok": True, "item": payload}
+
+
+@router.get("/voice/status")
+async def voice_ai_status(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    from app.services.voice_ai import voice_status_for_org
+
+    org_id = admin_org_from_session(request)
+    org = await db.get(Organization, org_id)
+    return {"ok": True, "item": voice_status_for_org(org)}
+
+
+@router.post("/voice/config")
+async def voice_ai_config(
+    body: VoiceConfigBody,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    from app.services.voice_ai import set_voice_enabled
+
+    org_id = admin_org_from_session(request)
+    org = await db.get(Organization, org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    status = await set_voice_enabled(db, org, enabled=body.enabled, mode=body.mode)
     await db.commit()
-    return {"ok": True, "review_id": review_id, "reply_draft": draft}
+    return {"ok": True, "item": status}
 
 
 # ─── Phase 2.3 OS: Event-Driven Aggregates ───────────────────────────────────

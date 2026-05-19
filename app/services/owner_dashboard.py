@@ -366,10 +366,72 @@ def build_stock_alerts_stub(
             "source": "daily_org_stats.orders_confirmed",
             "message": (
                 f"По темпу заказов ({week_orders} за неделю) проверьте ключевые позиции "
-                "на кухне — полный SupplyMind подключит iiko Office."
+                "на кухне. Точные остатки появятся после подключения склада в iiko."
             ),
         },
     ]
+
+
+def build_stock_alerts_from_inventory(
+    snapshots: list[Any],
+    *,
+    limit: int = 10,
+) -> list[dict[str, Any]]:
+    """Build real stock alerts from latest inventory snapshots."""
+    alerts: list[dict[str, Any]] = []
+    for row in snapshots:
+        ingredient = str(getattr(row, "ingredient", "") or "").strip()
+        if not ingredient:
+            continue
+        quantity = float(getattr(row, "quantity", 0) or 0)
+        min_quantity_raw = getattr(row, "min_quantity", None)
+        reorder_quantity_raw = getattr(row, "reorder_quantity", None)
+        daily_usage_raw = getattr(row, "daily_usage_estimate", None)
+        min_quantity = float(min_quantity_raw) if min_quantity_raw is not None else None
+        reorder_quantity = float(reorder_quantity_raw) if reorder_quantity_raw is not None else None
+        daily_usage = float(daily_usage_raw) if daily_usage_raw is not None else None
+
+        threshold = min_quantity if min_quantity is not None else reorder_quantity
+        below_threshold = threshold is not None and quantity <= threshold
+        projected_runout = daily_usage is not None and daily_usage > 0
+        if not below_threshold and not projected_runout:
+            continue
+
+        if quantity <= 0:
+            days_until_runout = 0
+        elif projected_runout:
+            days_until_runout = max(1, int(quantity / max(daily_usage, 0.001)))
+        else:
+            days_until_runout = 1
+
+        if days_until_runout <= 1 or below_threshold:
+            severity = "critical"
+        elif days_until_runout <= 3:
+            severity = "warning"
+        else:
+            severity = "info"
+
+        unit = str(getattr(row, "unit", "") or "").strip()
+        alerts.append({
+            "ingredient": ingredient,
+            "sku": getattr(row, "sku", None),
+            "quantity": round(quantity, 3),
+            "unit": unit,
+            "min_quantity": min_quantity,
+            "reorder_quantity": reorder_quantity,
+            "daily_usage_estimate": daily_usage,
+            "days_until_runout": days_until_runout,
+            "severity": severity,
+            "confidence": "high" if projected_runout else "medium",
+            "source": f"inventory_stock_snapshots.{getattr(row, 'source', 'manual') or 'manual'}",
+            "message": (
+                f"{ingredient}: остаток {round(quantity, 2)}{(' ' + unit) if unit else ''}. "
+                f"Ожидаемое исчерпание: {days_until_runout} дн."
+            ),
+        })
+
+    alerts.sort(key=lambda x: (int(x.get("days_until_runout") or 999), str(x.get("ingredient") or "")))
+    return alerts[:limit]
 
 
 def build_recommendation_target(rec_type: str) -> dict[str, Any]:

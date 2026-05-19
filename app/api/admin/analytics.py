@@ -34,6 +34,7 @@ from app.services.intelligence_analytics import (
     upsell_stats_from_items_json,
 )
 from app.services.integration_config import (
+    ai_active_provider,
     ai_provider_configured,
     iiko_effective_configured,
     whatsapp_effective_configured,
@@ -574,14 +575,13 @@ async def admin_incidents(
                 "target": {"tab": "settings", "settings_tab": "connections"},
             },
         )
-    ai_provider = (settings.ai_provider or "openai").strip().lower()
     if not ai_provider_configured():
         integration_items.append(
             {
                 "id": "integration:ai_config",
                 "title": "AI не настроен",
                 "subtitle": "Бот не сможет стабильно разбирать заявки и отвечать гостям.",
-                "detail": f"Активный провайдер: {ai_provider or 'openai'}",
+                "detail": f"Активный провайдер: {ai_active_provider()} — API-ключ не найден",
                 "created_at": None,
                 "target": {"tab": "settings", "settings_tab": "technical"},
             },

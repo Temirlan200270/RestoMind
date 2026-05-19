@@ -390,6 +390,8 @@ function adminParseLocationHash() {
         let ac = 'value';
         if (subTab === 'insights') ac = 'insights';
         else if (subTab === 'load') ac = 'load';
+        else if (subTab === 'os') ac = 'os';
+        else if (subTab === 'guestcare') ac = 'guestcare';
         else if (subTab === 'value') ac = 'value';
         return { ...empty, tab: 'ai_center', phone, aiCenterTab: ac };
     }
@@ -3878,6 +3880,33 @@ function adminMixinAuthKnowledge() {
             }
             return { schedule: out, fallbackUsed };
         },
+        _todayScheduleKey() {
+            const map = { Mon: 'mon', Tue: 'tue', Wed: 'wed', Thu: 'thu', Fri: 'fri', Sat: 'sat', Sun: 'sun' };
+            try {
+                const zone = String(this.orgProfile?.timezone || '').trim();
+                const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'short', timeZone: zone || undefined }).format(new Date());
+                return map[weekday] || this.scheduleDayRows[new Date().getDay() === 0 ? 6 : new Date().getDay() - 1]?.key || 'mon';
+            } catch {
+                const jsDay = new Date().getDay();
+                return this.scheduleDayRows[jsDay === 0 ? 6 : jsDay - 1]?.key || 'mon';
+            }
+        },
+        scheduleTodayLabel(raw) {
+            const normalized = this.normalizeSchedule(raw).schedule;
+            const d = normalized[this._todayScheduleKey()] || this._defaultDay();
+            if (d.is_closed) return 'Сегодня выходной';
+            return `Сегодня ${d.open || '11:00'}–${d.business_close || '23:00'}, кухня до ${d.kitchen_close || '22:30'}`;
+        },
+        scheduleWeekCompact(raw) {
+            const normalized = this.normalizeSchedule(raw).schedule;
+            const openDays = [];
+            for (const d of this.scheduleDayRows) {
+                const day = normalized[d.key] || this._defaultDay();
+                if (!day.is_closed) openDays.push(`${d.label}: ${day.open}-${day.business_close}`);
+            }
+            if (!openDays.length) return 'Вся неделя отмечена как выходная.';
+            return openDays.slice(0, 3).join(' · ') + (openDays.length > 3 ? ` · ещё ${openDays.length - 3}` : '');
+        },
         openScheduleEditor() {
             const normalized = this.normalizeSchedule(this.orgProfile?.schedule_json);
             this.scheduleEditorOpen = true;
@@ -5742,6 +5771,8 @@ function adminMixinLiveChat() {
                     const a = o.aiCenterTab.trim();
                     if (a === 'insights') this.aiCenterTab = 'insights';
                     else if (a === 'load') this.aiCenterTab = 'load';
+                    else if (a === 'os') this.aiCenterTab = 'os';
+                    else if (a === 'guestcare') this.aiCenterTab = 'guestcare';
                     else this.aiCenterTab = 'value';
                 } else {
                     this.aiCenterTab = 'value';
@@ -5929,6 +5960,8 @@ function adminMixinLiveChat() {
                 const ac = parsed?.aiCenterTab;
                 if (ac === 'insights') this.aiCenterTab = 'insights';
                 else if (ac === 'load') this.aiCenterTab = 'load';
+                else if (ac === 'os') this.aiCenterTab = 'os';
+                else if (ac === 'guestcare') this.aiCenterTab = 'guestcare';
                 else this.aiCenterTab = 'value';
             } else {
                 this.aiCenterTab = 'value';
@@ -7468,28 +7501,32 @@ function adminMixinDataChartsSettings() {
 
         _osActionLabel(action) {
             const labels = {
-                'order.created':       'Новый заказ',
-                'order.confirmed':     'Заказ подтверждён',
-                'order.cancelled':     'Заказ отменён',
-                'booking.created':     'Новое бронирование',
-                'booking.confirmed':   'Бронирование подтверждено',
-                'payment.completed':   'Оплата получена',
-                'payment.failed':      'Ошибка оплаты',
-                'payment.expired':     'Оплата истекла',
-                'ai.escalated':        'ОС эскалировала диалог',
-                'operator.took_over':  'Оператор подключился',
-                'system.sla_violated': 'ОС: нарушен SLA',
-                'system.pricing_adjusted': 'ОС: цены скорректированы',
-                'system.healing_wa_sent': 'ОС: WA-напоминание об оплате',
-                'integration.iiko.failed': 'ОС: ошибка iiko',
-                'integration.whatsapp.failed': 'ОС: сбой WhatsApp',
-                'ai.dialog.started': 'ОС: новый диалог',
-                'cancellation_surge':  'ОС: обнаружен рост отмен',
-                'escalation_spike':    'ОС: всплеск эскалаций',
-                'payment_spike':       'ОС: всплеск ошибок оплаты',
-                'ai_message_drop':     'ОС: падение AI-ответов',
+                'order.created': 'Новый заказ',
+                'order.confirmed': 'Заказ подтверждён',
+                'order.cancelled': 'Заказ отменён',
+                'booking.created': 'Новое бронирование',
+                'booking.confirmed': 'Бронирование подтверждено',
+                'booking.cancelled': 'Бронирование отменено',
+                'payment.completed': 'Оплата получена',
+                'payment.failed': 'Ошибка оплаты',
+                'payment.expired': 'Оплата истекла',
+                'ai.escalated': 'Эскалация к оператору',
+                'ai.dialog.started': 'Новый диалог с гостем',
+                'operator.took_over': 'Оператор подключился',
+                'system.sla_violated': 'Нарушен SLA',
+                'system.pricing_adjusted': 'Цены скорректированы',
+                'system.healing_wa_sent': 'Напоминание об оплате в WhatsApp',
+                'integration.iiko.failed': 'Ошибка отправки в iiko',
+                'integration.whatsapp.failed': 'Сбой доставки WhatsApp',
+                'cancellation_surge': 'Рост отмен',
+                'escalation_spike': 'Всплеск эскалаций',
+                'payment_spike': 'Всплеск ошибок оплаты',
+                'ai_message_drop': 'Падение ответов ИИ',
             };
-            return labels[action] || action.replace('.', ': ').replace('_', ' ');
+            if (labels[action]) return labels[action];
+            return String(action || '')
+                .replace(/\./g, ' · ')
+                .replace(/_/g, ' ');
         },
 
         async loadDashRoiSummary() {

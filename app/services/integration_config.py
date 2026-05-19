@@ -41,7 +41,17 @@ async def whatsapp_effective_configured(db: AsyncSession, org_id: int) -> bool:
 
 
 def ai_provider_configured() -> bool:
-    provider = (settings.ai_provider or "openai").strip().lower()
-    if provider == "gemini":
-        return bool(str(settings.gemini_api_key or "").strip())
-    return bool(str(settings.openai_api_key or "").strip())
+    """True если хотя бы один AI-провайдер имеет ключ — независимо от AI_PROVIDER настройки."""
+    if bool(str(settings.gemini_api_key or "").strip()):
+        return True
+    if bool(str(settings.openai_api_key or "").strip()):
+        return True
+    return False
+
+
+def ai_active_provider() -> str:
+    """Возвращает имя реально активного провайдера для отображения в UI."""
+    provider = (settings.ai_provider or "").strip().lower()
+    if provider == "gemini" or bool(str(settings.gemini_api_key or "").strip()):
+        return "gemini"
+    return "openai"

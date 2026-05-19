@@ -135,9 +135,9 @@
                     <!-- Phase 2.3: индикатор event-driven источника данных -->
                     <template x-if="dashStats.event_driven_stats?.source === 'event_driven'">
                         <div class="flex items-center gap-1 text-[10px] font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100 ml-auto shrink-0"
-                            :title="'Эскалации (event bus): ' + (dashStats.event_driven_stats?.escalations ?? 0)">
+                            :title="'Эскалации (данные ОС): ' + (dashStats.event_driven_stats?.escalations ?? 0)">
                             <svg class="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd"/></svg>
-                            <span>event bus</span>
+                            <span>данные ОС</span>
                             <span class="tabular-nums text-indigo-800"
                                 x-text="(dashStats.event_driven_stats?.payments_completed ?? 0) > 0 ? '· ' + dashStats.event_driven_stats.payments_completed + ' оплат' : ''"></span>
                         </div>
