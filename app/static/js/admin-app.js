@@ -401,7 +401,7 @@ function adminParseLocationHash() {
 
 /** Допустимые верхнеуровневые вкладки (id из navItems). */
 const ADMIN_TOP_TAB_IDS = new Set([
-    'dashboard', 'inbox', 'ai_center', 'marketing', 'orders', 'bookings', 'chats', 'menu', 'settings',
+    'shift', 'dashboard', 'inbox', 'ai_center', 'marketing', 'orders', 'bookings', 'chats', 'menu', 'settings',
 ]);
 
 /** Начальное состояние GET /integrations/status — чтобы Alpine не падал на undefined до первой загрузки. */
@@ -613,6 +613,8 @@ function adminMixinState() {
         orgProfileDirty: false,
         brandingDirty: false,
         navItems: [
+            { id: 'shift', section: 'operations', label: 'Смена', desc: 'Управление деньгами и приоритетами смены',
+              icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>' },
             { id: 'inbox', section: 'operations', label: 'Требует внимания', desc: 'Очередь помощи и системные инциденты',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>' },
             { id: 'orders', section: 'operations', label: 'Заказы', desc: 'По этапам (черновик → подтверждён → кухня) или общий список',
@@ -701,11 +703,13 @@ function adminMixinState() {
             tenant_owner_id: null,
             active_organization_id: null,
             available_organizations: [],
+            available_locations: [],
             tenant: null,
             branding: null,
             is_network: false,
             network_orgs: [],
         },
+        selectedLocationId: '',
         /** Черновик E2.2.F — синхронизируется с `userData.branding` из `/auth/me`; сохранение через PATCH когда есть E2.2.B. */
         brandingDraft: { brand_name: '', brand_color_hex: '#2563eb' },
         brandingSaving: false,
@@ -778,6 +782,22 @@ function adminMixinState() {
         aiValueLoading: false,
         aiValueData: null,
         aiValueSource: '',
+        /** Money MVP: Revenue Leak Detector */
+        revenueLeak: null,
+        revenueLeakLoading: false,
+        revenueLeakActionLoading: '',
+        shiftState: null,
+        shiftStateLoading: false,
+        shiftStateFetchedAt: 0,
+        shiftStateDegraded: false,
+        shiftStateLoadError: '',
+        shiftActionLoading: '',
+        _shiftStateRefreshTimer: null,
+        _shiftHeartbeatTimer: null,
+        botSlaStatus: { bot_short_mode: false, slow_chats: 0 },
+        /** Phase 3b OS: AI Snapshot list */
+        aiSnapshots: [],
+        aiSnapshotsLoading: false,
         /** Phase 5 OS: OS Autopilot dashboard data from /intelligence/os-dashboard */
         osDashboardData: null,
         osDashboardLoading: false,
@@ -825,6 +845,8 @@ function adminMixinState() {
         /** GET /incidents?mode=summary — блок «Сейчас» на дашборде и счётчик в сайдбаре без тяжёлых групп */
         attentionSummary: null,
         attentionSummaryLoading: false,
+        moneyQueue: null,
+        moneyQueueLoading: false,
         /** Время последнего успешного GET /incidents?mode=summary (кэш ~45 с на дашборде) */
         attentionSummaryFetchedAt: 0,
         /** Скрыть системный баннер до следующей загрузки страницы */
@@ -876,6 +898,8 @@ function adminMixinState() {
         // Живые чаты
         chatList: [],
         chatSearch: '',
+        /** G8: фильтр pulse в списке чатов после перехода с дашборда */
+        chatPulseFilter: '',
         chatTriageMode: 'active',
         chatPhone: '',
         activeChatPhone: '',
@@ -894,6 +918,8 @@ function adminMixinState() {
         chatMessagesLoadingOlder: false,
         operatorInput: '',
         unreadChats: 0,
+        /** G5 Live Pulse: bump every 30s on вкладке «Чаты» для пересчёта wait time */
+        _chatPulseAt: 0,
         kanbanVisible: { draft: 20, confirmed: 20, sent_to_iiko: 20, in_transit: 20, waiting_pickup: 20, completed: 20 },
         upsellFeedbackLoading: false,
         /** Кабина оператора: сводка по клиенту */
@@ -1155,9 +1181,30 @@ function adminMixinMenuOrdersUi() {
         },
 
         get filteredChatList() {
-            if (!this.chatSearch.trim()) return this.chatList;
+            const rank = (c) => {
+                const p = this.chatPulseStatus(c);
+                if (p === 'red') return 0;
+                if (p === 'amber') return 1;
+                return 2;
+            };
+            const wait = (c) => Number(this.chatWaitSeconds(c) || 0);
+            let sorted = [...this.chatList].sort((a, b) => {
+                const dr = rank(a) - rank(b);
+                if (dr !== 0) return dr;
+                return wait(b) - wait(a);
+            });
+            const pulseFilter = String(this.chatPulseFilter || '').trim();
+            if (pulseFilter === 'red') {
+                sorted = sorted.filter((c) => this.chatPulseStatus(c) === 'red');
+            } else if (pulseFilter === 'slow') {
+                sorted = sorted.filter((c) => {
+                    const p = this.chatPulseStatus(c);
+                    return p === 'red' || p === 'amber';
+                });
+            }
+            if (!this.chatSearch.trim()) return sorted;
             const q = this.chatSearch.trim().toLowerCase();
-            return this.chatList.filter(c => c.phone.toLowerCase().includes(q));
+            return sorted.filter(c => c.phone.toLowerCase().includes(q));
         },
 
         _kanbanVisible(list, key) {
@@ -1365,6 +1412,18 @@ function adminMixinMenuOrdersUi() {
                 this.$watch('stopListItems', () => this._recalcStopListFiltered());
             } catch (_e) {
                 // no-op: на случай if Alpine $watch недоступен (не должно быть)
+            }
+
+            this._chatPulseAt = Date.now();
+            setInterval(() => {
+                if (this.currentTab === 'chats') this._chatPulseAt = Date.now();
+            }, 30000);
+
+            if (!this._shiftPageHideBound) {
+                this._shiftPageHideBound = true;
+                window.addEventListener('pagehide', () => {
+                    if (this.currentTab === 'shift') this.releaseShiftFocusClaim();
+                });
             }
         },
 
@@ -1654,9 +1713,26 @@ function adminMixinMenuOrdersUi() {
             return first && first.title ? String(first.title) : '';
         },
 
-        /** Бейдж пункта «Требует внимания»: открытые задачи помощи + открытые инциденты. */
+        /** Бейдж пункта «Требует внимания»: помощь + деньги на кону + инциденты. */
         inboxTotalOpen() {
-            return Number(this.dashStats?.failed_tasks_open || 0) + this.incidentsTotalOpen();
+            const money = Number(this.moneyQueue?.summary?.total || 0);
+            return Number(this.dashStats?.failed_tasks_open || 0) + money + this.incidentsTotalOpen();
+        },
+
+        moneyQueueSeverityClass(severity) {
+            const s = String(severity || 'info');
+            if (s === 'critical') return 'border-red-200 bg-red-50/90 text-red-950';
+            if (s === 'warning') return 'border-amber-200 bg-amber-50/90 text-amber-950';
+            return 'border-slate-200 bg-slate-50 text-slate-700';
+        },
+
+        moneyQueueKindLabel(kind) {
+            const k = String(kind || '');
+            if (k === 'abandoned_draft') return 'Брошенный заказ';
+            if (k === 'pending_prepay') return 'Ожидает оплату';
+            if (k === 'slow_chat') return 'Ждёт ответ';
+            if (k === 'high_value_stuck') return 'Крупный заказ';
+            return 'Внимание';
         },
 
         incidentSummaryCount(key) {
@@ -2080,6 +2156,8 @@ function adminMixinMenuOrdersUi() {
                     pickup_time_note: String(f.pickup_time_note || '').trim(),
                     food_lines: [],
                 };
+                const lid = Number(this.selectedLocationId || 0);
+                if (lid > 0) body.location_id = lid;
                 const { ok, data } = await this.apiJsonResponse('/api/admin/orders/manual', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -3281,12 +3359,79 @@ function adminMixinAuthKnowledge() {
                 tenant_owner_id: root.tenant_owner_id ?? null,
                 active_organization_id: root.active_organization_id ?? null,
                 available_organizations: Array.isArray(root.available_organizations) ? root.available_organizations : [],
+                available_locations: Array.isArray(root.available_locations) ? root.available_locations : [],
                 tenant: root.tenant || null,
                 branding: root.branding || null,
                 ws_token: root.ws_token || '',
                 is_network: !!root.is_network,
                 network_orgs: Array.isArray(root.network_orgs) ? root.network_orgs : [],
             };
+        },
+
+        ensureSelectedLocationAllowed() {
+            const locations = Array.isArray(this.userData?.available_locations) ? this.userData.available_locations : [];
+            if (!locations.length) {
+                this.selectedLocationId = '';
+                return;
+            }
+            const selected = Number(this.selectedLocationId || 0);
+            if (selected && locations.some((l) => Number(l.id) === selected)) return;
+            this.selectedLocationId = locations.length === 1 ? String(locations[0].id) : '';
+        },
+
+        get activeLocationId() {
+            return this.selectedLocationId;
+        },
+
+        set activeLocationId(value) {
+            this.selectedLocationId = value == null ? '' : String(value);
+        },
+
+        locationQueryParams() {
+            const p = new URLSearchParams();
+            const lid = Number(this.selectedLocationId || 0);
+            if (lid > 0) p.set('location_id', String(lid));
+            return p;
+        },
+
+        locationQueryString(prefix = '?') {
+            const qs = this.locationQueryParams().toString();
+            return qs ? `${prefix}${qs}` : '';
+        },
+
+        async onLocationFilterChanged() {
+            this.revenueLeak = null;
+            this.dashStatsLoadedOnce = false;
+            this.dashActivity = [];
+            this.attentionSummary = null;
+            this.attentionSummaryFetchedAt = 0;
+            this.moneyQueue = null;
+            this.shiftState = null;
+            this.shiftStateFetchedAt = 0;
+            this.shiftStateDegraded = false;
+            this.shiftStateLoadError = '';
+            this.osDashboardData = null;
+            this.intelligenceData = { summary: null, insights: [], snapshot: null };
+            this.digitalTwin = { snapshot: null };
+            this.chatList = [];
+            this.activeChatPhone = '';
+            this.chatMessages = [];
+            this.chatListHasMore = true;
+            this.chatListCursorAt = null;
+            this.chatListCursorId = null;
+            this.ordersPage = 1;
+            this.orders = [];
+            this.selectedOrder = null;
+            this.showOrderModal = false;
+            await Promise.all([
+                this.loadRevenueLeak(),
+                this.currentTab === 'dashboard' ? this.loadTabData() : Promise.resolve(),
+                this.currentTab === 'ai_center' ? this.loadTabData() : Promise.resolve(),
+                this.currentTab === 'orders' ? this.loadOrders() : Promise.resolve(),
+                this.currentTab === 'chats' ? this.loadChatList(true) : Promise.resolve(),
+                this.currentTab === 'inbox' ? this.loadTabData() : Promise.resolve(),
+                this.currentTab === 'shift' ? this.loadShiftState(true) : Promise.resolve(),
+            ]);
         },
 
         async selectOrganization(orgId) {
@@ -3304,6 +3449,8 @@ function adminMixinAuthKnowledge() {
                 }
                 const me = this.normalizeMePayload(data);
                 this.userData = me;
+                this.selectedLocationId = '';
+                this.ensureSelectedLocationAllowed();
                 this.syncBrandingDraftFromUser();
                 this.wsToken = me.ws_token;
                 this.staffRole = me.role;
@@ -3380,6 +3527,7 @@ function adminMixinAuthKnowledge() {
                     }
                     const me = this.normalizeMePayload(data);
                     this.userData = me;
+                    this.ensureSelectedLocationAllowed();
                     this.syncBrandingDraftFromUser();
                     this.authenticated = true;
                     this.auth401AlertShown = false;
@@ -3390,7 +3538,7 @@ function adminMixinAuthKnowledge() {
                     this._ensureAdminHashListener();
                     const parsed = adminParseLocationHash();
                     if (!parsed.tab) {
-                        this.currentTab = this.staffRole === 'operator' ? 'chats' : 'dashboard';
+                        this.currentTab = this.staffRole === 'operator' ? 'shift' : 'dashboard';
                         this._pushAdminHash();
                     } else {
                         this._applyParsedHash(parsed);
@@ -3439,6 +3587,7 @@ function adminMixinAuthKnowledge() {
                 }
                 const me = this.normalizeMePayload(data);
                 this.userData = me;
+                this.ensureSelectedLocationAllowed();
                 this.syncBrandingDraftFromUser();
                 this.auth401AlertShown = false;
                 this.authenticated = true;
@@ -3450,7 +3599,7 @@ function adminMixinAuthKnowledge() {
                 this._ensureAdminHashListener();
                 const parsedLogin = adminParseLocationHash();
                 if (!parsedLogin.tab) {
-                    this.currentTab = this.staffRole === 'operator' ? 'chats' : 'dashboard';
+                    this.currentTab = this.staffRole === 'operator' ? 'shift' : 'dashboard';
                     this._pushAdminHash();
                 } else {
                     this._applyParsedHash(parsedLogin);
@@ -3779,6 +3928,7 @@ function adminMixinAuthKnowledge() {
             if (!data?.authenticated) return;
             const me = this.normalizeMePayload(data);
             this.userData = me;
+            this.ensureSelectedLocationAllowed();
             this.wsToken = me.ws_token;
             this.syncBrandingDraftFromUser();
         },
@@ -5151,6 +5301,8 @@ function adminMixinWebSocketEvents() {
                 }
             } else if (type === 'state_changed') {
                 this.onStateChanged(data);
+            } else if (type === 'bot_sla_status') {
+                this.onBotSlaStatus(data);
             } else if (type === 'stoplist_updated') {
                 // iiko обновил стоп-лист → перезагрузить меню если вкладка открыта
                 this._pushDashLiveFeed(type, `Стоп-лист обновлён (iiko)${data.ok === false ? ' ⚠️ ошибка' : ''}`);
@@ -5363,11 +5515,104 @@ function adminMixinWebSocketEvents() {
             return 'ИИ';
         },
 
+        chatWaitSeconds(chat) {
+            void this._chatPulseAt;
+            const role = String(chat?.lastRole || '').toLowerCase();
+            if (role !== 'user') return 0;
+            const raw = chat?.lastAt;
+            if (!raw) return Number(chat?.waitSeconds || 0);
+            const ts = Date.parse(String(raw));
+            if (!Number.isFinite(ts)) return Number(chat?.waitSeconds || 0);
+            return Math.max(0, Math.floor((Date.now() - ts) / 1000));
+        },
+
+        chatPulseStatus(chat) {
+            const wait = this.chatWaitSeconds(chat);
+            const role = String(chat?.lastRole || '').toLowerCase();
+            if (role === 'user') {
+                if (wait >= 300) return 'red';
+                if (wait >= 120) return 'amber';
+                return 'green';
+            }
+            if (chat?.chatSlow) return 'red';
+            return String(chat?.pulse || chat?.slaStatus || 'green');
+        },
+
+        chatSlaDotClass(chat) {
+            const s = this.chatPulseStatus(chat);
+            if (s === 'red') return 'bg-red-500 shadow-[0_0_0_3px_rgba(239,68,68,0.18)] animate-pulse';
+            if (s === 'amber') return 'bg-amber-400 shadow-[0_0_0_3px_rgba(245,158,11,0.14)]';
+            return 'bg-emerald-400';
+        },
+
+        chatSlaTitle(chat) {
+            const wait = this.chatWaitSeconds(chat);
+            const s = this.chatPulseStatus(chat);
+            if (String(chat?.lastRole || '').toLowerCase() === 'user') {
+                if (s === 'red') return `Live Pulse: клиент ждёт ${Math.floor(wait / 60)} мин — риск потери заказа`;
+                if (s === 'amber') return `Live Pulse: клиент ждёт ${Math.max(1, Math.floor(wait / 60))} мин`;
+                return 'Live Pulse: клиент ждёт < 2 мин';
+            }
+            if (s === 'red') return 'Live Pulse: чат помечен как просроченный';
+            if (chat?.botShortMode) return 'Нагрузка: бот в кратком режиме';
+            return 'Live Pulse: ответ дан, ожидания нет';
+        },
+
+        activeChatSlaStatus() {
+            const c = this.chatList.find(x => x.phone === this.activeChatPhone);
+            return c ? this.chatPulseStatus(c) : (this.botSlaStatus?.bot_short_mode ? 'amber' : 'green');
+        },
+
+        botShortModeBannerVisible() {
+            return this.activeChatPhone && (
+                this.activeChatSlaStatus() === 'red' ||
+                !!this.botSlaStatus?.bot_short_mode
+            );
+        },
+
+        onBotSlaStatus(data) {
+            const eventLocationId = Number(data?.location_id || 0);
+            const selectedLocationId = Number(this.selectedLocationId || 0);
+            if (selectedLocationId > 0 && eventLocationId > 0 && eventLocationId !== selectedLocationId) return;
+            this.botSlaStatus = {
+                bot_short_mode: !!data.bot_short_mode,
+                slow_chats: Number(data.slow_chats || 0),
+                location_id: data.location_id ?? null,
+            };
+            const phone = data.phone;
+            if (phone) {
+                const idx = this.chatList.findIndex((c) => c.phone === phone);
+                if (idx >= 0) {
+                    this.chatList[idx].botShortMode = !!data.bot_short_mode;
+                    this.chatList[idx].slowChats = Number(data.slow_chats || 0);
+                    this.chatList[idx].chatSlow = !!data.chat_slow;
+                    if (data.chat_slow) {
+                        this.chatList[idx].slaStatus = 'red';
+                        this.chatList[idx].pulse = 'red';
+                    }
+                }
+            }
+            for (const chat of this.chatList) {
+                if (phone && chat.phone === phone) continue;
+                chat.botShortMode = !!data.bot_short_mode;
+                chat.slowChats = Number(data.slow_chats || 0);
+            }
+        },
+
         onNewMessage(data) {
+            const eventLocationId = Number(data?.location_id || 0);
+            const selectedLocationId = Number(this.selectedLocationId || 0);
+            if (selectedLocationId > 0 && eventLocationId > 0 && eventLocationId !== selectedLocationId) return;
             const chatIdx = this.chatList.findIndex(c => c.phone === data.phone);
+            const msgRole = String(data.role || 'user').toLowerCase();
             if (chatIdx >= 0) {
                 this.chatList[chatIdx].lastMessage = data.content?.slice(0, 60) || '';
-                this.chatList[chatIdx].lastAt = new Date().toISOString();
+                this.chatList[chatIdx].lastAt = data.created_at || new Date().toISOString();
+                this.chatList[chatIdx].lastRole = msgRole;
+                this.chatList[chatIdx].waitSeconds = msgRole === 'user' ? 0 : null;
+                this.chatList[chatIdx].pulse = msgRole === 'user' ? 'green' : 'green';
+                this.chatList[chatIdx].slaStatus = this.chatList[chatIdx].pulse;
+                if (msgRole !== 'user') this.chatList[chatIdx].chatSlow = false;
                 if (data.phone !== this.activeChatPhone) {
                     this.chatList[chatIdx].unread = true;
                     this.unreadChats = this.chatList.filter(c => c.unread).length;
@@ -5380,7 +5625,14 @@ function adminMixinWebSocketEvents() {
                     lastMessage: data.content?.slice(0, 60) || '',
                     state: 'chatting',
                     unread: data.phone !== this.activeChatPhone,
-                    lastAt: new Date().toISOString(),
+                    lastAt: data.created_at || new Date().toISOString(),
+                    lastRole: msgRole,
+                    waitSeconds: msgRole === 'user' ? 0 : null,
+                    botShortMode: !!this.botSlaStatus?.bot_short_mode,
+                    slowChats: Number(this.botSlaStatus?.slow_chats || 0),
+                    pulse: 'green',
+                    slaStatus: 'green',
+                    chatSlow: false,
                 });
                 this.unreadChats = this.chatList.filter(c => c.unread).length;
             }
@@ -5781,6 +6033,22 @@ function adminMixinLiveChat() {
             if (tabId !== 'inbox') this.inboxTab = 'clients';
             if (tabId !== 'dashboard') this.dashboardTab = 'overview';
             if (tabId !== 'ai_center') this.aiCenterTab = 'value';
+            if (tabId === 'chats') {
+                if (typeof o.chatPulseFilter === 'string' && o.chatPulseFilter.trim()) {
+                    this.chatPulseFilter = o.chatPulseFilter.trim();
+                } else {
+                    this.chatPulseFilter = '';
+                }
+            } else {
+                this.chatPulseFilter = '';
+            }
+            if (tabId === 'orders') {
+                if (o.orderSumMin != null && o.orderSumMin !== '') {
+                    this.orderSumMin = Number(o.orderSumMin);
+                    this.ordersView = 'table';
+                    this.ordersPage = 1;
+                }
+            }
             this.sidebarOpen = false;
             void this.loadTabData();
             this._schedulePushAdminHash();
@@ -6014,6 +6282,9 @@ function adminMixinLiveChat() {
             try {
                 const limit = 60;
                 let url = `/api/admin/chats?limit=${limit}&mode=${encodeURIComponent(this.chatTriageMode || 'active')}`;
+                const locationParams = this.locationQueryParams();
+                const locationQuery = locationParams.toString();
+                if (locationQuery) url += `&${locationQuery}`;
                 if (!reset) {
                     if (this.chatListCursorAt) url += `&cursor_at=${encodeURIComponent(String(this.chatListCursorAt))}`;
                     if (this.chatListCursorId) url += `&cursor_id=${encodeURIComponent(String(this.chatListCursorId))}`;
@@ -6025,6 +6296,11 @@ function adminMixinLiveChat() {
                 }
                 const data = await res.json();
                 const incoming = data.chats || [];
+                this.botSlaStatus = {
+                    bot_short_mode: !!data.bot_short_mode,
+                    slow_chats: Number(data.slow_chats || 0),
+                    location_id: data.location_id ?? null,
+                };
                 const preserved = new Map(
                     this.chatList.filter((c) => c.unread).map((c) => [c.phone, c]),
                 );
@@ -6042,6 +6318,14 @@ function adminMixinLiveChat() {
                         triageState: c.triageState || c.triage?.state || 'active',
                         assignee: c.assignee || c.triage?.assignee || '',
                         snoozedUntil: c.snoozedUntil || c.triage?.snoozed_until || null,
+                        botShortMode: !!c.bot_short_mode,
+                        slowChats: Number(c.slow_chats || 0),
+                        lastRole: c.last_role || 'assistant',
+                        waitSeconds: c.wait_seconds ?? null,
+                        pulse: c.pulse || c.sla_status || 'green',
+                        slaStatus: c.pulse || c.sla_status || 'green',
+                        chatSlow: !!c.chat_slow,
+                        locationId: c.location_id ?? null,
                     };
                 });
 
@@ -6210,11 +6494,21 @@ function adminMixinLiveChat() {
             const enc = encodeURIComponent(phone);
             const qo = new URLSearchParams({ q: phone, size: '40', page: '1' });
             const qb = new URLSearchParams({ q: phone, limit: '40' });
+            const locParams = this.locationQueryParams();
+            const locQuery = locParams.toString();
+            if (locQuery) {
+                for (const [k, v] of locParams.entries()) {
+                    qo.set(k, v);
+                    qb.set(k, v);
+                }
+            }
+            const stateUrl = `/api/admin/chats/${enc}/state${locQuery ? `?${locQuery}` : ''}`;
+            const messagesUrl = `/api/admin/chats/${enc}?limit=50${locQuery ? `&${locQuery}` : ''}`;
 
             // Все 5 запросов параллельно — ни один не зависит от другого
             const [stateRes, msgsRes, summaryRes, ordersRes, bookingsRes] = await Promise.all([
-                this.apiFetch(`/api/admin/chats/${enc}/state`).catch(() => null),
-                this.apiFetch(`/api/admin/chats/${enc}?limit=50`).catch(() => null),
+                this.apiFetch(stateUrl).catch(() => null),
+                this.apiFetch(messagesUrl).catch(() => null),
                 this.apiFetch(`/api/admin/customers/${enc}/summary`).catch(() => null),
                 this.apiFetch(`/api/admin/orders?${qo}`).catch(() => null),
                 this.apiFetch(`/api/admin/bookings?${qb}`).catch(() => null),
@@ -6226,11 +6520,22 @@ function adminMixinLiveChat() {
             if (stateRes?.ok) {
                 const d = await stateRes.json();
                 this.activeChatState = d.state;
+                this.botSlaStatus = {
+                    bot_short_mode: !!d.bot_short_mode,
+                    slow_chats: Number(d.slow_chats || 0),
+                    location_id: d.location_id ?? null,
+                };
                 if (d.ai_snoozed_until != null && this.customerSummary) {
                     this.customerSummary.ai_snoozed_until = d.ai_snoozed_until;
                 }
                 const uix = this.chatList.findIndex(c => c.phone === phone);
-                if (uix >= 0) this.chatList[uix].state = d.state;
+                if (uix >= 0) {
+                    this.chatList[uix].state = d.state;
+                    this.chatList[uix].botShortMode = !!d.bot_short_mode;
+                    this.chatList[uix].slowChats = Number(d.slow_chats || 0);
+                    this.chatList[uix].slaStatus = d.sla_status || 'green';
+                    this.chatList[uix].chatSlow = !!d.chat_slow;
+                }
             }
 
             // messages
@@ -6290,7 +6595,8 @@ function adminMixinLiveChat() {
             this.chatMessagesLoadingOlder = true;
             try {
                 const phone = this.activeChatPhone;
-                const res = await this.apiFetch(`/api/admin/chats/${encodeURIComponent(phone)}?limit=50&before_id=${encodeURIComponent(String(beforeId))}`);
+                const locQuery = this.locationQueryParams().toString();
+                const res = await this.apiFetch(`/api/admin/chats/${encodeURIComponent(phone)}?limit=50&before_id=${encodeURIComponent(String(beforeId))}${locQuery ? `&${locQuery}` : ''}`);
                 if (!res.ok) return;
                 const data = await res.json();
                 const older = data.messages || [];
@@ -6386,6 +6692,10 @@ function adminMixinLiveChat() {
             try {
                 const qo = new URLSearchParams({ q: key, size: '40', page: '1' });
                 const qb = new URLSearchParams({ q: key, limit: '40' });
+                for (const [k, v] of this.locationQueryParams().entries()) {
+                    qo.set(k, v);
+                    qb.set(k, v);
+                }
                 const [ro, rb] = await Promise.all([
                     this.apiFetch(`/api/admin/orders?${qo.toString()}`),
                     this.apiFetch(`/api/admin/bookings?${qb.toString()}`),
@@ -6685,6 +6995,8 @@ function adminMixinDataChartsSettings() {
             await this.$nextTick();
             this.tabDataLoading = true;
             try {
+                void this.loadRevenueLeak();
+                void this.loadShiftState();
                 if (this.currentTab === 'dashboard') {
                     void this.refreshTaskQueueHealth();
                     if (this.dashboardTab === 'analytics') {
@@ -6694,6 +7006,7 @@ function adminMixinDataChartsSettings() {
                             this.loadDashStats(),
                             this.loadDashFunnel(),
                             this.loadAttentionSummary(),
+                            this.loadRevenueLeak(),
                         ]);
                         this.deferIdleWork(async () => {
                             if (this.currentTab !== 'dashboard' || this.dashboardTab !== 'overview') return;
@@ -6712,11 +7025,14 @@ function adminMixinDataChartsSettings() {
                     } else {
                         await this.loadAiValue();
                     }
+                } else if (this.currentTab === 'shift') {
+                    await this.loadShiftState(true);
+                    this._startShiftStateAutoRefresh();
                 } else if (this.currentTab === 'inbox') {
                     if (this.inboxTab === 'system') {
                         await this.loadIncidents();
                     } else {
-                        await Promise.all([this.loadFailedTasks(), this.loadDashStats()]);
+                        await Promise.all([this.loadFailedTasks(), this.loadDashStats(), this.loadMoneyQueue()]);
                     }
                 } else if (this.currentTab === 'orders') {
                     await this.loadOrders();
@@ -6795,6 +7111,181 @@ function adminMixinDataChartsSettings() {
             [150, 400, 800].forEach((ms) => {
                 setTimeout(() => this._resizeVisibleCharts(tab), ms);
             });
+            if (this.currentTab !== 'shift') this._stopShiftStateAutoRefresh();
+        },
+
+        _stopShiftHeartbeat(releaseClaim = false) {
+            if (this._shiftHeartbeatTimer) {
+                clearInterval(this._shiftHeartbeatTimer);
+                this._shiftHeartbeatTimer = null;
+            }
+            if (releaseClaim) {
+                this.releaseShiftFocusClaim();
+            }
+        },
+
+        async sendShiftHeartbeat() {
+            const focusId = this.shiftState?.focus?.id;
+            const ownerToken = this.shiftState?.focus?.owner_token || null;
+            const ownership = this.shiftState?.presentation?.focus_ownership
+                || this.shiftState?.focus?.ownership;
+            if (!focusId || ownership === 'other') return;
+            const locQuery = this.locationQueryParams().toString();
+            const url = locQuery ? `/api/admin/shift/heartbeat?${locQuery}` : '/api/admin/shift/heartbeat';
+            try {
+                const { ok, data } = await this.apiJsonResponse(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ focus_id: focusId, owner_token: ownerToken }),
+                });
+                if (!ok || !data?.renewed) {
+                    if (this.currentTab === 'shift') {
+                        await this.loadShiftState(true);
+                    }
+                    return;
+                }
+                if (data.owner_token && this.shiftState?.focus) {
+                    this.shiftState.focus.owner_token = data.owner_token;
+                }
+            } catch (e) {
+                adminLogger.debug('[admin] sendShiftHeartbeat', e);
+            }
+        },
+
+        releaseShiftFocusClaim() {
+            const focusId = this.shiftState?.focus?.id;
+            const ownerToken = this.shiftState?.focus?.owner_token || null;
+            if (!focusId) return;
+            const locQuery = this.locationQueryParams().toString();
+            const url = locQuery ? `/api/admin/shift/heartbeat?${locQuery}` : '/api/admin/shift/heartbeat';
+            void fetch(url, {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ focus_id: focusId, owner_token: ownerToken }),
+                keepalive: true,
+                credentials: 'same-origin',
+            }).catch((e) => adminLogger.debug('[admin] releaseShiftFocusClaim', e));
+        },
+
+        _startShiftHeartbeat() {
+            this._stopShiftHeartbeat();
+            void this.sendShiftHeartbeat();
+            this._shiftHeartbeatTimer = setInterval(() => {
+                if (this.currentTab !== 'shift' || document.hidden) return;
+                void this.sendShiftHeartbeat();
+            }, 7000);
+        },
+
+        _stopShiftStateAutoRefresh() {
+            this._stopShiftHeartbeat(true);
+            if (this._shiftStateRefreshTimer) {
+                clearInterval(this._shiftStateRefreshTimer);
+                this._shiftStateRefreshTimer = null;
+            }
+        },
+
+        _startShiftStateAutoRefresh() {
+            this._stopShiftStateAutoRefresh();
+            this._startShiftHeartbeat();
+            this._shiftStateRefreshTimer = setInterval(() => {
+                if (this.currentTab !== 'shift' || document.hidden) return;
+                void this.loadShiftState(false);
+            }, 45000);
+        },
+
+        shiftFormatWait(totalSec) {
+            const sec = Math.max(0, Number(totalSec || 0));
+            const m = Math.floor(sec / 60);
+            const s = sec % 60;
+            if (m <= 0) return `${s} сек`;
+            return `${m}м ${String(s).padStart(2, '0')}с`;
+        },
+
+        async loadShiftState(force = false) {
+            const ttlMs = 30000;
+            const now = Date.now();
+            if (
+                !force &&
+                this.shiftState &&
+                this.shiftStateFetchedAt > 0 &&
+                now - this.shiftStateFetchedAt < ttlMs
+            ) {
+                return;
+            }
+            this.shiftStateLoading = true;
+            try {
+                const { ok, data, status } = await this.apiJsonResponse(
+                    `/api/admin/shift/state${this.locationQueryString('?')}`,
+                );
+                if (ok && data?.ok) {
+                    this.shiftState = data;
+                    this.shiftStateFetchedAt = Date.now();
+                    this.shiftStateDegraded = false;
+                    this.shiftStateLoadError = '';
+                    if (this.currentTab === 'shift' && data.focus?.id) {
+                        this._startShiftHeartbeat();
+                    }
+                } else if (this.shiftState) {
+                    this.shiftStateDegraded = true;
+                    this.shiftStateLoadError =
+                        this.formatApiError(data?.detail) || `Ошибка загрузки (${status || '—'})`;
+                }
+            } catch (e) {
+                adminLogger.error('[admin] loadShiftState', e);
+                if (this.shiftState) {
+                    this.shiftStateDegraded = true;
+                    this.shiftStateLoadError = 'Нет связи с сервером — показаны последние данные';
+                }
+            } finally {
+                this.shiftStateLoading = false;
+            }
+        },
+
+        async runShiftStateAction(subtype, focusId) {
+            if (this.shiftActionLoading) return;
+            const actionId = String(subtype || 'next');
+            this.shiftActionLoading = actionId;
+            this._stopShiftHeartbeat(true);
+            try {
+                const locQuery = this.locationQueryParams().toString();
+                const url = locQuery ? `/api/admin/shift/action?${locQuery}` : '/api/admin/shift/action';
+                const { ok, data } = await this.apiJsonResponse(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        subtype: String(subtype || 'next'),
+                        focus_id: focusId || null,
+                    }),
+                });
+                if (ok && data?.ok) {
+                    this.shiftState = data;
+                    this.shiftStateFetchedAt = Date.now();
+                } else {
+                    void this.flashToast(this.formatApiError(data?.detail) || 'Не удалось выполнить действие', 'error');
+                }
+            } catch (e) {
+                adminLogger.error('[admin] runShiftStateAction', e);
+                void this.flashToast('Ошибка сети', 'error');
+            } finally {
+                this.shiftActionLoading = '';
+            }
+        },
+
+        runShiftFocusAction(action) {
+            if (!action) return;
+            const act = { ...action };
+            if (!act.type && act.tab) act.type = 'navigate';
+            if (act.type === 'api') {
+                void this.runRevenueLeakAction(act).then(() => {
+                    if (this.currentTab === 'shift') void this.loadShiftState(true);
+                });
+                return;
+            }
+            if (act.type === 'navigate') {
+                this.runRevenueLeakAction(act);
+                return;
+            }
+            this.runMoneyQueueAction(act);
         },
 
         /**
@@ -6905,12 +7396,95 @@ function adminMixinDataChartsSettings() {
         async loadDashFunnel() {
             this.dashFunnelLoading = true;
             try {
-                const { ok, data } = await this.apiJsonResponse('/api/admin/funnel?days=7');
+                const qs = this.locationQueryString('&');
+                const { ok, data } = await this.apiJsonResponse(`/api/admin/funnel?days=7${qs}`);
                 if (ok) this.dashFunnel = data;
             } catch (e) {
                 adminLogger.error('[admin] loadDashFunnel', e);
             } finally {
                 this.dashFunnelLoading = false;
+            }
+        },
+
+        async loadAiSnapshots() {
+            if (this.aiSnapshotsLoading) return;
+            this.aiSnapshotsLoading = true;
+            try {
+                const { ok, data } = await this.apiJsonResponse('/api/admin/intelligence/snapshots?limit=20');
+                if (ok && data?.ok) this.aiSnapshots = data.items || [];
+            } catch (_e) { /* noop */ } finally {
+                this.aiSnapshotsLoading = false;
+            }
+        },
+
+        async loadRevenueLeak() {
+            if (this.revenueLeakLoading) return;
+            this.revenueLeakLoading = true;
+            try {
+                const locQuery = this.locationQueryParams().toString();
+                const { ok, data } = await this.apiJsonResponse(`/api/admin/intelligence/revenue-leak${locQuery ? `?${locQuery}` : ''}`);
+                if (ok && data?.ok) this.revenueLeak = data;
+            } catch (_e) { /* noop */ } finally {
+                this.revenueLeakLoading = false;
+            }
+        },
+
+        revenueLeakSurfaceClass(severity) {
+            const s = String(severity || 'info');
+            if (s === 'critical') return 'border-l-4 border-red-500 bg-red-50 ring-1 ring-red-200/60';
+            if (s === 'warning') return 'border-l-4 border-amber-500 bg-amber-50 ring-1 ring-amber-200/60';
+            return 'border-l-4 border-sky-500 bg-sky-50 ring-1 ring-sky-200/60';
+        },
+
+        revenueLeakSurfaceCountLabel(surface) {
+            const count = Number(surface?.count || 0);
+            const risk = Number(surface?.risk_kzt || 0);
+            const unit = count === 1 ? 'заказ' : (count >= 2 && count <= 4 ? 'заказа' : 'заказов');
+            if (surface?.id === 'slow_chats') {
+                const conv = count === 1 ? 'диалог' : (count >= 2 && count <= 4 ? 'диалога' : 'диалогов');
+                return `${count} ${conv}${risk > 0 ? ' · риск ' + this.fmt.money(risk) : ''}`;
+            }
+            return `${count} ${unit} · ${this.fmt.money(risk)}`;
+        },
+
+        async runRevenueLeakAction(action) {
+            if (!action || this.revenueLeakActionLoading) return;
+            const actionId = String(action.id || action.label || 'action');
+            if (String(action.type || '') === 'api') {
+                this.revenueLeakActionLoading = actionId;
+                try {
+                    const method = String(action.method || 'POST').toUpperCase();
+                    const path = String(action.path || '');
+                    if (!path) return;
+                    const locQuery = this.locationQueryParams().toString();
+                    const url = locQuery ? `${path}?${locQuery}` : path;
+                    const { ok, data } = await this.apiJsonResponse(url, { method });
+                    if (ok && data?.ok) {
+                        const sent = Number(data.sent || 0);
+                        void this.flashToast(
+                            sent > 0 ? `Отправлено напоминаний: ${sent}` : 'Нет подходящих черновиков для возврата',
+                            sent > 0 ? 'success' : 'info',
+                            4500,
+                        );
+                        await this.loadRevenueLeak();
+                    } else {
+                        void this.flashToast(this.formatApiError(data?.detail) || 'Не удалось выполнить действие', 'error');
+                    }
+                } catch (e) {
+                    adminLogger.error('[admin] runRevenueLeakAction', e);
+                    void this.flashToast('Ошибка сети', 'error');
+                } finally {
+                    this.revenueLeakActionLoading = '';
+                }
+                return;
+            }
+            if (String(action.type || '') === 'navigate') {
+                const tab = String(action.tab || 'dashboard');
+                const opts = {};
+                if (action.inboxTab) opts.inboxTab = action.inboxTab;
+                if (action.chatPulseFilter) opts.chatPulseFilter = action.chatPulseFilter;
+                if (action.orderSumMin != null) opts.orderSumMin = action.orderSumMin;
+                this.navigateToTab(tab, opts);
             }
         },
 
@@ -6920,7 +7494,7 @@ function adminMixinDataChartsSettings() {
                 this.dashStatsLoading = true;
             }
             try {
-                const { ok, status, data } = await this.apiJsonResponse('/api/admin/stats');
+                const { ok, status, data } = await this.apiJsonResponse(`/api/admin/stats${this.locationQueryString('?')}`);
                 if (!ok) {
                     adminLogger.warn('GET /api/admin/stats', status, data);
                     // Не затираем уже загруженные KPI/серию: второй параллельный или повторный запрос
@@ -7014,13 +7588,14 @@ function adminMixinDataChartsSettings() {
                 if (this.aiValuePeriod === 'custom' && this.aiValueFrom && this.aiValueTo) {
                     url += `&date_from=${encodeURIComponent(this.aiValueFrom)}&date_to=${encodeURIComponent(this.aiValueTo)}`;
                 }
+                url += this.locationQueryString('&');
                 const r = await this.apiJsonResponse(url);
                 if (r.ok && r.data) {
                     this.aiValueData = this.normalizeAiValuePayload(r.data, 'ai-value');
                     this.aiValueSource = 'ai-value';
                     return;
                 }
-                const st = await this.apiJsonResponse('/api/admin/stats');
+                const st = await this.apiJsonResponse(`/api/admin/stats${this.locationQueryString('?')}`);
                 if (st.ok && st.data) {
                     this.aiValueData = this.normalizeAiValuePayload(st.data, 'stats');
                     this.aiValueSource = 'stats';
@@ -7052,10 +7627,11 @@ function adminMixinDataChartsSettings() {
         async loadIntelligence() {
             this.intelligenceLoading = true;
             try {
+                const locQs = this.locationQueryString('&');
                 const [mainRes, opRes, latRes] = await Promise.all([
-                    this.apiJsonResponse('/api/admin/intelligence/overview'),
+                    this.apiJsonResponse(`/api/admin/intelligence/overview${this.locationQueryString('?')}`),
                     this.apiJsonResponse('/api/admin/intelligence/operator-efficiency?hours=24'),
-                    this.apiJsonResponse('/api/admin/intelligence/latency?hours=24'),
+                    this.apiJsonResponse(`/api/admin/intelligence/latency?hours=24${locQs}`),
                 ]);
                 if (mainRes.ok) {
                     this.intelligenceData = {
@@ -7118,7 +7694,7 @@ function adminMixinDataChartsSettings() {
         async loadDigitalTwin() {
             this.digitalTwinLoading = true;
             try {
-                const { ok, data } = await this.apiJsonResponse('/api/admin/intelligence/digital-twin');
+                const { ok, data } = await this.apiJsonResponse(`/api/admin/intelligence/digital-twin${this.locationQueryString('?')}`);
                 if (!ok) return;
                 this.digitalTwin = { snapshot: data.snapshot || {} };
                 if (data.snapshot?.avg_check_today) {
@@ -7166,7 +7742,7 @@ function adminMixinDataChartsSettings() {
         async loadDashActivity() {
             this.dashActivityLoading = true;
             try {
-                const { ok, status, data } = await this.apiJsonResponse('/api/admin/activity?limit=25');
+                const { ok, status, data } = await this.apiJsonResponse(`/api/admin/activity?limit=25${this.locationQueryString('&')}`);
                 if (!ok) {
                     adminLogger.warn('GET /api/admin/activity', status, data);
                     return;
@@ -7190,7 +7766,7 @@ function adminMixinDataChartsSettings() {
             }
             this.attentionSummaryLoading = true;
             try {
-                const { ok, data } = await this.apiJsonResponse('/api/admin/incidents?mode=summary');
+                const { ok, data } = await this.apiJsonResponse(`/api/admin/incidents?mode=summary${this.locationQueryString('&')}`);
                 if (ok && data) {
                     const prevTotal = Number(this.attentionSummary?.total_open || 0);
                     const newTotal = Number(data.total_open || 0);
@@ -7395,7 +7971,7 @@ function adminMixinDataChartsSettings() {
             if (this.osDashboardLoading) return;
             this.osDashboardLoading = true;
             try {
-                const { ok, data } = await this.apiJsonResponse('/api/admin/intelligence/os-dashboard');
+                const { ok, data } = await this.apiJsonResponse(`/api/admin/intelligence/os-dashboard${this.locationQueryString('?')}`);
                 if (ok && data?.ok) this.osDashboardData = data;
             } catch (_e) { /* noop */ } finally {
                 this.osDashboardLoading = false;
@@ -7533,7 +8109,7 @@ function adminMixinDataChartsSettings() {
         async loadDashRoiSummary() {
             this.dashRoiLoading = true;
             try {
-                const { ok, status, data } = await this.apiJsonResponse('/api/admin/roi/today');
+                const { ok, status, data } = await this.apiJsonResponse(`/api/admin/roi/today${this.locationQueryString('?')}`);
                 if (!ok) {
                     adminLogger.warn('GET /api/admin/roi/today', status, data);
                     this.dashRoiSummary = null;
@@ -7667,6 +8243,8 @@ function adminMixinDataChartsSettings() {
             p.set('page', String(Number.isFinite(page) && page > 0 ? page : 1));
             p.set('size', String(Number.isFinite(size) && size > 0 ? Math.min(500, size) : 50));
             if (this.orderFilter) p.set('status', this.orderFilter);
+            const locParams = this.locationQueryParams();
+            for (const [k, v] of locParams.entries()) p.set(k, v);
             const q = (this.orderSearchQ || '').trim();
             if (q) p.set('q', q);
             const smin = this.orderSumMin;
@@ -7749,6 +8327,46 @@ function adminMixinDataChartsSettings() {
             }
         },
 
+        async loadMoneyQueue() {
+            this.moneyQueueLoading = true;
+            try {
+                const { ok, status, data } = await this.apiJsonResponse(
+                    `/api/admin/inbox/money-queue${this.locationQueryString('?')}`,
+                );
+                if (!ok) {
+                    adminLogger.warn('[admin] loadMoneyQueue', status, data);
+                    return;
+                }
+                this.moneyQueue = data;
+            } finally {
+                this.moneyQueueLoading = false;
+            }
+        },
+
+        runMoneyQueueAction(action) {
+            if (!action) return;
+            const tab = String(action.tab || '').trim();
+            if (tab === 'orders' && action.order_id != null) {
+                this.openGuestContextOrder({ id: Number(action.order_id) });
+                return;
+            }
+            if (tab === 'chats' && action.phone) {
+                void this.openHelpChat(String(action.phone));
+                return;
+            }
+            if (tab === 'inbox') {
+                this.navigateToTab('inbox', { inboxTab: action.inboxTab || 'clients' });
+                return;
+            }
+            if (tab) {
+                const opts = {};
+                if (action.inboxTab) opts.inboxTab = action.inboxTab;
+                if (action.chatPulseFilter) opts.chatPulseFilter = action.chatPulseFilter;
+                if (action.orderSumMin != null) opts.orderSumMin = action.orderSumMin;
+                this.navigateToTab(tab, opts);
+            }
+        },
+
         async loadTeam() {
             this.teamLoading = true;
             this.teamError = '';
@@ -7762,6 +8380,70 @@ function adminMixinDataChartsSettings() {
                 this.teamUsers = Array.isArray(data.users) ? data.users : [];
             } finally {
                 this.teamLoading = false;
+            }
+        },
+
+        async loadStaffMindOnboarding() {
+            if (this.staffMindLoading) return;
+            this.staffMindLoading = true;
+            try {
+                const { ok, data } = await this.apiJsonResponse('/api/admin/intelligence/staffmind/onboarding?limit=20');
+                if (ok && data?.ok) this.staffMindSessions = Array.isArray(data.items) ? data.items : [];
+            } catch (_e) { /* noop */ } finally {
+                this.staffMindLoading = false;
+            }
+        },
+
+        async startStaffMindOnboarding() {
+            const phone = String(this.staffMindPhone || '').trim();
+            if (!phone) {
+                this.teamError = 'Введите телефон сотрудника для онбординга';
+                return;
+            }
+            if (this.staffMindStartLoading) return;
+            this.staffMindStartLoading = true;
+            try {
+                const { ok, data } = await this.apiJsonResponse('/api/admin/intelligence/staffmind/onboarding', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        phone,
+                        role: String(this.staffMindRole || 'staff').trim() || 'staff',
+                    }),
+                });
+                if (ok && data?.item) {
+                    this.staffMindSessions = [data.item, ...(this.staffMindSessions || [])];
+                    this.staffMindPhone = '';
+                    this.staffMindRole = 'staff';
+                    this.setToast('Онбординг сотрудника запущен');
+                } else {
+                    this.teamError = this.formatApiError(data?.detail) || 'Не удалось запустить StaffMind';
+                }
+            } finally {
+                this.staffMindStartLoading = false;
+            }
+        },
+
+        async askStaffMind(sessionId) {
+            const id = Number(sessionId);
+            if (!Number.isFinite(id) || id < 1) return;
+            const question = String(this.staffMindQuestionById?.[id] || '').trim();
+            if (!question) return;
+            this.staffMindAskLoadingId = id;
+            try {
+                const { ok, data } = await this.apiJsonResponse(`/api/admin/intelligence/staffmind/onboarding/${id}/message`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question }),
+                });
+                if (ok && data?.item) {
+                    this.staffMindSessions = (this.staffMindSessions || []).map((s) => Number(s.id) === id ? data.item : s);
+                    this.staffMindQuestionById = { ...(this.staffMindQuestionById || {}), [id]: '' };
+                } else {
+                    this.teamError = this.formatApiError(data?.detail) || 'StaffMind не смог ответить';
+                }
+            } finally {
+                this.staffMindAskLoadingId = null;
             }
         },
 
@@ -8629,6 +9311,7 @@ function adminMixinDataChartsSettings() {
             if (this.analyticsPeriod === 'custom' && this.analyticsFrom && this.analyticsTo) {
                 url += `&date_from=${this.analyticsFrom}&date_to=${this.analyticsTo}`;
             }
+            url += this.locationQueryString('&');
             try {
                 const { ok, status, data: raw } = await this.apiJsonResponse(url);
                 if (!ok) {

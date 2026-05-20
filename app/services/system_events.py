@@ -81,15 +81,22 @@ async def emit_event(db: AsyncSession, event: BusinessEvent) -> SystemEvent | No
         except Exception:
             logger.exception("audit_consumer failed for event type=%s org=%d", event.type, event.org_id)
 
-        # Phase 5 OS: websocket_consumer — публикуем в Pub/Sub для real-time UI
+        try:
+            from app.services.healing_realtime import maybe_trigger_realtime_healing
+            await maybe_trigger_realtime_healing(db, event)
+        except Exception:
+            logger.exception("healing_realtime failed for event type=%s org=%d", event.type, event.org_id)
+
+        # Phase 2a/5 OS: websocket_consumer — org-scoped Pub/Sub push
         try:
             import asyncio
-            from app.services.events import publish_event as _ws_publish
+            from app.services.events import publish_org_event as _ws_publish
             asyncio.create_task(
                 _ws_publish(
+                    event.org_id,
                     event.type,
                     {
-                        "org_id": event.org_id,
+                        "organization_id": event.org_id,
                         "type": event.type,
                         "payload": {k: v for k, v in event.payload.items() if not k.startswith("_")},
                     },

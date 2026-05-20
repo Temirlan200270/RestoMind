@@ -28,11 +28,24 @@ from app.services.dialog_mgr import (
     get_user_state,
     set_user_state_durable,
 )
+from app.services.bot_sla_status import (
+    SHORT_MODE_THRESHOLD,
+    chat_live_pulse,
+    get_slow_chat_count,
+    is_chat_slow,
+)
 from app.services.events import publish_event
 from app.services.intent_router import get_or_create_user
 from app.services.system_events import BusinessEvent, emit_event
+from app.services.tenant_scope import allowed_location_ids_for_staff, chat_logs_location_filter
 
-from .deps import admin_actor_key, admin_org_from_session, require_admin_session_active
+from .deps import (
+    _session_is_superadmin,
+    _session_staff_user,
+    admin_actor_key,
+    admin_org_from_session,
+    require_admin_session_active,
+)
 from .schemas import TextRequest
 
 logger = logging.getLogger(__name__)
@@ -99,6 +112,7 @@ async def list_chats_sidebar(
     cursor_at: str | None = Query(None, description="Cursor: lastAt ISO (for infinite scroll)"),
     cursor_id: int | None = Query(None, ge=1, description="Cursor: last message id (tie-breaker)"),
     mode: Literal["active", "mine", "closed", "snoozed", "all"] = Query("active"),
+    location_id: int | None = Query(None, ge=1),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """
@@ -106,6 +120,16 @@ async def list_chats_sidebar(
     Infinite scroll: курсор по (lastAt, last_id). Без full-scan chat_logs.
     """
     org_id = admin_org_from_session(request)
+    staff = await _session_staff_user(request, db)
+    is_super = await _session_is_superadmin(request, db)
+    allowed_location_ids = await allowed_location_ids_for_staff(
+        db,
+        staff=staff,
+        org_id=org_id,
+        is_superadmin=is_super,
+    )
+    if location_id is not None and allowed_location_ids is not None and int(location_id) not in allowed_location_ids:
+        raise HTTPException(status_code=403, detail="Location is not allowed")
 
     cur_dt: datetime | None = None
     if cursor_at:
@@ -125,6 +149,7 @@ async def list_chats_sidebar(
             ChatLog.user_id.label("user_id"),
             ChatLog.created_at.label("last_at"),
             ChatLog.content.label("content"),
+            ChatLog.role.label("last_role"),
             User.phone.label("phone"),
             User.name.label("user_name"),
             User.meta_json.label("user_meta"),
@@ -136,7 +161,10 @@ async def list_chats_sidebar(
             .label("rn"),
         )
         .join(User, User.id == ChatLog.user_id)
-        .where(User.organization_id == org_id)
+        .where(
+            User.organization_id == org_id,
+            chat_logs_location_filter(allowed_location_ids, location_id),
+        )
         .subquery()
     )
 
@@ -167,10 +195,14 @@ async def list_chats_sidebar(
     next_cursor: dict[str, object] | None = None
     staff_key = admin_actor_key(request)
     now = datetime.now(timezone.utc)
+    slow_chats_count = await get_slow_chat_count(redis_client, org_id, location_id)
+    bot_short_mode = slow_chats_count > SHORT_MODE_THRESHOLD
     for r in rows:
         phone = r.phone
         if not phone:
             continue
+        chat_slow = await is_chat_slow(redis_client, org_id, phone, location_id)
+        live = chat_live_pulse(r.last_role, r.last_at, now=now, chat_slow=chat_slow)
         triage = _chat_triage_from_meta(r.user_meta)
         snoozed_until = _parse_dt(triage.get("snoozed_until"))
         is_snoozed = snoozed_until is not None and snoozed_until > now
@@ -196,8 +228,21 @@ async def list_chats_sidebar(
                 "triageState": triage.get("state") or "active",
                 "assignee": assignee,
                 "snoozedUntil": triage.get("snoozed_until"),
+                "bot_short_mode": bot_short_mode,
+                "slow_chats": slow_chats_count,
+                "last_role": live["last_role"],
+                "wait_seconds": live["wait_seconds"],
+                "pulse": live["pulse"],
+                "sla_status": live["pulse"],
+                "chat_slow": chat_slow,
             }
         )
+    chats.sort(
+        key=lambda c: (
+            {"red": 0, "amber": 1, "green": 2}.get(str(c.get("pulse") or "green"), 2),
+            -(int(c.get("wait_seconds") or 0)),
+        ),
+    )
     if chats:
         last = rows[-1]
         if last.last_at is not None:
@@ -205,7 +250,14 @@ async def list_chats_sidebar(
         else:
             next_cursor = {"cursor_at": None, "cursor_id": int(last.log_id)}
 
-    return {"chats": chats, "has_more": has_more, "next_cursor": next_cursor}
+    return {
+        "chats": chats,
+        "has_more": has_more,
+        "next_cursor": next_cursor,
+        "bot_short_mode": bot_short_mode,
+        "slow_chats": slow_chats_count,
+        "location_id": location_id,
+    }
 
 
 @chats_router.get("/chats/{phone}")
@@ -214,6 +266,7 @@ async def get_chat_log(
     phone: str,
     limit: int = Query(50, ge=1, le=200),
     before_id: int | None = Query(None, ge=1, description="Cursor: load older messages with id < before_id"),
+    location_id: int | None = Query(None, ge=1),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Просмотр истории диалога с клиентом по номеру телефона."""
@@ -226,7 +279,21 @@ async def get_chat_log(
     if user is None:
         raise HTTPException(status_code=404, detail=f"Пользователь с номером {phone} не найден")
 
-    stmt = select(ChatLog).where(ChatLog.user_id == user.id)
+    staff = _session_staff_user(request)
+    allowed_location_ids = await allowed_location_ids_for_staff(
+        db,
+        org_id=org_id,
+        staff=staff,
+        is_superadmin=_session_is_superadmin(request),
+        is_demo=False,
+    )
+    if location_id is not None and allowed_location_ids is not None and int(location_id) not in allowed_location_ids:
+        raise HTTPException(status_code=403, detail="location_forbidden")
+
+    stmt = select(ChatLog).where(
+        ChatLog.user_id == user.id,
+        chat_logs_location_filter(allowed_location_ids, location_id),
+    )
     if before_id is not None:
         stmt = stmt.where(ChatLog.id < int(before_id))
     # Cursor-based: stable by primary key.
@@ -243,12 +310,14 @@ async def get_chat_log(
         "count": len(logs),
         "has_more": has_more,
         "next_before_id": next_before_id,
+        "location_id": location_id,
         "messages": [
             {
                 "id": log.id,
                 "role": log.role,
                 "content": log.content,
                 "created_at": log.created_at.isoformat() if log.created_at else None,
+                "location_id": log.location_id,
                 "meta": log.meta_json if isinstance(log.meta_json, dict) else None,
                 "provider_message_id": log.provider_message_id,
                 "delivery_status": log.delivery_status,
@@ -576,11 +645,25 @@ async def resend_failed_chat_message(
 async def get_chat_state(
     request: Request,
     phone: str,
+    location_id: int | None = Query(None, ge=1),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Получить текущее состояние диалога (CHATTING, CONFIRMING_ORDER, HUMAN_MODE)."""
     org_id = admin_org_from_session(request)
+    staff = await _session_staff_user(request, db)
+    is_super = await _session_is_superadmin(request, db)
+    allowed_location_ids = await allowed_location_ids_for_staff(
+        db,
+        staff=staff,
+        org_id=org_id,
+        is_superadmin=is_super,
+    )
+    if location_id is not None and allowed_location_ids is not None and int(location_id) not in allowed_location_ids:
+        raise HTTPException(status_code=403, detail="Location is not allowed")
     state = await get_user_state(redis_client, phone, organization_id=org_id)
+    slow_chats_count = await get_slow_chat_count(redis_client, org_id, location_id)
+    bot_short_mode = slow_chats_count > SHORT_MODE_THRESHOLD
+    chat_slow = await is_chat_slow(redis_client, org_id, phone, location_id)
     ai_snoozed_until: str | None = None
     u = await db.scalar(select(User).where(User.phone == phone, User.organization_id == org_id))
     if u is not None:
@@ -590,4 +673,13 @@ async def get_chat_state(
         await db.commit()
         if ai_snooze_is_active(u) and u.ai_snoozed_until is not None:
             ai_snoozed_until = u.ai_snoozed_until.isoformat()
-    return {"phone": phone, "state": state.value, "ai_snoozed_until": ai_snoozed_until}
+    return {
+        "phone": phone,
+        "state": state.value,
+        "ai_snoozed_until": ai_snoozed_until,
+        "bot_short_mode": bot_short_mode,
+        "slow_chats": slow_chats_count,
+        "location_id": location_id,
+        "sla_status": "red" if chat_slow else ("amber" if bot_short_mode else "green"),
+        "chat_slow": chat_slow,
+    }

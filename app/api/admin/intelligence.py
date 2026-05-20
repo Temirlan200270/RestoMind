@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.admin.deps import admin_org_from_session, require_admin_session_active
+from app.api.admin.deps import (
+    _session_is_superadmin,
+    _session_staff_user,
+    admin_org_from_session,
+    require_admin_session_active,
+)
 from sqlalchemy import select
 from app.db.models import (
     AIContextSnapshot,
@@ -31,6 +37,7 @@ from app.services.owner_dashboard import (
     build_stock_alerts_from_inventory,
     build_stock_alerts_stub,
     build_week_forecast,
+    fetch_daily_revenue_history,
     fetch_daily_revenue_history_from_events,
 )
 from app.services.intelligence import (
@@ -41,12 +48,32 @@ from app.services.intelligence import (
     revenue_orders_summary,
     simulate_operator_capacity,
 )
+from app.services.tenant_scope import allowed_location_ids_for_staff
 
 router = APIRouter(
     prefix="/admin/intelligence",
     tags=["Restaurant Intelligence"],
     dependencies=[Depends(require_admin_session_active)],
 )
+
+
+async def _location_scope_for_request(
+    request: Request,
+    db: AsyncSession,
+    org_id: int,
+    location_id: int | None,
+) -> tuple[set[int] | None, bool]:
+    staff = await _session_staff_user(request, db)
+    is_super = await _session_is_superadmin(request, db)
+    allowed = await allowed_location_ids_for_staff(
+        db,
+        staff=staff,
+        org_id=org_id,
+        is_superadmin=is_super,
+    )
+    if location_id is not None and allowed is not None and int(location_id) not in allowed:
+        raise HTTPException(status_code=403, detail="Location is not allowed")
+    return allowed, bool(location_id is not None or allowed is not None)
 
 
 class IntelligenceQueryBody(BaseModel):
@@ -88,11 +115,33 @@ def _insight_public(row: OperationalInsight) -> dict:
 
 
 @router.get("/overview")
-async def intelligence_overview(request: Request, db: AsyncSession = Depends(get_db)) -> dict:
+async def intelligence_overview(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    location_id: Annotated[int | None, Query(ge=1)] = None,
+) -> dict:
     org_id = admin_org_from_session(request)
-    summary = await revenue_orders_summary(db, org_id, "today")
+    allowed_location_ids, location_scoped = await _location_scope_for_request(
+        request,
+        db,
+        org_id,
+        location_id,
+    )
+    summary = await revenue_orders_summary(
+        db,
+        org_id,
+        "today",
+        location_id=location_id,
+        allowed_location_ids=allowed_location_ids,
+    )
     insights = await list_insights(db, org_id, limit=10)
-    snapshot = await build_state_snapshot(db, org_id, persist=True)
+    snapshot = await build_state_snapshot(
+        db,
+        org_id,
+        persist=not location_scoped,
+        location_id=location_id,
+        allowed_location_ids=allowed_location_ids,
+    )
     await db.commit()
     return {
         "summary": summary,
@@ -110,6 +159,10 @@ async def intelligence_overview(request: Request, db: AsyncSession = Depends(get
             "kitchen_load": float(snapshot.kitchen_load or 0),
             "stoplist_count": snapshot.stoplist_count,
             "created_at": snapshot.created_at.isoformat() if snapshot.created_at else None,
+        },
+        "location_scope": {
+            "location_id": int(location_id) if location_id is not None else None,
+            "source": "sql_location" if location_scoped else "org",
         },
     }
 
@@ -162,9 +215,25 @@ async def patch_intelligence_insight(
 
 
 @router.get("/digital-twin")
-async def digital_twin_state(request: Request, db: AsyncSession = Depends(get_db)) -> dict:
+async def digital_twin_state(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    location_id: Annotated[int | None, Query(ge=1)] = None,
+) -> dict:
     org_id = admin_org_from_session(request)
-    snapshot = await build_state_snapshot(db, org_id, persist=True)
+    allowed_location_ids, location_scoped = await _location_scope_for_request(
+        request,
+        db,
+        org_id,
+        location_id,
+    )
+    snapshot = await build_state_snapshot(
+        db,
+        org_id,
+        persist=not location_scoped,
+        location_id=location_id,
+        allowed_location_ids=allowed_location_ids,
+    )
     await db.commit()
     return {
         "snapshot": {
@@ -181,6 +250,10 @@ async def digital_twin_state(request: Request, db: AsyncSession = Depends(get_db
             "stoplist_count": snapshot.stoplist_count,
             "payload": snapshot.payload_json or {},
             "created_at": snapshot.created_at.isoformat() if snapshot.created_at else None,
+        },
+        "location_scope": {
+            "location_id": int(location_id) if location_id is not None else None,
+            "source": "sql_location" if location_scoped else "org",
         },
     }
 
@@ -204,17 +277,23 @@ async def digital_twin_simulate(body: SimulationBody) -> dict:
 async def intelligence_latency(
     request: Request,
     hours: int = Query(default=24, ge=1, le=168),
+    location_id: Annotated[int | None, Query(ge=1)] = None,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Агрегированные метрики задержки пайплайна по стадиям (p50/p95/max)."""
     from app.services.pipeline_latency import get_latency_summary, get_sla_violations_count
     org_id = admin_org_from_session(request)
+    _, location_scoped = await _location_scope_for_request(request, db, org_id, location_id)
     stages = await get_latency_summary(db, org_id, hours=hours)
     violations = await get_sla_violations_count(db, org_id, hours=hours)
     return {
         "period_hours": hours,
         "stages": stages,
         "sla_violations": violations,
+        "location_scope": {
+            "location_id": int(location_id) if location_id is not None else None,
+            "source": "org_level_latency_logs" if location_scoped else "org",
+        },
         "sla_thresholds": {
             "llm_p95_ms": 4000,
             "total_p95_ms": 8000,
@@ -542,6 +621,7 @@ async def apply_autopilot_pricing_bulk(
 @router.get("/os-dashboard")
 async def os_dashboard(
     request: Request,
+    location_id: Annotated[int | None, Query(ge=1)] = None,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """OS Autopilot view — ТОЛЬКО event-driven данные, нет SQL к Order/ChatLog.
@@ -551,30 +631,68 @@ async def os_dashboard(
     """
     from datetime import datetime, timezone
     org_id = admin_org_from_session(request)
+    allowed_location_ids, location_scoped = await _location_scope_for_request(
+        request,
+        db,
+        org_id,
+        location_id,
+    )
     now_utc = datetime.now(tz=timezone.utc)
 
     # Today summary (event-driven)
-    today_summary = await get_today_event_summary(db, org_id)
+    today_summary = (
+        {
+            "orders_created": 0,
+            "orders_confirmed": 0,
+            "orders_cancelled": 0,
+            "revenue_kzt": 0.0,
+            "payments_completed": 0,
+            "payments_failed": 0,
+            "escalations": 0,
+            "operator_takeovers": 0,
+            "dialogs_count": 0,
+        }
+        if location_scoped
+        else await get_today_event_summary(db, org_id)
+    )
 
     # Revenue forecast (event-driven, 28 days)
-    revenue_history = await fetch_daily_revenue_history_from_events(db, org_id, days=28, now_utc=now_utc)
+    if location_scoped:
+        revenue_history = await fetch_daily_revenue_history(
+            db,
+            org_id,
+            days=28,
+            now_utc=now_utc,
+            location_id=location_id,
+            allowed_location_ids=allowed_location_ids,
+        )
+        forecast_source = "sql_location"
+        today_summary["revenue_kzt"] = float(revenue_history.get(now_utc.date().isoformat(), 0.0) or 0.0)
+    else:
+        revenue_history = await fetch_daily_revenue_history_from_events(db, org_id, days=28, now_utc=now_utc)
+        forecast_source = "event_driven"
     week_forecast = build_week_forecast(revenue_history, today=now_utc.date())
     if week_forecast:
-        week_forecast = {**week_forecast, "source": "event_driven"}
+        week_forecast = {**week_forecast, "source": forecast_source}
 
     # Demand forecast (orders, event-driven) + predictive analytics
-    event_rows = await get_event_stats(db, org_id, days=28)
+    event_rows = [] if location_scoped else await get_event_stats(db, org_id, days=28)
     orders_by_date = {r["date"]: int(r["orders_confirmed"] or 0) for r in event_rows}
     demand_forecast = build_demand_forecast(orders_by_date, today=now_utc.date())
     cancellation_risk = build_cancellation_forecast(event_rows, today=now_utc.date())
     overload_risk = build_overload_risk(event_rows, today=now_utc.date())
     autopilot_pricing = build_autopilot_pricing(event_rows, today=now_utc.date())
-    inventory_rows = (await db.execute(
+    inventory_stmt = (
         select(InventoryStockSnapshot)
         .where(InventoryStockSnapshot.organization_id == org_id)
         .order_by(InventoryStockSnapshot.updated_at.desc())
         .limit(200)
-    )).scalars().all()
+    )
+    if location_id is not None:
+        inventory_stmt = inventory_stmt.where(InventoryStockSnapshot.location_id == int(location_id))
+    elif allowed_location_ids is not None:
+        inventory_stmt = inventory_stmt.where(InventoryStockSnapshot.location_id.in_(list(allowed_location_ids)))
+    inventory_rows = (await db.execute(inventory_stmt)).scalars().all()
     stock_alerts = build_stock_alerts_from_inventory(inventory_rows)
     if not stock_alerts:
         stock_alerts = build_stock_alerts_stub(event_rows, today=now_utc.date())
@@ -632,9 +750,13 @@ async def os_dashboard(
 
     return {
         "ok": True,
-        "source": "event_driven",
+        "source": "sql_location" if location_scoped else "event_driven",
         "generated_at": now_utc.isoformat(),
         "organization_id": org_id,
+        "location_scope": {
+            "location_id": int(location_id) if location_id is not None else None,
+            "source": "sql_location" if location_scoped else "event_driven",
+        },
         "today": today_summary,
         "week_forecast": week_forecast,
         "demand_forecast": demand_forecast,
@@ -644,7 +766,122 @@ async def os_dashboard(
         "stock_alerts": stock_alerts,
         "incidents": incidents,
         "top_recommendations": recommendations,
-        "note": "Данные из дневной статистики ОС (DailyOrgStats), без прямых запросов к заказам и чатам.",
+        "note": (
+            "Данные по точке считаются из SQL, потому что DailyOrgStats пока хранит агрегат по организации."
+            if location_scoped
+            else "Данные из дневной статистики ОС (DailyOrgStats), без прямых запросов к заказам и чатам."
+        ),
+    }
+
+
+# ─── Phase 3b OS: AI Context Snapshot List ───────────────────────────────────
+
+
+@router.get("/snapshots")
+async def list_ai_snapshots(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    limit: int = Query(20, ge=1, le=100),
+    phone: str | None = Query(None, description="Фильтр по номеру телефона"),
+) -> dict:
+    """Список последних AI-снимков контекста для просмотра и replay."""
+    from datetime import timedelta
+    from sqlalchemy import desc
+    org_id = admin_org_from_session(request)
+    stmt = (
+        select(AIContextSnapshot)
+        .where(AIContextSnapshot.organization_id == org_id)
+        .order_by(desc(AIContextSnapshot.created_at))
+        .limit(limit)
+    )
+    if phone:
+        stmt = stmt.where(AIContextSnapshot.phone == phone.strip())
+    rows = (await db.execute(stmt)).scalars().all()
+
+    def _snap_brief(s: AIContextSnapshot) -> dict:
+        bs = s.business_state or {}
+        return {
+            "id": s.id,
+            "phone": s.phone,
+            "created_at": s.created_at.isoformat() if s.created_at else None,
+            "intent": bs.get("last_intent"),
+            "has_menu": bool(bs.get("menu_context_text")),
+            "has_event_slice": bool(s.event_slice),
+            "has_prices": bool(bs.get("menu_prices_snapshot")),
+        }
+
+    return {
+        "ok": True,
+        "organization_id": org_id,
+        "items": [_snap_brief(r) for r in rows],
+        "count": len(rows),
+        "retention_days": 30,
+    }
+
+
+# ─── Money MVP: Revenue Leak Detector ────────────────────────────────────────
+
+
+@router.get("/revenue-leak")
+async def revenue_leak(
+    request: Request,
+    location_id: Annotated[int | None, Query(ge=1)] = None,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Детектор утечек выручки: брошенные корзины + медленные ответы + отмены.
+
+    Обновляется при каждом запросе (no cache). Использовать для Hero Block дашборда.
+    """
+    from app.services.revenue_leak import build_revenue_leak
+    from app.api.admin.deps import _session_is_superadmin, _session_staff_user
+    from app.services.tenant_scope import allowed_location_ids_for_staff
+    org_id = admin_org_from_session(request)
+    staff = await _session_staff_user(request, db)
+    is_super = await _session_is_superadmin(request, db)
+    allowed_location_ids = await allowed_location_ids_for_staff(
+        db,
+        staff=staff,
+        org_id=org_id,
+        is_superadmin=is_super,
+    )
+    if location_id is not None and allowed_location_ids is not None and int(location_id) not in allowed_location_ids:
+        raise HTTPException(status_code=403, detail="Location is not allowed")
+    result = await build_revenue_leak(
+        db,
+        org_id,
+        location_id=location_id,
+        allowed_location_ids=allowed_location_ids,
+    )
+    return {"ok": True, "organization_id": org_id, **result}
+
+
+@router.post("/revenue-leak/recover-drafts")
+async def revenue_leak_recover_drafts(
+    request: Request,
+    location_id: Annotated[int | None, Query(ge=1)] = None,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """G8: вручную запустить G6 draft recovery для текущей org (reuse cron-логики)."""
+    from app.services.draft_recovery import run_draft_recovery_for_org
+
+    org_id = admin_org_from_session(request)
+    staff = await _session_staff_user(request, db)
+    is_super = await _session_is_superadmin(request, db)
+    allowed_location_ids = await allowed_location_ids_for_staff(
+        db,
+        staff=staff,
+        org_id=org_id,
+        is_superadmin=is_super,
+    )
+    if location_id is not None and allowed_location_ids is not None and int(location_id) not in allowed_location_ids:
+        raise HTTPException(status_code=403, detail="Location is not allowed")
+    sent = await run_draft_recovery_for_org(db, org_id)
+    await db.commit()
+    return {
+        "ok": True,
+        "organization_id": org_id,
+        "sent": int(sent),
+        "location_id": location_id,
     }
 
 
@@ -886,17 +1123,38 @@ async def upsert_inventory_snapshots(
 @router.get("/inventory/stock-alerts")
 async def inventory_stock_alerts(
     request: Request,
+    location_id: Annotated[int | None, Query(ge=1)] = None,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     org_id = admin_org_from_session(request)
-    rows = (await db.execute(
+    allowed_location_ids, location_scoped = await _location_scope_for_request(
+        request,
+        db,
+        org_id,
+        location_id,
+    )
+    stmt = (
         select(InventoryStockSnapshot)
         .where(InventoryStockSnapshot.organization_id == org_id)
         .order_by(InventoryStockSnapshot.updated_at.desc())
         .limit(200)
-    )).scalars().all()
+    )
+    if location_id is not None:
+        stmt = stmt.where(InventoryStockSnapshot.location_id == int(location_id))
+    elif allowed_location_ids is not None:
+        stmt = stmt.where(InventoryStockSnapshot.location_id.in_(list(allowed_location_ids)))
+    rows = (await db.execute(stmt)).scalars().all()
     alerts = build_stock_alerts_from_inventory(rows)
-    return {"ok": True, "source": "inventory_stock_snapshots", "items": alerts, "count": len(alerts)}
+    return {
+        "ok": True,
+        "source": "inventory_stock_snapshots",
+        "items": alerts,
+        "count": len(alerts),
+        "location_scope": {
+            "location_id": int(location_id) if location_id is not None else None,
+            "source": "sql_location" if location_scoped else "org",
+        },
+    }
 
 
 @router.post("/supplymind/drafts")

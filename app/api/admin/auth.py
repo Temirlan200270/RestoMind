@@ -24,8 +24,11 @@ from app.db.models import Organization, RegistrationRequest, StaffRole, StaffUse
 from app.db.session import get_db
 from app.services.admin_tokens import create_admin_ws_token
 from app.services.tenant_scope import (
+    allowed_location_ids_for_staff,
     available_organizations_for_admin_session,
     branding_placeholder_e21,
+    ensure_default_location,
+    list_locations_for_org,
     organization_id_allowed_for_admin_session,
     resolve_tenant_summary_for_session,
 )
@@ -346,6 +349,20 @@ async def _admin_auth_me_payload(request: Request, db: AsyncSession) -> dict[str
         is_demo=is_demo,
         session_organization_id=int(oid),
     )
+    all_locations = await list_locations_for_org(db, int(oid))
+    if not all_locations:
+        all_locations = [await ensure_default_location(db, int(oid))]
+    allowed_location_ids = await allowed_location_ids_for_staff(
+        db,
+        staff=staff_me,
+        org_id=int(oid),
+        is_superadmin=is_superadmin,
+    )
+    available_locations = [
+        {"id": int(loc.id), "name": str(loc.name), "slug": str(loc.slug or "")}
+        for loc in all_locations
+        if allowed_location_ids is None or int(loc.id) in allowed_location_ids
+    ]
     tenant_payload = await resolve_tenant_summary_for_session(
         db,
         staff=staff_me,
@@ -378,6 +395,7 @@ async def _admin_auth_me_payload(request: Request, db: AsyncSession) -> dict[str
         else None,
         "active_organization_id": int(oid),
         "available_organizations": available,
+        "available_locations": available_locations,
         "tenant": tenant_payload,
         "branding": branding,
     }

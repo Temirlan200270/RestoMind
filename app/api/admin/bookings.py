@@ -9,10 +9,16 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.admin.deps import admin_org_from_session, require_admin_session_active
+from app.api.admin.deps import (
+    _session_is_superadmin,
+    _session_staff_user,
+    admin_org_from_session,
+    require_admin_session_active,
+)
 from app.db.models import Booking, Order, User
 from app.db.session import get_db
 from app.services.booking_halls import BOOKING_HALL_KEYS, BOOKING_HALL_VIP, vip_slot_occupied
+from app.services.tenant_scope import allowed_location_ids_for_staff, bookings_location_filter
 
 bookings_router = APIRouter(dependencies=[Depends(require_admin_session_active)])
 
@@ -33,6 +39,7 @@ async def list_bookings(
     q: str | None = Query(None, description="Поиск по телефону клиента"),
     date_from: date | None = Query(None, description="Дата брони от (включительно, YYYY-MM-DD)"),
     date_to: date | None = Query(None, description="Дата брони до (включительно, YYYY-MM-DD)"),
+    location_id: int | None = Query(None, ge=1),
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
@@ -41,6 +48,15 @@ async def list_bookings(
         raise HTTPException(status_code=400, detail="date_from не может быть позже date_to")
 
     org_id = admin_org_from_session(request)
+    allowed_location_ids = await allowed_location_ids_for_staff(
+        db,
+        org_id=org_id,
+        staff=_session_staff_user(request),
+        is_superadmin=_session_is_superadmin(request),
+        is_demo=False,
+    )
+    if location_id is not None and allowed_location_ids is not None and int(location_id) not in allowed_location_ids:
+        raise HTTPException(status_code=403, detail="location_forbidden")
     order_cols = (
         (Booking.booking_date.asc(), Booking.booking_time.asc())
         if date_from is not None or date_to is not None
@@ -50,7 +66,7 @@ async def list_bookings(
         select(Booking, User.phone, User.name, Order.id)
         .join(User, Booking.user_id == User.id)
         .outerjoin(Order, Order.booking_id == Booking.id)
-        .where(User.organization_id == org_id)
+        .where(User.organization_id == org_id, bookings_location_filter(allowed_location_ids, location_id))
         .order_by(*order_cols)
     )
     if status:
@@ -80,6 +96,7 @@ async def list_bookings(
                 "hall": b.hall,
                 "comment": b.comment,
                 "status": b.status,
+                "location_id": b.location_id,
                 "created_at": b.created_at.isoformat() if b.created_at else None,
                 "linked_order_id": linked_oid,
             }

@@ -82,7 +82,8 @@ async def admin_websocket(ws: WebSocket, token: str = "") -> None:
             keepalive_task.cancel()
         return
     try:
-        async for event_json in subscribe_events():
+        # Phase 2a: подписываемся только на org-scoped канал — не читаем чужие события
+        async for event_json in subscribe_events(org_id=int(claims.organization_id)):
             if _ws_event_allowed_for_org(event_json, claims):
                 await ws.send_text(event_json)
     except (WebSocketDisconnect, RuntimeError) as exc:

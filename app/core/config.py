@@ -581,6 +581,11 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("REVIEW_REQUEST_DELAY_SEC", "review_request_delay_sec"),
         description="Задержка перед запросом отзыва после SENT_TO_IIKO/COMPLETED (сек; по умолчанию 30 мин)",
     )
+    draft_recovery_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("DRAFT_RECOVERY_ENABLED", "draft_recovery_enabled"),
+        description="WA-nudge для DRAFT-заказов старше 45 мин (Money Core)",
+    )
 
     # --- Ночные предзаказы / смена ---
     shift_alert_timeout_min: int = Field(

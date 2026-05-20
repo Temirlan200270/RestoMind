@@ -11,7 +11,7 @@ from typing import Any
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import FailedTask, Location, Order, Organization, StaffRole, StaffUser, Tenant, User
+from app.db.models import Booking, ChatLog, FailedTask, Location, Order, Organization, StaffRole, StaffUser, Tenant, User
 
 
 def phones_subquery_for_org(org_id: int):
@@ -380,3 +380,38 @@ def orders_location_clause(org_id: int, allowed_location_ids: set[int] | None):
         base,
         or_(Order.location_id.is_(None), Order.location_id.in_(list(allowed_location_ids))),
     )
+
+
+def _coerce_location_id(location_id: object) -> int | None:
+    if location_id is None:
+        return None
+    try:
+        lid = int(location_id)
+    except (TypeError, ValueError):
+        return None
+    return lid if lid > 0 else None
+
+
+def _location_allowed_expr(model, allowed_location_ids: set[int] | None, location_id: int | None = None):
+    lid = _coerce_location_id(location_id)
+    if lid is not None:
+        if allowed_location_ids is not None and lid not in allowed_location_ids:
+            return model.id == -1
+        return model.location_id == lid
+    if allowed_location_ids is None:
+        return True
+    if not allowed_location_ids:
+        return model.id == -1
+    return or_(model.location_id.is_(None), model.location_id.in_(list(allowed_location_ids)))
+
+
+def orders_location_filter(allowed_location_ids: set[int] | None, location_id: int | None = None):
+    return _location_allowed_expr(Order, allowed_location_ids, location_id)
+
+
+def chat_logs_location_filter(allowed_location_ids: set[int] | None, location_id: int | None = None):
+    return _location_allowed_expr(ChatLog, allowed_location_ids, location_id)
+
+
+def bookings_location_filter(allowed_location_ids: set[int] | None, location_id: int | None = None):
+    return _location_allowed_expr(Booking, allowed_location_ids, location_id)

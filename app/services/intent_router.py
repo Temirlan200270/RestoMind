@@ -423,6 +423,7 @@ async def _handle_order(
     newly_stopped_names: list[str] | None = None,
     trace_id: str = "",
     conversation_id: str = "",
+    location_id: int | None = None,
 ) -> RouteResult:
     """
     Обработка intent='order':
@@ -581,6 +582,7 @@ async def _handle_order(
             )
         booking_row = Booking(
             organization_id=organization_id,
+            location_id=location_id,
             user_id=user.id,
             booking_date=booking_date,
             booking_time=booking_time,
@@ -689,6 +691,7 @@ async def _handle_order(
     else:
         order = Order(
             organization_id=organization_id,
+            location_id=location_id,
             user_id=user.id,
             status=OrderStatus.DRAFT,
             items_json=items_json,
@@ -901,6 +904,7 @@ async def _handle_booking(
     ai_response: AIBrainResponse,
     *,
     organization_id: int,
+    location_id: int | None = None,
 ) -> RouteResult:
     """
     Обработка intent='book':
@@ -933,6 +937,7 @@ async def _handle_booking(
 
     booking = Booking(
         organization_id=organization_id,
+        location_id=location_id,
         user_id=user.id,
         booking_date=booking_date,
         booking_time=booking_time,
@@ -1237,6 +1242,7 @@ async def route_intent(
     newly_stopped_names: list[str] | None = None,
     trace_id: str = "",
     conversation_id: str = "",
+    location_id: int | None = None,
 ) -> RouteResult:
     """
     Главный маршрутизатор — вызывает обработчик в зависимости от intent.
@@ -1261,9 +1267,10 @@ async def route_intent(
             newly_stopped_names=newly_stopped_names,
             trace_id=trace_id,
             conversation_id=conversation_id,
+            location_id=location_id,
         )
     elif intent == "book":
-        return await _handle_booking(db, phone, ai_response, organization_id=oid)
+        return await _handle_booking(db, phone, ai_response, organization_id=oid, location_id=location_id)
     elif intent == "escalate":
         return await _handle_escalate(phone, ai_response)
     else:

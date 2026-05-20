@@ -5,9 +5,10 @@ from __future__ import annotations
 import logging
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from pydantic import BaseModel, Field
 from sqlalchemy import exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -54,13 +55,17 @@ from app.services.owner_dashboard import (
 from app.services.owner_roi import aggregate_org_window, build_achievements_week, build_today_narrative_ru
 from app.services.readiness import build_admin_readiness_payload
 from app.services.tenant_scope import (
+    allowed_location_ids_for_staff,
+    chat_logs_location_filter,
     failed_tasks_tenant_clause as _failed_tasks_tenant_clause,
+    orders_location_filter,
     orders_tenant_clause as _orders_tenant_clause,
 )
 from .deps import (
     _bookings_tenant_clause,
     _escalation_tenant_clause,
     _session_is_superadmin,
+    _session_staff_user,
     admin_org_from_session,
     require_admin_session_active,
 )
@@ -72,6 +77,26 @@ router = APIRouter(
     tags=["Analytics"],
     dependencies=[Depends(require_admin_session_active)],
 )
+
+
+async def _location_scope_for_request(
+    request: Request,
+    db: AsyncSession,
+    org_id: int,
+    location_id: int | None,
+) -> tuple[set[int] | None, bool]:
+    """Return allowed location ids and whether org-level event aggregates are unsafe."""
+    staff = await _session_staff_user(request, db)
+    is_super = await _session_is_superadmin(request, db)
+    allowed = await allowed_location_ids_for_staff(
+        db,
+        staff=staff,
+        org_id=org_id,
+        is_superadmin=is_super,
+    )
+    if location_id is not None and allowed is not None and int(location_id) not in allowed:
+        raise HTTPException(status_code=403, detail="Location is not allowed")
+    return allowed, bool(location_id is not None or allowed is not None)
 
 
 # ─── Даты заказов (UTC) — общие для /stats и /analytics ───
@@ -250,11 +275,20 @@ async def admin_incidents(
         str,
         Query(description="full — полные группы; summary — только счётчики и hero_actions"),
     ] = "full",
+    location_id: Annotated[int | None, Query(ge=1)] = None,
 ) -> dict:
     """Единый центр того, что требует внимания оператора или владельца платформы."""
     summary_mode = (mode or "full").strip().lower() == "summary"
     org_id = admin_org_from_session(request)
     is_superadmin = await _session_is_superadmin(request, db)
+    allowed_location_ids, location_scoped = await _location_scope_for_request(
+        request,
+        db,
+        org_id,
+        location_id,
+    )
+    order_location_scope = orders_location_filter(allowed_location_ids, location_id)
+    chat_location_scope = chat_logs_location_filter(allowed_location_ids, location_id)
     now_utc = datetime.now(tz=timezone.utc)
     whatsapp_since = _sql_dt_for_filter(now_utc - timedelta(days=INCIDENT_WHATSAPP_LOOKBACK_DAYS))
     payment_since = _sql_dt_for_filter(now_utc - timedelta(days=INCIDENT_PAYMENT_LOOKBACK_DAYS))
@@ -266,6 +300,7 @@ async def admin_incidents(
     iiko_where = [
         User.organization_id == org_id,
         org_orders,
+        order_location_scope,
         not_cancelled,
         Order.iiko_last_error.isnot(None),
         func.coalesce(Order.iiko_last_error, "") != "",
@@ -321,6 +356,7 @@ async def admin_incidents(
     prepay_where = [
         User.organization_id == org_id,
         org_orders,
+        order_location_scope,
         not_cancelled,
         Order.prepayment_status == "pending",
     ]
@@ -419,6 +455,7 @@ async def admin_incidents(
         User.organization_id == org_id,
         ChatLog.delivery_status == "failed",
         ChatLog.created_at >= whatsapp_since,
+        chat_location_scope,
     ]
     whatsapp_count = int(
         await db.scalar(
@@ -469,6 +506,7 @@ async def admin_incidents(
         PaymentEvent.event_type == "webhook_failed",
         PaymentEvent.created_at >= payment_since,
         org_orders,
+        order_location_scope,
     ]
     payment_count = int(
         await db.scalar(
@@ -701,6 +739,10 @@ async def admin_incidents(
             "summary": summary,
             "restricted_count": int(summary["restricted"]),
             "hero_actions": hero_actions,
+            "location_scope": {
+                "location_id": int(location_id) if location_id is not None else None,
+                "source": "sql_location" if location_scoped else "org",
+            },
             "lookback_days": {
                 "whatsapp_failed": INCIDENT_WHATSAPP_LOOKBACK_DAYS,
                 "payment_webhook": INCIDENT_PAYMENT_LOOKBACK_DAYS,
@@ -719,6 +761,10 @@ async def admin_incidents(
         "hero_actions": hero_actions,
         "groups": groups,
         "superadmin_only": super_items if is_superadmin else [],
+        "location_scope": {
+            "location_id": int(location_id) if location_id is not None else None,
+            "source": "sql_location" if location_scoped else "org",
+        },
         "lookback_days": {
             "whatsapp_failed": INCIDENT_WHATSAPP_LOOKBACK_DAYS,
             "payment_webhook": INCIDENT_PAYMENT_LOOKBACK_DAYS,
@@ -732,9 +778,18 @@ async def admin_incidents(
 async def dashboard_stats(
     request: Request,
     db: AsyncSession = Depends(get_db),
+    location_id: Annotated[int | None, Query(ge=1)] = None,
 ) -> dict:
     """Статистика для дашборда: выручка за сегодня, общие счётчики."""
     org_id = admin_org_from_session(request)
+    allowed_location_ids, location_scoped = await _location_scope_for_request(
+        request,
+        db,
+        org_id,
+        location_id,
+    )
+    order_location_scope = orders_location_filter(allowed_location_ids, location_id)
+    chat_location_scope = chat_logs_location_filter(allowed_location_ids, location_id)
     now_utc = datetime.now(tz=timezone.utc)
     today_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
     ts_lo = _sql_dt_for_filter(today_start)
@@ -745,9 +800,26 @@ async def dashboard_stats(
     org_orders = _orders_tenant_clause(org_id)
 
     # Phase 5 OS: event-first metrics — получаем данные из DailyOrgStats первыми
-    _event_summary = await get_today_event_summary(db, org_id)
-    _event_rows_2d = await get_event_stats(db, org_id, days=2)
-    _event_data_active = (
+    _event_summary = (
+        {
+            "orders_created": 0,
+            "orders_confirmed": 0,
+            "orders_cancelled": 0,
+            "bookings_created": 0,
+            "bookings_confirmed": 0,
+            "payments_completed": 0,
+            "payments_failed": 0,
+            "escalations": 0,
+            "operator_takeovers": 0,
+            "ai_messages_count": 0,
+            "dialogs_count": 0,
+            "revenue_kzt": 0.0,
+        }
+        if location_scoped
+        else await get_today_event_summary(db, org_id)
+    )
+    _event_rows_2d = [] if location_scoped else await get_event_stats(db, org_id, days=2)
+    _event_data_active = (not location_scoped) and (
         _event_summary.get("orders_confirmed", 0) > 0
         or _event_summary.get("revenue_kzt", 0) > 0
     )
@@ -759,7 +831,7 @@ async def dashboard_stats(
     # Кумулятивные метрики (all-time) — только SQL, не хранится в events
     total_q = await db.execute(
         select(func.count(Order.id), func.coalesce(func.sum(Order.total_price), 0))
-        .where(not_cancelled, org_orders)
+        .where(not_cancelled, org_orders, order_location_scope)
     )
     total_row = total_q.one()
     total_orders = total_row[0]
@@ -775,6 +847,7 @@ async def dashboard_stats(
             .where(
                 not_cancelled,
                 org_orders,
+                order_location_scope,
                 Order.created_at >= ts_lo,
                 Order.created_at <= ts_hi,
             )
@@ -793,6 +866,7 @@ async def dashboard_stats(
             .where(
                 not_cancelled,
                 org_orders,
+                order_location_scope,
                 Order.created_at >= ys_lo,
                 Order.created_at < ts_lo,
             )
@@ -820,6 +894,7 @@ async def dashboard_stats(
         .where(
             not_cancelled,
             org_orders,
+            order_location_scope,
             Order.created_at.isnot(None),
             Order.created_at >= week_floor_sql,
         )
@@ -833,7 +908,7 @@ async def dashboard_stats(
             ai_profit_bucket[dk] += float(rev_ai or 0.0)
 
     # Event-driven revenue/orders для daily_series
-    event_rows_7d = await get_event_stats(db, org_id, days=7)
+    event_rows_7d = [] if location_scoped else await get_event_stats(db, org_id, days=7)
     event_rev_map = {r["date"]: (r["revenue_kzt"], r["orders_confirmed"]) for r in event_rows_7d}
 
     # SQL fallback для дней без event-данных
@@ -844,7 +919,13 @@ async def dashboard_stats(
         for created_at, total_price, items_json in (
             await db.execute(
                 select(Order.created_at, Order.total_price, Order.items_json)
-                .where(not_cancelled, org_orders, Order.created_at.isnot(None), Order.created_at >= week_floor_sql)
+                .where(
+                    not_cancelled,
+                    org_orders,
+                    order_location_scope,
+                    Order.created_at.isnot(None),
+                    Order.created_at >= week_floor_sql,
+                )
             )
         ):
             dk = _order_day_key_utc(created_at)
@@ -892,6 +973,7 @@ async def dashboard_stats(
         .where(
             not_cancelled,
             org_orders,
+            order_location_scope,
             Order.created_at >= ts_lo,
             Order.created_at <= ts_hi,
         )
@@ -913,6 +995,7 @@ async def dashboard_stats(
         await db.scalar(
             select(func.count(Order.id)).where(
                 org_orders,
+                order_location_scope,
                 Order.created_at >= ts_lo,
                 Order.created_at <= ts_hi,
                 Order.iiko_last_error.isnot(None),
@@ -928,6 +1011,7 @@ async def dashboard_stats(
         select(Order.total_price, Order.items_json).where(
             not_cancelled,
             org_orders,
+            order_location_scope,
             Order.created_at >= ts_lo,
             Order.created_at <= ts_hi,
         ),
@@ -963,6 +1047,7 @@ async def dashboard_stats(
                     ChatLog.role == "assistant",
                     ChatLog.created_at >= ts_lo,
                     ChatLog.created_at <= ts_hi,
+                    chat_location_scope,
                 ),
             )
             or 0,
@@ -989,6 +1074,7 @@ async def dashboard_stats(
                 select(func.count(Order.id)).where(
                     not_cancelled,
                     org_orders,
+                    order_location_scope,
                     Order.created_at >= ts_lo,
                     Order.created_at <= ts_hi,
                     ~op_before_order,
@@ -1019,6 +1105,7 @@ async def dashboard_stats(
                 ChatLog.user_id.isnot(None),
                 ChatLog.created_at >= ts_lo,
                 ChatLog.created_at <= ts_hi,
+                    chat_location_scope,
             ),
         )
         or 0,
@@ -1032,14 +1119,21 @@ async def dashboard_stats(
         bot_handled_pct = round(100 * bot_orders_today / today_orders, 1)
 
     # Пробуем event-driven источник первым; fallback на SQL только если данных мало
-    revenue_history_events = await fetch_daily_revenue_history_from_events(
+    revenue_history_events = {} if location_scoped else await fetch_daily_revenue_history_from_events(
         db, org_id, days=28, now_utc=now_utc,
     )
     if event_revenue_history_usable(revenue_history_events):
         revenue_for_forecast = revenue_history_events
         forecast_source = "event_driven"
     else:
-        revenue_for_forecast = await fetch_daily_revenue_history(db, org_id, days=28, now_utc=now_utc)
+        revenue_for_forecast = await fetch_daily_revenue_history(
+            db,
+            org_id,
+            days=28,
+            now_utc=now_utc,
+            location_id=location_id,
+            allowed_location_ids=allowed_location_ids,
+        )
         forecast_source = "sql_orders"
     week_forecast = build_week_forecast(
         revenue_for_forecast,
@@ -1112,6 +1206,10 @@ async def dashboard_stats(
 
     # Phase 5 OS: event_driven_stats уже вычислен выше (_event_summary)
     result["event_driven_stats"] = _event_summary
+    result["location_scope"] = {
+        "location_id": int(location_id) if location_id is not None else None,
+        "source": "sql_location" if location_scoped else "event_driven_or_sql",
+    }
 
     return result
 
@@ -1122,11 +1220,21 @@ async def admin_funnel(
     db: AsyncSession = Depends(get_db),
     days: Annotated[int, Query(ge=1, le=90)] = 7,
     churn_days: Annotated[int, Query(ge=7, le=180)] = 30,
+    location_id: Annotated[int | None, Query(ge=1)] = None,
 ) -> dict[str, Any]:
     """Воронка потерь и отток клиентов за период."""
     org_id = admin_org_from_session(request)
     if not org_id:
         raise HTTPException(status_code=403, detail="Forbidden")
+    allowed_location_ids, location_scoped = await _location_scope_for_request(
+        request,
+        db,
+        org_id,
+        location_id,
+    )
+    order_scope = _orders_tenant_clause(org_id)
+    order_location_scope = orders_location_filter(allowed_location_ids, location_id)
+    chat_location_scope = chat_logs_location_filter(allowed_location_ids, location_id)
 
     now_utc = datetime.now(tz=timezone.utc)
     cutoff = now_utc - timedelta(days=days)
@@ -1142,7 +1250,7 @@ async def admin_funnel(
     )
     _funnel_dialogs_event = sum(r["dialogs_count"] for r in _funnel_event_rows)
     _funnel_completed_event = sum(r["orders_confirmed"] for r in _funnel_event_rows)
-    _funnel_event_active = _funnel_completed_event > 0 or _funnel_dialogs_event > 0
+    _funnel_event_active = (not location_scoped) and (_funnel_completed_event > 0 or _funnel_dialogs_event > 0)
 
     if _funnel_event_active and _funnel_dialogs_event > 0:
         dialogs_count = _funnel_dialogs_event
@@ -1154,6 +1262,7 @@ async def admin_funnel(
                     ChatLog.created_at >= cutoff_sql,
                     ChatLog.role == "user",
                     ChatLog.user_id.isnot(None),
+                    chat_location_scope,
                 ),
             )
             or 0,
@@ -1162,7 +1271,8 @@ async def admin_funnel(
     drafts_count = int(
         await db.scalar(
             select(func.count(func.distinct(Order.user_id))).where(
-                Order.organization_id == org_id,
+                order_scope,
+                order_location_scope,
                 Order.created_at >= cutoff_sql,
                 Order.user_id.isnot(None),
             ),
@@ -1176,7 +1286,8 @@ async def admin_funnel(
         completed_count = int(
             await db.scalar(
                 select(func.count(func.distinct(Order.user_id))).where(
-                    Order.organization_id == org_id,
+                    order_scope,
+                    order_location_scope,
                     Order.created_at >= cutoff_sql,
                     Order.user_id.isnot(None),
                     Order.status.in_(_COMPLETED_ORDER_STATUSES),
@@ -1188,7 +1299,8 @@ async def admin_funnel(
     recent_buyers = (
         select(func.distinct(Order.user_id))
         .where(
-            Order.organization_id == org_id,
+            order_scope,
+            order_location_scope,
             Order.user_id.isnot(None),
             Order.status.in_(_COMPLETED_ORDER_STATUSES),
             Order.created_at >= churn_cutoff_sql,
@@ -1197,7 +1309,8 @@ async def admin_funnel(
     churned_count = int(
         await db.scalar(
             select(func.count(func.distinct(Order.user_id))).where(
-                Order.organization_id == org_id,
+                order_scope,
+                order_location_scope,
                 Order.user_id.isnot(None),
                 Order.status.in_(_COMPLETED_ORDER_STATUSES),
                 Order.user_id.not_in(recent_buyers),
@@ -1209,7 +1322,8 @@ async def admin_funnel(
     ordered_users_period = (
         select(func.distinct(Order.user_id))
         .where(
-            Order.organization_id == org_id,
+            order_scope,
+            order_location_scope,
             Order.created_at >= cutoff_sql,
             Order.user_id.isnot(None),
         )
@@ -1222,6 +1336,7 @@ async def admin_funnel(
                 ChatLog.role == "user",
                 ChatLog.user_id.isnot(None),
                 ChatLog.user_id.not_in(ordered_users_period),
+                chat_location_scope,
             ),
         )
         or 0,
@@ -1255,7 +1370,8 @@ async def admin_funnel(
     cancellations = int(
         await db.scalar(
             select(func.count(Order.id)).where(
-                Order.organization_id == org_id,
+                order_scope,
+                order_location_scope,
                 Order.created_at >= cutoff_sql,
                 Order.status == OrderStatus.CANCELLED.value,
             ),
@@ -1270,6 +1386,10 @@ async def admin_funnel(
     return {
         "ok": True,
         "period_days": days,
+        "location_scope": {
+            "location_id": int(location_id) if location_id is not None else None,
+            "source": "sql_location" if location_scoped else "event_driven_or_sql",
+        },
         "funnel": {
             "dialogs": dialogs_count,
             "drafts": drafts_count,
@@ -1562,18 +1682,35 @@ async def admin_ai_value(
 
 
 @router.get("/roi/today")
-async def roi_today_summary(request: Request, db: AsyncSession = Depends(get_db)) -> dict[str, object]:
+async def roi_today_summary(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    location_id: Annotated[int | None, Query(ge=1)] = None,
+) -> dict[str, object]:
     """
     ROI-нарратив за сегодня (UTC, как /stats) + «достижения» за последние 7 дней в TZ организации.
     """
     org_id = admin_org_from_session(request)
+    allowed_location_ids, location_scoped = await _location_scope_for_request(
+        request,
+        db,
+        org_id,
+        location_id,
+    )
     org = await db.get(Organization, org_id)
     now_utc = datetime.now(tz=timezone.utc)
     today_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
     cur = (getattr(org, "currency", None) or "KZT") if org is not None else "KZT"
     tz = (getattr(org, "timezone", None) or "UTC") if org is not None else "UTC"
     try:
-        metrics = await aggregate_org_window(db, org_id, today_start, now_utc)
+        metrics = await aggregate_org_window(
+            db,
+            org_id,
+            today_start,
+            now_utc,
+            location_id=location_id,
+            allowed_location_ids=allowed_location_ids,
+        )
     except Exception:
         logger.exception("Failed to build ROI metrics org=%s", org_id)
         metrics = {
@@ -1597,6 +1734,10 @@ async def roi_today_summary(request: Request, db: AsyncSession = Depends(get_db)
         "narrative": narrative,
         "metrics": metrics,
         "achievements": achievements,
+        "location_scope": {
+            "location_id": int(location_id) if location_id is not None else None,
+            "source": "sql_location" if location_scoped else "org",
+        },
     }
 
 
@@ -1604,6 +1745,7 @@ async def roi_today_summary(request: Request, db: AsyncSession = Depends(get_db)
 async def dashboard_activity(
     request: Request,
     limit: int = Query(25, ge=5, le=100),
+    location_id: Annotated[int | None, Query(ge=1)] = None,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """
@@ -1613,6 +1755,13 @@ async def dashboard_activity(
     from app.db.models import SystemEvent
 
     org_id = admin_org_from_session(request)
+    allowed_location_ids, location_scoped = await _location_scope_for_request(
+        request,
+        db,
+        org_id,
+        location_id,
+    )
+    chat_location_scope = chat_logs_location_filter(allowed_location_ids, location_id)
     now_utc = datetime.now(tz=timezone.utc)
     since = _sql_dt_for_filter(now_utc - timedelta(days=7))
 
@@ -1635,13 +1784,22 @@ async def dashboard_activity(
             SystemEvent.created_at >= since,
         )
         .order_by(SystemEvent.created_at.desc())
-        .limit(limit * 2)  # берём с запасом для дедупликации
+        .limit(limit * (4 if location_scoped else 2))  # берём с запасом для дедупликации/фильтра по точке
     )).all()
 
     for ev_type, entity_id, payload, ts in ev_rows:
         if ts is None:
             continue
         p = payload or {}
+        raw_loc = p.get("_location_id") or p.get("location_id")
+        try:
+            event_location_id = int(raw_loc) if raw_loc is not None else None
+        except (TypeError, ValueError):
+            event_location_id = None
+        if location_id is not None and event_location_id != int(location_id):
+            continue
+        if location_id is None and allowed_location_ids is not None and event_location_id not in allowed_location_ids:
+            continue
         ts_iso = _dt_as_utc(ts).isoformat()
         if ev_type in ("order.created", "order.confirmed"):
             oid = entity_id or p.get("order_id") or "?"
@@ -1725,6 +1883,7 @@ async def dashboard_activity(
             ChatLog.delivery_status == "failed",
             ChatLog.created_at.isnot(None),
             ChatLog.created_at >= since,
+            chat_location_scope,
         )
         .order_by(ChatLog.created_at.desc())
         .limit(10),
@@ -1743,7 +1902,14 @@ async def dashboard_activity(
 
     items.sort(key=lambda x: x.get("ts") or "", reverse=True)
     items = items[: int(limit)]
-    return {"items": items, "source": "event_driven"}
+    return {
+        "items": items,
+        "source": "event_driven" if not location_scoped else "event_driven_location_filtered",
+        "location_scope": {
+            "location_id": int(location_id) if location_id is not None else None,
+            "source": "event_payload_and_sql" if location_scoped else "org",
+        },
+    }
 
 
 # ─── Аналитика ──────────────────────────────────────────
@@ -1756,6 +1922,7 @@ async def analytics(
     period: str = Query("week", description="day, week, month, year, custom"),
     date_from: str | None = Query(None, description="Начало периода (YYYY-MM-DD)"),
     date_to: str | None = Query(None, description="Конец периода (YYYY-MM-DD)"),
+    location_id: Annotated[int | None, Query(ge=1)] = None,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """
@@ -1769,7 +1936,15 @@ async def analytics(
     response.headers["Cache-Control"] = "no-store"
 
     org_id = admin_org_from_session(request)
+    allowed_location_ids, location_scoped = await _location_scope_for_request(
+        request,
+        db,
+        org_id,
+        location_id,
+    )
     org_orders = _orders_tenant_clause(org_id)
+    order_location_scope = orders_location_filter(allowed_location_ids, location_id)
+    chat_location_scope = chat_logs_location_filter(allowed_location_ids, location_id)
 
     now = datetime.now(tz=timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -1834,7 +2009,7 @@ async def analytics(
     not_cancelled = Order.status != OrderStatus.CANCELLED
 
     # Phase 5 OS: event-first для revenue/orders по периоду
-    _analytics_event_rows = await get_event_stats_for_range(
+    _analytics_event_rows = [] if location_scoped else await get_event_stats_for_range(
         db, org_id,
         start_date=_dt_as_utc(start).date(),
         end_date=_dt_as_utc(end).date(),
@@ -1842,7 +2017,7 @@ async def analytics(
     _analytics_event_map: dict[str, dict] = {r["date"]: r for r in _analytics_event_rows}
     _analytics_event_orders = sum(r["orders_confirmed"] for r in _analytics_event_rows)
     _analytics_event_revenue = sum(r["revenue_kzt"] for r in _analytics_event_rows)
-    _analytics_event_active = _analytics_event_orders > 0 or _analytics_event_revenue > 0
+    _analytics_event_active = (not location_scoped) and (_analytics_event_orders > 0 or _analytics_event_revenue > 0)
 
     if _analytics_event_active:
         current_count = _analytics_event_orders
@@ -1857,6 +2032,7 @@ async def analytics(
             .where(
                 not_cancelled,
                 org_orders,
+                order_location_scope,
                 Order.created_at >= start_sql,
                 Order.created_at <= end_sql,
             )
@@ -1874,6 +2050,7 @@ async def analytics(
         .where(
             not_cancelled,
             org_orders,
+            order_location_scope,
             Order.created_at >= prev_start_sql,
             Order.created_at < prev_end_sql,
         )
@@ -1891,6 +2068,7 @@ async def analytics(
         .where(
             not_cancelled,
             org_orders,
+            order_location_scope,
             Order.created_at >= start_sql,
             Order.created_at <= end_sql,
         )
@@ -2000,6 +2178,7 @@ async def analytics(
             User.organization_id == org_id,
             ChatLog.created_at >= start_sql,
             ChatLog.created_at <= end_sql,
+            chat_location_scope,
         )
         .distinct()
         .subquery()
@@ -2013,6 +2192,7 @@ async def analytics(
                 Order.status == OrderStatus.DRAFT.value,
                 not_cancelled,
                 org_orders,
+                order_location_scope,
                 Order.created_at >= start_sql,
                 Order.created_at <= end_sql,
             ),
@@ -2032,6 +2212,7 @@ async def analytics(
                 ),
                 not_cancelled,
                 org_orders,
+                order_location_scope,
                 Order.created_at >= start_sql,
                 Order.created_at <= end_sql,
             ),
@@ -2059,6 +2240,7 @@ async def analytics(
                 ),
                 not_cancelled,
                 org_orders,
+                order_location_scope,
                 Order.created_at >= start_sql,
                 Order.created_at <= end_sql,
                 ~op_exists,
@@ -2140,6 +2322,7 @@ async def analytics(
         .where(
             not_cancelled,
             org_orders,
+            order_location_scope,
             Order.created_at >= prev_start_sql,
             Order.created_at < prev_end_sql,
         )
@@ -2152,6 +2335,10 @@ async def analytics(
 
     return {
         "period": period,
+        "location_scope": {
+            "location_id": int(location_id) if location_id is not None else None,
+            "source": "sql_location" if location_scoped else "event_driven_or_sql",
+        },
         "date_from": start.strftime("%Y-%m-%d"),
         "date_to": end.strftime("%Y-%m-%d"),
         "current": {
@@ -2213,3 +2400,171 @@ async def analytics(
             for x in hour_buckets
         ],
     }
+
+
+@router.get("/inbox/money-queue")
+async def inbox_money_queue(
+    request: Request,
+    location_id: Annotated[int | None, Query(ge=1)] = None,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Единая money-at-risk очередь для Inbox: брошенные DRAFT, pending prepay, медленные чаты."""
+    from app.services.money_queue import build_money_queue
+
+    org_id = admin_org_from_session(request)
+    allowed_location_ids, _ = await _location_scope_for_request(
+        request,
+        db,
+        org_id,
+        location_id,
+    )
+    return await build_money_queue(
+        db,
+        org_id,
+        location_id=location_id,
+        allowed_location_ids=allowed_location_ids,
+    )
+
+
+@router.get("/shift-control")
+async def shift_control(
+    request: Request,
+    location_id: Annotated[int | None, Query(ge=1)] = None,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Единый экран смены: очередь денег G5–G8, focus, leak summary, system."""
+    from app.services.shift_control import build_shift_control
+
+    org_id = admin_org_from_session(request)
+    allowed_location_ids, _ = await _location_scope_for_request(
+        request,
+        db,
+        org_id,
+        location_id,
+    )
+    payload = await build_shift_control(
+        db,
+        org_id,
+        location_id=location_id,
+        allowed_location_ids=allowed_location_ids,
+    )
+    return {"ok": True, "organization_id": org_id, **payload}
+
+
+class ShiftActionBody(BaseModel):
+    subtype: Literal["next", "skip", "complete"] = Field(description="Тип действия смены")
+    focus_id: str | None = Field(default=None, description="ID focus item из GET /shift/state")
+
+
+class ShiftHeartbeatBody(BaseModel):
+    focus_id: str = Field(description="ID focus item для продления lease")
+    owner_token: str | None = Field(
+        default=None,
+        description="Session-bound token из GET /shift/state focus.owner_token",
+    )
+
+
+@router.post("/shift/heartbeat")
+async def shift_heartbeat(
+    request: Request,
+    body: ShiftHeartbeatBody,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """G10.2: продлить focus claim пока оператор на вкладке «Смена»."""
+    from app.services.shift_state_engine import renew_focus_claim
+
+    org_id = admin_org_from_session(request)
+    renewed, owner_token = await renew_focus_claim(
+        org_id,
+        body.focus_id,
+        request.session.get("staff_id"),
+        owner_token=body.owner_token,
+    )
+    return {
+        "ok": True,
+        "renewed": renewed,
+        "owner_token": owner_token if renewed else None,
+        "organization_id": org_id,
+    }
+
+
+@router.delete("/shift/heartbeat")
+async def shift_heartbeat_release(
+    request: Request,
+    body: ShiftHeartbeatBody,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """G10.1: немедленно отпустить focus claim (уход с вкладки / pagehide)."""
+    from app.services.shift_state_engine import release_focus_claim
+
+    org_id = admin_org_from_session(request)
+    released = await release_focus_claim(
+        org_id,
+        body.focus_id,
+        request.session.get("staff_id"),
+        owner_token=body.owner_token,
+    )
+    return {"ok": True, "released": released, "organization_id": org_id}
+
+
+@router.get("/shift/state")
+async def shift_state(
+    request: Request,
+    location_id: Annotated[int | None, Query(ge=1)] = None,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """G10 v1: детерминированное состояние смены (S0–S5) поверх G5–G8."""
+    from app.services.shift_state_engine import build_shift_state
+
+    org_id = admin_org_from_session(request)
+    operator_id = request.session.get("staff_id")
+    allowed_location_ids, _ = await _location_scope_for_request(
+        request,
+        db,
+        org_id,
+        location_id,
+    )
+    payload = await build_shift_state(
+        db,
+        org_id,
+        location_id=location_id,
+        allowed_location_ids=allowed_location_ids,
+        operator_id=operator_id,
+    )
+    return {"ok": True, "organization_id": org_id, **payload}
+
+
+@router.post("/shift/action")
+async def shift_action_endpoint(
+    request: Request,
+    body: ShiftActionBody,
+    location_id: Annotated[int | None, Query(ge=1)] = None,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """G10: next / skip / complete для focus item; возвращает свежий state."""
+    from app.services.shift_state_engine import apply_shift_action, build_shift_state
+
+    org_id = admin_org_from_session(request)
+    operator_id = request.session.get("staff_id")
+    allowed_location_ids, _ = await _location_scope_for_request(
+        request,
+        db,
+        org_id,
+        location_id,
+    )
+    await apply_shift_action(
+        db,
+        org_id,
+        body.subtype,
+        body.focus_id,
+        location_id=location_id,
+        operator_id=operator_id,
+    )
+    payload = await build_shift_state(
+        db,
+        org_id,
+        location_id=location_id,
+        allowed_location_ids=allowed_location_ids,
+        operator_id=operator_id,
+    )
+    return {"ok": True, "organization_id": org_id, **payload}

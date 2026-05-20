@@ -23,7 +23,7 @@ from app.db.models import (
     OrderStatus,
     RestaurantStateSnapshot,
 )
-from app.services.tenant_scope import orders_tenant_clause
+from app.services.tenant_scope import chat_logs_location_filter, orders_location_filter, orders_tenant_clause
 
 
 def _dt_as_utc(dt: datetime) -> datetime:
@@ -148,31 +148,52 @@ def parse_revenue_orders_intent(question: str) -> dict[str, str]:
     return {"metric": metric, "period": period, "language": detect_language(question)}
 
 
-async def revenue_orders_summary(db: AsyncSession, org_id: int, period: str) -> dict[str, Any]:
+async def revenue_orders_summary(
+    db: AsyncSession,
+    org_id: int,
+    period: str,
+    *,
+    location_id: int | None = None,
+    allowed_location_ids: set[int] | None = None,
+) -> dict[str, Any]:
     start, end, prev_start, prev_end, label = _period_bounds(period)
     start_sql = _sql_dt_for_filter(start)
     end_sql = _sql_dt_for_filter(end)
     prev_start_sql = _sql_dt_for_filter(prev_start)
     prev_end_sql = _sql_dt_for_filter(prev_end)
     org_orders = orders_tenant_clause(org_id)
+    order_location_scope = orders_location_filter(allowed_location_ids, location_id)
     not_cancelled = Order.status != OrderStatus.CANCELLED.value
 
     cur = (
         await db.execute(
             select(func.count(Order.id), func.coalesce(func.sum(Order.total_price), 0))
-            .where(not_cancelled, org_orders, Order.created_at >= start_sql, Order.created_at < end_sql)
+            .where(
+                not_cancelled,
+                org_orders,
+                order_location_scope,
+                Order.created_at >= start_sql,
+                Order.created_at < end_sql,
+            )
         )
     ).one()
     prev = (
         await db.execute(
             select(func.count(Order.id), func.coalesce(func.sum(Order.total_price), 0))
-            .where(not_cancelled, org_orders, Order.created_at >= prev_start_sql, Order.created_at < prev_end_sql)
+            .where(
+                not_cancelled,
+                org_orders,
+                order_location_scope,
+                Order.created_at >= prev_start_sql,
+                Order.created_at < prev_end_sql,
+            )
         )
     ).one()
     cur_cancelled = int(
         await db.scalar(
             select(func.count(Order.id)).where(
                 org_orders,
+                order_location_scope,
                 Order.status == OrderStatus.CANCELLED.value,
                 Order.created_at >= start_sql,
                 Order.created_at < end_sql,
@@ -184,6 +205,7 @@ async def revenue_orders_summary(db: AsyncSession, org_id: int, period: str) -> 
         await db.scalar(
             select(func.count(Order.id)).where(
                 org_orders,
+                order_location_scope,
                 Order.status == OrderStatus.CANCELLED.value,
                 Order.created_at >= prev_start_sql,
                 Order.created_at < prev_end_sql,
@@ -198,7 +220,13 @@ async def revenue_orders_summary(db: AsyncSession, org_id: int, period: str) -> 
 
     rows = await db.execute(
         select(Order.items_json, Order.total_price)
-        .where(not_cancelled, org_orders, Order.created_at >= start_sql, Order.created_at < end_sql)
+        .where(
+            not_cancelled,
+            org_orders,
+            order_location_scope,
+            Order.created_at >= start_sql,
+            Order.created_at < end_sql,
+        )
     )
     item_counter: Counter[str] = Counter()
     item_revenue: Counter[str] = Counter()
@@ -548,18 +576,37 @@ async def list_insights(db: AsyncSession, org_id: int, *, limit: int = 20) -> li
     return found
 
 
-async def build_state_snapshot(db: AsyncSession, org_id: int, *, persist: bool = True) -> RestaurantStateSnapshot:
+async def build_state_snapshot(
+    db: AsyncSession,
+    org_id: int,
+    *,
+    persist: bool = True,
+    location_id: int | None = None,
+    allowed_location_ids: set[int] | None = None,
+) -> RestaurantStateSnapshot:
     now = datetime.now(timezone.utc)
     today = now.replace(hour=0, minute=0, second=0, microsecond=0)
     today_sql = _sql_dt_for_filter(today)
     now_sql = _sql_dt_for_filter(now)
     org_orders = orders_tenant_clause(org_id)
+    order_location_scope = orders_location_filter(allowed_location_ids, location_id)
+    chat_location_scope = chat_logs_location_filter(allowed_location_ids, location_id)
 
-    draft = int(await db.scalar(select(func.count(Order.id)).where(org_orders, Order.status == OrderStatus.DRAFT.value)) or 0)
+    draft = int(
+        await db.scalar(
+            select(func.count(Order.id)).where(
+                org_orders,
+                order_location_scope,
+                Order.status == OrderStatus.DRAFT.value,
+            )
+        )
+        or 0
+    )
     confirmed = int(
         await db.scalar(
             select(func.count(Order.id)).where(
                 org_orders,
+                order_location_scope,
                 Order.status.in_([OrderStatus.CONFIRMED.value, OrderStatus.SENDING_TO_IIKO.value]),
             )
         )
@@ -569,6 +616,7 @@ async def build_state_snapshot(db: AsyncSession, org_id: int, *, persist: bool =
         await db.scalar(
             select(func.count(Order.id)).where(
                 org_orders,
+                order_location_scope,
                 Order.status.in_(
                     [
                         OrderStatus.DRAFT.value,
@@ -588,6 +636,7 @@ async def build_state_snapshot(db: AsyncSession, org_id: int, *, persist: bool =
             select(func.count(Order.id), func.coalesce(func.sum(Order.total_price), 0))
             .where(
                 org_orders,
+                order_location_scope,
                 Order.status != OrderStatus.CANCELLED.value,
                 Order.created_at >= today_sql,
                 Order.created_at <= now_sql,
@@ -600,6 +649,7 @@ async def build_state_snapshot(db: AsyncSession, org_id: int, *, persist: bool =
         await db.scalar(
             select(func.count(Order.id)).where(
                 org_orders,
+                order_location_scope,
                 Order.status == OrderStatus.CANCELLED.value,
                 Order.created_at >= today_sql,
                 Order.created_at <= now_sql,
@@ -617,6 +667,7 @@ async def build_state_snapshot(db: AsyncSession, org_id: int, *, persist: bool =
                 ChatLog.organization_id == org_id,
                 ChatLog.role == "operator",
                 ChatLog.created_at >= _sql_dt_for_filter(now - timedelta(minutes=15)),
+                chat_location_scope,
             )
         )
         or 0
@@ -636,7 +687,11 @@ async def build_state_snapshot(db: AsyncSession, org_id: int, *, persist: bool =
         operator_load=operator_load,
         kitchen_load=kitchen_load,
         stoplist_count=stoplist,
-        payload_json={"today_orders": today_orders, "operator_messages_15m": operator_msgs_15m},
+        payload_json={
+            "today_orders": today_orders,
+            "operator_messages_15m": operator_msgs_15m,
+            "location_id": int(location_id) if location_id is not None else None,
+        },
     )
     if persist:
         db.add(snapshot)

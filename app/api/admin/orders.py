@@ -31,6 +31,7 @@ from app.services.intelligence_analytics import order_meta_from_items_json
 from app.services.tenant_scope import (
     allowed_location_ids_for_staff,
     failed_tasks_tenant_clause as _failed_tasks_tenant_clause,
+    orders_location_filter,
     orders_location_clause as _orders_location_clause,
     orders_tenant_clause as _orders_tenant_clause,
 )
@@ -290,6 +291,7 @@ class AdminManualOrderBody(BaseModel):
     split_remote: float = Field(0.0, ge=0)
     delivery_address: str = ""
     pickup_time_note: str = ""
+    location_id: int | None = Field(default=None, ge=1)
     food_lines: list[AdminFoodLineIn] = Field(default_factory=list)
 
 
@@ -334,6 +336,7 @@ async def list_orders(
     # New pagination (Stripe-style)
     page: int | None = Query(None, ge=1),
     size: int | None = Query(None, ge=1, le=500),
+    location_id: int | None = Query(None, ge=1),
     # Backward-compat aliases
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
@@ -351,6 +354,8 @@ async def list_orders(
         org_id=org_id,
         is_superadmin=is_super,
     )
+    if location_id is not None and allowed_location_ids is not None and int(location_id) not in allowed_location_ids:
+        raise HTTPException(status_code=403, detail="Location is not allowed")
     base_query = (
         select(Order, User.phone, User.name)
         .join(User, Order.user_id == User.id)
@@ -358,6 +363,7 @@ async def list_orders(
         .where(
             User.organization_id == org_id,
             _orders_location_clause(org_id, allowed_location_ids),
+            orders_location_filter(allowed_location_ids, location_id),
         )
     )
     if status:
@@ -1176,6 +1182,16 @@ async def create_manual_order(
     Без позиций — одна «безопасная» строка из меню (не плов 1 кг без упаковки).
     """
     org_id = admin_org_from_session(request)
+    allowed_location_ids = await allowed_location_ids_for_staff(
+        db,
+        org_id=org_id,
+        staff=_session_staff_user(request),
+        is_superadmin=_session_is_superadmin(request),
+        is_demo=False,
+    )
+    location_id = int(body.location_id) if body.location_id is not None else None
+    if location_id is not None and allowed_location_ids is not None and location_id not in allowed_location_ids:
+        raise HTTPException(status_code=403, detail="location_forbidden")
     raw_phone = (body.phone or "").strip()
     phone = _normalize_phone_e164(raw_phone)
     if not phone:
@@ -1287,6 +1303,7 @@ async def create_manual_order(
 
     order = Order(
         organization_id=org_id,
+        location_id=location_id,
         user_id=user.id,
         status=OrderStatus.DRAFT,
         items_json=merged,
@@ -1304,6 +1321,7 @@ async def create_manual_order(
         "phone": phone,
         "total_price": float(order.total_price),
         "row_version": int(order.row_version),
+        "location_id": order.location_id,
         "items_json": merged,
         "payment_split_warning": split_warn,
     }

@@ -73,6 +73,7 @@ class InMemoryRedis:
     def __init__(self) -> None:
         self._store: dict[str, list[str]] = {}
         self._kv: dict[str, str] = {}
+        self._sets: dict[str, set[str]] = {}
 
     async def ping(self) -> bool:
         return True
@@ -80,11 +81,39 @@ class InMemoryRedis:
     async def get(self, key: str) -> str | None:
         return self._kv.get(key)
 
-    async def set(self, key: str, value: str, ex: int | None = None) -> None:
+    async def set(
+        self,
+        key: str,
+        value: str,
+        ex: int | None = None,
+        nx: bool = False,
+    ) -> bool | None:
+        if nx and key in self._kv:
+            return None
         self._kv[key] = value
+        return True
 
     async def setex(self, key: str, ttl: int, value: str) -> None:
         self._kv[key] = value
+
+    async def sadd(self, key: str, *values: str) -> int:
+        bucket = self._sets.setdefault(key, set())
+        before = len(bucket)
+        for v in values:
+            bucket.add(v)
+        return len(bucket) - before
+
+    async def smembers(self, key: str) -> list[str]:
+        return list(self._sets.get(key, set()))
+
+    async def srem(self, key: str, *values: str) -> int:
+        bucket = self._sets.get(key, set())
+        removed = 0
+        for v in values:
+            if v in bucket:
+                bucket.remove(v)
+                removed += 1
+        return removed
 
     async def lrange(self, key: str, start: int, end: int) -> list[str]:
         data = self._store.get(key, [])
@@ -98,6 +127,24 @@ class InMemoryRedis:
         self._store[key].append(value)
         return len(self._store[key])
 
+    async def lpop(self, key: str) -> str | None:
+        items = self._store.get(key, [])
+        if not items:
+            return None
+        return items.pop(0)
+
+    async def llen(self, key: str) -> int:
+        return len(self._store.get(key, []))
+
+    async def incr(self, key: str) -> int:
+        raw = self._kv.get(key, "0")
+        try:
+            val = int(raw) + 1
+        except ValueError:
+            val = 1
+        self._kv[key] = str(val)
+        return val
+
     async def ltrim(self, key: str, start: int, end: int) -> None:
         if key in self._store:
             self._store[key] = self._store[key][start:] if end == -1 else self._store[key][start:end + 1]
@@ -108,6 +155,11 @@ class InMemoryRedis:
     async def delete(self, key: str) -> None:
         self._store.pop(key, None)
         self._kv.pop(key, None)
+
+    async def scan(self, cursor: int, match: str | None = None, count: int = 64) -> tuple[int, list[str]]:
+        prefix = (match or "").replace("*", "")
+        keys = [k for k in self._kv if k.startswith(prefix)]
+        return 0, keys
 
     async def aclose(self) -> None:
         pass

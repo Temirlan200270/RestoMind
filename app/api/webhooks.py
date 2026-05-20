@@ -77,6 +77,7 @@ from app.services.billing_guard import tenant_billing_blocks_inbound
 from app.services.system_events import BusinessEvent, emit_event
 from app.services.decision_engine import decision_engine
 from app.services.org_resolve import organization_id_for_whatsapp_value
+from app.services.tenant_scope import ensure_default_location
 from app.services.intent_router import (
     cancel_all_draft_orders_for_phone,
     cancel_booking,
@@ -102,6 +103,16 @@ from app.services.stoplist_session import (
     newly_stopped_names,
     save_seen_stopped_keys,
 )
+from app.services.bot_sla_status import (
+    SLOW_CHAT_SECONDS,
+    clear_chat_slow,
+    get_slow_chat_count,
+    is_org_in_short_mode,
+    last_msg_key,
+    mark_chat_slow_once,
+    sla_payload,
+    SHORT_MODE_THRESHOLD,
+)
 from app.services.whatsapp_idempotency import (
     cache_whatsapp_inbound_done_redis,
     mark_whatsapp_inbound_done,
@@ -110,7 +121,7 @@ from app.services.whatsapp_idempotency import (
     try_start_whatsapp_inbound_in_db,
 )
 from app.services.tts_edge import synthesize_speech_mp3
-from app.services.trace_context import build_conversation_id, build_trace_id, merge_trace_meta, trace_payload
+from app.services.chat_serializer import ChatMessagePayload, run_serialized_chat_pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -284,6 +295,7 @@ async def _save_chat_log(
     trace_id: str | None = None,
     conversation_id: str | None = None,
     known_user_id: int | None = None,
+    location_id: int | None = None,
 ) -> int | None:
     """
     Сохраняет пару сообщений (user + assistant) в ChatLog.
@@ -298,6 +310,7 @@ async def _save_chat_log(
     db.add(
         ChatLog(
             organization_id=organization_id,
+            location_id=location_id,
             user_id=uid,
             role="user",
             content=user_text,
@@ -313,6 +326,7 @@ async def _save_chat_log(
     now = datetime.now(timezone.utc)
     assistant_kwargs: dict[str, Any] = {
         "organization_id": organization_id,
+        "location_id": location_id,
         "user_id": uid,
         "role": "assistant",
         "content": reply_text,
@@ -909,55 +923,81 @@ async def process_with_retry(
     if settings.pipeline_timing_enabled:
         pipeline_sw.split("dedupe")
 
-    last_exc: BaseException | None = None
-    for attempt in range(MAX_RETRIES):
-        try:
-            await process_message(
-                phone,
-                message_text,
-                whatsapp_message_id=wmid,
-                voice_audio=voice_audio,
-                organization_id=org_id,
-                pipeline_sw=pipeline_sw,
-            )
-            if wmid:
-                try:
-                    async with async_session_factory() as db:
-                        await mark_whatsapp_inbound_done(db, wmid)
-                        await db.commit()
-                except Exception as exc:
-                    logger.warning("WhatsApp dedupe mark done failed (mid=%s): %s", wmid[:24], exc)
-                else:
-                    await cache_whatsapp_inbound_done_redis(wmid)
-            return
-        except Exception as exc:
-            last_exc = exc
-            logger.warning(
-                "Retry %d/%d для %s: %s", attempt + 1, MAX_RETRIES, phone, exc,
-            )
-            if attempt < MAX_RETRIES - 1:
-                await asyncio.sleep(2 ** attempt)
+    async def _process_payload_item(item: ChatMessagePayload) -> None:
+        nonlocal last_exc
+        wmid_item = (item.whatsapp_message_id or "").strip()
+        for attempt in range(MAX_RETRIES):
+            try:
+                await process_message(
+                    item.phone,
+                    item.message_text,
+                    whatsapp_message_id=wmid_item,
+                    voice_audio=item.voice_audio,
+                    organization_id=int(item.organization_id),
+                    pipeline_sw=pipeline_sw,
+                )
+                if wmid_item:
+                    try:
+                        async with async_session_factory() as db:
+                            await mark_whatsapp_inbound_done(db, wmid_item)
+                            await db.commit()
+                    except Exception as exc:
+                        logger.warning("WhatsApp dedupe mark done failed (mid=%s): %s", wmid_item[:24], exc)
+                    else:
+                        await cache_whatsapp_inbound_done_redis(wmid_item)
+                return
+            except Exception as exc:
+                last_exc = exc
+                logger.warning(
+                    "Retry %d/%d для %s: %s", attempt + 1, MAX_RETRIES, item.phone, exc,
+                )
+                if attempt < MAX_RETRIES - 1:
+                    await asyncio.sleep(2 ** attempt)
 
-    logger.error("Все %d попыток исчерпаны для %s: %s", MAX_RETRIES, phone, last_exc)
-    log_pipeline_stage(
-        "failed_queue",
-        phone=phone,
-        extra={"error": str(last_exc)[:500] if last_exc else "", "attempts": MAX_RETRIES},
-    )
-    await _save_failed_task(
-        phone, message_text, str(last_exc), MAX_RETRIES, organization_id=org_id,
-    )
-    if wmid:
+        logger.error("Все %d попыток исчерпаны для %s: %s", MAX_RETRIES, item.phone, last_exc)
+        log_pipeline_stage(
+            "failed_queue",
+            phone=item.phone,
+            extra={"error": str(last_exc)[:500] if last_exc else "", "attempts": MAX_RETRIES},
+        )
+        await _save_failed_task(
+            item.phone, item.message_text, str(last_exc), MAX_RETRIES, organization_id=org_id,
+        )
+        if wmid_item:
+            try:
+                async with async_session_factory() as db:
+                    await mark_whatsapp_inbound_failed(db, wmid_item, str(last_exc or "unknown_error"))
+                    await db.commit()
+            except Exception as exc:
+                logger.warning("WhatsApp dedupe mark failed error (mid=%s): %s", wmid_item[:24], exc)
         try:
-            async with async_session_factory() as db:
-                await mark_whatsapp_inbound_failed(db, wmid, str(last_exc or "unknown_error"))
-                await db.commit()
-        except Exception as exc:
-            logger.warning("WhatsApp dedupe mark failed error (mid=%s): %s", wmid[:24], exc)
-    try:
-        await send_customer_text(phone, "Извините, произошла техническая ошибка. Мы уже работаем над ней — попробуйте написать чуть позже.")
-    except Exception:
-        pass
+            await send_customer_text(item.phone, "Извините, произошла техническая ошибка. Мы уже работаем над ней — попробуйте написать чуть позже.")
+        except Exception:
+            pass
+
+    initial = ChatMessagePayload(
+        phone=phone,
+        message_text=message_text,
+        whatsapp_message_id=wmid,
+        organization_id=org_id,
+        voice_audio=voice_audio,
+    )
+    last_exc: BaseException | None = None
+    acquired = await run_serialized_chat_pipeline(
+        org_id,
+        phone,
+        initial,
+        process_one=_process_payload_item,
+    )
+    if acquired:
+        return
+
+    logger.info(
+        "chat_serializer.deferred org_id=%s phone=%s wmid=%s",
+        org_id,
+        _redact_msisdn_for_log(phone),
+        wmid[:16] if wmid else "",
+    )
 
 
 _OPERATOR_ONLY_REPLY = (
@@ -1042,6 +1082,81 @@ async def _handle_cancel_all_in_chatting(
     )
 
 
+async def _is_org_overloaded(redis_client: Any, organization_id: int, location_id: int | None = None) -> bool:
+    """G4 Auto-Short: True если у org > 3 чатов ждут ответа > 5 минут.
+
+    Используем Redis-счётчик с TTL=10мин. Инкрементируется при каждом входящем
+    сообщении если предыдущий ответ по этому диалогу был > 5 мин назад.
+    Счётчик декрементируется при успешном ответе бота.
+    """
+    return await is_org_in_short_mode(redis_client, organization_id, location_id)
+
+
+async def _track_slow_chat(
+    redis_client: Any,
+    organization_id: int,
+    phone: str,
+    location_id: int | None = None,
+) -> bool:
+    """Отмечает чат как медленный (инкремент счётчика); убирается после ответа."""
+    try:
+        last_key = last_msg_key(organization_id, phone, location_id)
+        last_ts_raw = await redis_client.get(last_key)
+        now_ts = datetime.now(tz=timezone.utc).timestamp()
+        await redis_client.setex(last_key, 600, str(now_ts))
+        if last_ts_raw:
+            elapsed = now_ts - float(last_ts_raw)
+            if elapsed > SLOW_CHAT_SECONDS:  # > 5 минут — считаем медленным
+                return await mark_chat_slow_once(redis_client, organization_id, phone, location_id)
+    except Exception:
+        pass
+    return False
+
+
+async def _untrack_slow_chat(
+    redis_client: Any,
+    organization_id: int,
+    phone: str | None = None,
+    location_id: int | None = None,
+) -> bool:
+    """Декремент счётчика перегруза после успешного ответа бота."""
+    return await clear_chat_slow(redis_client, organization_id, phone, location_id)
+
+
+async def _publish_bot_sla_status(
+    redis_client: Any,
+    organization_id: int,
+    *,
+    location_id: int | None = None,
+    phone: str | None = None,
+    chat_slow: bool | None = None,
+) -> None:
+    try:
+        slow_chats = await get_slow_chat_count(redis_client, organization_id, location_id)
+        await publish_event(
+            "bot_sla_status",
+            sla_payload(
+                organization_id=organization_id,
+                location_id=location_id,
+                slow_chats=slow_chats,
+                bot_short_mode=slow_chats > SHORT_MODE_THRESHOLD,
+                phone=phone,
+                chat_slow=chat_slow,
+            ),
+        )
+    except Exception:
+        logger.debug("bot_sla_status publish failed", exc_info=True)
+
+
+async def _resolve_default_location_id(db: AsyncSession, organization_id: int) -> int | None:
+    try:
+        loc = await ensure_default_location(db, int(organization_id))
+        return int(loc.id) if loc and loc.id is not None else None
+    except Exception:
+        logger.debug("default location resolve failed for org=%s", organization_id, exc_info=True)
+        return None
+
+
 async def process_message(
     phone: str,
     message_text: str = "",
@@ -1059,12 +1174,14 @@ async def process_message(
         pipe_sw = pipeline_sw or PipelineStopwatch()
         conversation_id = build_conversation_id(organization_id, phone)
         trace_id = build_trace_id(whatsapp_message_id)
+        active_location_id: int | None = None
         state = await get_user_state(redis_client, phone, organization_id=organization_id)
         if message_text and _is_plain_greeting(message_text):
             if state == UserState.CHATTING and voice_audio is None:
                 quick_reply = _greeting_reply()
                 outbound_id_quick: int | None = None
                 async with async_session_factory() as db_quick:
+                    active_location_id = await _resolve_default_location_id(db_quick, organization_id)
                     outbound_id_quick = await _save_chat_log(
                         db_quick,
                         phone,
@@ -1073,6 +1190,7 @@ async def process_message(
                         organization_id=organization_id,
                         trace_id=trace_id,
                         conversation_id=conversation_id,
+                        location_id=active_location_id,
                     )
                     await db_quick.commit()
                 await append_to_history(redis_client, phone, "user", message_text, organization_id=organization_id)
@@ -1084,6 +1202,7 @@ async def process_message(
                     "id": outbound_id_quick,
                     "delivery_status": "sending",
                     "organization_id": organization_id,
+                    "location_id": active_location_id,
                     "trace_id": trace_id,
                     "conversation_id": conversation_id,
                 })
@@ -1535,6 +1654,17 @@ async def process_message(
         )
         if stoplist_change_ctx:
             menu_context = f"{menu_context}\n\n{stoplist_change_ctx}"
+
+        # G3 Money MVP: профиль гостя — одна строка, помогает боту «узнать» постоянного клиента
+        _prefs = read_ctx.user_preferences or {}
+        _top = _prefs.get("top_items") or []
+        _disliked = _prefs.get("disliked") or []
+        if _top:
+            _guest_line = f"Профиль гостя: обычно берёт {', '.join(_top[:2])}"
+            if _disliked:
+                _guest_line += f"; не берёт {_disliked[0]}"
+            menu_context = f"{_guest_line}\n{menu_context}"
+
         if draft_row and isinstance(draft_row.items_json, dict):
             cart = [
                 x for x in (draft_row.items_json.get("items") or [])
@@ -1568,6 +1698,26 @@ async def process_message(
             )
         except Exception:
             pass  # snapshot — аудит; потеря не критична
+
+        # G4 Money MVP: трекинг медленных чатов + краткий режим при перегрузе
+        active_location_id = getattr(draft_row, "location_id", None)
+        if active_location_id is None:
+            async with async_session_factory() as db_loc:
+                active_location_id = await _resolve_default_location_id(db_loc, organization_id)
+                await db_loc.commit()
+        short_before = await _is_org_overloaded(redis_client, organization_id, active_location_id)
+        chat_marked_slow = await _track_slow_chat(redis_client, organization_id, phone, active_location_id)
+        short_after = await _is_org_overloaded(redis_client, organization_id, active_location_id)
+        if chat_marked_slow or short_after != short_before:
+            await _publish_bot_sla_status(
+                redis_client,
+                organization_id,
+                location_id=active_location_id,
+                phone=phone,
+                chat_slow=True,
+            )
+        if short_after:
+            menu_context = "[КРАТКИЙ РЕЖИМ] Очередь загружена — отвечай коротко и по делу, без апсейла.\n" + menu_context
 
         # 2) OpenAI: без DB-сессии
         if had_voice:
@@ -1651,6 +1801,7 @@ async def process_message(
                 newly_stopped_names=fresh_stopped,
                 trace_id=trace_id,
                 conversation_id=conversation_id,
+                location_id=active_location_id,
             )
             log_pipeline_stage(
                 "route_ok",
@@ -1705,6 +1856,7 @@ async def process_message(
                 trace_id=trace_id,
                 conversation_id=conversation_id,
                 known_user_id=u_row.id if u_row is not None else None,
+                location_id=active_location_id,
             )
             # Phase 5 OS: счётчик AI-ответов для event-driven аналитики
             _usage = getattr(ai_response, "_usage", None)
@@ -1776,6 +1928,20 @@ async def process_message(
         await save_seen_stopped_keys(redis_client, phone, organization_id, menu_items)
 
         schedule_log_message(organization_id, "outbound", "ai", "voice" if had_voice else "text")
+        # G4: декремент счётчика перегруза — бот ответил, чат обработан
+        short_before = await _is_org_overloaded(redis_client, organization_id, active_location_id)
+        chat_cleared_slow = await _untrack_slow_chat(redis_client, organization_id, phone, active_location_id)
+        short_after = await _is_org_overloaded(redis_client, organization_id, active_location_id)
+        if chat_cleared_slow:
+            await _publish_bot_sla_status(
+                redis_client,
+                organization_id,
+                location_id=active_location_id,
+                phone=phone,
+                chat_slow=False,
+            )
+        if short_after != short_before:
+            await _publish_bot_sla_status(redis_client, organization_id, location_id=active_location_id)
 
         if settings.pipeline_timing_enabled:
             pipe_sw.split("route")

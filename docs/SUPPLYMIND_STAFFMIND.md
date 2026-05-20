@@ -10,7 +10,7 @@ Scope: iiko Office inventory read -> draft purchase order.
 | 2 | `forecast_ingredient_runout` on real SKU data |
 | 3 | Draft purchase order API |
 
-Dependencies: Location RBAC, event bus `DailyOrgStats`.
+Dependencies: Location RBAC, шина событий → `DailyOrgStats` (backfill / event-driven KPI).
 
 Implemented bridge:
 
@@ -39,4 +39,4 @@ Implemented bridge:
 
 ## Status
 
-SupplyMind and StaffMind now have backend MVP APIs. Full iiko Office stock sync and a dedicated admin UI remain backlog items.
+SupplyMind and StaffMind have **backend MVP APIs** (tests in [`tests/test_ultimate_platform_sprint.py`](../tests/test_ultimate_platform_sprint.py)). Full iiko Office stock sync and **admin UI screens** remain backlog — см. [`docs/REMAINING_UPDATES.md`](REMAINING_UPDATES.md).

@@ -288,7 +288,7 @@ class TestEventDrivenStatsUIH4:
         html = pathlib.Path(
             "app/templates/screens/_tab_dashboard.html"
         ).read_text(encoding="utf-8")
-        # Индикатор "event bus" виден только при source=event_driven
+        # Бейдж «данные ОС» виден только при source=event_driven
         assert "event_driven" in html, "Должен быть индикатор источника event_driven"
         assert "payments_completed" in html, (
             "Количество оплат из event_driven_stats должно отображаться в UI"

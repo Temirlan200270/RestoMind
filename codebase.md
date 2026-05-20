@@ -41,9 +41,10 @@ RestoMind/
 │   │   │   ├── auth.py            # /api/admin/auth/* (cookie-сессия, demo-login, request-access, select-org)
 │   │   │   ├── ws.py              # /api/admin/ws?token=... (live-события)
 │   │   │   ├── test_bot.py        # /api/admin/test-bot (ручное тестирование диалога)
-│   │   │   ├── intelligence.py    # Restaurant Intelligence + Digital Twin API
+│   │   │   ├── intelligence.py    # OS dashboard, snapshots/replay, apply-pricing, reviews, digest, supply/staff/voice
+│   │   │   ├── network.py         # сеть филиалов (is_network tenant)
 │   │   │   ├── schemas.py         # общие Pydantic-схемы для admin API
-│   │   │   ├── deps.py            # зависимости: сессия, tenant-scope, guards
+│   │   │   ├── deps.py            # сессия, tenant-scope, location guards
 │   │   │   └── _monolith.py       # временно: остальной admin API до завершения раскола E0.1
 │   │   ├── webhooks.py            # Meta WhatsApp: verify + входящие → обработка сообщений
 │   │   ├── payment_webhook.py     # внешние провайдеры оплаты (Bearer/HMAC)
@@ -86,14 +87,27 @@ RestoMind/
 │   │   ├── intelligence.py        # revenue/orders analytics, insights, digital twin snapshots/simulation
 │   │   ├── sales_strategy_engine.py # E11: жёсткие правила до LLM (trace cap, session rejection cap)
 │   │   ├── sales_strategy.py      # build_sales_strategy: tag-pairing, персонализация, heuristics
-│   │   ├── system_events.py       # durable domain events for analytics/audit/AI ops
-│   │   ├── integration_health.py / readiness.py   # диагностика интеграций
-│   │   ├── tenant_scope.py        # ограничения запросов по organization_id
+│   │   ├── system_events.py       # emit_event(BusinessEvent) → analytics + audit
+│   │   ├── audit_consumer.py      # audit_log + WS os.audit
+│   │   ├── dialog_events.py       # ai.dialog.started
+│   │   ├── integration_events.py  # integration.iiko.failed
+│   │   ├── analytics_backfill.py  # DailyOrgStats + dialogs_count
+│   │   ├── owner_dashboard.py     # os-dashboard, stock_alerts, revenue history (location-aware)
+│   │   ├── revenue_leak.py        # Money MVP: abandoned drafts, slow response, cancellations
+│   │   ├── supplymind.py          # inventory snapshots, purchase draft builder
+│   │   ├── staffmind.py           # staff onboarding sessions, KB Q&A
+│   │   ├── voice_ai.py            # per-org voice flag, call logs, Twilio guard
+│   │   ├── daily_os_digest.py     # owner digest payload + Telegram send + ARQ tick
+│   │   ├── healing_actions.py     # self-healing + WA payment nudges 2.0
+│   │   ├── integration_health.py / readiness.py
+│   │   ├── tenant_scope.py        # organization_id + Location RBAC
 │   │   └── …                      # booking, analytics, стоп-листы, sales strategy, loyalty, marketing и др.
 │   │
 │   ├── templates/                 # Jinja2: admin.html (скелет + include), screens/*, components/*, superadmin, onboarding
 │   └── static/
-│       ├── js/admin-app.js        # основная логика админ UI (Alpine)
+│       ├── js/admin-app.js        # Alpine + WS (os.audit, business events)
+│       ├── manifest.webmanifest   # PWA
+│       ├── sw.js                  # service worker (offline shell)
 │       └── css/admin.css
 │
 ├── alembic/                       # миграции PostgreSQL (Alembic)
@@ -130,7 +144,9 @@ RestoMind/
 |-------------|----------|-------------|
 | WhatsApp → бот | `api/webhooks.py` | preflight: канон. телефон, сброс DRAFT при пустой истории, stoplist_session; `dialog_mgr`, `intent_router`, `ai_brain`; operator_only / эскалация → `trace_context.publish_*` |
 | Админ UI | `templates/` + `static/js/admin-app.js` | `api/admin/` → сервисы, БД; чаты: FSM-бейдж, `formatChatDisplayContent`, takeover/release |
-| Live-обновления | WS `/api/admin/ws` | `services/events` + `trace_context`; события `new_message`, `state_changed`, `human_needed`, `order_updated` |
+| Live-обновления | WS `/api/admin/ws` | `services/events` + `trace_context`; `os.audit`, business events, `new_message`, `state_changed`, … |
+| Voice (Twilio) | `api/webhooks.py` voice routes | `voice_ai.py` → STT → `process_message`; guard `voice_ai_enabled` |
+| Daily digest | ARQ `daily_os_digest_scheduled_tick` | `daily_os_digest.py` → Telegram ops chat |
 | Оплата провайдера | `api/payment_webhook.py` | заказ, `PaymentEvent`, фон: автопечать iiko при флаге org |
 | Superadmin | `api/superadmin.py` | организации, заявки, синхронизация меню, message accounting, AI-токены |
 
@@ -157,5 +173,7 @@ python -m pytest tests/ -v
 | [docs/SUPERADMIN_GUIDE.md](docs/SUPERADMIN_GUIDE.md) | Super Admin (владелец платформы): заявки/регистрация, управление ресторанами, аудит webhook, идеи улучшений |
 | [docs/UI_MAP.md](docs/UI_MAP.md) | Карта админ UI: `admin.html`, `screens/*`, компоненты, `admin-app.js` |
 | [docs/AI_TOOLS_SETUP.md](docs/AI_TOOLS_SETUP.md) | Настройка Cursor / Claude Code / MCP для работы над репо |
-| [docs/AI_OPERATIONS.md](docs/AI_OPERATIONS.md) | Restaurant Intelligence, события, инсайты (операционка) |
+| [docs/AI_OPERATIONS.md](docs/AI_OPERATIONS.md) | Restaurant Intelligence, события, инсайты, Final Mile API |
+| [docs/FINAL_MILE_IMPLEMENTED.md](docs/FINAL_MILE_IMPLEMENTED.md) | SupplyMind, StaffMind, Voice, Digest — backend MVP |
+| [docs/REMAINING_UPDATES.md](docs/REMAINING_UPDATES.md) | UI gaps и staging checks после Final Mile |
 | [docs/EVENT_ARCHITECTURE.md](docs/EVENT_ARCHITECTURE.md) | Durable `SystemEvent`, пайплайн аналитики |

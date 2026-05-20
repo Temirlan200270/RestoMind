@@ -7,7 +7,7 @@
 - `app/templates/admin.html` — входная точка админки: macro imports, `DOCTYPE`, `head`, общий authenticated shell и include всех экранов.
 - `app/templates/screens/_login.html` — экран входа, demo-login и заявка на подключение.
 - `app/templates/screens/_sidebar.html` — desktop-навигация слева.
-- `app/templates/screens/_header.html` — глобальная шапка: брендинг, филиал, название активной вкладки, readiness, глобальный поиск.
+- `app/templates/screens/_header.html` — глобальная шапка: брендинг, филиал, селектор точки (`available_locations` → `selectedLocationId`), название активной вкладки, readiness, глобальный поиск.
 - `app/templates/screens/_system_banner.html` — системные статусы/готовность.
 - `app/templates/screens/_alert_banner.html` — верхний баннер внимания.
 - `app/templates/screens/_bottom_nav.html` — мобильный tab-bar.
@@ -26,8 +26,14 @@
 
 ### Управление (`section: management`)
 
-- `_tab_dashboard.html` — дашборд: KPI, ROI, график, лента; под-таб **`dashboardTab`** `overview` | `analytics`; блок аналитики — `{% include "screens/_tab_analytics.html" %}` внутри этого файла (отдельного пункта в сайдбаре нет).
-- `_tab_ai_center.html` — **«ИИ-аналитика»**: под-табы `aiCenterTab` `value` | `insights` | `load` (вклад ИИ, operational insights, Digital Twin / нагрузка). В DOM по-прежнему лежат `_tab_ai_value.html`, `_tab_intelligence.html`, `_tab_digital_twin.html` для совместимости и редиректов — новая навигация ведёт в `ai_center`.
+- `_tab_dashboard.html` — дашборд: KPI, ROI, график; под-таб **`dashboardTab`** `overview` | `analytics`; на overview — блок **«Живая ОС»** (`dashLiveFeed`, обновляется из WebSocket). Бейдж **«данные ОС»** при `event_driven_stats.source === 'event_driven'`. При выбранной точке loaders добавляют `location_id`, а API возвращает `location_scope.source=sql_location`. Аналитика — `{% include "screens/_tab_analytics.html" %}`.
+- `_tab_ai_center.html` — **«ИИ-аналитика»**: под-табы `aiCenterTab`:
+  - `value` — вклад ИИ (ROI, метрики);
+  - `insights` — operational insights + рекомендации;
+  - `load` — Digital Twin / нагрузка;
+  - `os` — **Автопилот** (`GET /intelligence/os-dashboard`, лента решений `loadAuditLog()`, bulk pricing);
+  - `guestcare` — **Отзывы** (внешние 2GIS/Google: `GET/POST /reviews/external*`).
+  Legacy-файлы `_tab_ai_value.html`, `_tab_intelligence.html`, `_tab_digital_twin.html` остаются для редиректов hash.
 - `_tab_menu.html` — меню и стоп-лист.
 
 ### Настройки (`currentTab === 'settings'` + `settingsTab`)
@@ -36,7 +42,7 @@
 - `_tab_settings_branding.html` — брендинг шапки.
 - `_tab_settings_connections.html` — интеграции (iiko, WhatsApp, Telegram).
 - `_tab_settings_smart_sales.html` — правила допродаж.
-- `_tab_settings_team.html` — команда и роли.
+- `_tab_settings_team.html` — команда и роли. **StaffMind:** JS-хелперы (`loadStaffMindOnboarding`, `startStaffMindOnboarding`, `askStaffMind`) в `admin-app.js` — разметка пока не подключена.
 - `_tab_settings_health.html` — проверки окружения.
 - `_tab_settings_technical.html` — экспорт, retention, опасные действия.
 - `_tab_settings_bot_test.html` — лаборатория бота / тестовый чат.
@@ -67,10 +73,20 @@
 ## Client Logic
 
 - `app/static/js/admin-app.js` — большой Alpine `adminApp()` и миксины. Следующая крупная цель для раскола.
+- Location UI state: `userData.available_locations`, `selectedLocationId` / `activeLocationId`, `locationQueryParams()`, `onLocationFilterChanged()`. Прокидывается в `loadOrders`, `loadChatList`, dashboard loaders, Intelligence/Digital Twin/OS Dashboard.
 - `app/static/js/admin-brand-tokens.js` — CSS-токены бренда.
 - `app/static/js/onboarding.js` — логика onboarding/request access.
 - `src/css/admin-input.css` — исходник Tailwind/CSS. Не редактировать `app/static/css/admin.css` напрямую.
 - `app/static/css/admin.css` — собранный CSS после `npm run build:admin-css`.
+- `app/static/manifest.webmanifest` + `app/static/sw.js` — PWA (offline shell); подключение в [`admin.html`](app/templates/admin.html).
+
+### WebSocket (admin)
+
+Типы, которые обрабатывает `handleWsEvent` в [`admin-app.js`](app/static/js/admin-app.js):
+
+- Операционные: `new_message`, `order_updated`, `message_status_updated`, `human_needed`, `state_changed`, `stoplist_updated`, `menu_updated`.
+- **OS:** `os.audit` — prepend в ленту решений (`auditLog`).
+- **Бизнес-события шины** (refresh дашборда / автопилота): `order.created`, `order.confirmed`, `order.cancelled`, `payment.completed`, `payment.failed`, `payment.expired`, `booking.created`, `booking.confirmed`, `booking.cancelled`.
 
 ## Current Contracts
 
@@ -93,6 +109,7 @@
 
 ## Known Follow-Ups
 
+- **Final Mile UI:** подключить экраны/секции для SupplyMind drafts, StaffMind onboarding (JS уже есть), Voice AI toggle, Daily OS Digest preview — см. [`docs/REMAINING_UPDATES.md`](REMAINING_UPDATES.md).
 - Разбить `admin-app.js` на небольшие доменные модули: dashboard, orders, menu, chats, settings.
 - Постепенно убрать гибриды `rm-*`/raw Tailwind в экранах, когда файл всё равно открыт для правок.
 - Решить, нужен ли Lazy DOM слой для тяжёлых экранов. Сейчас все include рендерятся сразу ради простоты и предсказуемости.

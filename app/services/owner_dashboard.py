@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.db.models import Order, OrderStatus
-from app.services.tenant_scope import orders_tenant_clause
+from app.services.tenant_scope import orders_location_filter, orders_tenant_clause
 
 
 def _sql_dt_for_filter(dt: datetime) -> datetime:
@@ -38,6 +38,8 @@ async def fetch_daily_revenue_history(
     *,
     days: int = 28,
     now_utc: datetime | None = None,
+    location_id: int | None = None,
+    allowed_location_ids: set[int] | None = None,
 ) -> dict[str, float]:
     """Выручка по дням (UTC) за последние N дней — для прогноза по дню недели."""
     now_utc = now_utc or datetime.now(tz=timezone.utc)
@@ -52,6 +54,7 @@ async def fetch_daily_revenue_history(
         select(Order.created_at, Order.total_price).where(
             not_cancelled,
             org_orders,
+            orders_location_filter(allowed_location_ids, location_id),
             Order.created_at.isnot(None),
             Order.created_at >= floor_sql,
             Order.created_at <= hi_sql,

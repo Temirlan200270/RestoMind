@@ -698,6 +698,45 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Phase 2b OS: Audit-лог admin-мутаций (PATCH/POST/PUT/DELETE на /api/admin/)
+# Добавляем ДО SessionMiddleware → сессия доступна в request.state после разворачивания стека
+@app.middleware("http")
+async def admin_mutation_audit(request: Request, call_next):
+    response = await call_next(request)
+    try:
+        if (
+            request.method in ("POST", "PUT", "PATCH", "DELETE")
+            and "/api/admin/" in str(request.url.path)
+            and response.status_code < 400
+        ):
+            org_id = None
+            staff_id = None
+            try:
+                org_id = request.session.get("organization_id")
+                staff_id = request.session.get("staff_id")
+            except Exception:
+                pass
+            if org_id:
+                async def _write_audit(oid: int, sid: int | None, path: str, method: str) -> None:
+                    try:
+                        from app.db.session import async_session_factory
+                        from app.db.models import AuditLog
+                        async with async_session_factory() as db:
+                            db.add(AuditLog(
+                                organization_id=int(oid),
+                                actor=f"staff:{sid}" if sid else "session",
+                                action=f"admin.{method.lower()}.{path.split('/')[-1]}",
+                                entity_type="admin_action",
+                                entity_id=str(path),
+                            ))
+                            await db.commit()
+                    except Exception:
+                        pass
+                asyncio.create_task(_write_audit(org_id, staff_id, str(request.url.path), request.method))
+    except Exception:
+        pass
+    return response
+
 # Сессия для формы входа в админку (cookie)
 app.add_middleware(
     SessionMiddleware,

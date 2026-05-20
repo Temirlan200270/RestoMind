@@ -105,13 +105,40 @@ async def get_user_preferences(
     avg_total = sum(totals) / len(totals) if totals else 0.0
     drinks_frequency = drinks_orders / total_orders
 
+    # Топ-2 блюда по частоте заказов (для узнавания гостя в промпте)
+    item_counts: Counter[str] = Counter()
+    rejected_items: Counter[str] = Counter()
+    for items_json in rows:
+        if not isinstance(items_json, dict):
+            continue
+        items = items_json.get("items") or []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            name = (item.get("name") or "").strip()
+            if name and len(name) > 2:
+                item_counts[name] += 1
+        # Отказы из upsell-трейса
+        trace = (items_json.get("order_meta") or {}).get("recommendation_trace") or []
+        for ev in trace:
+            if isinstance(ev, dict) and ev.get("accepted") is False:
+                offered = (ev.get("offered_name") or "").strip()
+                if offered:
+                    rejected_items[offered] += 1
+
+    top_items = [name for name, _ in item_counts.most_common(2)]
+    # Отклонял 2+ раза — не предлагать
+    disliked = [name for name, count in rejected_items.items() if count >= 2][:1]
+
     logger.debug(
-        "personalization user_id=%s: never=%s drinks_freq=%.2f avg_total=%.0f",
-        user_id, never_categories, drinks_frequency, avg_total,
+        "personalization user_id=%s: never=%s drinks_freq=%.2f avg_total=%.0f top=%s",
+        user_id, never_categories, drinks_frequency, avg_total, top_items,
     )
 
     return {
         "never_categories": never_categories,
         "avg_total": avg_total,
         "drinks_frequency": drinks_frequency,
+        "top_items": top_items,
+        "disliked": disliked,
     }

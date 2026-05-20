@@ -351,10 +351,9 @@ class DecisionEngine:
         if proposal.intent != "order" or not proposal.items:
             return None
 
-        # Phase 4.1: проверка скидки (активна когда AI-схема получит поле discount_pct)
         max_pct = getattr(org, "max_discount_pct", 0) or 0 if org else 0
         if max_pct > 0:
-            proposed_discount = getattr(proposal, "discount_pct", 0) or 0
+            proposed_discount = float(getattr(proposal, "discount_pct", 0) or 0)
             if proposed_discount > max_pct:
                 return PolicyViolation(
                     rule="discount_exceeds_policy",

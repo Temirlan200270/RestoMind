@@ -17,6 +17,66 @@
                         </div>
                     {% endcall %}
                 </div>
+
+                {% call card(padding_class='p-0', extra_class='overflow-hidden mb-6 !border-amber-200/80') %}
+                    <div class="px-5 py-4 border-b border-amber-100 bg-amber-50/60 flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                            <h3 class="text-base font-bold text-amber-950">Деньги на кону</h3>
+                            <p class="text-sm text-amber-900/80 mt-0.5">Брошенные заказы, ожидание оплаты и гости без ответа — в одной очереди.</p>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <div x-show="moneyQueue?.summary?.money_at_risk_kzt > 0" class="text-right">
+                                <div class="text-xs font-medium text-amber-800/70 uppercase tracking-wide">Сумма под риском</div>
+                                <div class="text-xl font-black tabular-nums text-amber-950" x-text="fmt.money(moneyQueue?.summary?.money_at_risk_kzt ?? 0)"></div>
+                            </div>
+                            <button type="button" @click="loadMoneyQueue()"
+                                class="ds-btn ds-btn-secondary ds-btn-sm min-h-[40px]">Обновить</button>
+                        </div>
+                    </div>
+                    <div x-show="moneyQueueLoading" class="p-6">{{ skeleton(kind='table', rows=4, extra_class='!p-2') }}</div>
+                    <div x-show="!moneyQueueLoading && !(moneyQueue?.items?.length)" class="p-8 text-center text-gray-500">
+                        <div class="text-4xl mb-2" aria-hidden="true">💚</div>
+                        <div class="font-semibold text-gray-800">Сейчас ничего не горит</div>
+                        <p class="text-sm mt-1 max-w-md mx-auto">Нет брошенных черновиков, зависших оплат и медленных чатов по текущему фильтру точки.</p>
+                    </div>
+                    <div x-show="!moneyQueueLoading && (moneyQueue?.items?.length > 0)" class="divide-y divide-gray-100">
+                        <template x-for="item in (moneyQueue?.items || [])" :key="item.id">
+                            <div class="px-5 py-4 flex flex-col sm:flex-row sm:items-start gap-3 sm:gap-4"
+                                :class="moneyQueueSeverityClass(item.severity)">
+                                <div class="flex-1 min-w-0">
+                                    <div class="flex flex-wrap items-center gap-2">
+                                        <span class="text-xs font-bold uppercase tracking-wide opacity-80"
+                                            x-text="moneyQueueKindLabel(item.kind)"></span>
+                                        <span x-show="item.amount_kzt > 0"
+                                            class="text-sm font-black tabular-nums"
+                                            x-text="fmt.money(item.amount_kzt)"></span>
+                                        <span x-show="item.wait_minutes > 0"
+                                            class="text-xs tabular-nums opacity-75"
+                                            x-text="item.wait_minutes + ' мин'"></span>
+                                    </div>
+                                    <div class="font-semibold mt-1" x-text="item.title"></div>
+                                    <p class="text-sm mt-0.5 opacity-85 line-clamp-2" x-text="item.subtitle"></p>
+                                </div>
+                                <div class="flex flex-wrap gap-2 shrink-0">
+                                    <template x-for="(act, idx) in (item.actions || [])" :key="item.id + '-act-' + idx">
+                                        <button type="button" @click="runMoneyQueueAction(act)"
+                                            class="text-xs font-semibold px-3 py-2 rounded-lg border bg-white/70 hover:bg-white min-h-[40px]"
+                                            x-text="act.label"></button>
+                                    </template>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                    <p class="px-5 py-3 text-xs text-gray-500 border-t border-gray-100"
+                        x-show="!moneyQueueLoading && moneyQueue?.summary?.total > 0">
+                        В очереди <span x-text="moneyQueue.summary.total"></span>
+                        · критичных <span x-text="moneyQueue.summary.critical"></span>
+                        · черновики <span x-text="moneyQueue.summary.abandoned_drafts"></span>
+                        · оплата <span x-text="moneyQueue.summary.pending_prepay"></span>
+                        · чаты <span x-text="moneyQueue.summary.slow_chats"></span>
+                    </p>
+                {% endcall %}
+
                 <p class="text-sm text-gray-600 mb-4 max-w-3xl leading-relaxed">
                     Здесь — обращения, где системе нужен человек: что-то пошло не так или нужен ручной ответ.
                     Цель этого экрана — <span class="font-semibold text-emerald-800">пусто</span>.

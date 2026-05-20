@@ -6,6 +6,88 @@
 
 ## [Unreleased] — 2026-03-20
 
+### Изменено (2026-05-20) — G10 Simplification Map (текущая модель)
+
+- **Chat:** [`chat_serializer.py`](app/services/chat_serializer.py) — `chat:lock` (15s) + FIFO `chat:queue`; убраны `active_pipeline`, epoch, shadow.
+- **Shift:** `shift:active_focus:{org}:{operator}` — один lease TTL 45s; убраны `focus_lock`/`focus_claim`/`owner_token` в engine.
+- **Healing:** realtime (`payment.failed`, `ai.escalated`) + `heal:mute` 30m; cron только cold (7d cancel, ai drop, WA nudge). Убран `heal:fp`.
+- **Доки:** синхронизированы [`G10_SEMANTIC_CONTRACT.md`](docs/G10_SEMANTIC_CONTRACT.md), [`G10_FAILURE_SIMULATION.md`](docs/G10_FAILURE_SIMULATION.md), [`G10_SHIFT_CONTROL_PLANE.md`](docs/G10_SHIFT_CONTROL_PLANE.md), [`AI_OPERATIONS.md`](docs/AI_OPERATIONS.md).
+- **Freeze:** новые consistency-слои без prod-инцидента — [`docs/G10_SIMPLIFICATION.md`](docs/G10_SIMPLIFICATION.md).
+
+### Добавлено (2026-05-20) — G10 Production Hardening (промежуточный слой, superseded)
+
+- Промежуточно: `active_pipeline`, dual focus keys, `heal:fp` — **заменено** Simplification Map (см. блок выше).
+- Сохранено: S1 hysteresis, degraded UI, heartbeat API, FS-8/9/10 в failure sim (обновлены под simplify).
+
+### Добавлено (2026-05-20) — G10 v1.2 Semantic Hardening
+
+- **Projection diff:** `presentation.projection_gap`, `state_reason`, `debug_trace`; UI баннер расхождения.
+- **Ownership:** `focus.ownership`, complete org-wide SETNX; Redis keys — см. Simplification (`active_focus`).
+- **Redis:** prune ghost SET members; action labels «Другое дело» / «Не сейчас».
+- **Contract:** [`docs/G10_SEMANTIC_CONTRACT.md`](docs/G10_SEMANTIC_CONTRACT.md) §7–§10.
+
+### Добавлено (2026-05-20) — G10 v1.1 Semantic Contract + Trust Layer
+
+- **Contract:** [`docs/G10_SEMANTIC_CONTRACT.md`](docs/G10_SEMANTIC_CONTRACT.md) — system truth vs operational projection, guarantees, operator mental model, UI renderer, logging.
+- **Engine:** focus lock 45s; `shift:next:*` отдельно от `shift:skip:*` + SET index; `SETNX` complete; `presentation.empty_focus_reason`; structured logs `shift_state_built` / `shift_action_applied`.
+- **UI:** баннер при `focus=null` по `presentation` (не эвристика на клиенте).
+
+### Добавлено (2026-05-20) — G10 v1 Next Action Mode (Money Core)
+
+- **State machine:** S0–S5 детерминированно из G5–G8 сигналов — [`shift_state_engine.py`](app/services/shift_state_engine.py).
+- **API:** `GET /api/admin/shift/state`, `POST /api/admin/shift/action` (next/skip/complete, Redis dedupe 10/60 мин, событие `shift.focus_completed`).
+- **Контракт:** engine pure (state из G5–G8 без Redis); Redis — только фильтр skip/done; `next` = soft skip + refresh; `complete` — единственная business mutation (idempotent).
+- **UI:** `_tab_shift_control.html` — один layout на state, focus card + queue preview; `loadShiftState()` / `runShiftStateAction()` в [`admin-app.js`](app/static/js/admin-app.js).
+- **Тесты:** [`tests/test_shift_state_engine.py`](tests/test_shift_state_engine.py).
+- **Операции:** PR rollout, failure modes, hardening checklist — [`docs/G10_SHIFT_CONTROL_PLANE.md`](docs/G10_SHIFT_CONTROL_PLANE.md).
+
+### Добавлено (2026-05-20) — G9 Shift Control Screen (Money Core)
+
+- **Экран смены:** вкладка «Смена» — единый контур G5–G8: метрики (под риском / сохранено / ожидание), focus «Что делать сейчас», очередь до 8 позиций, quick actions, live chats, orders strip, leak summary, system status.
+- **API:** `GET /api/admin/shift-control?location_id=` — [`shift_control.py`](app/services/shift_control.py); reuse `build_money_queue` + `build_revenue_leak`.
+- **UX:** оператор стартует на вкладке `shift`; auto-refresh 45с; mobile bottom nav «Смена».
+
+### Добавлено (2026-05-20) — G8 Revenue Leak → Action Layer (Money Core)
+
+- **Action surfaces:** `GET /api/admin/intelligence/revenue-leak` возвращает `surfaces[]` — брошенные заказы, медленные чаты, pending prepay, крупные зависшие; агрегаты через [`summarize_queue_counts`](app/services/money_queue.py).
+- **1-клик:** `POST /api/admin/intelligence/revenue-leak/recover-drafts` — ручной запуск G6 draft recovery; навигация в Inbox/чаты/заказы из дашборда.
+- **UI:** блок «Деньги под контролем» в `_tab_dashboard.html`, `runRevenueLeakAction()` и `chatPulseFilter` в [`admin-app.js`](app/static/js/admin-app.js).
+
+### Добавлено (2026-05-20) — G7 Inbox = money queue (Money Core)
+
+- **Money queue:** единая очередь «Деньги на кону» в Inbox — брошенные DRAFT (&gt;30 мин), заказы с `prepayment_status=pending`, медленные чаты (pulse amber/red ≥2 мин).
+- **API:** `GET /api/admin/inbox/money-queue?location_id=` — [`money_queue.py`](app/services/money_queue.py), endpoint в [`analytics.py`](app/api/admin/analytics.py).
+- **UI:** блок в `_tab_operator_queue.html`, `loadMoneyQueue()` / счётчик в бейдже Inbox в [`admin-app.js`](app/static/js/admin-app.js).
+- **Тесты:** [`tests/test_money_queue.py`](tests/test_money_queue.py).
+
+### Добавлено (2026-05-20) — G6 Draft Recovery (Money Core)
+
+- **Draft Recovery:** cron `draft_recovery_scheduled_tick` ищет DRAFT старше 45 мин, шлёт WhatsApp-кнопки «Оформить» / «Отменить», dedupe Redis 24ч/заказ, восстанавливает `CONFIRMING_ORDER` + pending order для `handle_confirmation`.
+- **Событие:** `order.draft_recovery_sent` через `emit_event`.
+- **Конфиг:** `DRAFT_RECOVERY_ENABLED` (default true).
+
+### Добавлено (2026-05-20) — G5 Live Pulse (Money Core)
+
+- **Live Pulse в чатах:** индикатор ожидания ответа гостю — 🟢 &lt;2 мин, 🟡 2–5 мин, 🔴 &gt;5 мин; красные чаты поднимаются вверх списка.
+- **API:** `GET /api/admin/chats` возвращает `last_role`, `wait_seconds`, `pulse`; логика в [`bot_sla_status.py`](app/services/bot_sla_status.py).
+- **Тесты:** [`tests/test_visibility_money.py`](tests/test_visibility_money.py) — пороги pulse и sidebar payload.
+
+### Документация (2026-05-20)
+
+- Синхронизированы [`docs/OS_TRANSITION_PLAN.md`](docs/OS_TRANSITION_PLAN.md) (Phase 1–4 → 100%, Phase 3 → 95%, Final Mile backend/UI split), [`docs/ROADMAP.md`](docs/ROADMAP.md) (Final Mile backend `[x]`, UI gaps явно в backlog), [`docs/AI_OPERATIONS.md`](docs/AI_OPERATIONS.md), [`docs/UI_MAP.md`](docs/UI_MAP.md), [`docs/REMAINING_UPDATES.md`](docs/REMAINING_UPDATES.md), [`codebase.md`](codebase.md) с текущим кодом после Location Enterprise Metrics и Final Mile backend MVP.
+
+### Добавлено (2026-05-20) — Location Enterprise Metrics
+
+- **Location-aware dashboard metrics:** `/stats`, `/funnel`, `/analytics`, `/activity`, `/incidents`, `/roi/today` принимают `location_id`; при location scope не используют org-wide `DailyOrgStats` как точный источник и возвращают `location_scope`.
+- **Location-aware Intelligence:** `/overview`, `/digital-twin`, `/latency`, `/os-dashboard`, `/revenue-leak`, `/inventory/stock-alerts` проверяют `assigned_location_ids`; `os-dashboard` для точки использует SQL/inventory fallback.
+- **Admin UI filter:** селектор точки в шапке берёт `available_locations` из `/auth/me`, сбрасывает активный чат/заказ при смене точки и прокидывает `location_id` в dashboard, AI Center, chats и orders.
+- **Тесты:** добавлены проверки location metrics и UI surface (`tests/test_location_scope.py`, `tests/test_location_ui_surface.py`).
+
+### Документация (2026-05-21)
+
+- Синхронизированы [`docs/ROADMAP.md`](docs/ROADMAP.md), [`docs/OS_TRANSITION_PLAN.md`](docs/OS_TRANSITION_PLAN.md), [`docs/AI_OPERATIONS.md`](docs/AI_OPERATIONS.md), [`docs/UI_MAP.md`](docs/UI_MAP.md) с текущим кодом (Location 1.1, os.audit, bulk pricing, GuestCare, digest, PWA, operator-facing UI).
+- Тест [`tests/test_os_phase5.py`](tests/test_os_phase5.py): бейдж автопилота — «данные ОС» / «по событиям ОС» вместо `event bus`.
+
 ### Добавлено (2026-05-19) — Ultimate Platform 2026 (Sprint A/B/C)
 
 - **Phase 1.1 Location:** модель `Location`, `location_id` на Order/ChatLog/Booking, миграция `20260520_locations_phase11`, RBAC в `tenant_scope` + `deps.py`, тесты `tests/test_location_scope.py`.
@@ -57,7 +139,7 @@
 - **H1 — DailyOrgStats: 4 новые колонки** ([`app/db/models.py`](app/db/models.py), [`analytics_consumer.py`](app/services/analytics_consumer.py)): `bookings_created`, `payments_completed`, `payments_failed`, `revenue_kzt`. Миграция [`20260518_daily_org_stats_v2.py`](alembic/versions/20260518_daily_org_stats_v2.py) + SQLite-патч. `_EVENT_COLUMN` расширен до всех 10 типов. `payment.completed` дополнительно вызывает `_upsert_daily_revenue(amount)` через новую функцию — выручка от оплат теперь в event-driven агрегатах.
 - **H2 — DE `book` → `faq` при block** ([`decision_engine.py`](app/services/decision_engine.py)): `_build_corrected_response` теперь меняет `intent` на `faq` для `order` **и** `book`. До этого при блокировке брони (billing_suspended, force_closed) `_handle_booking` всё равно создавал DRAFT-бронь.
 - **H3 — `tenant` в `AIReadContext`** ([`context_engine.py`](app/services/context_engine.py)): новое поле `tenant: Tenant | None = None`. `fetch_ai_read_context` загружает `Tenant` параллельно с остальными данными. [`webhooks.py`](app/api/webhooks.py) передаёт `tenant=read_ctx.tenant` в `decision_engine.validate()`. Теперь DE получает реальный `tenant.plan_status` из контекста, а не только `org.is_active` как прокси.
-- **H4 — `event_driven_stats` в UI** ([`_tab_dashboard.html`](app/templates/screens/_tab_dashboard.html)): добавлен бейдж «⚡ event bus» в блоке ИИ-эффективности. Виден только при `event_driven_stats.source === 'event_driven'`, показывает количество оплат из event bus рядом с SQL-данными. Первый KPI использующий event-driven источник вместо SQL.
+- **H4 — `event_driven_stats` в UI** ([`_tab_dashboard.html`](app/templates/screens/_tab_dashboard.html)): бейдж «данные ОС» при `event_driven_stats.source === 'event_driven'` (язык оператора; ранее dev-лейбл `event bus`).
 - **Тесты Sprint H:** [`tests/test_sprint_h.py`](tests/test_sprint_h.py) — 295 строк, 4 класса: `TestDailyOrgStatsH1` (5 тестов: payment.completed/failed, booking.created, revenue_kzt accumulation, все 10 типов), `TestBookingBlockH2` (2 теста: billing+book→faq, force_closed+book→faq), `TestTenantInContextH3` (3 теста: поле в dataclass, optional default, DE видит tenant.plan_status), `TestEventDrivenStatsUIH4` (2 теста: template содержит event_driven_stats, индикатор payments_completed).
 
 ### Исправлено (2026-05-18) — Sprint G Staff Review (DoD)

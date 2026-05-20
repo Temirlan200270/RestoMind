@@ -44,3 +44,15 @@ Implemented backend MVPs for the remaining Ultimate Platform modules.
 - Make sure org `timezone` values are valid IANA names; Daily OS Digest uses the organization timezone window.
 - Voice AI is disabled by default. Enable per organization with `POST /api/admin/intelligence/voice/config`.
 - SupplyMind works with pushed stock snapshots today. Real iiko Office stock sync still needs credentials and endpoint mapping.
+
+## Admin UI status (2026-05-20)
+
+| Module | Backend | Admin UI |
+|--------|---------|----------|
+| OS Decision Feed + `os.audit` | ✅ | ✅ (`_tab_ai_center.html`, `dashLiveFeed`) |
+| GuestCare External | ✅ | ✅ (`aiCenterTab=guestcare`) |
+| Daily OS Digest | ✅ preview + cron | ❌ preview panel not wired |
+| SupplyMind drafts | ✅ | ❌ |
+| StaffMind onboarding | ✅ | ⚠️ JS helpers in `admin-app.js`, no template |
+| Voice AI toggle | ✅ status/config API | ❌ |
+| PWA | ✅ manifest + sw | ✅ registered in admin |

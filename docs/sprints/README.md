@@ -12,7 +12,7 @@
 
 3. **Один спринт = одна папка.**
 
-## Шаблон структуры
+4. **Долгоживущие operational spec** (не удалять после спринта) — в `docs/`, например [`docs/G10_SHIFT_CONTROL_PLANE.md`](../G10_SHIFT_CONTROL_PLANE.md) (PR rollout, failure modes, prod checklist).
 
 Создаём папку `docs/sprints/YYYY-MM-DD__<slug>/` и кладём внутрь:
 

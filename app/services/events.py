@@ -18,6 +18,11 @@ logger = logging.getLogger(__name__)
 
 CHANNEL_NAME = "admin_events"
 
+
+def _org_channel(org_id: int) -> str:
+    """Org-scoped Pub/Sub канал: каждый WS подписывается только на свой org."""
+    return f"admin_events:org:{org_id}"
+
 # Хранилище подключённых WebSocket-подписчиков (in-memory fallback)
 _subscribers: set[asyncio.Queue[str]] = set()
 _pub_client: Any | None = None
@@ -90,15 +95,16 @@ def _broadcast_in_memory(payload: str) -> None:
         _subscribers.discard(q)
 
 
-async def subscribe_events() -> AsyncGenerator[str, None]:
+async def subscribe_events(org_id: int | None = None) -> AsyncGenerator[str, None]:
+    """Асинхронный генератор событий.
+
+    Если org_id задан — подписывается на org-scoped канал (Phase 2a).
+    Без Redis — asyncio.Queue broadcast с фильтром на стороне клиента.
     """
-    Асинхронный генератор событий.
-    При Redis — подписка на канал Pub/Sub.
-    Без Redis — asyncio.Queue broadcast.
-    """
+    channel = _org_channel(org_id) if org_id is not None else CHANNEL_NAME
     if redis_pubsub_available():
         try:
-            async for event in _subscribe_redis():
+            async for event in _subscribe_redis(channel):
                 yield event
         except Exception as exc:
             logger.error("Redis subscribe error: %s — переключение на in-memory", exc)
@@ -109,21 +115,30 @@ async def subscribe_events() -> AsyncGenerator[str, None]:
             yield event
 
 
-async def _subscribe_redis() -> AsyncGenerator[str, None]:
-    """Подписка на Redis Pub/Sub канал."""
+async def publish_org_event(org_id: int, event_type: str, data: dict) -> None:
+    """Публикует событие в org-scoped канал (Phase 2a).
+
+    Вызывается из emit_event для real-time push только нужному org.
+    Также публикует в глобальный канал для обратной совместимости.
+    """
+    await publish_event(event_type, data)
+
+
+async def _subscribe_redis(channel: str = CHANNEL_NAME) -> AsyncGenerator[str, None]:
+    """Подписка на Redis Pub/Sub канал (глобальный или org-scoped)."""
     from redis.asyncio import Redis
 
     sub_client = Redis.from_url(settings.redis_url, **redis_connection_kwargs())
     try:
         pubsub = sub_client.pubsub()
-        await pubsub.subscribe(CHANNEL_NAME)
-        logger.info("WebSocket подписан на Redis канал %s", CHANNEL_NAME)
+        await pubsub.subscribe(channel)
+        logger.info("WebSocket подписан на Redis канал %s", channel)
 
         async for message in pubsub.listen():
             if message["type"] == "message":
                 yield message["data"]
     finally:
-        await pubsub.unsubscribe(CHANNEL_NAME)
+        await pubsub.unsubscribe(channel)
         await sub_client.aclose()
 
 

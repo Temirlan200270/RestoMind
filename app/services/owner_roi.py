@@ -23,7 +23,9 @@ from app.services.intelligence_analytics import (
     upsell_stats_from_items_json,
 )
 from app.services.tenant_scope import (
+    chat_logs_location_filter,
     failed_tasks_tenant_clause as _failed_tasks_tenant_clause,
+    orders_location_filter,
     orders_tenant_clause as _orders_tenant_clause,
 )
 
@@ -73,10 +75,15 @@ async def aggregate_org_window(
     org_id: int,
     ts_lo_utc: datetime,
     ts_hi_utc: datetime,
+    *,
+    location_id: int | None = None,
+    allowed_location_ids: set[int] | None = None,
 ) -> dict[str, Any]:
     """Сводка за полуинтервал [ts_lo, ts_hi] в UTC (как в /stats)."""
     not_cancelled = Order.status != OrderStatus.CANCELLED
     org_orders = _orders_tenant_clause(org_id)
+    order_location_scope = orders_location_filter(allowed_location_ids, location_id)
+    chat_location_scope = chat_logs_location_filter(allowed_location_ids, location_id)
     ts_lo = _sql_dt_for_filter(ts_lo_utc)
     ts_hi = _sql_dt_for_filter(ts_hi_utc)
 
@@ -85,6 +92,7 @@ async def aggregate_org_window(
             select(func.count(Order.id), func.coalesce(func.sum(Order.total_price), 0)).where(
                 not_cancelled,
                 org_orders,
+                order_location_scope,
                 Order.created_at >= ts_lo,
                 Order.created_at <= ts_hi,
             ),
@@ -100,6 +108,7 @@ async def aggregate_org_window(
         select(Order.items_json).where(
             not_cancelled,
             org_orders,
+            order_location_scope,
             Order.created_at >= ts_lo,
             Order.created_at <= ts_hi,
         ),
@@ -116,6 +125,7 @@ async def aggregate_org_window(
                 ChatLog.organization_id == org_id,
                 ChatLog.created_at >= ts_lo,
                 ChatLog.created_at <= ts_hi,
+                chat_location_scope,
             ),
         )
         or 0,
@@ -128,6 +138,7 @@ async def aggregate_org_window(
                 ChatLog.role == "assistant",
                 ChatLog.created_at >= ts_lo,
                 ChatLog.created_at <= ts_hi,
+                chat_location_scope,
             ),
         )
         or 0,

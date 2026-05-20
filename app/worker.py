@@ -12,6 +12,7 @@ from typing import Any
 from app.core.config import settings
 from app.services.billing_rollup import billing_usage_daily_scheduled_tick
 from app.services.daily_os_digest import daily_os_digest_scheduled_tick
+from app.services.draft_recovery import draft_recovery_scheduled_tick
 from app.services.night_preorders import morning_preorders_tick
 from app.services.owner_weekly_digest import owner_digest_scheduled_tick
 from app.services.payment_notify import run_payment_received_customer_notify
@@ -156,6 +157,22 @@ async def ai_incidents_hourly_tick(ctx: dict[str, Any]) -> None:
 
     logger.info("Phase5.3 hourly_tick: %d orgs processed", len(org_ids))
 
+    # Phase 3a OS: snapshot retention — удаляем снимки старше 30 дней
+    try:
+        from sqlalchemy import delete as _del
+        from app.db.models import AIContextSnapshot
+        cutoff_snap = datetime.now(tz=timezone.utc) - timedelta(days=30)
+        async with async_session_factory() as db:
+            result = await db.execute(
+                _del(AIContextSnapshot).where(AIContextSnapshot.created_at < cutoff_snap)
+            )
+            deleted = result.rowcount
+            await db.commit()
+        if deleted:
+            logger.info("Phase3a snapshot_retention: deleted %d snapshots older than 30d", deleted)
+    except Exception:
+        logger.exception("snapshot_retention: ошибка")
+
 
 async def iiko_stoplist_sync(
     ctx: dict[str, Any],
@@ -192,6 +209,7 @@ class WorkerSettings:
         iiko_menu_sync,
         ai_incidents_hourly_tick,
         daily_os_digest_scheduled_tick,
+        draft_recovery_scheduled_tick,
     ]
     # Digest: 4× в час; биллинг: суточный rollup; ночные предзаказы: каждые 5 мин.
     # Запланированные рассылки: каждые 5 минут. AI-инциденты: каждый час в :05.
@@ -201,6 +219,7 @@ class WorkerSettings:
             cron(daily_os_digest_scheduled_tick, minute={0, 15, 30, 45}),
             cron(billing_usage_daily_scheduled_tick, hour=0, minute=12),
             cron(morning_preorders_tick, minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55}),
+            cron(draft_recovery_scheduled_tick, minute={2, 12, 22, 32, 42, 52}),
             cron(scheduled_blasts_tick, minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55}),
             cron(ai_incidents_hourly_tick, minute=5),
         ]

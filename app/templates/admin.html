@@ -55,6 +55,7 @@
         >
             {# Operations #}
             {% include "screens/_tab_inbox.html" %}
+            {% include "screens/_tab_shift_control.html" %}
             {# P0 lazy DOM: тяжёлые операционные табы — в дереве после первого визита (`lazyTabMount.*` в admin-app.js). #}
             <template x-if="lazyTabMount.orders">
             {% include "screens/_tab_orders.html" %}

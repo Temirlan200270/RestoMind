@@ -260,38 +260,51 @@ high ≥ 1.5, medium ≥ 1.2, low < 1.2
 | `stable` | всё в норме | 0% |
 
 Рекомендации создаются автоматически в UTC 04:00 через `generate_autopilot_pricing_recommendation()`.  
-Применяются через `POST /api/admin/intelligence/apply-pricing/{rec_id}` (обновляет `MenuItem.price`).
+Применяются через:
+- `POST /api/admin/intelligence/apply-pricing/{rec_id}` — одна рекомендация;
+- `POST /api/admin/intelligence/apply-pricing/bulk` — все `autopilot_pricing` со статусом `new` за org (один aggregate `system.pricing_adjusted`).
 
 ---
 
 ## Self-Healing Actions (Phase 5 OS)
 
-[`app/services/healing_actions.py`](../app/services/healing_actions.py). Вызывается из `ai_incidents_hourly_tick` каждый час.
+Два канала (см. [`G10_SEMANTIC_CONTRACT.md`](G10_SEMANTIC_CONTRACT.md) §12, [`G10_SIMPLIFICATION.md`](G10_SIMPLIFICATION.md)):
 
-### Детекторы
+### Realtime (event bus)
+
+[`app/services/healing_realtime.py`](../app/services/healing_realtime.py) — подписчик на `BusinessEvent` при emit.
+
+| Событие | Порог (за текущий час) | Insight type | Дедуп |
+|---------|------------------------|--------------|-------|
+| `payment.failed` | ≥3 | `payment_failed_spike` | `heal:mute:{org}:{type}` 30 min |
+| `ai.escalated` | ≥5 | `escalation_spike` | то же |
+
+Счётчик: `heal:counter:{org}:{event_type}:{YYYYMMDDHH}`. Cron **не** дублирует эти spikes.
+
+### Cron (hourly cold)
+
+[`app/services/healing_actions.py`](../app/services/healing_actions.py) — `ai_incidents_hourly_tick` в worker.
 
 | Детектор | Порог | Действие |
 |----------|-------|---------|
-| **Escalation spike** | ≥5 эскалаций за сегодня | `OperationalInsight` severity=warning/critical |
-| **Payment failed spike** | ≥3 failed-платежей за сегодня | `OperationalInsight` severity=critical |
 | **Cancellation surge** | ≥25% отмен за 7 дней | `OperationalInsight` + auto-trigger `generate_recommendations` |
 | **AI message drop** | −70% AI-ответов vs предыдущая неделя | `OperationalInsight` severity=critical |
+| **Payment failed → WA nudge** | ≥3 failed за сегодня | Шаблонное WhatsApp гостям с `prepayment_status=pending` (≤5/час/org), `system.healing_wa_sent` |
 
-Дедупликация: не создаёт повторный инсайт если аналогичный есть за последние N часов.
+Дедупликация: `heal:mute` 30 min на тип + `_create_insight_if_new` (нет аналога за N часов в БД).
 
 ---
 
 ## Audit Trail (Phase 5 OS)
 
-Status update: Phase 6 Visibility backend is now implemented for audit push and daily digest.
+[`app/services/audit_consumer.py`](../app/services/audit_consumer.py) + таблица `audit_log`.
 
-- New `AuditLog` entries emit `os.audit` with `organization_id`, so admin websocket filtering delivers the event to the correct org.
-- Daily OS Digest preview is available at `GET /api/admin/intelligence/daily-os-digest/preview`.
-- Scheduled Telegram delivery runs through `daily_os_digest_scheduled_tick` in the ARQ worker during the 09:00 org-timezone window.
+- Вызывается из `emit_event()` для бизнес-событий (кроме `ai.response.generated`, `conversation.state_changed`).
+- После записи публикует WebSocket **`os.audit`** (`org_id`, `actor`, `action`, `title`) — лента в админке без polling.
+- Интеграционные события: `integration.iiko.failed`, `integration.whatsapp.failed` (см. [`integration_events.py`](../app/services/integration_events.py), [`chat_delivery.py`](../app/services/chat_delivery.py)).
+- Диалоги: `ai.dialog.started` — [`dialog_events.py`](../app/services/dialog_events.py) (один раз на org+phone+день).
 
-[`app/services/audit_consumer.py`](../app/services/audit_consumer.py) + `AuditLog` table.
-
-Вызывается из `emit_event()` для **всех** событий (кроме высокочастотных технических).
+**Daily OS Digest:** `GET /api/admin/intelligence/daily-os-digest/preview`; отправка — `daily_os_digest_scheduled_tick` в ARQ (окно 09:00 по timezone org).
 
 ```http
 GET /api/admin/intelligence/audit-log?limit=50&action=order.confirmed&actor=ai
@@ -305,32 +318,102 @@ GET /api/admin/intelligence/audit-log?limit=50&action=order.confirmed&actor=ai
 
 ## OS Dashboard — `GET /os-dashboard`
 
-Единый event-driven endpoint для «Автопилот» вкладки. Нет SQL к `Order`/`ChatLog`.
+Единый endpoint для «Автопилот» вкладки. По умолчанию читает event-driven `DailyOrgStats`. Если передан `location_id` или staff ограничен `assigned_location_ids`, endpoint не использует org-wide `DailyOrgStats` как точный источник и возвращает `source=sql_location` для метрик по точке.
 
 ```json
 {
   "source": "event_driven",
+  "location_scope": { "location_id": null, "source": "event_driven" },
   "today": { "orders_confirmed": 12, "revenue_kzt": 34500, "escalations": 1 },
   "week_forecast": { "forecast_revenue": 245000, "confidence": "high" },
   "demand_forecast": { "forecast_orders": 87, "daily_avg_orders": 14.5 },
   "cancellation_risk": { "risk_level": "low", "cancellation_rate_pct": 5.2 },
   "overload_risk": { "risk_level": "medium", "current_pace": 18.5 },
   "autopilot_pricing": { "tactic": "demand_up", "price_adj_pct": 7 },
+  "stock_alerts": [{ "ingredient": "...", "days_until_runout": 7, "message": "..." }],
   "incidents": [...],
   "top_recommendations": [...]
 }
 ```
 
+`stock_alerts`: сначала из `inventory_stock_snapshots` ([`build_stock_alerts_from_inventory`](../app/services/owner_dashboard.py)), иначе прокси [`build_stock_alerts_stub`](../app/services/owner_dashboard.py) по `DailyOrgStats`. При `location_id` inventory snapshots фильтруются по точке.
+
+### Location Enterprise Metrics
+
+Location scope поддержан в:
+
+- Dashboard: `GET /api/admin/stats`, `/funnel`, `/analytics`, `/activity`, `/incidents`, `/roi/today`.
+- Intelligence: `/overview`, `/digital-twin`, `/latency`, `/os-dashboard`, `/revenue-leak`, `/inventory/stock-alerts`.
+- UI: селектор точки в шапке (`available_locations` из `/auth/me`) прокидывается в dashboard, AI Center, chats и orders.
+
+Важный инвариант: `DailyOrgStats` пока агрегируется по `organization_id`. Поэтому location-scoped запросы возвращают `location_scope.source=sql_location` / `org_level_latency_logs`, а полноценный `daily_location_stats` остаётся отдельным hardening-этапом.
+
+### Replay снимка
+
+`POST /api/admin/intelligence/snapshots/{id}/replay?user_text=...` — использует frozen `menu_context_text` и **`chat_history_slice`** из `customer_state` снимка (не пустой `history=[]`).
+
+### GuestCare External
+
+- `GET /api/admin/intelligence/reviews/external`
+- `POST /api/admin/intelligence/reviews/external/import` — URL или полный payload (`author`, `rating`, `text`)
+- `POST /api/admin/intelligence/reviews/external/{review_id}/reply-draft`
+
+Хранение: таблица `external_reviews` (не `Organization.meta_json`).
+
+---
+
+## Final Mile — backend MVP
+
+Детали деплоя и эндпоинтов: [`docs/FINAL_MILE_IMPLEMENTED.md`](FINAL_MILE_IMPLEMENTED.md). UI-обёртки — в backlog ([`docs/REMAINING_UPDATES.md`](REMAINING_UPDATES.md)).
+
+### SupplyMind
+
+| Endpoint | Назначение |
+|----------|------------|
+| `POST /inventory/snapshots/bulk` | upsert `inventory_stock_snapshots` |
+| `GET /inventory/stock-alerts` | алерты по SKU (location-aware) |
+| `POST /supplymind/drafts` | черновик закупки из low-stock |
+| `GET /supplymind/drafts` | список черновиков |
+
+Сервис: [`app/services/supplymind.py`](../app/services/supplymind.py).
+
+### StaffMind
+
+| Endpoint | Назначение |
+|----------|------------|
+| `POST /staffmind/onboarding` | старт сессии онбординга |
+| `POST /staffmind/onboarding/{id}/message` | Q&A из `KnowledgeItem` |
+| `GET /staffmind/onboarding` | список сессий |
+
+Сервис: [`app/services/staffmind.py`](../app/services/staffmind.py). JS-хелперы в `admin-app.js` есть; шаблон настроек команды не подключён.
+
+### Voice AI
+
+| Endpoint | Назначение |
+|----------|------------|
+| `GET /voice/status` | readiness per org |
+| `POST /voice/config` | `voice_ai_enabled`, `voice_ai_mode` в `Organization.meta_json` |
+
+Сервис: [`app/services/voice_ai.py`](../app/services/voice_ai.py). Twilio path: [`docs/VOICE_AI_SPIKE.md`](VOICE_AI_SPIKE.md). OpenAI Realtime — следующий коннектор.
+
+### Daily OS Digest
+
+- Preview: `GET /daily-os-digest/preview`
+- Cron: `daily_os_digest_scheduled_tick` в [`app/worker.py`](../app/worker.py) (09:00 по timezone org)
+- Сервис: [`app/services/daily_os_digest.py`](../app/services/daily_os_digest.py)
+
 ---
 
 ## Границы и эволюция
 
-**Сейчас (Phase 5):** observational + predictive + self-healing — система сама детектирует и эскалирует проблемы, даёт ценовые рекомендации, строит прогнозы.
+**Сейчас (Phase 5 + Final Mile backend):** observational + predictive + self-healing; SupplyMind/StaffMind/Voice/Digest API готовы; Decision Feed и `os.audit` в UI работают.
 
-**Следующий уровень (Phase 6 — Visibility):**
-- Audit Log Feed в UI (лента решений ОС)
-- Websocket push при новых AuditLog entries
-- Digest Email/Telegram: утренняя сводка OS-действий
-- Hourly baselines (нужен накопленный датасет)
-- Causal graph (корреляции между метриками)
-- Feedback calibration (автокалибровка порогов по `was_useful`)
+**Phase 6 — Visibility (следующий слой):**
+- [x] Audit Log Feed в UI (лента решений ОС, `loadAuditLog`, `dashLiveFeed`)
+- [x] Websocket push `os.audit` при новых AuditLog entries
+- [x] Daily OS Digest backend (Telegram preview endpoint + cron)
+- [ ] Admin UI для SupplyMind drafts, StaffMind onboarding, Voice toggle, digest preview
+- [ ] Staging smoke: Telegram digest delivery, Twilio voice stream
+- [ ] Hourly baselines (нужен накопленный датасет)
+- [ ] Causal graph (корреляции между метриками)
+- [ ] Feedback calibration (автокалибровка порогов по `was_useful`)

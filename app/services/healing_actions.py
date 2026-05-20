@@ -19,14 +19,37 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import OperationalInsight, Organization
+from app.db.session import redis_client
 from app.services.analytics_consumer import get_event_stats, get_today_event_summary
 
 logger = logging.getLogger(__name__)
+
+HEALING_MUTE_TTL_SEC = 1800
 
 _ESCALATION_SPIKE_THRESHOLD = 5     # эскалаций за час
 _PAYMENT_FAILED_THRESHOLD = 3       # failed-платежей за сегодня
 _CANCEL_RATE_THRESHOLD = 0.25       # 25% отмен → surge
 _MIN_ORDERS_FOR_CANCEL_ANALYSIS = 4
+
+
+def healing_mute_key(org_id: int, insight_type: str) -> str:
+    return f"heal:mute:{int(org_id)}:{insight_type}"
+
+
+async def try_acquire_healing_mute(org_id: int, insight_type: str) -> bool:
+    """One healing action per insight_type per org per 30 min."""
+    key = healing_mute_key(org_id, insight_type)
+    try:
+        acquired = await redis_client.set(key, "1", nx=True, ex=HEALING_MUTE_TTL_SEC)
+        return bool(acquired)
+    except Exception as exc:
+        logger.warning(
+            "healing.mute_failed org=%s type=%s err=%s",
+            org_id,
+            insight_type,
+            exc,
+        )
+        return True
 
 
 async def _create_insight_if_new(
@@ -73,44 +96,9 @@ async def run_healing_actions(db: AsyncSession, org_id: int) -> list[str]:
     today_summary = await get_today_event_summary(db, org_id)
     event_rows_14d = await get_event_stats(db, org_id, days=14)
 
-    # ── Spike эскалаций ───────────────────────────────────────────────────
-    escalations_today = today_summary.get("escalations", 0)
-    if escalations_today >= _ESCALATION_SPIKE_THRESHOLD:
-        created = await _create_insight_if_new(
-            db, org_id,
-            insight_type="escalation_spike",
-            title=f"Spike эскалаций: {escalations_today} за сегодня",
-            summary=(
-                f"Сегодня зафиксировано {escalations_today} эскалаций — "
-                f"выше порога ({_ESCALATION_SPIKE_THRESHOLD}). "
-                "Проверьте: актуальность меню/стоп-листа, корректность ответов бота, "
-                "нагрузку на операторов."
-            ),
-            severity="warning" if escalations_today < _ESCALATION_SPIKE_THRESHOLD * 3 else "critical",
-        )
-        if created:
-            actions.append(f"insight:escalation_spike:{escalations_today}")
-            logger.warning("Phase5 healing: escalation spike org=%d count=%d", org_id, escalations_today)
-
-    # ── Spike failed-платежей ─────────────────────────────────────────────
     payments_failed = today_summary.get("payments_failed", 0)
-    if payments_failed >= _PAYMENT_FAILED_THRESHOLD:
-        created = await _create_insight_if_new(
-            db, org_id,
-            insight_type="payment_failed_spike",
-            title=f"Проблемы с платежами: {payments_failed} ошибок сегодня",
-            summary=(
-                f"Сегодня {payments_failed} платежа(ей) завершились ошибкой. "
-                "Проверьте: статус платёжного шлюза, корректность webhook-URL, "
-                "срок действия API-ключей."
-            ),
-            severity="critical",
-        )
-        if created:
-            actions.append(f"insight:payment_spike:{payments_failed}")
-            logger.error("Phase5 healing: payment spike org=%d failed=%d", org_id, payments_failed)
 
-    # ── Cancellation surge ────────────────────────────────────────────────
+    # ── Cancellation surge (cold, 7d — cron only) ─────────────────────────
     recent = event_rows_14d[:7]  # последние 7 дней
     total_confirmed = sum(r["orders_confirmed"] for r in recent)
     total_cancelled = sum(r["orders_cancelled"] for r in recent)
@@ -118,7 +106,9 @@ async def run_healing_actions(db: AsyncSession, org_id: int) -> list[str]:
     if total_orders >= _MIN_ORDERS_FOR_CANCEL_ANALYSIS:
         cancel_rate = total_cancelled / total_orders
         if cancel_rate >= _CANCEL_RATE_THRESHOLD:
-            created = await _create_insight_if_new(
+            if not await try_acquire_healing_mute(org_id, "cancellation_surge"):
+                pass
+            elif await _create_insight_if_new(
                 db, org_id,
                 insight_type="cancellation_surge",
                 title=f"Высокий уровень отмен: {cancel_rate * 100:.0f}% за 7 дней",
@@ -130,8 +120,7 @@ async def run_healing_actions(db: AsyncSession, org_id: int) -> list[str]:
                 ),
                 severity="warning",
                 dedup_hours=24,
-            )
-            if created:
+            ):
                 actions.append(f"insight:cancellation_surge:{cancel_rate:.2f}")
                 # Триггерим пересчёт рекомендаций при высоком уровне отмен
                 try:
@@ -153,7 +142,9 @@ async def run_healing_actions(db: AsyncSession, org_id: int) -> list[str]:
         recent_ai = sum(r["ai_messages_count"] for r in recent_7)
         prev_ai = sum(r["ai_messages_count"] for r in prev_7)
         if prev_ai > 10 and recent_ai < prev_ai * 0.3:
-            created = await _create_insight_if_new(
+            if not await try_acquire_healing_mute(org_id, "ai_message_drop"):
+                pass
+            elif await _create_insight_if_new(
                 db, org_id,
                 insight_type="ai_message_drop",
                 title="Резкое падение AI-ответов",
@@ -164,8 +155,7 @@ async def run_healing_actions(db: AsyncSession, org_id: int) -> list[str]:
                 ),
                 severity="critical",
                 dedup_hours=12,
-            )
-            if created:
+            ):
                 actions.append(f"insight:ai_message_drop:{recent_ai}/{prev_ai}")
                 logger.error("Phase5 healing: AI message drop org=%d recent=%d prev=%d", org_id, recent_ai, prev_ai)
 

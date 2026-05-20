@@ -6,13 +6,14 @@ This file tracks what is still needed outside the backend MVP that is already im
 
 - **Database:** run `alembic upgrade head`; expected head is `20260521_final_mile`.
 - **Workers:** restart ARQ workers so `daily_os_digest_scheduled_tick` is registered.
-- **Frontend:** add UI controls for:
-  - SupplyMind stock snapshots and purchase drafts.
-  - StaffMind onboarding sessions and Q&A.
-  - Voice AI status/config.
-  - Daily OS Digest preview.
+- **Frontend (UI gaps — backend уже готов):**
+  - SupplyMind: список/создание purchase drafts, просмотр stock alerts.
+  - StaffMind: онбординг-сессии и Q&A — в `admin-app.js` есть `loadStaffMindOnboarding` / `startStaffMindOnboarding` / `askStaffMind`, но `_tab_settings_team.html` их не вызывает.
+  - Voice AI: toggle `voice_ai_enabled` / mode через `POST /voice/config`.
+  - Daily OS Digest: preview panel через `GET /daily-os-digest/preview`.
 - **Permissions:** decide which staff roles can create supply drafts, start StaffMind onboarding, and toggle Voice AI.
 - **Operations:** confirm every organization has a valid `timezone`, especially for the 09:00 Daily OS Digest.
+- **Staging checks:** Telegram digest delivery (`TELEGRAM_BOT_TOKEN`, ops chat IDs); WebSocket `os.audit` fanout в браузере после deploy.
 
 ## External Integrations Still Needed
 
@@ -24,13 +25,12 @@ This file tracks what is still needed outside the backend MVP that is already im
 
 ## Docs That Should Be Cleaned Later
 
-- `docs/ROADMAP.md` still has older unchecked lines for websocket audit push, daily digest, and Voice AI. The implemented status is now in `docs/FINAL_MILE_IMPLEMENTED.md`.
-- `docs/OS_TRANSITION_PLAN.md` still describes Phase 6 as “next level” in a few older sections. Treat `docs/FINAL_MILE_IMPLEMENTED.md` as the current source for Final Mile status.
-- `README.md` still has older module wording in a legacy encoded section. Keep it, but prefer this file and `docs/FINAL_MILE_IMPLEMENTED.md` for release notes until README is normalized to UTF-8.
+- `README.md` — legacy encoded section; для релиза предпочитать [`docs/FINAL_MILE_IMPLEMENTED.md`](FINAL_MILE_IMPLEMENTED.md) и [`docs/ROADMAP.md`](ROADMAP.md).
+- **Admin i18n ru/kk** — не внедрён; UI остаётся русским inline ([`docs/ROADMAP.md`](ROADMAP.md) backlog).
 
 ## Suggested Next Engineering Sprint
 
-- Add admin UI for SupplyMind, StaffMind, Voice AI, and digest preview.
+- Wire admin UI: SupplyMind drafts, StaffMind (reuse existing JS), Voice toggle, digest preview.
 - Add role-gated dependencies around the new admin endpoints.
+- Staging smoke: Telegram Daily OS Digest, WebSocket `os.audit`, Twilio voice stream.
 - Add real iiko inventory adapter tests with captured sample payloads.
-- Add staging smoke for Twilio voice incoming/stream flow.
