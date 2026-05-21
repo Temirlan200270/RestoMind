@@ -6,10 +6,41 @@
 
 ## [Unreleased] — 2026-03-20
 
-### Добавлено (2026-05-21) — Focus-Driven OS Sprint 1 (Mode Bar shell)
+### Документация (2026-05-21) — Focus-Driven OS Sprint 1–4 audit
 
-- **`components/_mode_bar.html`:** три режима (Смена / Контроль / Intelligence) на `ds-segmented` + placeholder-классы `ds-status-shift|control|intelligence`; Alpine `@click="setMode(...)"`, active через `currentMode`.
-- **`screens/_header.html`:** Mode Bar над существующей шапкой при `authenticated`; сайдбар P1.5 и hash-редиректы без изменений.
+- Gap-audit: все 4 спринта wired end-to-end (mixins в `adminApp()`, шаблоны/CSS, inbox `loadMoneyQueue` на открытии вкладки, voice `location_id`, Command Bar без конфликта Ctrl+K с `handleGlobalKeydown`).
+- Синхронизированы статусы: ROADMAP P5, `OS_TRANSITION_PLAN.md` § UI Layer, `UI_MAP.md`, `UI_DESIGN_SYSTEM.md` (убраны ⏳ / backlog Sprint 3–4).
+- Тесты: 30 passed — `test_focus_driven_os_sprint{1,2,3,4}.py`, `test_voice_staging.py`, `test_twilio_routing.py`.
+
+### Добавлено (2026-05-21) — Focus-Driven OS Sprint 4 (Command Bar)
+
+- **Command Bar (`adminMixinCommandBar`):** Ctrl+K / Cmd+K открывает палитру поверх legacy global search (Strangler); `commandBarOpen`, `commandQuery`, `parseCommand()`, `executeCommand()`, `handleCommandBarKeydown()`; `window.adminCommandBar`.
+- **Префиксы:** `/leak` → Intelligence + dashboard/revenue leak; `/red` → Shift + вкладка смены; `/force-close` → настройки ресторана + модалка экстренного закрытия.
+- **UI:** `components/_command_bar.html`, `ds-command-bar-*` в `src/css/admin-input.css`; include в `_modals.html`; кнопки «Поиск» в шапке → `openCommandBar()`.
+- Тесты: [`tests/test_focus_driven_os_sprint4.py`](tests/test_focus_driven_os_sprint4.py).
+
+### Добавлено (2026-05-21) — Focus-Driven OS Sprint 3 (Action Queue + voice tail)
+
+- **Action Queue inbox:** [`_tab_inbox.html`](app/templates/screens/_tab_inbox.html) — карточки из `GET /inbox/money-queue` с `ds-status-*` semantics; дублирующий блок убран из [`_tab_operator_queue.html`](app/templates/screens/_tab_operator_queue.html).
+- **`adminMixinInboxActionQueue()`:** хелперы очереди (`moneyQueueStatusClass`, `loadInboxActionQueue`, `runMoneyQueueAction`) и voice strip (`refreshVoiceCallStrip`, `loadVoiceCallLogs` с `locationQueryParams()` + pagination).
+- **Voice `location_id` в payload:** `record_voice_call(..., location_id=)` + Twilio routing [`resolve_location_from_twilio_number`](app/services/twilio_routing.py); кэш `twilio:location:{callSid}` в webhook.
+- **Final Mile voice strip:** [`_tab_ai_center.html`](app/templates/screens/_tab_ai_center.html) — `ds-status-surface` badges, кнопка «Ещё», фильтр по точке.
+- Тесты: [`tests/test_focus_driven_os_sprint3.py`](tests/test_focus_driven_os_sprint3.py), расширены [`tests/test_voice_staging.py`](tests/test_voice_staging.py), [`tests/test_twilio_routing.py`](tests/test_twilio_routing.py).
+
+### Добавлено (2026-05-21) — Focus-Driven OS Sprint 2 (Shift split + staged nav)
+
+- **Shift split layout:** `_tab_shift_control.html` — Focus Deck (слева) + Context Dock (справа) на `≥lg`; partials `_shift_focus_chat.html` (slow_chat / pulse red|amber), `_shift_focus_order.html` (abandoned_draft / pending_prepay).
+- **Mobile staged nav (LAW 2):** `adminMixinShiftStagedNav()` — `mobileActiveScreen` `focus`|`context`, `openShiftContext()`, `backToShiftFocus()`, кнопка «⬅ Назад к задаче» на `<lg`.
+- **CSS:** `src/css/admin-input.css` — `.ds-shift-split*`, `.ds-shift-pane--hidden-mobile`; `npm run build:admin-css`.
+- Тесты: [`tests/test_focus_driven_os_sprint2.py`](tests/test_focus_driven_os_sprint2.py).
+
+### Добавлено (2026-05-21) — Focus-Driven OS Sprint 1 (shell complete)
+
+- **Mode Engine (`admin-app.js`):** `currentMode` (`shift` \| `control` \| `intelligence`), `setMode()`, `_bootstrapAdminMode`, matrix mode↔tab по [`docs/UI_MAP.md`](docs/UI_MAP.md); `window.adminModeEngine` + event `restomind:admin-mode`; persistence `localStorage.restomind_admin_mode`.
+- **Mode Bar:** `components/_mode_bar.html` (три режима на `ds-segmented`, `@click="setMode(...)"`); include в `screens/_header.html` при `authenticated`.
+- **Universal Semantics + Mode Bar CSS:** `src/css/admin-input.css` — `ds-status-ok|warn|danger|ai|inactive`, `--color-mode-*`, `.ds-mode-bar*` / `.ds-status-shift|control|intelligence`; сборка `npm run build:admin-css`.
+- **Условный сайдбар (Strangler):** `screens/_sidebar.html` — `navItems` и секции фильтруются через `isTabInCurrentMode()`; legacy-навигация не удалена.
+- Тесты: [`tests/test_focus_driven_os_sprint1.py`](tests/test_focus_driven_os_sprint1.py).
 
 ### Исправлено (2026-05-21) — Admin checkSession 500 (prod resilience)
 
@@ -26,14 +57,6 @@
 - **Admin API:** `await _session_staff_user` / `_session_is_superadmin` в `chats.py`, `bookings.py`, `orders.py` — устранены 500 на `/chats/{phone}`, `/bookings`, ручной заказ.
 - **Analytics:** безопасное чтение `daily_org_stats` при отставании миграций на prod (`/stats`, `/funnel` fallback на SQL).
 - Тесты: [`tests/test_admin_session_deps_http.py`](tests/test_admin_session_deps_http.py).
-
-### Добавлено (2026-05-21) — Focus-Driven OS Sprint 1 (CSS)
-
-- Universal Semantics в [`src/css/admin-input.css`](src/css/admin-input.css): токены `--color-ai`, `--color-status-*`, `--color-mode-*`; классы `ds-status-ok|warn|danger|ai|inactive` (+ composable `ds-status-dot`, `ds-status-surface`, `ds-status-ring`) для pulse, бейджей и focus-карточек. Сборка: `npm run build:admin-css`.
-
-### Добавлено (2026-05-21) — Focus-Driven OS Sprint 1 · Mode Engine
-
-- **`admin-app.js`:** `currentMode` (`shift` \| `control` \| `intelligence`), `setMode()`, helpers `isShiftMode` / `isControlMode` / `isIntelligenceMode`, persistence `localStorage.restomind_admin_mode`, matrix mode↔tab по [`docs/UI_MAP.md`](docs/UI_MAP.md); sidebar/hash sync mode (Strangler, sidebar не удалён); `window.adminModeEngine` + event `restomind:admin-mode`.
 
 ### Документация (2026-05-21) — Focus-Driven OS (Admin Shell)
 

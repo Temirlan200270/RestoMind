@@ -1,0 +1,102 @@
+{# Focus-Driven OS — Command Bar (Sprint 4): Ctrl+K palette over legacy global search #}
+<div x-show="commandBarOpen" x-cloak x-transition.opacity
+    class="ds-command-bar-overlay fixed inset-0 flex items-start justify-center pt-[8vh] px-4"
+    @click.self="closeCommandBar()">
+    <div class="ds-command-bar-panel w-full max-w-lg overflow-hidden fade-in"
+        @click.stop role="dialog" aria-modal="true" aria-label="Командная палитра">
+        <div class="ds-command-bar-header flex items-center gap-2">
+            <svg class="ds-command-bar-icon shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+            </svg>
+            <input id="command-bar-input" type="search" x-model="commandQuery"
+                @input.debounce.200ms="onCommandBarInput()"
+                @keydown.enter.prevent="commandBarSubmit()"
+                placeholder="Поиск или /команда…"
+                class="ds-command-bar-input flex-1"
+                autocomplete="off" spellcheck="false">
+            <kbd class="ds-command-bar-kbd hidden sm:inline">Esc</kbd>
+        </div>
+        <div class="ds-command-bar-body max-h-[60vh] overflow-y-auto text-sm">
+            <template x-if="(commandQuery || '').trim().startsWith('/')">
+                <div class="ds-command-bar-section">
+                    <div class="ds-command-bar-section-title">Команды</div>
+                    <template x-if="commandBarSuggestions().length">
+                        <div class="space-y-1">
+                            <template x-for="def in commandBarSuggestions()" :key="'cmd-' + def.id">
+                                <button type="button" @click="commandBarPickSuggestion(def)"
+                                    class="ds-command-bar-item w-full text-left">
+                                    <span class="ds-command-bar-prefix font-mono" x-text="def.prefix"></span>
+                                    <span class="ds-command-bar-label" x-text="def.label"></span>
+                                    <span class="ds-command-bar-hint block" x-text="def.hint"></span>
+                                </button>
+                            </template>
+                        </div>
+                    </template>
+                    <p x-show="!(commandBarSuggestions().length)" class="ds-command-bar-empty">
+                        Нет команды для этого префикса. Доступны: /leak, /red, /force-close
+                    </p>
+                </div>
+            </template>
+            <template x-if="commandBarShowsSearch()">
+                <div class="ds-command-bar-section">
+                    <p x-show="globalSearchLoading" class="ds-command-bar-empty">Поиск…</p>
+                    <template x-if="!globalSearchLoading && (commandQuery || '').trim().length >= 3">
+                        <div class="space-y-4">
+                            <div x-show="(globalSearchResults.orders || []).length">
+                                <div class="ds-command-bar-section-title">Заказы</div>
+                                <template x-for="o in globalSearchResults.orders" :key="'cb-o-' + o.id">
+                                    <button type="button" @click="globalSearchGoOrders(o); closeCommandBar()"
+                                        class="ds-command-bar-item w-full text-left">
+                                        <span class="font-semibold ds-command-bar-accent" x-text="'#' + o.id"></span>
+                                        <span x-text="' · ' + (o.user_phone || '')"></span>
+                                        <span class="ds-command-bar-hint block" x-text="o.status"></span>
+                                    </button>
+                                </template>
+                            </div>
+                            <div x-show="(globalSearchResults.chats || []).length">
+                                <div class="ds-command-bar-section-title">Диалоги</div>
+                                <template x-for="c in globalSearchResults.chats" :key="'cb-c-' + c.phone">
+                                    <button type="button" @click="globalSearchGoChat(c); closeCommandBar()"
+                                        class="ds-command-bar-item w-full text-left">
+                                        <span class="font-mono text-xs" x-text="c.phone"></span>
+                                        <span class="ds-command-bar-hint block" x-text="c.user_name || ''"></span>
+                                    </button>
+                                </template>
+                            </div>
+                            <div x-show="(globalSearchResults.bookings || []).length">
+                                <div class="ds-command-bar-section-title">Бронирования</div>
+                                <template x-for="b in globalSearchResults.bookings" :key="'cb-b-' + b.id">
+                                    <button type="button" @click="globalSearchGoBooking(b); closeCommandBar()"
+                                        class="ds-command-bar-item w-full text-left">
+                                        <span class="font-semibold" x-text="'#' + b.id"></span>
+                                        <span x-text="' · ' + b.date + ' ' + b.time"></span>
+                                    </button>
+                                </template>
+                            </div>
+                            <p x-show="!(globalSearchResults.orders || []).length && !(globalSearchResults.chats || []).length && !(globalSearchResults.bookings || []).length"
+                                class="ds-command-bar-empty">Ничего не найдено</p>
+                        </div>
+                    </template>
+                    <p x-show="(commandQuery || '').trim().length < 3 && !globalSearchLoading"
+                        class="ds-command-bar-empty">Введите минимум 3 символа для поиска</p>
+                </div>
+            </template>
+            <template x-if="!(commandQuery || '').trim()">
+                <div class="ds-command-bar-section">
+                    <div class="ds-command-bar-section-title">Быстрые команды</div>
+                    <div class="space-y-1">
+                        <template x-for="def in commandBarDefaultCommands()" :key="'cmd-h-' + def.id">
+                            <button type="button" @click="commandBarPickSuggestion(def)"
+                                class="ds-command-bar-item w-full text-left">
+                                <span class="ds-command-bar-prefix font-mono" x-text="def.prefix"></span>
+                                <span class="ds-command-bar-label" x-text="def.label"></span>
+                                <span class="ds-command-bar-hint block" x-text="def.hint"></span>
+                            </button>
+                        </template>
+                    </div>
+                    <p class="ds-command-bar-footnote">Enter — выполнить команду · без «/» — поиск по заказам и чатам</p>
+                </div>
+            </template>
+        </div>
+    </div>
+</div>

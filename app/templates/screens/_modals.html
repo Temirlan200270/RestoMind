@@ -1,59 +1,6 @@
         <!-- Модалки и оверлеи вне <main>: иначе fixed + z-index ограничены stacking context (scroll/transform внутри main). -->
-        <!-- Глобальный поиск Ctrl+K -->
-        <div x-show="globalSearchOpen" x-cloak x-transition.opacity
-            class="fixed inset-0 z-[70] flex items-start justify-center pt-[8vh] px-4 bg-slate-900/50 backdrop-blur-sm"
-            @click.self="globalSearchOpen = false">
-            <div class="bg-white rounded-2xl shadow-2xl border border-gray-100 w-full max-w-lg overflow-hidden fade-in" @click.stop role="dialog" aria-modal="true" aria-label="Глобальный поиск по заказам, чатам и бронированиям">
-                <div class="p-4 border-b border-gray-100 flex items-center gap-2">
-                    <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-                    <input id="global-search-input" type="search" x-model="globalSearchQ" @input.debounce.300ms="runGlobalSearch()"
-                        placeholder="Телефон, имя или № заказа…"
-                        class="flex-1 text-sm border-0 focus:ring-0 focus:outline-none placeholder:text-gray-400">
-                    <kbd class="text-[10px] text-gray-400 hidden sm:inline">Esc</kbd>
-                </div>
-                <div class="max-h-[60vh] overflow-y-auto p-3 text-sm">
-                    <p x-show="globalSearchLoading" class="text-gray-400 text-xs px-2 py-3">Поиск…</p>
-                    <template x-if="!globalSearchLoading && (globalSearchQ || '').trim().length >= 3">
-                        <div class="space-y-4">
-                            <div x-show="(globalSearchResults.orders || []).length">
-                                <div class="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-2 mb-1">Заказы</div>
-                                <template x-for="o in globalSearchResults.orders" :key="'o-' + o.id">
-                                    <button type="button" @click="globalSearchGoOrders(o)"
-                                        class="w-full text-left px-3 py-2 rounded-xl hover:bg-brand-50 border border-transparent hover:border-brand-100">
-                                        <span class="font-semibold text-brand-600" x-text="'#' + o.id"></span>
-                                        <span class="text-gray-600" x-text="' · ' + (o.user_phone || '')"></span>
-                                        <span class="text-xs text-gray-400 block" x-text="o.status"></span>
-                                    </button>
-                                </template>
-                            </div>
-                            <div x-show="(globalSearchResults.chats || []).length">
-                                <div class="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-2 mb-1">Диалоги</div>
-                                <template x-for="c in globalSearchResults.chats" :key="'c-' + c.phone">
-                                    <button type="button" @click="globalSearchGoChat(c)"
-                                        class="w-full text-left px-3 py-2 rounded-xl hover:bg-brand-50 border border-transparent hover:border-brand-100">
-                                        <span class="font-mono text-xs" x-text="c.phone"></span>
-                                        <span class="text-xs text-gray-400 block" x-text="c.user_name || ''"></span>
-                                    </button>
-                                </template>
-                            </div>
-                            <div x-show="(globalSearchResults.bookings || []).length">
-                                <div class="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-2 mb-1">Бронирования</div>
-                                <template x-for="b in globalSearchResults.bookings" :key="'b-' + b.id">
-                                    <button type="button" @click="globalSearchGoBooking(b)"
-                                        class="w-full text-left px-3 py-2 rounded-xl hover:bg-brand-50 border border-transparent hover:border-brand-100">
-                                        <span class="font-semibold" x-text="'#' + b.id"></span>
-                                        <span class="text-gray-600" x-text="' · ' + b.date + ' ' + b.time"></span>
-                                    </button>
-                                </template>
-                            </div>
-                            <p x-show="!(globalSearchResults.orders || []).length && !(globalSearchResults.chats || []).length && !(globalSearchResults.bookings || []).length"
-                                class="text-gray-400 text-xs px-2 py-4 text-center">Ничего не найдено</p>
-                        </div>
-                    </template>
-                    <p x-show="(globalSearchQ || '').trim().length < 3 && !globalSearchLoading" class="text-gray-400 text-xs px-2 py-4 text-center">Введите минимум 3 символа</p>
-                </div>
-            </div>
-        </div>
+        <!-- Глобальный поиск → Command Bar (Sprint 4 Strangler) -->
+        {% include "components/_command_bar.html" %}
 
         <!-- Модалка деталей заказа -->
         <!-- Модалка: безопасное удаление демо-данных -->

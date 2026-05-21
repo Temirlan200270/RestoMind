@@ -25,7 +25,7 @@
     <script defer src="/static/vendor/alpine-3.min.js?v={{ asset_ver }}"></script>
 </head>
 <body class="admin-root bg-gray-50 min-h-screen font-sans text-gray-800"
-    x-data="adminApp()" x-init="init()" @keydown.window="handleGlobalKeydown($event)">
+    x-data="adminApp()" x-init="init()" @keydown.window="handleCommandBarKeydown($event); handleGlobalKeydown($event)">
 
 {# Auth gate #}
 {% include "screens/_login.html" %}

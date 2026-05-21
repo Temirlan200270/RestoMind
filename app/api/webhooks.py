@@ -164,6 +164,7 @@ router = APIRouter(prefix="/whatsapp", tags=["WhatsApp Webhook"])
 _twilio_caller_memory: dict[str, str] = {}
 _twilio_org_memory: dict[str, int] = {}
 _twilio_mode_memory: dict[str, str] = {}
+_twilio_location_memory: dict[str, int] = {}
 
 
 def _twilio_stream_wss_url() -> str:
@@ -186,6 +187,7 @@ async def _store_twilio_caller(
     org_id: int | None = None,
     *,
     voice_mode: str | None = None,
+    location_id: int | None = None,
 ) -> None:
     if not call_sid or not phone:
         return
@@ -197,6 +199,8 @@ async def _store_twilio_caller(
                 await redis_client.setex(f"twilio:org:{call_sid}", 600, str(int(org_id)))
             if voice_mode:
                 await redis_client.setex(f"twilio:mode:{call_sid}", 600, voice_mode)
+            if location_id is not None:
+                await redis_client.setex(f"twilio:location:{call_sid}", 600, str(int(location_id)))
             return
         except Exception as exc:
             logger.warning("Redis twilio caller cache: %s", exc)
@@ -205,6 +209,8 @@ async def _store_twilio_caller(
         _twilio_org_memory[call_sid] = int(org_id)
     if voice_mode:
         _twilio_mode_memory[call_sid] = voice_mode
+    if location_id is not None:
+        _twilio_location_memory[call_sid] = int(location_id)
 
 
 async def _get_twilio_caller(call_sid: str) -> str:
@@ -246,6 +252,20 @@ async def _get_twilio_voice_mode(call_sid: str) -> str:
         except Exception:
             pass
     return _twilio_mode_memory.get(call_sid) or "stt_fallback"
+
+
+async def _get_twilio_location_id(call_sid: str) -> int | None:
+    if not call_sid:
+        return None
+    if settings.redis_enabled:
+        try:
+            raw = await redis_client.get(f"twilio:location:{call_sid}")
+            if raw:
+                return int(str(raw).strip())
+        except Exception:
+            pass
+    loc = _twilio_location_memory.get(call_sid)
+    return int(loc) if loc is not None else None
 
 
 def _normalize_phone_e164(phone: str) -> str:
@@ -2244,6 +2264,7 @@ async def _flush_twilio_voice_chunk(
         from app.services.voice_ai import record_voice_call
 
         async with async_session_factory() as db:
+            location_id = await _get_twilio_location_id(call_sid)
             await record_voice_call(
                 db,
                 org_id=int(org_id),
@@ -2252,6 +2273,7 @@ async def _flush_twilio_voice_chunk(
                 status="transcribed",
                 transcript=text,
                 mode=mode,
+                location_id=location_id,
             )
             await db.commit()
     except Exception:
@@ -2403,13 +2425,14 @@ async def twilio_voice_incoming(request: Request) -> Response:
 
     try:
         from app.db.session import async_session_factory
-        from app.services.twilio_routing import resolve_org_from_twilio_number
+        from app.services.twilio_routing import resolve_location_from_twilio_number, resolve_org_from_twilio_number
         from app.services.voice_ai import get_voice_mode, org_voice_enabled, record_voice_call
 
         async with async_session_factory() as db:
             org, org_id = await resolve_org_from_twilio_number(db, to_phone)
             org_name = (org.name if org else "") or ""
             voice_mode = get_voice_mode(org)
+            location_id = await resolve_location_from_twilio_number(db, org_id, to_phone)
             if not org_voice_enabled(org):
                 return Response(
                     content="""<?xml version="1.0" encoding="UTF-8"?>
@@ -2425,6 +2448,7 @@ async def twilio_voice_incoming(request: Request) -> Response:
                     from_phone,
                     org_id,
                     voice_mode=voice_mode,
+                    location_id=location_id,
                 )
             if call_sid:
                 await record_voice_call(
@@ -2434,6 +2458,7 @@ async def twilio_voice_incoming(request: Request) -> Response:
                     phone=from_phone,
                     status="started",
                     mode=voice_mode,
+                    location_id=location_id,
                 )
                 await db.commit()
     except Exception:

@@ -1,0 +1,53 @@
+{% from "components/_card.html" import card %}
+{# Context Dock — abandoned_draft | pending_prepay (Sprint 2) #}
+{% call card(padding_class='p-0', extra_class='ds-shift-dock-card overflow-hidden h-full') %}
+    <div class="px-4 py-3 border-b border-slate-100 bg-slate-50">
+        <h3 class="text-sm font-semibold text-slate-800">Контекст заказа</h3>
+        <p class="text-xs text-slate-500 mt-0.5"
+            x-text="moneyQueueKindLabel(shiftState.focus?.kind)"></p>
+    </div>
+    <div class="p-4 space-y-4">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+                <div class="text-2xl font-black text-brand-600 tabular-nums"
+                    x-text="shiftState.focus?.order_id ? ('#' + shiftState.focus.order_id) : '—'"></div>
+                <p class="text-sm text-slate-600 mt-1" x-text="shiftState.focus?.subtitle"></p>
+            </div>
+            <div x-show="shiftState.focus?.value_kzt > 0" class="text-right">
+                <div class="text-[10px] font-bold uppercase text-red-700">Под риском</div>
+                <div class="text-xl font-black tabular-nums text-red-950"
+                    x-text="fmt.money(shiftState.focus.value_kzt)"></div>
+            </div>
+        </div>
+
+        <div>
+            <div class="text-[10px] font-bold uppercase text-slate-500 mb-2">Состав корзины</div>
+            <ul class="space-y-2" x-show="shiftDockHasOrderLines()">
+                <template x-for="(line, idx) in shiftDockOrderLines()" :key="'sdl-' + idx">
+                    <li class="flex justify-between gap-2 text-sm text-slate-800">
+                        <span class="min-w-0 truncate"
+                            x-text="(line.name || line.title || 'Позиция') + (line.quantity > 1 ? ' ×' + line.quantity : '')"></span>
+                        <span class="shrink-0 tabular-nums text-slate-600"
+                            x-show="line.price != null"
+                            x-text="fmt.money((line.price || 0) * (line.quantity || 1))"></span>
+                    </li>
+                </template>
+            </ul>
+            <p class="text-sm text-slate-500" x-show="!shiftDockHasOrderLines()">
+                Состав подгрузится после открытия заказа или обновления списка заказов.
+            </p>
+        </div>
+
+        <div class="pt-1 border-t border-slate-100">
+            <div class="text-[10px] font-bold uppercase text-slate-500 mb-2">Восстановление</div>
+            <div class="flex flex-col gap-2">
+                <template x-for="(act, idx) in (shiftState.focus?.actions || [])" :key="'sda-' + idx">
+                    <button type="button" @click="shiftDockRunFocusAction(act)"
+                        class="ds-btn ds-btn-md min-h-[44px] w-full"
+                        :class="idx === 0 ? 'ds-btn-primary' : 'ds-btn-secondary'"
+                        x-text="act.label"></button>
+                </template>
+            </div>
+        </div>
+    </div>
+{% endcall %}

@@ -17,7 +17,7 @@
 | Phase 5: Full OS Behavior | Predictive + autopilot pricing (single + bulk), healing 2.0 WA, digest backend, GuestCare, stock alerts, Decision Feed UI | **~98%** | `owner_dashboard.py`, `healing_actions.py`, `intelligence.py` |
 | Final Mile (backend) | SupplyMind + iiko Office sync, StaffMind onboarding, Voice (`stt_fallback` + Realtime code), Daily OS Digest cron, GuestCare 2GIS sync | **MVP ✅** | [`docs/FINAL_MILE_IMPLEMENTED.md`](FINAL_MILE_IMPLEMENTED.md) |
 | Final Mile (UI) | SupplyMind / StaffMind / Voice toggle / digest preview / GuestCare sync в админке | **wired ✅** | [`docs/REMAINING_UPDATES.md`](REMAINING_UPDATES.md) — **ops gates** |
-| **UI Layer (Phase 6)** | Focus-Driven Admin Shell: 3 режима, split Shift, Action Queue inbox, Command Bar | **контракт ✅ / код ⏳** | [`docs/UI_DESIGN_SYSTEM.md`](UI_DESIGN_SYSTEM.md), ROADMAP P5 «Focus-Driven OS» |
+| **UI Layer (Phase 6)** | Focus-Driven Admin Shell: 3 режима, split Shift, Action Queue inbox, Command Bar | **✅ Sprint 1–4** (Strangler) | [`docs/UI_DESIGN_SYSTEM.md`](UI_DESIGN_SYSTEM.md), ROADMAP P5 «Focus-Driven OS» |
 
 **Главный вывод (2026-05-22):** RestoMind OS — **Industrial Platform** с закрытыми фазами 1–4 и Phase 3 (~100%). Final Mile backend+UI в репо; следующий слой — **staging/ops**: Telegram digest, WS `os.audit`, iiko Office live pilot, Twilio Realtime call + cost report.
 
@@ -308,7 +308,7 @@ Decision Engine: `max_discount_pct = 15` по policy ресторана → от
 - Auto-recommendations без ручного refresh
 - Self-healing: система сама детектирует и эскалирует операционные проблемы
 
-**Статус (2026-05-22):** ~98% — см. ROADMAP P4/P5. Backend OS-слои закрыты; остаются ops-gates Final Mile и **UI-слой Focus-Driven Admin Shell** (ниже).
+**Статус (2026-05-22):** ~98% — см. ROADMAP P4/P5. Backend OS-слои и **Focus-Driven Admin Shell (Sprint 1–4)** закрыты в коде; остаются ops-gates Final Mile (§ ниже).
 
 ---
 
@@ -332,13 +332,13 @@ Decision Engine: `max_discount_pct = 15` по policy ресторана → от
 | **CONTROL** 🟡 | Менеджер | `inbox`, `orders`, `chats`, `bookings`, `menu` | Виден (Операции) | Виден |
 | **INTELLIGENCE** 🔵 | Владелец | `dashboard`, `ai_center`, `settings` | Виден (Управление) | Опционально «вся сеть» / без фильтра |
 
-**Текущее состояние кода:** все вкладки в одном сайдбаре (`navItems` в `admin-app.js`); `_tab_shift_control.html` — отдельная вкладка без split Context Dock и без Mode Bar. Миграция — ROADMAP P5 «Focus-Driven OS», 4 спринта.
+**Текущее состояние кода (Sprint 1–4 ✅):** Mode Bar в `_header.html`; сайдбар фильтруется по `currentMode` (`isTabInCurrentMode`); `_tab_shift_control.html` — split Focus Deck + Context Dock (`_shift_focus_chat.html` / `_shift_focus_order.html`); inbox Action Queue; Command Bar Ctrl+K. Legacy hash/sidebar сохранены (Strangler).
 
 ### Архитектурные решения (зафиксированы)
 
 1. **Mobile Shift:** Staged Focus Navigation (экран Focus → экран Context, `⬅ Назад к задаче`).
 2. **Starvation / skip:** Redis TTL 600s на `skip` + кнопка **`reset_skips`** при `metrics.shift_empty_focus_while_risk_positive` и ненулевых `excluded_skip|excluded_next` (не ждать только TTL). Реализовано: FM-3, [`_tab_shift_control.html`](../app/templates/screens/_tab_shift_control.html).
-3. **Voice calls:** `GET /api/admin/intelligence/voice/calls?location_id=` при активной точке; без точки — org-wide список (read-only). Фильтр API ✅; запись `location_id` в `voice_call_logs.payload_json` — backlog ROADMAP.
+3. **Voice calls:** `GET /api/admin/intelligence/voice/calls?location_id=` при активной точке; без точки — org-wide список (read-only). Фильтр API ✅; запись `location_id` в `voice_call_logs.payload_json` при `record_voice_call` ✅ (Twilio routing + Final Mile strip).
 
 ### Engineering plan (4 спринта)
 

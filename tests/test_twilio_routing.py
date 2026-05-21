@@ -54,6 +54,39 @@ async def test_resolve_org_env_fallback(monkeypatch, db_session) -> None:
 
 
 @pytest.mark.asyncio
+async def test_resolve_location_by_meta_twilio_number(db_session) -> None:
+    from app.db.models import Location
+    from app.services.twilio_routing import resolve_location_from_twilio_number
+
+    org = Organization(id=10, name="Loc Org", slug="loc-org", meta_json={})
+    db_session.add(org)
+    await db_session.flush()
+    db_session.add(
+        Location(
+            organization_id=10,
+            name="Branch A",
+            slug="branch-a",
+            meta_json={"twilio_voice_number": "+15553334444"},
+        )
+    )
+    db_session.add(
+        Location(
+            organization_id=10,
+            name="Branch B",
+            slug="branch-b",
+            meta_json={"twilio_voice_number": "+15553335555"},
+        )
+    )
+    await db_session.flush()
+
+    loc_id = await resolve_location_from_twilio_number(db_session, 10, "+15553335555")
+    assert loc_id is not None
+    loc = await db_session.get(Location, int(loc_id))
+    assert loc is not None
+    assert loc.slug == "branch-b"
+
+
+@pytest.mark.asyncio
 async def test_resolve_org_default_when_no_match(monkeypatch, db_session) -> None:
     monkeypatch.setattr(settings, "default_organization_id", 7)
     db_session.add(Organization(id=7, name="Fallback", slug="fb", meta_json={}))

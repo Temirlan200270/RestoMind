@@ -39,6 +39,72 @@ async def _seed_voice_org(session_factory, *, mode: str = "realtime") -> tuple[i
 
 
 @pytest.mark.asyncio
+async def test_record_voice_call_persists_location_id(db_session) -> None:
+    from app.services.voice_ai import record_voice_call
+
+    org = Organization(name="Voice Loc Org", slug="voice-loc-org", meta_json={})
+    db_session.add(org)
+    await db_session.flush()
+
+    row = await record_voice_call(
+        db_session,
+        org_id=int(org.id),
+        call_sid="CA-LOC-001",
+        phone="+77051112233",
+        status="started",
+        mode="stt_fallback",
+        location_id=7,
+    )
+    await db_session.commit()
+
+    assert row.payload_json is not None
+    assert row.payload_json.get("location_id") == 7
+
+
+@pytest.mark.asyncio
+async def test_voice_calls_api_filters_by_location_id(asgi_memory_client) -> None:
+    client, session_factory = asgi_memory_client
+    org_id, _ = await _seed_voice_org(session_factory, mode="realtime")
+
+    async with session_factory() as db:
+        from app.db.models import VoiceCallLog
+
+        db.add_all([
+            VoiceCallLog(
+                organization_id=org_id,
+                call_sid="CA-LOC-A",
+                phone="+77051234567",
+                mode="realtime",
+                status="completed",
+                payload_json={"location_id": 10, "duration_sec": 30},
+            ),
+            VoiceCallLog(
+                organization_id=org_id,
+                call_sid="CA-LOC-B",
+                phone="+77059876543",
+                mode="realtime",
+                status="completed",
+                payload_json={"location_id": 20, "duration_sec": 45},
+            ),
+        ])
+        await db.commit()
+
+    login = await client.post(
+        "/api/admin/auth/login",
+        json={"username": "voice-staging@test.kz", "password": "secret123"},
+    )
+    assert login.status_code == 200
+
+    res = await client.get("/api/admin/intelligence/voice/calls?limit=15&location_id=10")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["ok"] is True
+    assert body["total"] == 1
+    assert len(body["items"]) == 1
+    assert body["items"][0]["call_sid"] == "CA-LOC-A"
+
+
+@pytest.mark.asyncio
 async def test_voice_incoming_returns_stream_twiml(asgi_memory_client, monkeypatch) -> None:
     client, session_factory = asgi_memory_client
     org_id, to_number = await _seed_voice_org(session_factory, mode="stt_fallback")

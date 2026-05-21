@@ -1,3 +1,4 @@
+            {% from "components/_skeleton.html" import skeleton %}
             <!-- ========== ТРЕБУЕТ ВНИМАНИЯ (inbox) ========== -->
             <div x-show="currentTab === 'inbox'" x-cloak class="fade-in space-y-4">
                 <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
@@ -15,6 +16,90 @@
                                 @click="navigateToTab('inbox', { inboxTab: 'system' })">Системные</button>
                         </div>
                         {% endcall %}
+                    </div>
+                </div>
+
+                <!-- Action Queue (Sprint 3): money-at-risk cards from GET /inbox/money-queue -->
+                <div x-show="inboxTab === 'clients'" x-cloak class="space-y-3">
+                    <div class="ds-card p-0 overflow-hidden">
+                        <div class="px-4 sm:px-5 py-4 border-b flex flex-wrap items-center justify-between gap-3"
+                            style="border-color: var(--color-border); background: color-mix(in srgb, var(--color-status-warn) 6%, var(--color-surface));">
+                            <div class="min-w-0">
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <span class="ds-status-dot ds-status-warn" aria-hidden="true"></span>
+                                    <h3 class="text-base font-bold" style="color: var(--color-text);">Action Queue</h3>
+                                </div>
+                                <p class="text-sm ds-text-muted mt-0.5">Брошенные заказы, ожидание оплаты и гости без ответа.</p>
+                            </div>
+                            <div class="flex items-center gap-3 shrink-0">
+                                <div x-show="moneyQueue?.summary?.money_at_risk_kzt > 0" class="text-right">
+                                    <div class="text-[10px] font-bold uppercase tracking-wide ds-text-muted">Под риском</div>
+                                    <div class="text-xl font-black tabular-nums" style="color: var(--color-status-warn-strong);"
+                                        x-text="fmt.money(moneyQueue?.summary?.money_at_risk_kzt ?? 0)"></div>
+                                </div>
+                                <button type="button" @click="loadInboxActionQueue()"
+                                    class="ds-btn ds-btn-secondary ds-btn-sm min-h-[40px]"
+                                    :disabled="moneyQueueLoading">
+                                    <span x-text="moneyQueueLoading ? 'Загрузка…' : 'Обновить'"></span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div x-show="moneyQueueLoading && !(moneyQueue?.items?.length)" class="p-6">
+                            {{ skeleton(kind='table', rows=3, extra_class='!p-2') }}
+                        </div>
+
+                        <div x-show="!moneyQueueLoading && !(moneyQueue?.items?.length)"
+                            class="p-8 text-center ds-text-muted">
+                            <div class="text-4xl mb-2" aria-hidden="true">💚</div>
+                            <div class="font-semibold" style="color: var(--color-text);">Сейчас ничего не горит</div>
+                            <p class="text-sm mt-1 max-w-md mx-auto">Нет брошенных черновиков, зависших оплат и медленных чатов по текущей точке.</p>
+                        </div>
+
+                        <div x-show="!moneyQueueLoading && (moneyQueue?.items?.length > 0)"
+                            class="p-3 sm:p-4 grid grid-cols-1 lg:grid-cols-2 gap-3">
+                            <template x-for="item in (moneyQueue?.items || [])" :key="item.id">
+                                <article class="ds-status-surface ds-status-ring p-4 flex flex-col gap-3 min-h-[44px]"
+                                    :class="moneyQueueStatusClass(item.severity)">
+                                    <div class="flex items-start gap-3 min-w-0">
+                                        <span class="ds-status-dot mt-1.5 shrink-0"
+                                            :class="moneyQueueStatusDotClass(item.severity)"
+                                            aria-hidden="true"></span>
+                                        <div class="flex-1 min-w-0">
+                                            <div class="flex flex-wrap items-center gap-2">
+                                                <span class="text-[10px] font-bold uppercase tracking-wide opacity-80"
+                                                    x-text="moneyQueueKindLabel(item.kind)"></span>
+                                                <span x-show="item.amount_kzt > 0"
+                                                    class="text-sm font-black tabular-nums"
+                                                    x-text="fmt.money(item.amount_kzt)"></span>
+                                                <span x-show="item.wait_minutes > 0"
+                                                    class="text-xs tabular-nums opacity-75"
+                                                    x-text="item.wait_minutes + ' мин'"></span>
+                                            </div>
+                                            <div class="font-semibold mt-1 leading-snug" x-text="item.title"></div>
+                                            <p class="text-sm mt-0.5 opacity-85 line-clamp-2" x-text="item.subtitle"></p>
+                                        </div>
+                                    </div>
+                                    <div class="flex flex-wrap gap-2">
+                                        <template x-for="(act, idx) in (item.actions || [])" :key="item.id + '-act-' + idx">
+                                            <button type="button" @click="runMoneyQueueAction(act)"
+                                                class="ds-btn ds-btn-secondary ds-btn-sm min-h-[40px]"
+                                                x-text="act.label"></button>
+                                        </template>
+                                    </div>
+                                </article>
+                            </template>
+                        </div>
+
+                        <p class="px-4 sm:px-5 py-3 text-xs ds-text-muted border-t"
+                            style="border-color: var(--color-border);"
+                            x-show="!moneyQueueLoading && moneyQueue?.summary?.total > 0">
+                            В очереди <span x-text="moneyQueue?.summary?.total ?? 0"></span>
+                            · критичных <span x-text="moneyQueue?.summary?.critical ?? 0"></span>
+                            · черновики <span x-text="moneyQueue?.summary?.abandoned_drafts ?? 0"></span>
+                            · оплата <span x-text="moneyQueue?.summary?.pending_prepay ?? 0"></span>
+                            · чаты <span x-text="moneyQueue?.summary?.slow_chats ?? 0"></span>
+                        </p>
                     </div>
                 </div>
             </div>

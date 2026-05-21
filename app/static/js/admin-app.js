@@ -506,7 +506,67 @@ function adminTabsForMode(mode) {
     return m ? [...ADMIN_MODE_TABS[m]] : [...ADMIN_MODE_TABS.control];
 }
 
+/** Focus-Driven OS — Command Bar prefixes (Sprint 4). */
+const ADMIN_COMMAND_DEFINITIONS = Object.freeze([
+    Object.freeze({
+        id: 'leak',
+        prefix: '/leak',
+        label: 'Упущенная выручка',
+        hint: 'Режим Intelligence → дашборд с revenue leak',
+        mode: 'intelligence',
+    }),
+    Object.freeze({
+        id: 'red',
+        prefix: '/red',
+        label: 'Риск · смена',
+        hint: 'Режим Shift → контроль смены',
+        mode: 'shift',
+    }),
+    Object.freeze({
+        id: 'force-close',
+        prefix: '/force-close',
+        label: 'Экстренное закрытие',
+        hint: 'Профиль заведения → закрыть на N минут',
+        mode: null,
+    }),
+]);
+
+/**
+ * Parse command-bar query for known `/prefix` commands.
+ * @param {string} query
+ * @returns {{ id: string, prefix: string, args: string } | null}
+ */
+function adminParseCommand(query) {
+    const raw = String(query || '').trim();
+    if (!raw.startsWith('/')) return null;
+    const lower = raw.toLowerCase();
+    for (const def of ADMIN_COMMAND_DEFINITIONS) {
+        const p = def.prefix.toLowerCase();
+        if (lower === p || lower.startsWith(`${p} `)) {
+            return {
+                id: def.id,
+                prefix: def.prefix,
+                args: raw.slice(def.prefix.length).trim(),
+            };
+        }
+    }
+    return null;
+}
+
+/** Filter command definitions matching partial `/` query. */
+function adminCommandBarSuggestions(query) {
+    const raw = String(query || '').trim().toLowerCase();
+    if (!raw.startsWith('/')) return [];
+    if (raw === '/') return [...ADMIN_COMMAND_DEFINITIONS];
+    return ADMIN_COMMAND_DEFINITIONS.filter((def) => def.prefix.toLowerCase().startsWith(raw));
+}
+
 if (typeof window !== 'undefined') {
+    window.adminCommandBar = {
+        DEFINITIONS: ADMIN_COMMAND_DEFINITIONS,
+        parseCommand: adminParseCommand,
+        suggestions: adminCommandBarSuggestions,
+    };
     window.adminModeEngine = {
         MODES: ADMIN_MODES,
         STORAGE_KEY: ADMIN_MODE_STORAGE_KEY,
@@ -953,6 +1013,10 @@ function adminMixinState() {
         voiceCallLogs: [],
         voiceCallLogsLoading: false,
         voiceCallLogsUnavailable: false,
+        voiceCallLogsTotal: 0,
+        voiceCallLogsOffset: 0,
+        voiceCallLogsLimit: 15,
+        voiceCallLogsHasMore: false,
         supplyMindExpandedDraftId: null,
         supplyMindItemChecks: {},
         /** Phase 5 OS: Audit log feed (OS Decision Feed) */
@@ -1887,22 +1951,6 @@ function adminMixinMenuOrdersUi() {
         inboxTotalOpen() {
             const money = Number(this.moneyQueue?.summary?.total || 0);
             return Number(this.dashStats?.failed_tasks_open || 0) + money + this.incidentsTotalOpen();
-        },
-
-        moneyQueueSeverityClass(severity) {
-            const s = String(severity || 'info');
-            if (s === 'critical') return 'border-red-200 bg-red-50/90 text-red-950';
-            if (s === 'warning') return 'border-amber-200 bg-amber-50/90 text-amber-950';
-            return 'border-slate-200 bg-slate-50 text-slate-700';
-        },
-
-        moneyQueueKindLabel(kind) {
-            const k = String(kind || '');
-            if (k === 'abandoned_draft') return 'Брошенный заказ';
-            if (k === 'pending_prepay') return 'Ожидает оплату';
-            if (k === 'slow_chat') return 'Ждёт ответ';
-            if (k === 'high_value_stuck') return 'Крупный заказ';
-            return 'Внимание';
         },
 
         incidentSummaryCount(key) {
@@ -2840,12 +2888,13 @@ function adminMixinMenuOrdersUi() {
 function adminMixinSearchBookings() {
     return {
         handleGlobalKeydown(e) {
-            if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+            if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) return;
+            if (e.key !== 'Escape') return;
+            if (this.commandBarOpen) {
                 e.preventDefault();
-                this.openGlobalSearch();
+                this.closeCommandBar();
                 return;
             }
-            if (e.key !== 'Escape') return;
             /** Закрытие оверлеев сверху вниз (одна Esc — один слой). */
             if (this.p15TourActive) {
                 e.preventDefault();
@@ -3607,6 +3656,10 @@ function adminMixinAuthKnowledge() {
             this.attentionSummary = null;
             this.attentionSummaryFetchedAt = 0;
             this.moneyQueue = adminDefaultMoneyQueue();
+            this.voiceCallLogs = [];
+            this.voiceCallLogsTotal = 0;
+            this.voiceCallLogsOffset = 0;
+            this.voiceCallLogsHasMore = false;
             this.shiftState = adminDefaultShiftState();
             this.shiftStateFetchedAt = 0;
             this.shiftStateDegraded = false;
@@ -6227,6 +6280,213 @@ function adminMixinModeEngine() {
     };
 }
 
+/** Focus-Driven OS — Command Bar (Ctrl+K / Cmd+K), Sprint 4 Strangler over global search. */
+function adminMixinCommandBar() {
+    return {
+        commandBarOpen: false,
+        commandQuery: '',
+
+        /** Strangler: header buttons and legacy openGlobalSearch → unified palette. */
+        openGlobalSearch() {
+            this.openCommandBar();
+        },
+
+        openCommandBar(prefill) {
+            this.commandBarOpen = true;
+            this.globalSearchOpen = false;
+            this.commandQuery = typeof prefill === 'string' ? prefill : '';
+            this.globalSearchQ = this.commandQuery;
+            this.globalSearchLastFetchedQ = '';
+            this.globalSearchResults = { orders: [], chats: [], bookings: [] };
+            this.$nextTick(() => {
+                requestAnimationFrame(() => {
+                    const el = document.getElementById('command-bar-input');
+                    if (el) {
+                        el.focus();
+                        el.select();
+                    }
+                });
+            });
+            if ((this.commandQuery || '').trim().length >= 3 && !this.parseCommand(this.commandQuery)) {
+                void this.runGlobalSearch();
+            }
+        },
+
+        closeCommandBar() {
+            this.commandBarOpen = false;
+            this.commandQuery = '';
+            this.globalSearchOpen = false;
+        },
+
+        parseCommand(query) {
+            return adminParseCommand(query);
+        },
+
+        commandBarSuggestions() {
+            return adminCommandBarSuggestions(this.commandQuery);
+        },
+
+        commandBarDefaultCommands() {
+            return [...ADMIN_COMMAND_DEFINITIONS];
+        },
+
+        commandBarShowsSearch() {
+            const q = (this.commandQuery || '').trim();
+            return q.length > 0 && !q.startsWith('/');
+        },
+
+        onCommandBarInput() {
+            this.globalSearchQ = this.commandQuery;
+            if (this.commandBarShowsSearch()) {
+                void this.runGlobalSearch();
+            } else {
+                this.globalSearchLastFetchedQ = '';
+                this.globalSearchResults = { orders: [], chats: [], bookings: [] };
+            }
+        },
+
+        commandBarSubmit() {
+            const cmd = this.parseCommand(this.commandQuery);
+            if (cmd) {
+                this.executeCommand(cmd);
+                return;
+            }
+            const q = (this.commandQuery || '').trim();
+            if (q.length >= 3) void this.runGlobalSearch();
+        },
+
+        commandBarPickSuggestion(def) {
+            if (!def || !def.prefix) return;
+            this.commandQuery = def.prefix;
+            this.commandBarSubmit();
+        },
+
+        /**
+         * Execute parsed command prefix.
+         * @param {{ id: string, prefix?: string, args?: string }} cmd
+         */
+        executeCommand(cmd) {
+            if (!cmd || !cmd.id) return;
+            this.closeCommandBar();
+            switch (cmd.id) {
+                case 'leak':
+                    this.setMode('intelligence', { navigate: false });
+                    this.navigateToTab('dashboard', { dashboardTab: 'overview' });
+                    void this.loadRevenueLeak();
+                    this.flashToast('Упущенная выручка · Intelligence', 'info', 2800);
+                    break;
+                case 'red':
+                    this.setMode('shift', { navigate: false });
+                    this.navigateToTab('shift');
+                    this.flashToast('Риск · режим Shift', 'warning', 2800);
+                    break;
+                case 'force-close':
+                    this.navigateToTab('settings', { settingsTab: 'restaurant' });
+                    if (typeof this.openForceCloseModal === 'function') {
+                        this.$nextTick(() => this.openForceCloseModal());
+                    }
+                    break;
+                default:
+                    break;
+            }
+        },
+
+        handleCommandBarKeydown(e) {
+            if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+                e.preventDefault();
+                if (this.commandBarOpen) this.closeCommandBar();
+                else this.openCommandBar();
+            }
+        },
+    };
+}
+
+/** Focus-Driven OS Sprint 2 — Shift split + mobile staged nav (focus ↔ context). */
+function adminMixinShiftStagedNav() {
+    return {
+        /** @type {'focus'|'context'} */
+        mobileActiveScreen: 'focus',
+
+        shiftFocusShowsChatDock() {
+            const f = this.shiftState?.focus;
+            if (!f) return false;
+            if (String(f.kind || '') === 'slow_chat') return true;
+            const pulse = String(f.pulse || '');
+            return pulse === 'red' || pulse === 'amber';
+        },
+
+        shiftFocusShowsOrderDock() {
+            const k = String(this.shiftState?.focus?.kind || '');
+            return k === 'abandoned_draft' || k === 'pending_prepay';
+        },
+
+        shiftHasContextDock() {
+            return this.shiftFocusShowsChatDock() || this.shiftFocusShowsOrderDock();
+        },
+
+        _shiftStagedNavIsDesktop() {
+            try {
+                return window.matchMedia('(min-width: 1024px)').matches;
+            } catch (_e) {
+                return false;
+            }
+        },
+
+        shiftMobileShowsFocus() {
+            return this._shiftStagedNavIsDesktop() || this.mobileActiveScreen === 'focus';
+        },
+
+        shiftMobileShowsContext() {
+            return this._shiftStagedNavIsDesktop() || this.mobileActiveScreen === 'context';
+        },
+
+        openShiftContext() {
+            if (!this.shiftHasContextDock()) return;
+            this.mobileActiveScreen = 'context';
+        },
+
+        backToShiftFocus() {
+            this.mobileActiveScreen = 'focus';
+        },
+
+        shiftDockPulseClass() {
+            const pulse = String(this.shiftState?.focus?.pulse || '');
+            if (pulse === 'red') return 'ds-status-danger';
+            if (pulse === 'amber') return 'ds-status-warn';
+            return 'ds-status-inactive';
+        },
+
+        shiftDockOpenChat() {
+            const phone = this.shiftState?.focus?.phone;
+            if (phone) void this.openHelpChat(String(phone));
+        },
+
+        shiftDockOpenOrder() {
+            const oid = this.shiftState?.focus?.order_id;
+            if (oid != null) this.openGuestContextOrder({ id: Number(oid) });
+        },
+
+        shiftDockRunFocusAction(action) {
+            this.runShiftFocusAction(action);
+        },
+
+        shiftDockOrderLines() {
+            const oid = Number(this.shiftState?.focus?.order_id);
+            if (!oid) return [];
+            const o = (this.orders || []).find((x) => Number(x.id) === oid);
+            if (!o) return [];
+            const raw = o.items?.items
+                || (o.items_json && typeof o.items_json === 'object' ? o.items_json.items : null)
+                || [];
+            return Array.isArray(raw) ? raw.slice(0, 8) : [];
+        },
+
+        shiftDockHasOrderLines() {
+            return this.shiftDockOrderLines().length > 0;
+        },
+    };
+}
+
 /** Список чатов, сообщения, takeover */
 function adminMixinLiveChat() {
     return {
@@ -8636,68 +8896,6 @@ function adminMixinDataChartsSettings() {
             }
         },
 
-        async loadVoiceCallLogs() {
-            if (this.voiceCallLogsLoading) return;
-            this.voiceCallLogsLoading = true;
-            this.voiceCallLogsUnavailable = false;
-            try {
-                const { ok, status, data } = await this.apiJsonResponse(
-                    '/api/admin/intelligence/voice/calls?limit=15',
-                );
-                if (ok && Array.isArray(data?.items)) {
-                    this.voiceCallLogs = data.items;
-                    return;
-                }
-                if (status === 404 || status === 501) {
-                    this.voiceCallLogs = [];
-                    this.voiceCallLogsUnavailable = true;
-                    return;
-                }
-                this.voiceCallLogs = [];
-            } catch (_e) {
-                this.voiceCallLogs = [];
-            } finally {
-                this.voiceCallLogsLoading = false;
-            }
-        },
-
-        voiceCallStatusLabel(status) {
-            const raw = String(status || '').toLowerCase();
-            const labels = {
-                started: 'Начат',
-                transcribed: 'Расшифрован',
-                completed: 'Завершён',
-                escalated_whatsapp: 'Эскалация в WhatsApp',
-                escalated: 'Эскалация в WhatsApp',
-                error: 'Ошибка',
-            };
-            return labels[raw] || raw || '—';
-        },
-
-        voiceCallStatusClass(status) {
-            const raw = String(status || '').toLowerCase();
-            if (raw === 'completed') return 'bg-emerald-100 text-emerald-700';
-            if (raw === 'error') return 'bg-rose-100 text-rose-700';
-            if (raw.includes('escalat')) return 'bg-amber-100 text-amber-800';
-            return 'bg-slate-100 text-slate-600';
-        },
-
-        voiceCallDurationLabel(log) {
-            const payload = (log && typeof log.payload === 'object') ? log.payload : {};
-            const sec = Number(log?.duration_sec ?? payload?.duration_sec ?? payload?.duration ?? 0);
-            if (!Number.isFinite(sec) || sec <= 0) return '—';
-            if (sec < 60) return `${Math.round(sec)} с`;
-            const m = Math.floor(sec / 60);
-            const s = Math.round(sec % 60);
-            return `${m} мин ${s} с`;
-        },
-
-        voiceCallRecordingUrl(log) {
-            const payload = (log && typeof log.payload === 'object') ? log.payload : {};
-            const url = String(log?.recording_url || payload?.recording_url || payload?.recording || '').trim();
-            return url || '';
-        },
-
         async saveVoiceAiConfig() {
             if (!this.canStaffAdminOnly()) {
                 void this.showUiAlert(this.staffRbacHint('admin') || 'Недостаточно прав', 'Voice AI');
@@ -9128,46 +9326,6 @@ function adminMixinDataChartsSettings() {
                 this.failedTasksTotal = data.total ?? (data.tasks || []).length;
             } finally {
                 this.failedTasksLoading = false;
-            }
-        },
-
-        async loadMoneyQueue() {
-            this.moneyQueueLoading = true;
-            try {
-                const { ok, status, data } = await this.apiJsonResponse(
-                    `/api/admin/inbox/money-queue${this.locationQueryString('?')}`,
-                );
-                if (!ok) {
-                    adminLogger.warn('[admin] loadMoneyQueue', status, data);
-                    return;
-                }
-                this.moneyQueue = data;
-            } finally {
-                this.moneyQueueLoading = false;
-            }
-        },
-
-        runMoneyQueueAction(action) {
-            if (!action) return;
-            const tab = String(action.tab || '').trim();
-            if (tab === 'orders' && action.order_id != null) {
-                this.openGuestContextOrder({ id: Number(action.order_id) });
-                return;
-            }
-            if (tab === 'chats' && action.phone) {
-                void this.openHelpChat(String(action.phone));
-                return;
-            }
-            if (tab === 'inbox') {
-                this.navigateToTab('inbox', { inboxTab: action.inboxTab || 'clients' });
-                return;
-            }
-            if (tab) {
-                const opts = {};
-                if (action.inboxTab) opts.inboxTab = action.inboxTab;
-                if (action.chatPulseFilter) opts.chatPulseFilter = action.chatPulseFilter;
-                if (action.orderSumMin != null) opts.orderSumMin = action.orderSumMin;
-                this.navigateToTab(tab, opts);
             }
         },
 
@@ -10661,16 +10819,172 @@ function mergeAdminMixins(...sources) {
     return target;
 }
 
+/** Focus-Driven OS Sprint 3 — Action Queue inbox cards + Final Mile voice strip. */
+function adminMixinInboxActionQueue() {
+    return {
+        moneyQueueStatusClass(severity) {
+            const s = String(severity || 'info');
+            if (s === 'critical') return 'ds-status-danger';
+            if (s === 'warning') return 'ds-status-warn';
+            return 'ds-status-inactive';
+        },
+
+        moneyQueueStatusDotClass(severity) {
+            const s = String(severity || 'info');
+            if (s === 'critical') return 'ds-status-danger';
+            if (s === 'warning') return 'ds-status-warn';
+            return 'ds-status-inactive';
+        },
+
+        moneyQueueKindLabel(kind) {
+            const k = String(kind || '');
+            if (k === 'abandoned_draft') return 'Брошенный заказ';
+            if (k === 'pending_prepay') return 'Ожидает оплату';
+            if (k === 'slow_chat') return 'Ждёт ответ';
+            if (k === 'high_value_stuck') return 'Крупный заказ';
+            return 'Внимание';
+        },
+
+        async loadMoneyQueue() {
+            this.moneyQueueLoading = true;
+            try {
+                const { ok, status, data } = await this.apiJsonResponse(
+                    `/api/admin/inbox/money-queue${this.locationQueryString('?')}`,
+                );
+                if (!ok) {
+                    adminLogger.warn('[admin] loadMoneyQueue', status, data);
+                    return;
+                }
+                this.moneyQueue = data;
+            } finally {
+                this.moneyQueueLoading = false;
+            }
+        },
+
+        loadInboxActionQueue() {
+            return this.loadMoneyQueue();
+        },
+
+        runMoneyQueueAction(action) {
+            if (!action) return;
+            const tab = String(action.tab || '').trim();
+            if (tab === 'orders' && action.order_id != null) {
+                this.openGuestContextOrder({ id: Number(action.order_id) });
+                return;
+            }
+            if (tab === 'chats' && action.phone) {
+                void this.openHelpChat(String(action.phone));
+                return;
+            }
+            if (tab === 'inbox') {
+                this.navigateToTab('inbox', { inboxTab: action.inboxTab || 'clients' });
+                return;
+            }
+            if (tab) {
+                const opts = {};
+                if (action.inboxTab) opts.inboxTab = action.inboxTab;
+                if (action.chatPulseFilter) opts.chatPulseFilter = action.chatPulseFilter;
+                if (action.orderSumMin != null) opts.orderSumMin = action.orderSumMin;
+                this.navigateToTab(tab, opts);
+            }
+        },
+
+        refreshVoiceCallStrip() {
+            this.voiceCallLogsOffset = 0;
+            return this.loadVoiceCallLogs({ append: false });
+        },
+
+        loadMoreVoiceCallLogs() {
+            return this.loadVoiceCallLogs({ append: true });
+        },
+
+        async loadVoiceCallLogs({ append = false } = {}) {
+            if (this.voiceCallLogsLoading) return;
+            this.voiceCallLogsLoading = true;
+            this.voiceCallLogsUnavailable = false;
+            const limit = Number(this.voiceCallLogsLimit) || 15;
+            const offset = append ? Number(this.voiceCallLogsOffset) || 0 : 0;
+            try {
+                const q = this.locationQueryParams();
+                q.set('limit', String(limit));
+                q.set('offset', String(offset));
+                const { ok, status, data } = await this.apiJsonResponse(
+                    `/api/admin/intelligence/voice/calls?${q.toString()}`,
+                );
+                if (ok && Array.isArray(data?.items)) {
+                    const items = data.items;
+                    const total = Number(data.total ?? items.length);
+                    this.voiceCallLogs = append ? [...(this.voiceCallLogs || []), ...items] : items;
+                    this.voiceCallLogsTotal = total;
+                    this.voiceCallLogsOffset = offset + items.length;
+                    this.voiceCallLogsHasMore = this.voiceCallLogsOffset < total;
+                    return;
+                }
+                if (status === 404 || status === 501) {
+                    if (!append) this.voiceCallLogs = [];
+                    this.voiceCallLogsUnavailable = true;
+                    return;
+                }
+                if (!append) this.voiceCallLogs = [];
+            } catch (_e) {
+                if (!append) this.voiceCallLogs = [];
+            } finally {
+                this.voiceCallLogsLoading = false;
+            }
+        },
+
+        voiceCallStatusLabel(status) {
+            const raw = String(status || '').toLowerCase();
+            const labels = {
+                started: 'Начат',
+                transcribed: 'Расшифрован',
+                completed: 'Завершён',
+                escalated_whatsapp: 'Эскалация в WhatsApp',
+                escalated: 'Эскалация в WhatsApp',
+                error: 'Ошибка',
+            };
+            return labels[raw] || raw || '—';
+        },
+
+        voiceCallStatusSurfaceClass(status) {
+            const raw = String(status || '').toLowerCase();
+            if (raw === 'completed') return 'ds-status-ok ds-status-ring';
+            if (raw === 'error') return 'ds-status-danger ds-status-ring';
+            if (raw.includes('escalat')) return 'ds-status-warn ds-status-ring';
+            return 'ds-status-inactive ds-status-ring';
+        },
+
+        voiceCallDurationLabel(log) {
+            const payload = (log && typeof log.payload === 'object') ? log.payload : {};
+            const sec = Number(log?.duration_sec ?? payload?.duration_sec ?? payload?.duration ?? 0);
+            if (!Number.isFinite(sec) || sec <= 0) return '—';
+            if (sec < 60) return `${Math.round(sec)} с`;
+            const m = Math.floor(sec / 60);
+            const s = Math.round(sec % 60);
+            return `${m} мин ${s} с`;
+        },
+
+        voiceCallRecordingUrl(log) {
+            const payload = (log && typeof log.payload === 'object') ? log.payload : {};
+            const url = String(log?.recording_url || payload?.recording_url || payload?.recording || '').trim();
+            return url || '';
+        },
+    };
+}
+
 function adminApp() {
     return mergeAdminMixins(
         adminMixinState(),
         adminMixinModeEngine(),
+        adminMixinShiftStagedNav(),
+        adminMixinCommandBar(),
         adminMixinMenuOrdersUi(),
         adminMixinSearchBookings(),
         adminMixinAuthKnowledge(),
         adminMixinPackagingIntegrationsDemoWsUi(),
         adminMixinWebSocketEvents(),
         adminMixinLiveChat(),
+        adminMixinInboxActionQueue(),
         adminMixinDataChartsSettings(),
     );
 }

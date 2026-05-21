@@ -135,6 +135,7 @@ async def record_voice_call(
     status: str,
     transcript: str = "",
     mode: str = "stt_fallback",
+    location_id: int | None = None,
     payload: dict[str, Any] | None = None,
 ) -> VoiceCallLog:
     row = await db.scalar(
@@ -149,6 +150,9 @@ async def record_voice_call(
     row.status = status
     if transcript:
         row.transcript = ((row.transcript or "") + "\n" + transcript).strip()
-    row.payload_json = {**(row.payload_json or {}), **(payload or {})}
+    merged_payload = {**(row.payload_json or {}), **(payload or {})}
+    if location_id is not None:
+        merged_payload["location_id"] = int(location_id)
+    row.payload_json = merged_payload
     await db.flush()
     return row

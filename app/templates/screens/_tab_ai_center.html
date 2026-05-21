@@ -359,28 +359,42 @@
                 <div class="ds-card p-4">
                     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
                         <div>
-                            <div class="text-xs font-bold uppercase text-slate-500">Журнал звонков Voice AI</div>
-                            <div class="text-sm text-slate-700">Статус, длительность, запись и расшифровка</div>
+                            <div class="text-xs font-bold uppercase ds-text-muted">Журнал звонков Voice AI</div>
+                            <div class="text-sm" style="color: var(--color-text);">Статус, длительность, запись и расшифровка</div>
+                            <p x-show="selectedLocationId" x-cloak class="text-[11px] ds-text-muted mt-1">
+                                Фильтр по выбранной точке ·
+                                <span x-text="(voiceCallLogs || []).length"></span> из
+                                <span x-text="voiceCallLogsTotal ?? 0"></span>
+                            </p>
                         </div>
-                        <button type="button" class="ds-btn ds-btn-secondary ds-btn-sm" @click="loadVoiceCallLogs()"
-                            :disabled="voiceCallLogsLoading">
-                            <span x-text="voiceCallLogsLoading ? 'Загрузка…' : 'Обновить'"></span>
-                        </button>
+                        <div class="flex flex-wrap items-center gap-2">
+                            <button type="button" class="ds-btn ds-btn-secondary ds-btn-sm" @click="refreshVoiceCallStrip()"
+                                :disabled="voiceCallLogsLoading">
+                                <span x-text="voiceCallLogsLoading ? 'Загрузка…' : 'Обновить'"></span>
+                            </button>
+                            <button type="button" class="ds-btn ds-btn-secondary ds-btn-sm" x-show="voiceCallLogsHasMore"
+                                @click="loadMoreVoiceCallLogs()" :disabled="voiceCallLogsLoading">
+                                Ещё
+                            </button>
+                        </div>
                     </div>
                     <div x-show="voiceCallLogsLoading && !(voiceCallLogs || []).length" class="h-16 rounded-xl bg-slate-100 animate-pulse"></div>
-                    <div x-show="voiceCallLogsUnavailable" x-cloak class="rounded-xl border border-dashed border-slate-200 px-4 py-3 text-sm text-slate-500">
+                    <div x-show="voiceCallLogsUnavailable" x-cloak class="rounded-xl border border-dashed px-4 py-3 text-sm ds-text-muted"
+                        style="border-color: var(--color-border);">
                         Не удалось загрузить журнал звонков. Проверьте доступ к API или повторите позже.
                     </div>
                     <template x-if="!voiceCallLogsLoading && !voiceCallLogsUnavailable && !(voiceCallLogs || []).length">
-                        <div class="text-sm text-slate-400 rounded-xl border border-dashed border-slate-200 p-4 text-center">Звонков пока нет</div>
+                        <div class="text-sm ds-text-muted rounded-xl border border-dashed p-4 text-center"
+                            style="border-color: var(--color-border);">Звонков пока нет</div>
                     </template>
                     <div class="space-y-2 max-h-72 overflow-y-auto" x-show="(voiceCallLogs || []).length && !voiceCallLogsUnavailable">
                         <template x-for="log in (voiceCallLogs || [])" :key="'voice-log-' + (log?.id || log?.call_sid || '')">
-                            <div class="rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2.5">
+                            <div class="ds-status-surface px-3 py-2.5 flex flex-col gap-2">
                                 <div class="flex flex-wrap items-center justify-between gap-2">
                                     <div class="min-w-0">
-                                        <div class="text-sm font-semibold text-slate-900 tabular-nums" x-text="log?.phone || '—'"></div>
-                                        <div class="text-[11px] text-slate-500">
+                                        <div class="text-sm font-semibold tabular-nums" style="color: var(--color-text);"
+                                            x-text="log?.phone || '—'"></div>
+                                        <div class="text-[11px] ds-text-muted">
                                             <span x-text="fmt.dateTime(log?.created_at)"></span>
                                             <span class="mx-1">·</span>
                                             <span x-text="voiceCallDurationLabel(log)"></span>
@@ -388,19 +402,21 @@
                                             <span x-show="log?.mode" x-text="log?.mode || ''"></span>
                                         </div>
                                     </div>
-                                    <span class="text-[10px] font-bold uppercase rounded-full px-2 py-0.5 shrink-0"
-                                        :class="voiceCallStatusClass(log?.status)"
+                                    <span class="text-[10px] font-bold uppercase rounded-full px-2 py-0.5 shrink-0 ds-status-surface"
+                                        :class="voiceCallStatusSurfaceClass(log?.status)"
                                         x-text="voiceCallStatusLabel(log?.status)"></span>
                                 </div>
-                                <div class="mt-2 flex flex-wrap items-center gap-2">
+                                <div class="flex flex-wrap items-center gap-2">
                                     <a x-show="voiceCallRecordingUrl(log)" x-cloak
                                         :href="voiceCallRecordingUrl(log)" target="_blank" rel="noopener noreferrer"
                                         class="ds-btn ds-btn-secondary ds-btn-sm">Запись</a>
-                                    <span x-show="!voiceCallRecordingUrl(log)" x-cloak class="text-[11px] text-slate-400">Запись недоступна</span>
+                                    <span x-show="!voiceCallRecordingUrl(log)" x-cloak class="text-[11px] ds-text-muted">Запись недоступна</span>
                                 </div>
-                                <details x-show="(log?.transcript || '').trim()" x-cloak class="mt-2">
-                                    <summary class="text-xs font-semibold text-slate-600 cursor-pointer">Транскрипт</summary>
-                                    <pre class="mt-1 text-[11px] whitespace-pre-wrap rounded-lg border border-slate-200 bg-white p-2 text-slate-700 max-h-28 overflow-y-auto" x-text="log?.transcript || ''"></pre>
+                                <details x-show="(log?.transcript || '').trim()" x-cloak>
+                                    <summary class="text-xs font-semibold ds-text-muted cursor-pointer">Транскрипт</summary>
+                                    <pre class="mt-1 text-[11px] whitespace-pre-wrap rounded-lg border p-2 max-h-28 overflow-y-auto ds-text-muted"
+                                        style="border-color: var(--color-border); background: var(--color-surface);"
+                                        x-text="log?.transcript || ''"></pre>
                                 </details>
                             </div>
                         </template>

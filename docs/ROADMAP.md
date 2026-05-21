@@ -127,7 +127,7 @@
 
 ### Focus-Driven OS (Admin Shell) — целевая UI-модель G10.4+
 
-> **Статус:** архитектурный контракт зафиксирован; **код сейчас** — P1.5.0 (сайдбар + вкладки) + G10 `_tab_shift_control.html` (один экран, без Mode Engine). Детали: [`docs/UI_DESIGN_SYSTEM.md`](UI_DESIGN_SYSTEM.md) § Focus-Driven OS, [`docs/OS_TRANSITION_PLAN.md`](OS_TRANSITION_PLAN.md) § UI Layer.
+> **Статус:** Sprint 1–4 ✅ (Mode Engine + Mode Bar, Shift split + staged nav, Action Queue inbox + voice `location_id`, Command Bar Ctrl+K). Strangler: legacy sidebar/hash сохранены. Детали: [`docs/UI_DESIGN_SYSTEM.md`](UI_DESIGN_SYSTEM.md) § Focus-Driven OS, [`docs/OS_TRANSITION_PLAN.md`](OS_TRANSITION_PLAN.md) § UI Layer.
 
 **Принятые решения (2026-05-21):**
 
@@ -135,14 +135,18 @@
 |--------|---------|-------------------|
 | Mobile Shift Mode | **Staged Focus Navigation** (`focus` ↔ `context`, кнопка «Назад к задаче» на `<lg`) | UI_DESIGN_SYSTEM LAW 2; реализация — Sprint 2 |
 | Пустой focus при риске | **Гибрид:** TTL skip 600s + CTA `reset_skips` при `shift_empty_focus_while_risk_positive` | ✅ [`_tab_shift_control.html`](app/templates/screens/_tab_shift_control.html), FM-3 в ROADMAP |
-| Voice call log | **Strict `location_id`** при выбранной точке; org-wide — только summary в Intelligence | ✅ `GET /voice/calls?location_id=`; backlog — запись `location_id` в payload |
+| Voice call log | **Strict `location_id`** при выбранной точке; org-wide — только summary в Intelligence | ✅ `GET /voice/calls?location_id=`; ✅ `location_id` в payload при `record_voice_call` |
 
 **Спринты (Strangler — без остановки прода):**
 
-- [ ] **Sprint 1 — Mode Engine + Universal Semantics:** `currentMode` (`shift` \| `control` \| `intelligence`) в `admin-app.js`; Mode Bar в шапке; условный сайдбар; CSS-токены `ds-status-ok|warn|danger|ai|inactive` в `src/css/admin-input.css` → `npm run build:admin-css`. Backend без изменений (`GET /shift/state` ✅).
-- [ ] **Sprint 2 — Shift split + mobile staged nav:** `_shift_focus_chat.html`, `_shift_focus_order.html`; правая панель Context Dock по `shiftState.focus.kind`; mobile `mobileActiveScreen` focus/context.
-- [ ] **Sprint 3 — Action Queue inbox + voice tail:** эволюция `_tab_inbox.html` (карточки `money_queue.py`, не дублировать G7 backend); Final Mile call strip с `locationQueryParams()`; закрыть backlog `location_id` в `record_voice_call`.
-- [ ] **Sprint 4 — Command Bar (Ctrl+K):** префиксы `/leak`, `/red`, `/force-close` поверх существующего глобального поиска.
+- [x] **Sprint 1 — Mode Engine + Universal Semantics** (Strangler; backend без изменений, `GET /shift/state` ✅):
+  - [x] Mode Engine — `currentMode`, `setMode()`, `_bootstrapAdminMode`, matrix mode↔tab в `admin-app.js`
+  - [x] Mode Bar — `components/_mode_bar.html` + include в `screens/_header.html`
+  - [x] Universal Semantics — `ds-status-ok|warn|danger|ai|inactive` + `--color-mode-*` в `src/css/admin-input.css` → `npm run build:admin-css`
+  - [x] Условный сайдбар — фильтр `navItems` по `isTabInCurrentMode()` в `screens/_sidebar.html` (скрытие, не удаление)
+- [x] **Sprint 2 — Shift split + mobile staged nav:** `_shift_focus_chat.html`, `_shift_focus_order.html`; правая панель Context Dock по `shiftState.focus.kind`; mobile `mobileActiveScreen` focus/context.
+- [x] **Sprint 3 — Action Queue inbox + voice tail:** эволюция `_tab_inbox.html` (карточки `money_queue.py`, не дублировать G7 backend); Final Mile call strip с `locationQueryParams()`; закрыть backlog `location_id` в `record_voice_call`.
+- [x] **Sprint 4 — Command Bar (Ctrl+K):** префиксы `/leak`, `/red`, `/force-close` поверх существующего глобального поиска.
 
 **Не дублировать (уже сделано):** G7 money queue, G9/G10 shift engine, FM-3 `reset_skips`, Voice `GET /voice/calls` (пагинация + RBAC) — см. чекбоксы ниже в P5.
 
@@ -159,9 +163,9 @@
 - [x] **StaffMind Step 1 (meta):** `StaffUser.meta_json` — `role_metadata` + `assigned_location_ids`; `GET/POST/PATCH /api/admin/staff`; UI редактирования в **Настройки → Команда** ([`docs/SUPPLYMIND_STAFFMIND.md`](docs/SUPPLYMIND_STAFFMIND.md)).
 - [x] **Voice AI (backend MVP):** Twilio incoming/stream, `GET/POST /voice/status|config`, `voice_call_logs` — [`voice_ai.py`](app/services/voice_ai.py), [`docs/VOICE_AI_SPIKE.md`](docs/VOICE_AI_SPIKE.md).
 - [x] **Voice AI (admin UI toggle):** `aiCenterTab=final_mile` подключает enable/mode toggle через `GET /voice/status` и `POST /voice/config`.
-- [x] **Voice AI (call log strip UI):** блок «Журнал звонков Voice AI» в `aiCenterTab=final_mile` — [`_tab_ai_center.html`](app/templates/screens/_tab_ai_center.html), `loadVoiceCallLogs()` → `GET /voice/calls` (пока `limit=15` без offset / `locationQueryParams`).
+- [x] **Voice AI (call log strip UI):** блок «Журнал звонков Voice AI» в `aiCenterTab=final_mile` — [`_tab_ai_center.html`](app/templates/screens/_tab_ai_center.html), `refreshVoiceCallStrip()` → `GET /voice/calls` с `locationQueryParams()` + offset pagination.
 - [x] **Voice AI — GET /voice/calls API:** `GET /api/admin/intelligence/voice/calls?limit=&offset=` — список `voice_call_logs`, `total`, опционально `location_id` (фильтр по `payload_json` + RBAC). Тест: [`tests/test_voice_staging.py`](tests/test_voice_staging.py).
-- [ ] **Voice AI — call log location_id in payload:** писать `location_id` в `voice_call_logs.payload_json` при `record_voice_call`, чтобы фильтр `?location_id=` работал end-to-end.
+- [x] **Voice AI — call log location_id in payload:** писать `location_id` в `voice_call_logs.payload_json` при `record_voice_call`, чтобы фильтр `?location_id=` работал end-to-end.
 - [x] **StaffMind tracker UI:** прогресс шагов, счётчики Q&A/тем, progress bar в **Настройки → Команда** — [`_tab_settings_team.html`](app/templates/screens/_tab_settings_team.html), `staffMindTrackerMeta()` в JS (часть метрик — эвристики до расширения API).
 - [ ] **StaffMind tracker backend metrics:** `progress.test_passed`, `questions_asked`, `step_target` в ответах onboarding API.
 - [x] **SupplyMind checklist UX:** раскрываемые черновики, session item checks (не persist), lifecycle-кнопки в `aiCenterTab=final_mile` — [`_tab_ai_center.html`](app/templates/screens/_tab_ai_center.html).

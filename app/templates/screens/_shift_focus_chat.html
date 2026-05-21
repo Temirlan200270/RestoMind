@@ -1,0 +1,43 @@
+{% from "components/_card.html" import card %}
+{# Context Dock — slow_chat / pulse red|amber (Sprint 2) #}
+{% call card(padding_class='p-0', extra_class='ds-shift-dock-card overflow-hidden h-full') %}
+    <div class="px-4 py-3 border-b border-slate-100 bg-slate-50 flex items-center justify-between gap-2">
+        <h3 class="text-sm font-semibold text-slate-800">Контекст диалога</h3>
+        <span class="inline-flex items-center gap-1.5 text-xs font-bold uppercase"
+            :class="shiftDockPulseClass()">
+            <span class="ds-status-dot" :class="shiftDockPulseClass()"></span>
+            <span x-text="(shiftState.focus?.pulse === 'red' ? 'Срочно' : (shiftState.focus?.pulse === 'amber' ? 'Ждёт' : 'Pulse'))"></span>
+        </span>
+    </div>
+    <div class="p-4 space-y-4">
+        <div>
+            <div class="text-[10px] font-bold uppercase text-slate-500">Гость</div>
+            <div class="mt-1 font-mono text-sm text-slate-900" x-text="shiftState.focus?.phone || '—'"></div>
+            <p class="text-xs text-slate-500 mt-1" x-show="shiftState.focus?.wait_minutes > 0"
+                x-text="'Ожидание ответа · ' + shiftState.focus.wait_minutes + ' мин'"></p>
+        </div>
+
+        <div class="ds-status-surface ds-status-ai rounded-xl p-3">
+            <div class="text-[10px] font-bold uppercase text-violet-700 mb-1">Последнее сообщение</div>
+            <p class="text-sm text-slate-800 leading-snug" x-text="shiftState.focus?.subtitle || '—'"></p>
+        </div>
+
+        <template x-if="shiftState.focus?.order_id">
+            <div class="rounded-xl border border-slate-200 bg-white p-3">
+                <div class="text-[10px] font-bold uppercase text-slate-500">Связанный заказ</div>
+                <div class="mt-2 flex flex-wrap items-center justify-between gap-2">
+                    <span class="font-bold text-brand-600" x-text="'#' + shiftState.focus.order_id"></span>
+                    <span x-show="shiftState.focus?.value_kzt > 0" class="text-sm font-black tabular-nums text-red-700"
+                        x-text="fmt.money(shiftState.focus.value_kzt)"></span>
+                </div>
+                <button type="button" @click="shiftDockOpenOrder()"
+                    class="ds-btn ds-btn-secondary ds-btn-sm min-h-[44px] w-full mt-3">Открыть заказ</button>
+            </div>
+        </template>
+
+        <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+            <button type="button" @click="shiftDockOpenChat()"
+                class="ds-btn ds-btn-primary ds-btn-md min-h-[44px] flex-1">Открыть диалог</button>
+        </div>
+    </div>
+{% endcall %}

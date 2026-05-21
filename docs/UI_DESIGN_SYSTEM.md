@@ -177,7 +177,7 @@ Operations‑интерфейс должен работать в двух реж
 | **CONTROL MODE** | 🟡 | Менеджер | `inbox`, `orders`, `chats`, `bookings`, `menu` | Операции (P1.5) | Обязателен |
 | **INTELLIGENCE MODE** | 🔵 | Владелец | `dashboard`, `ai_center`, `settings` | Управление | Опционально / вся сеть |
 
-**Сейчас в prod-коде:** единый сайдбар со всеми `navItems`; `_tab_shift_control.html` — одна колонка без Context Dock. Mode Bar и split — Sprint 1–2 ROADMAP.
+**Сейчас в prod-коде (Sprint 1–4 ✅):** Mode Bar + фильтр сайдбара по режиму; `_tab_shift_control.html` — split Focus Deck + Context Dock на `≥lg`, staged nav на `<lg`; inbox Action Queue; Command Bar Ctrl+K. Legacy hash/sidebar сохранены (Strangler).
 
 **Связь с IA P1.5.0:** Inbox / Dashboard / AI Center **не удаляются** — они **перераспределяются по режимам** (CONTROL vs INTELLIGENCE). Hash-редиректы (`#operator_queue` → `#inbox`) сохраняются.
 
@@ -218,7 +218,7 @@ UI рендерит поля **`focus`** как отдано API ([`_focus_paylo
 
 - При выбранной точке: `GET /voice/calls?location_id={selectedLocationId}&limit=…` (✅ API + RBAC).
 - Без точки / Intelligence summary: org-wide список допустим.
-- Backlog: писать `location_id` в payload при `record_voice_call` — см. ROADMAP P5.
+- `location_id` в `payload_json` при `record_voice_call` ✅ — фильтр `?location_id=` end-to-end (Final Mile strip + Twilio routing).
 
 ---
 
