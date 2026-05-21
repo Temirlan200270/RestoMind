@@ -792,7 +792,6 @@ async def list_ai_snapshots(
     phone: str | None = Query(None, description="Фильтр по номеру телефона"),
 ) -> dict:
     """Список последних AI-снимков контекста для просмотра и replay."""
-    from datetime import timedelta
     from sqlalchemy import desc
     org_id = admin_org_from_session(request)
     stmt = (
@@ -815,6 +814,9 @@ async def list_ai_snapshots(
             "has_menu": bool(bs.get("menu_context_text")),
             "has_event_slice": bool(s.event_slice),
             "has_prices": bool(bs.get("menu_prices_snapshot")),
+            "has_business_state": s.business_state is not None,
+            "has_customer_state": s.customer_state is not None,
+            "menu_items_count": bs.get("menu_items_count"),
         }
 
     return {
@@ -1307,6 +1309,7 @@ async def export_supplymind_draft(
 async def start_staffmind_onboarding(
     body: StaffOnboardingStartBody,
     request: Request,
+    _perm: None = Depends(require_staff_manager_or_admin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     from app.services.staffmind import onboarding_public, start_onboarding_session
@@ -1329,6 +1332,7 @@ async def staffmind_onboarding_message(
     session_id: int,
     body: StaffOnboardingMessageBody,
     request: Request,
+    _perm: None = Depends(require_staff_manager_or_admin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     from app.services.staffmind import answer_staff_question, onboarding_public
@@ -1455,40 +1459,6 @@ async def intelligence_event_stats(
 
 
 # ─── Phase 3 OS: AI Context Snapshot (Replay) ────────────────────────────────
-
-
-@router.get("/snapshots")
-async def list_ai_snapshots(
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    phone: str | None = Query(None, description="Фильтр по телефону гостя"),
-    limit: int = Query(20, ge=1, le=100),
-) -> dict:
-    """Список последних снимков AI-контекста для организации."""
-    org_id = admin_org_from_session(request)
-    stmt = (
-        select(AIContextSnapshot)
-        .where(AIContextSnapshot.organization_id == org_id)
-        .order_by(AIContextSnapshot.created_at.desc())
-        .limit(limit)
-    )
-    if phone:
-        stmt = stmt.where(AIContextSnapshot.phone == phone.strip())
-    rows = (await db.execute(stmt)).scalars().all()
-    return {
-        "ok": True,
-        "items": [
-            {
-                "id": r.id,
-                "phone": r.phone,
-                "created_at": r.created_at.isoformat() if r.created_at else None,
-                "has_business_state": r.business_state is not None,
-                "has_customer_state": r.customer_state is not None,
-                "menu_items_count": (r.business_state or {}).get("menu_items_count"),
-            }
-            for r in rows
-        ],
-    }
 
 
 @router.get("/snapshots/{snapshot_id}")

@@ -6,19 +6,19 @@
 
 ---
 
-## Текущее состояние (актуально на 2026-05-20)
+## Текущее состояние (актуально на 2026-05-22)
 
 | Фаза | Что реализовано | Готовность | Ключевые файлы |
 |------|----------------|------------|----------------|
 | Phase 1: Franchise / Tenant | `Tenant.is_network`, Branch Switcher, `/network/*`, Manager `assigned_org_ids`. **Location (1.1):** `locations`, `location_id` на Order/ChatLog/Booking, RBAC, location-aware деньги/SLA/UI-фильтр | **✅ 100%** | `network.py`, `tenant_scope.py`, `analytics.py`, `_header.html` |
 | Phase 2: Event System | `emit_event`, `DailyOrgStats`, backfill (+ `dialogs_count`), WS fanout, `audit_log`, `os.audit`, `integration.*`, event-first `/stats`/`/analytics`/`/funnel` | **✅ 100%** | `system_events.py`, `analytics_consumer.py`, `audit_consumer.py` |
-| Phase 3: AI Context Snapshot | Frozen menu + `chat_history_slice`, replay с историей, `GET /snapshots`, minimal `menu_prices_snapshot` | **~95%** | `context_engine.py`, `intelligence.py` |
+| Phase 3: AI Context Snapshot | Frozen menu + `chat_history_slice`, replay с историей, `GET /snapshots` + `GET /snapshots/{id}` + `POST …/replay`, `menu_prices_snapshot` fallback | **~100%** ✅ | `context_engine.py`, `intelligence.py` — дубликат `GET /snapshots` убран |
 | Phase 4: Decision Engine | 8 правил DE + `tenant` в `AIReadContext`, интеграция в WhatsApp pipeline | **✅ 100%** | `decision_engine.py`, `webhooks.py` |
 | Phase 5: Full OS Behavior | Predictive + autopilot pricing (single + bulk), healing 2.0 WA, digest backend, GuestCare, stock alerts, Decision Feed UI | **~98%** | `owner_dashboard.py`, `healing_actions.py`, `intelligence.py` |
-| Final Mile (backend) | SupplyMind snapshots/drafts, StaffMind onboarding, Voice status/config, Daily OS Digest cron, `external_reviews` | **MVP ✅** | [`docs/FINAL_MILE_IMPLEMENTED.md`](FINAL_MILE_IMPLEMENTED.md) |
-| Final Mile (UI) | SupplyMind / StaffMind / Voice toggle / digest preview в админке | **wired ✅** | [`docs/REMAINING_UPDATES.md`](REMAINING_UPDATES.md) |
+| Final Mile (backend) | SupplyMind + iiko Office sync, StaffMind onboarding, Voice (`stt_fallback` + Realtime code), Daily OS Digest cron, GuestCare 2GIS sync | **MVP ✅** | [`docs/FINAL_MILE_IMPLEMENTED.md`](FINAL_MILE_IMPLEMENTED.md) |
+| Final Mile (UI) | SupplyMind / StaffMind / Voice toggle / digest preview / GuestCare sync в админке | **wired ✅** | [`docs/REMAINING_UPDATES.md`](REMAINING_UPDATES.md) — **ops gates** |
 
-**Главный вывод (2026-05-20):** RestoMind OS — **Industrial Platform** с закрытыми фазами 1–4 и Launch Window по Phase 5. Final Mile UI подключён; следующий инженерный слой — staging-проверки Telegram digest / WS `os.audit`, iiko Office pilot и Voice staging call.
+**Главный вывод (2026-05-22):** RestoMind OS — **Industrial Platform** с закрытыми фазами 1–4 и Phase 3 (~100%). Final Mile backend+UI в репо; следующий слой — **staging/ops**: Telegram digest, WS `os.audit`, iiko Office live pilot, Twilio Realtime call + cost report.
 
 ### Что остаётся для 100%
 

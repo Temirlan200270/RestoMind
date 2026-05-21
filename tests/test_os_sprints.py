@@ -384,6 +384,58 @@ class TestAIContextSnapshot:
         assert snap_id is not None
         assert len(snap_id) == 36
 
+    @pytest.mark.asyncio
+    async def test_list_ai_snapshots_http_endpoint(self, asgi_memory_client) -> None:
+        """GET /intelligence/snapshots — единый handler с retention и extended items."""
+        from app.core.passwords import hash_password
+        from app.db.models import AIContextSnapshot, Organization, StaffUser
+
+        client, session_factory = asgi_memory_client
+        async with session_factory() as db:
+            org = Organization(name="Snap List Org", slug="snap-list-org")
+            db.add(org)
+            await db.flush()
+            org_id = int(org.id)
+            db.add(StaffUser(
+                organization_id=org_id,
+                email="snaplist@test.kz",
+                password_hash=hash_password("secret123"),
+                role="admin",
+                is_active=True,
+            ))
+            db.add(AIContextSnapshot(
+                id=str(uuid.uuid4()),
+                organization_id=org_id,
+                phone="+77001234567",
+                business_state={
+                    "menu_items_count": 3,
+                    "last_intent": "order",
+                    "menu_context_text": "menu",
+                },
+                customer_state={"has_draft": False},
+                event_slice={"events": []},
+            ))
+            await db.commit()
+
+        await client.post(
+            "/api/admin/auth/login",
+            json={"username": "snaplist@test.kz", "password": "secret123"},
+        )
+        res = await client.get("/api/admin/intelligence/snapshots?limit=10")
+        assert res.status_code == 200
+        body = res.json()
+        assert body["ok"] is True
+        assert body["organization_id"] == org_id
+        assert body["count"] == 1
+        assert body["retention_days"] == 30
+        item = body["items"][0]
+        assert item["intent"] == "order"
+        assert item["has_menu"] is True
+        assert item["has_event_slice"] is True
+        assert item["has_business_state"] is True
+        assert item["has_customer_state"] is True
+        assert item["menu_items_count"] == 3
+
 
 # ─── Integration smoke tests ─────────────────────────────────────────────────
 

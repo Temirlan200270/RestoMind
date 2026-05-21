@@ -103,6 +103,20 @@ class OrganizationProfilePatchBody(BaseModel):
         max_length=512,
         description="Ссылка на 2GIS для отзывов",
     )
+    review_url_google: str | None = Field(
+        default=None,
+        max_length=512,
+        description="Ссылка на Google Maps/Reviews для GuestCare External (meta_json.review_url_google)",
+    )
+
+
+def _org_meta_dict(org: Organization) -> dict:
+    return dict(org.meta_json) if isinstance(org.meta_json, dict) else {}
+
+
+def _review_url_google_from_org(org: Organization) -> str:
+    meta = _org_meta_dict(org)
+    return str(meta.get("review_url_google") or meta.get("guestcare_google_url") or "").strip()
 
 
 _VALID_PAYMENT_PROVIDERS = frozenset({"freedom_pay", "kaspi", "cloudpayments"})
@@ -313,6 +327,7 @@ async def get_organization_profile(request: Request, db: AsyncSession = Depends(
         "telegram_ops_chat_id": (getattr(org, "telegram_ops_chat_id", None) or "").strip(),
         "prepayment_legal_text": (getattr(org, "prepayment_legal_text", None) or "").strip(),
         "review_url_2gis": (getattr(org, "review_url_2gis", None) or "").strip(),
+        "review_url_google": _review_url_google_from_org(org),
         "schedule_json": parse_schedule_json(getattr(org, "schedule_json", None)).model_dump(mode="json"),
         "operational_label": op.human_label,
         "is_business_open": op.is_business_open,
@@ -420,6 +435,15 @@ async def patch_organization_profile(
     if body.review_url_2gis is not None:
         raw_url = (body.review_url_2gis or "").strip()
         org.review_url_2gis = raw_url if raw_url else None
+    if body.review_url_google is not None:
+        raw_google = (body.review_url_google or "").strip()
+        meta = _org_meta_dict(org)
+        if raw_google:
+            meta["review_url_google"] = raw_google
+        else:
+            meta.pop("review_url_google", None)
+            meta.pop("guestcare_google_url", None)
+        org.meta_json = meta or None
     await db.commit()
     await db.refresh(org)
     op = check_operational_status(
@@ -438,6 +462,7 @@ async def patch_organization_profile(
         "telegram_ops_chat_id": (getattr(org, "telegram_ops_chat_id", None) or "").strip(),
         "prepayment_legal_text": (getattr(org, "prepayment_legal_text", None) or "").strip(),
         "review_url_2gis": (getattr(org, "review_url_2gis", None) or "").strip(),
+        "review_url_google": _review_url_google_from_org(org),
         "schedule_json": parse_schedule_json(getattr(org, "schedule_json", None)).model_dump(mode="json"),
         "operational_label": op.human_label,
         "is_business_open": op.is_business_open,

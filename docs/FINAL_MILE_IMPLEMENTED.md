@@ -9,6 +9,7 @@ Implemented backend MVPs for the remaining Ultimate Platform modules.
 - `GET /api/admin/intelligence/inventory/stock-alerts` returns real SKU alerts.
 - `POST /api/admin/intelligence/supplymind/drafts` creates a purchase draft from low-stock alerts.
 - `GET /api/admin/intelligence/supplymind/drafts` lists purchase drafts.
+- **iiko Office sync (code ✅):** [`iiko_office_client.py`](app/integrations/iiko_office_client.py), [`iiko_inventory_sync.py`](app/services/iiko_inventory_sync.py) — `POST/GET /api/admin/inventory/sync-iiko|sync-status`, ARQ cron ~6h, UI in `aiCenterTab=final_mile`. **Gate:** live Office credentials + pilot smoke.
 
 ## StaffMind
 
@@ -26,33 +27,34 @@ Implemented backend MVPs for the remaining Ultimate Platform modules.
 ## GuestCare External
 
 - Imported reviews are stored in `external_reviews`.
-- Import accepts parsed `author`, `rating`, and `text` payloads for 2GIS/Google review data.
+- **Auto-sync:** 2GIS via `review_url_2gis` (parser + cron); Google best-effort via `meta_json.review_url_google`.
+- Manual import still accepts parsed `author`, `rating`, and `text` payloads.
 - Reply drafts are persisted per review.
 
 ## Voice AI
 
 - Twilio Media Streams MVP is guarded by `Organization.meta_json.voice_ai_enabled`.
 - `GET /api/admin/intelligence/voice/status` reports readiness.
-- `POST /api/admin/intelligence/voice/config` toggles voice mode.
+- `POST /api/admin/intelligence/voice/config` toggles voice mode (`stt_fallback` | `realtime`).
 - `voice_call_logs` records call status and transcripts.
-- OpenAI Realtime remains the next connector step behind `voice_ai_mode = realtime`.
+- **OpenAI Realtime (code ✅):** [`voice_realtime/`](app/services/voice_realtime/) + [`twilio_routing.py`](app/services/twilio_routing.py); webhook branches on `voice_ai_mode`. **Gate:** staging call on real Twilio — [`docs/VOICE_AI_SPIKE.md`](VOICE_AI_SPIKE.md), [`docs/VOICE_STAGING_CHECKLIST.md`](VOICE_STAGING_CHECKLIST.md).
 
 ## Deployment Notes
 
-- Run `alembic upgrade head`; current head is `20260521_final_mile`.
-- Restart web and ARQ worker processes after deploy, because new routes, models, and `daily_os_digest_scheduled_tick` are loaded at import time.
+- Run `alembic upgrade head`; current head is `20260522_iiko_office_inventory`.
+- Restart web and ARQ worker processes after deploy, because new routes, models, cron ticks (`daily_os_digest_scheduled_tick`, `iiko_inventory_sync`, `external_reviews_sync`) load at import time.
 - Make sure org `timezone` values are valid IANA names; Daily OS Digest uses the organization timezone window.
 - Voice AI is disabled by default. Enable per organization with `POST /api/admin/intelligence/voice/config`.
-- SupplyMind works with pushed stock snapshots today. Real iiko Office stock sync still needs credentials and endpoint mapping.
+- SupplyMind: bulk snapshots, iiko Office sync, or manual pushes all land in `inventory_stock_snapshots`.
 
-## Admin UI status (2026-05-20)
+## Admin UI status (2026-05-22)
 
 | Module | Backend | Admin UI |
 |--------|---------|----------|
 | OS Decision Feed + `os.audit` | ✅ | ✅ (`_tab_ai_center.html`, `dashLiveFeed`) |
-| GuestCare External | ✅ | ✅ (`aiCenterTab=guestcare`) |
+| GuestCare External + sync | ✅ | ✅ (`aiCenterTab=guestcare`) |
 | Daily OS Digest | ✅ preview + cron | ✅ `aiCenterTab=final_mile` preview panel |
-| SupplyMind drafts | ✅ | ✅ stock alerts + draft list/create in `aiCenterTab=final_mile` |
+| SupplyMind drafts + iiko Office | ✅ | ✅ stock alerts, drafts, sync status in `aiCenterTab=final_mile` |
 | StaffMind onboarding | ✅ | ✅ `_tab_settings_team.html` sessions + Q&A |
-| Voice AI toggle | ✅ status/config API | ✅ enable/mode controls in `aiCenterTab=final_mile` |
+| Voice AI (`stt_fallback` + `realtime`) | ✅ code | ✅ enable/mode in `aiCenterTab=final_mile`; Realtime = staging smoke |
 | PWA | ✅ manifest + sw | ✅ registered in admin |

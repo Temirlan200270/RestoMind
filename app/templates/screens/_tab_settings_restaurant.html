@@ -82,6 +82,12 @@
                             <p class="text-xs text-gray-500 mt-1.5">Клиент получает эту ссылку после нажатия 👍 в отзыве. Пусто — ссылка не отправляется.</p>
                         </div>
                         <div class="md:col-span-2">
+                            <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Ссылка на Google для отзывов</label>
+                            <input type="url" x-model="orgProfile.review_url_google" placeholder="https://www.google.com/maps/place/..."
+                                class="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm bg-white">
+                            <p class="text-xs text-gray-500 mt-1.5">Используется GuestCare External при синхронизации Google (без Places API результат может быть пустым).</p>
+                        </div>
+                        <div class="md:col-span-2">
                             <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Текст при предоплате (юридический дисклеймер)</label>
                             <textarea x-model="orgProfile.prepayment_legal_text" rows="4" placeholder="Например: 'Предоплата вносится в счёт заказа...'"
                                 class="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm bg-white whitespace-pre-wrap min-h-[6rem]"></textarea>

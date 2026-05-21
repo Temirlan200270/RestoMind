@@ -348,9 +348,19 @@ Location scope поддержан в:
 
 Важный инвариант: `DailyOrgStats` пока агрегируется по `organization_id`. Поэтому location-scoped запросы возвращают `location_scope.source=sql_location` / `org_level_latency_logs`, а полноценный `daily_location_stats` остаётся отдельным hardening-этапом.
 
-### Replay снимка
+### AI Context Snapshot (Phase 3)
 
-`POST /api/admin/intelligence/snapshots/{id}/replay?user_text=...` — использует frozen `menu_context_text` и **`chat_history_slice`** из `customer_state` снимка (не пустой `history=[]`).
+Канонический контракт в [`intelligence.py`](../app/api/admin/intelligence.py) (не путать с `POST /inventory/snapshots/bulk` — SupplyMind):
+
+| Endpoint | Назначение |
+|----------|------------|
+| `GET /snapshots` | список `AIContextSnapshot` org (фильтр `phone`, `limit`) |
+| `GET /snapshots/{id}` | полный снимок для аудита |
+| `POST /snapshots/{id}/replay?user_text=...` | воспроизведение без отправки гостю |
+
+Дубликат `GET /snapshots` в файле убран — остаётся одна регистрация маршрута вместе с `{id}` и `replay`.
+
+**Replay:** frozen `menu_context_text` + **`chat_history_slice`** из `customer_state`; fallback — `menu_prices_snapshot` → synthetic menu context.
 
 ### GuestCare External
 
@@ -367,7 +377,7 @@ Location scope поддержан в:
 
 ## Final Mile — backend MVP
 
-Детали деплоя и эндпоинтов: [`docs/FINAL_MILE_IMPLEMENTED.md`](FINAL_MILE_IMPLEMENTED.md). UI-обёртки — в backlog ([`docs/REMAINING_UPDATES.md`](REMAINING_UPDATES.md)).
+Детали деплоя и эндпоинтов: [`docs/FINAL_MILE_IMPLEMENTED.md`](FINAL_MILE_IMPLEMENTED.md). **Ops/staging gate** (не «нет UI»): [`docs/REMAINING_UPDATES.md`](REMAINING_UPDATES.md).
 
 ### SupplyMind
 
@@ -388,7 +398,7 @@ Location scope поддержан в:
 | `POST /staffmind/onboarding/{id}/message` | Q&A из `KnowledgeItem` |
 | `GET /staffmind/onboarding` | список сессий |
 
-Сервис: [`app/services/staffmind.py`](../app/services/staffmind.py). JS-хелперы в `admin-app.js` есть; шаблон настроек команды не подключён.
+Сервис: [`app/services/staffmind.py`](../app/services/staffmind.py). UI: [`_tab_settings_team.html`](../app/templates/screens/_tab_settings_team.html) + `loadStaffMindOnboarding` / `startStaffMindOnboarding` в `admin-app.js`. RBAC: `require_staff_manager_or_admin` на `POST …/onboarding` и `POST …/message`; `GET …/onboarding` — любой авторизованный staff org.
 
 ### Voice AI
 
@@ -397,7 +407,7 @@ Location scope поддержан в:
 | `GET /voice/status` | readiness per org |
 | `POST /voice/config` | `voice_ai_enabled`, `voice_ai_mode` в `Organization.meta_json` |
 
-Сервис: [`app/services/voice_ai.py`](../app/services/voice_ai.py). Twilio path: [`docs/VOICE_AI_SPIKE.md`](VOICE_AI_SPIKE.md). OpenAI Realtime — следующий коннектор.
+Сервис: [`app/services/voice_ai.py`](../app/services/voice_ai.py) + [`voice_realtime/`](../app/services/voice_realtime/). Twilio + Realtime bridge: [`docs/VOICE_AI_SPIKE.md`](VOICE_AI_SPIKE.md) (`stt_fallback` | `realtime` реализованы). **Хвост:** staging call на реальном Twilio Media Stream.
 
 ### Daily OS Digest
 
@@ -416,7 +426,7 @@ Location scope поддержан в:
 - [x] Websocket push `os.audit` при новых AuditLog entries
 - [x] Daily OS Digest backend (Telegram preview endpoint + cron)
 - [x] Admin UI для SupplyMind drafts, StaffMind onboarding, Voice toggle, digest preview
-- [ ] Staging smoke: Telegram digest delivery, Twilio voice stream
+- [ ] Staging smoke (ops gate): Telegram digest delivery, Twilio voice (STT + Realtime latency/cost)
 - [ ] Hourly baselines (нужен накопленный датасет)
 - [ ] Causal graph (корреляции между метриками)
 - [ ] Feedback calibration (автокалибровка порогов по `was_useful`)

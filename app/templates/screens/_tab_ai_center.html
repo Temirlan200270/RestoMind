@@ -323,11 +323,13 @@
                                 x-text="voiceAiEnabledDraft ? 'on' : 'off'"></span>
                         </div>
                         <div class="space-y-3">
-                            <label class="flex items-center justify-between gap-3 rounded-xl border border-slate-200 px-3 py-2 min-h-[44px]">
+                            <label class="flex items-center justify-between gap-3 rounded-xl border border-slate-200 px-3 py-2 min-h-[44px]"
+                                :class="!canStaffAdminOnly() ? 'opacity-60' : ''">
                                 <span class="text-sm font-semibold text-slate-800">Включить Voice AI</span>
-                                <input type="checkbox" x-model="voiceAiEnabledDraft" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500">
+                                <input type="checkbox" x-model="voiceAiEnabledDraft" :disabled="!canStaffAdminOnly()"
+                                    class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500">
                             </label>
-                            <select x-model="voiceAiModeDraft" class="ds-input min-h-[44px]">
+                            <select x-model="voiceAiModeDraft" class="ds-input min-h-[44px]" :disabled="!canStaffAdminOnly()">
                                 <option value="stt_fallback">STT fallback</option>
                                 <option value="realtime">Realtime</option>
                             </select>
@@ -345,8 +347,9 @@
                                     Realtime: <span class="font-bold" x-text="voiceAiStatus?.realtime_ready ? 'готов' : 'нет'"></span>
                                 </div>
                             </div>
-                            <p class="text-[11px] text-slate-500">Сохранение — только для роли admin.</p>
-                            <button type="button" class="ds-btn ds-btn-primary ds-btn-md w-full" @click="saveVoiceAiConfig()" :disabled="voiceAiSaving || voiceAiLoading">
+                            <p x-show="staffRbacHint('admin')" x-cloak class="text-[11px] text-amber-700/90" x-text="staffRbacHint('admin')"></p>
+                            <button type="button" class="ds-btn ds-btn-primary ds-btn-md w-full" @click="saveVoiceAiConfig()"
+                                :disabled="voiceAiSaving || voiceAiLoading || !canStaffAdminOnly()">
                                 <span x-text="voiceAiSaving ? 'Сохраняем…' : 'Сохранить'"></span>
                             </button>
                         </div>
@@ -359,14 +362,20 @@
                             <div class="text-xs font-bold uppercase text-slate-500">SupplyMind</div>
                             <div class="text-sm text-slate-700">Stock alerts и чеклисты закупки (внутренний список)</div>
                         </div>
-                        <div class="flex items-center gap-2">
-                            <label class="text-xs text-slate-500">Дней
-                                <input type="number" min="1" max="30" x-model="supplyMindCoverDays" class="ml-1 w-20 rounded-lg border border-slate-200 px-2 py-2 text-sm">
-                            </label>
-                            <button type="button" class="ds-btn ds-btn-primary ds-btn-sm" @click="createSupplyMindDraft()" :disabled="supplyMindCreateLoading">
-                                <span x-text="supplyMindCreateLoading ? 'Создаём…' : 'Создать чеклист'"></span>
-                            </button>
-                            <button type="button" class="ds-btn ds-btn-secondary ds-btn-sm" @click="loadSupplyMind()" :disabled="supplyMindLoading">Обновить</button>
+                        <div class="flex flex-col items-end gap-1">
+                            <div class="flex items-center gap-2">
+                                <label class="text-xs text-slate-500">Дней
+                                    <input type="number" min="1" max="30" x-model="supplyMindCoverDays"
+                                        :disabled="!canStaffManageSupply()"
+                                        class="ml-1 w-20 rounded-lg border border-slate-200 px-2 py-2 text-sm">
+                                </label>
+                                <button type="button" class="ds-btn ds-btn-primary ds-btn-sm" @click="createSupplyMindDraft()"
+                                    :disabled="supplyMindCreateLoading || !canStaffManageSupply()">
+                                    <span x-text="supplyMindCreateLoading ? 'Создаём…' : 'Создать чеклист'"></span>
+                                </button>
+                                <button type="button" class="ds-btn ds-btn-secondary ds-btn-sm" @click="loadSupplyMind()" :disabled="supplyMindLoading">Обновить</button>
+                            </div>
+                            <p x-show="staffRbacHint('manager')" x-cloak class="text-[11px] text-amber-700/90" x-text="staffRbacHint('manager')"></p>
                         </div>
                     </div>
                     <div class="mb-4 flex flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -383,9 +392,10 @@
                             </button>
                             <button type="button" class="ds-btn ds-btn-primary ds-btn-sm"
                                 @click="runInventorySyncIiko()"
-                                :disabled="inventorySyncRunning || inventorySyncLoading || !inventorySyncStatus?.iiko_office_configured">
+                                :disabled="inventorySyncRunning || inventorySyncLoading || !inventorySyncStatus?.iiko_office_configured || !canStaffManageSupply()">
                                 <span x-text="inventorySyncRunning ? 'Синхронизация…' : 'Sync iiko'"></span>
                             </button>
+                            <p x-show="staffRbacHint('manager')" x-cloak class="w-full text-[11px] text-amber-700/90 sm:w-auto" x-text="staffRbacHint('manager')"></p>
                         </div>
                     </div>
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -432,31 +442,32 @@
                                         <div class="flex flex-wrap items-center gap-2 mt-3">
                                             <button type="button" class="ds-btn ds-btn-secondary ds-btn-sm"
                                                 @click="exportSupplyMindDraft(draft.id)"
-                                                :disabled="supplyMindExportLoading === draft.id">
+                                                :disabled="supplyMindExportLoading === draft.id || !canStaffManageSupply()">
                                                 <span x-text="supplyMindExportLoading === draft.id ? 'CSV…' : 'Скачать CSV'"></span>
                                             </button>
                                             <template x-if="draft.status === 'draft'">
                                                 <button type="button" class="ds-btn ds-btn-primary ds-btn-sm"
                                                     @click="updateSupplyMindDraft(draft.id, 'approved')"
-                                                    :disabled="supplyMindUpdateLoading === draft.id">
+                                                    :disabled="supplyMindUpdateLoading === draft.id || !canStaffManageSupply()">
                                                     Утвердить
                                                 </button>
                                             </template>
                                             <template x-if="draft.status === 'approved'">
                                                 <button type="button" class="ds-btn ds-btn-primary ds-btn-sm"
                                                     @click="updateSupplyMindDraft(draft.id, 'completed')"
-                                                    :disabled="supplyMindUpdateLoading === draft.id">
+                                                    :disabled="supplyMindUpdateLoading === draft.id || !canStaffManageSupply()">
                                                     Завершить
                                                 </button>
                                             </template>
                                             <template x-if="draft.status === 'draft' || draft.status === 'approved'">
                                                 <button type="button" class="ds-btn ds-btn-secondary ds-btn-sm"
                                                     @click="updateSupplyMindDraft(draft.id, 'cancelled')"
-                                                    :disabled="supplyMindUpdateLoading === draft.id">
+                                                    :disabled="supplyMindUpdateLoading === draft.id || !canStaffManageSupply()">
                                                     Отменить
                                                 </button>
                                             </template>
                                         </div>
+                                        <p x-show="staffRbacHint('manager')" x-cloak class="mt-2 text-[11px] text-amber-700/90" x-text="staffRbacHint('manager')"></p>
                                     </div>
                                 </template>
                             </div>

@@ -690,6 +690,8 @@ function adminMixinState() {
             whatsapp_phone_number_id: '',
             telegram_ops_chat_id: '',
             prepayment_legal_text: '',
+            review_url_2gis: '',
+            review_url_google: '',
             schedule_json: null,
             schedule_json_text: '',
             operational_label: '',
@@ -3370,6 +3372,8 @@ function adminMixinAuthKnowledge() {
                 whatsapp_phone_number_id: '',
                 telegram_ops_chat_id: '',
                 prepayment_legal_text: '',
+                review_url_2gis: '',
+                review_url_google: '',
             };
             this.orgProfileLoading = false;
             this.integrationStatus = defaultIntegrationStatus();
@@ -3398,6 +3402,35 @@ function adminMixinAuthKnowledge() {
             }
             this.brandingPreviewObjectUrl = '';
             this.brandingApiUnavailable = false;
+        },
+
+        /** Текущая роль staff (legacy без staff_id → admin). */
+        effectiveStaffRole() {
+            return String(this.staffRole || 'admin').trim().toLowerCase();
+        },
+
+        canStaffManageSupply() {
+            return this.effectiveStaffRole() !== 'operator';
+        },
+
+        canStaffAdminOnly() {
+            return this.effectiveStaffRole() === 'admin';
+        },
+
+        canStaffStartStaffMind() {
+            return this.canStaffManageSupply();
+        },
+
+        /** Подсказка RBAC для UI: '' если доступ есть, иначе текст для operator/manager. */
+        staffRbacHint(level) {
+            const role = this.effectiveStaffRole();
+            if (level === 'admin') {
+                return role === 'admin' ? '' : 'Только для admin';
+            }
+            if (level === 'manager') {
+                return role === 'operator' ? 'Только для admin/manager' : '';
+            }
+            return '';
         },
 
         normalizeMePayload(data) {
@@ -3736,6 +3769,8 @@ function adminMixinAuthKnowledge() {
                     whatsapp_phone_number_id: (data?.whatsapp_phone_number_id || '').trim(),
                     telegram_ops_chat_id: (data?.telegram_ops_chat_id || '').trim(),
                     prepayment_legal_text: String(data?.prepayment_legal_text ?? '').trim(),
+                    review_url_2gis: String(data?.review_url_2gis ?? '').trim(),
+                    review_url_google: String(data?.review_url_google ?? '').trim(),
                     schedule_json: scheduleObj,
                     schedule_json_text: JSON.stringify(scheduleObj, null, 2),
                     operational_label: String(data?.operational_label || '').trim(),
@@ -3770,6 +3805,8 @@ function adminMixinAuthKnowledge() {
                     whatsapp_phone_number_id: String(this.orgProfile?.whatsapp_phone_number_id || '').trim(),
                     telegram_ops_chat_id: String(this.orgProfile?.telegram_ops_chat_id || '').trim(),
                     prepayment_legal_text: String(this.orgProfile?.prepayment_legal_text ?? '').trim(),
+                    review_url_2gis: String(this.orgProfile?.review_url_2gis ?? '').trim(),
+                    review_url_google: String(this.orgProfile?.review_url_google ?? '').trim(),
                     schedule_json: scheduleJson,
                 };
                 const { ok, status, data } = await this.apiJsonResponse('/api/admin/organization/profile', {
@@ -3791,6 +3828,8 @@ function adminMixinAuthKnowledge() {
                     whatsapp_phone_number_id: (data?.whatsapp_phone_number_id || '').trim(),
                     telegram_ops_chat_id: (data?.telegram_ops_chat_id || '').trim(),
                     prepayment_legal_text: String(data?.prepayment_legal_text ?? '').trim(),
+                    review_url_2gis: String(data?.review_url_2gis ?? '').trim(),
+                    review_url_google: String(data?.review_url_google ?? '').trim(),
                     schedule_json: (data?.schedule_json && typeof data.schedule_json === 'object') ? data.schedule_json : scheduleJson,
                     schedule_json_text: JSON.stringify((data?.schedule_json && typeof data.schedule_json === 'object') ? data.schedule_json : scheduleJson, null, 2),
                     operational_label: String(data?.operational_label || '').trim(),
@@ -4221,6 +4260,8 @@ function adminMixinAuthKnowledge() {
                 whatsapp_phone_number_id: '',
                 telegram_ops_chat_id: '',
                 prepayment_legal_text: '',
+                review_url_2gis: '',
+                review_url_google: '',
                 schedule_json: null,
                 schedule_json_text: '',
             };
@@ -8158,6 +8199,10 @@ function adminMixinDataChartsSettings() {
         },
 
         async runInventorySyncIiko() {
+            if (!this.canStaffManageSupply()) {
+                void this.showUiAlert(this.staffRbacHint('manager') || 'Недостаточно прав', 'SupplyMind');
+                return;
+            }
             if (this.inventorySyncRunning) return;
             this.inventorySyncRunning = true;
             try {
@@ -8193,6 +8238,10 @@ function adminMixinDataChartsSettings() {
         },
 
         async createSupplyMindDraft() {
+            if (!this.canStaffManageSupply()) {
+                void this.showUiAlert(this.staffRbacHint('manager') || 'Недостаточно прав', 'SupplyMind');
+                return;
+            }
             if (this.supplyMindCreateLoading) return;
             this.supplyMindCreateLoading = true;
             try {
@@ -8227,6 +8276,10 @@ function adminMixinDataChartsSettings() {
         },
 
         async updateSupplyMindDraft(draftId, status) {
+            if (!this.canStaffManageSupply()) {
+                void this.showUiAlert(this.staffRbacHint('manager') || 'Недостаточно прав', 'SupplyMind');
+                return;
+            }
             if (this.supplyMindUpdateLoading) return;
             this.supplyMindUpdateLoading = draftId;
             try {
@@ -8255,6 +8308,10 @@ function adminMixinDataChartsSettings() {
         },
 
         async exportSupplyMindDraft(draftId) {
+            if (!this.canStaffManageSupply()) {
+                void this.showUiAlert(this.staffRbacHint('manager') || 'Недостаточно прав', 'SupplyMind');
+                return;
+            }
             if (this.supplyMindExportLoading) return;
             this.supplyMindExportLoading = draftId;
             try {
@@ -8297,6 +8354,10 @@ function adminMixinDataChartsSettings() {
         },
 
         async saveVoiceAiConfig() {
+            if (!this.canStaffAdminOnly()) {
+                void this.showUiAlert(this.staffRbacHint('admin') || 'Недостаточно прав', 'Voice AI');
+                return;
+            }
             if (this.voiceAiSaving) return;
             this.voiceAiSaving = true;
             try {
@@ -8785,6 +8846,10 @@ function adminMixinDataChartsSettings() {
         },
 
         async startStaffMindOnboarding() {
+            if (!this.canStaffStartStaffMind()) {
+                void this.showUiAlert(this.staffRbacHint('manager') || 'Недостаточно прав', 'StaffMind');
+                return;
+            }
             const phone = String(this.staffMindPhone || '').trim();
             if (!phone) {
                 this.teamError = 'Введите телефон сотрудника для онбординга';
@@ -8815,6 +8880,10 @@ function adminMixinDataChartsSettings() {
         },
 
         async askStaffMind(sessionId) {
+            if (!this.canStaffStartStaffMind()) {
+                void this.showUiAlert(this.staffRbacHint('manager') || 'Недостаточно прав', 'StaffMind');
+                return;
+            }
             const id = Number(sessionId);
             if (!Number.isFinite(id) || id < 1) return;
             const question = String(this.staffMindQuestionById?.[id] || '').trim();

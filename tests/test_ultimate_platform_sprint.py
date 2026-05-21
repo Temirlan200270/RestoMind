@@ -403,6 +403,39 @@ async def test_staffmind_answers_from_knowledge_base(asgi_memory_client) -> None
 
 
 @pytest.mark.asyncio
+async def test_staffmind_operator_cannot_mutate_onboarding(asgi_memory_client) -> None:
+    from app.core.passwords import hash_password
+    from app.db.models import StaffRole, StaffUser
+
+    client, session_factory = asgi_memory_client
+    async with session_factory() as db:
+        org = Organization(name="StaffMind RBAC Org", slug="staffmind-rbac-org")
+        db.add(org)
+        await db.flush()
+        db.add(StaffUser(
+            organization_id=org.id,
+            email="op-staffmind@test.kz",
+            password_hash=hash_password("secret123"),
+            role=StaffRole.OPERATOR.value,
+            is_active=True,
+        ))
+        await db.commit()
+
+    await client.post(
+        "/api/admin/auth/login",
+        json={"username": "op-staffmind@test.kz", "password": "secret123"},
+    )
+    start = await client.post(
+        "/api/admin/intelligence/staffmind/onboarding",
+        json={"phone": "+77005550000", "role": "cashier"},
+    )
+    assert start.status_code == 403
+
+    listing = await client.get("/api/admin/intelligence/staffmind/onboarding")
+    assert listing.status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_daily_os_digest_preview_and_voice_config(asgi_memory_client) -> None:
     from app.core.passwords import hash_password
     from app.db.models import StaffUser

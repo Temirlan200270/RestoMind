@@ -103,6 +103,6 @@ Implemented bridge:
 | SupplyMind | ✅ snapshots + sync + checklist | live iiko Office smoke | ✅ final_mile panel |
 | StaffMind | ✅ sessions + Q&A | — | ✅ settings team |
 
-Tests: [`tests/test_ultimate_platform_sprint.py`](../tests/test_ultimate_platform_sprint.py); add [`tests/test_iiko_inventory_sync.py`](../tests/test_iiko_inventory_sync.py) and supplymind lifecycle tests when PRs land.
+Tests: [`tests/test_ultimate_platform_sprint.py`](../tests/test_ultimate_platform_sprint.py), [`tests/test_iiko_inventory_sync.py`](../tests/test_iiko_inventory_sync.py) (lifecycle + RBAC).
 
 Ops checklist: [`docs/REMAINING_UPDATES.md`](REMAINING_UPDATES.md).

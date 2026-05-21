@@ -4,12 +4,12 @@ This file tracks what is still needed outside the backend MVP that is already im
 
 ## Must Update Before Production
 
-- **Database:** run `alembic upgrade head`; expected head is `20260521_final_mile` (plus `20260522_iiko_office_inventory` when inventory sync PR merges).
-- **Workers:** restart ARQ workers so `daily_os_digest_scheduled_tick` and (after merge) `iiko_inventory_sync` are registered.
+- **Database:** run `alembic upgrade head`; expected head is `20260522_iiko_office_inventory` (chain: `20260521_final_mile` → inventory migration).
+- **Workers:** restart ARQ workers so `daily_os_digest_scheduled_tick`, `iiko_inventory_sync`, and `external_reviews_sync_scheduled_tick` are registered.
 - **Frontend (wired):** `aiCenterTab=final_mile` — Daily OS Digest preview, SupplyMind stock alerts/drafts, Voice AI enable/mode. `_tab_settings_team.html` — StaffMind onboarding.
-- **Permissions:** decide which staff roles can create supply drafts, change checklist status, start StaffMind onboarding, and toggle Voice AI.
+- **Permissions:** decide which staff roles can create supply drafts and change checklist status; StaffMind POST onboarding — `require_staff_manager_or_admin`; Voice toggle — `require_staff_admin` on `POST /voice/config`.
 - **Operations:** confirm every organization has a valid `timezone`, especially for the 09:00 Daily OS Digest.
-- **Staging checks:** Telegram digest delivery (`TELEGRAM_BOT_TOKEN`, ops chat IDs); WebSocket `os.audit` fanout; Twilio voice stream (STT and, after merge, Realtime).
+- **Staging checks (ops gate):** Telegram digest delivery (`TELEGRAM_BOT_TOKEN`, ops chat IDs); WebSocket `os.audit` fanout; Twilio voice stream — STT path + **Realtime** manual call on real Twilio Media Stream (code ✅, see [`docs/VOICE_STAGING_CHECKLIST.md`](VOICE_STAGING_CHECKLIST.md)).
 
 ## Integration Epics (2026-05) — status
 
@@ -17,7 +17,7 @@ This file tracks what is still needed outside the backend MVP that is already im
 |------|--------------|-----------------|
 | **iiko Office inventory sync** | ✅ `iiko_office_client`, `iiko_inventory_sync`, `inventory_sync` router, ARQ cron, Final Mile status/manual sync UI, [`tests/test_iiko_inventory_sync.py`](tests/test_iiko_inventory_sync.py) | Per-org `integration_config_json.iiko_office` + smoke against **live** iiko Office |
 | **SupplyMind checklist** | ✅ lifecycle API + CSV + UI «Чеклисты закупки»; tests in `test_ultimate_platform_sprint.py` | Role gates + operator smoke in AI Center |
-| **Voice Realtime** | ✅ `voice_realtime/*`, `twilio_routing`, webhook branch; tests `test_voice_realtime.py`, `test_twilio_routing.py`, `test_voice_staging.py` | Manual staging call (`mode=realtime`) on real Twilio Media Stream + latency/cost notes |
+| **Voice Realtime** | ✅ `voice_realtime/*`, `twilio_routing`, webhook branch; tests `test_voice_realtime.py`, `test_twilio_routing.py`, `test_voice_staging.py` | **Staging gate:** manual call (`mode=realtime`) on real Twilio + latency/cost notes ([`docs/VOICE_AI_SPIKE.md`](VOICE_AI_SPIKE.md)) |
 
 ### iiko Office inventory sync
 
@@ -30,21 +30,22 @@ This file tracks what is still needed outside the backend MVP that is already im
 ### SupplyMind — internal checklist (no iiko PO export)
 
 - **Product decision:** `supply_purchase_drafts` = operator **checklist**, not a purchase order in iiko. Export = **CSV for supplier/kitchen**, not `POST` into iiko Office.
-- **API (target):** `GET/PATCH /supplymind/drafts/{id}`, `GET /supplymind/drafts/{id}/export?format=csv`.
+- **API:** `GET/PATCH /supplymind/drafts/{id}`, `GET /supplymind/drafts/{id}/export?format=csv` — implemented.
 - **UI copy:** «Чеклист закупки», not «Заказ в iiko».
 
-### Voice — OpenAI Realtime production connector
+### Voice — OpenAI Realtime (code ✅; staging gate)
 
-- **`stt_fallback` (today):** Twilio μ-law buffer → Whisper → `process_message` → Twilio Say.
-- **`realtime` (target):** bidirectional bridge Twilio Media Streams ↔ OpenAI Realtime; minimal tools (`lookup_menu` stub, `escalate_to_whatsapp`); org resolved from `To` via [`twilio_routing`](app/services/twilio_routing.py) (`Organization.meta_json.twilio_voice_number`).
-- **Enable:** `POST /api/admin/intelligence/voice/config` with `mode=realtime`; env: `OPENAI_REALTIME_MODEL`, `OPENAI_REALTIME_VOICE`, `VOICE_REALTIME_MAX_SESSION_SEC`.
-- **Fallback:** if Realtime session fails → log + TwiML Say + hangup; STT path must keep working.
-- **Economics:** keep `stt_fallback` as default for mass-market; Realtime is premium/experimental until cost-per-minute is measured in staging.
+- **`stt_fallback` (default prod):** Twilio μ-law buffer → Whisper → `process_message` → Twilio Say.
+- **`realtime` (implemented):** bidirectional bridge Twilio Media Streams ↔ OpenAI Realtime ([`voice_realtime/`](app/services/voice_realtime/), [`twilio_routing`](app/services/twilio_routing.py)); tools `lookup_menu`, `escalate_to_whatsapp`; org from `To` via `Organization.meta_json.twilio_voice_number`.
+- **Enable:** `POST /api/admin/intelligence/voice/config` with `mode=realtime` (`require_staff_admin`); env: `OPENAI_REALTIME_MODEL`, `OPENAI_REALTIME_VOICE`, `VOICE_REALTIME_MAX_SESSION_SEC`.
+- **Fallback:** if Realtime session fails → log + TwiML Say + hangup; STT path unchanged.
+- **Economics / gate:** keep `stt_fallback` as default for mass-market until staging measures cost-per-minute; Realtime promotion = **ops checklist**, not missing backend.
 
-## External Integrations Still Needed (unchanged backlog)
+## External Integrations — status
 
-- **2GIS/Google reviews:** connect real scraper/API ingestion to `external_reviews` (backend accepts parsed payloads).
-- **Telegram delivery check:** verify `TELEGRAM_BOT_TOKEN` and ops chat IDs for Daily OS Digest in staging.
+- **GuestCare 2GIS:** ✅ auto-sync — [`guestcare_parser.py`](app/services/guestcare_parser.py), [`external_reviews_sync.py`](app/services/external_reviews_sync.py), `POST /reviews/external/sync`, ARQ cron, UI «Синхронизировать» in `aiCenterTab=guestcare`.
+- **GuestCare Google:** best-effort via `meta_json.review_url_google` (static HTML often empty without Places API); production Google → official Places API.
+- **Telegram delivery check:** verify `TELEGRAM_BOT_TOKEN` and ops chat IDs for Daily OS Digest in staging ([`docs/TELEGRAM_DIGEST_STAGING.md`](TELEGRAM_DIGEST_STAGING.md)).
 
 ## Docs That Should Be Cleaned Later
 
@@ -53,7 +54,7 @@ This file tracks what is still needed outside the backend MVP that is already im
 
 ## Suggested Next Engineering Sprint
 
-- Merge integration epics above; run `alembic upgrade head`; restart workers.
+- Run `alembic upgrade head` (`20260522_iiko_office_inventory`); restart workers.
 - Harden Final Mile admin UI permissions and browser smoke (SupplyMind checklist, StaffMind, Voice toggle, digest preview).
-- Staging smoke: Telegram Daily OS Digest, WebSocket `os.audit`, Twilio voice (STT + Realtime).
-- Add iiko Office inventory adapter tests with captured sample payloads (`tests/fixtures/iiko_office/`).
+- Staging smoke: Telegram Daily OS Digest, WebSocket `os.audit`, Twilio voice (STT + Realtime report).
+- iiko Office pilot with live credentials; captured fixtures in `tests/fixtures/iiko_office/`.

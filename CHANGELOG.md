@@ -6,6 +6,15 @@
 
 ## [Unreleased] — 2026-03-20
 
+### Документация (2026-05-22) — sync audit drift
+
+- Синхронизированы [`docs/REMAINING_UPDATES.md`](docs/REMAINING_UPDATES.md), [`docs/FINAL_MILE_IMPLEMENTED.md`](docs/FINAL_MILE_IMPLEMENTED.md), [`docs/AI_OPERATIONS.md`](docs/AI_OPERATIONS.md), [`docs/OS_TRANSITION_PLAN.md`](docs/OS_TRANSITION_PLAN.md), [`docs/ROADMAP.md`](docs/ROADMAP.md): head `20260522_iiko_office_inventory`; iiko Office + Voice Realtime + GuestCare 2GIS — code ✅; Voice `[ ]` = ops/staging gate; Phase 3 ~100%; StaffMind UI + RBAC; единый контракт `GET/POST /snapshots*`.
+
+### Исправлено (2026-05-21) — docs↔code audit
+
+- **P0:** удалён дубликат `GET /api/admin/intelligence/snapshots`; один handler с `retention_days` и расширенными полями items.
+- **P2:** RBAC `require_staff_manager_or_admin` на мутациях StaffMind onboarding (`POST …/onboarding`, `POST …/message`); operator — только `GET`.
+
 ### Добавлено (2026-05-21) — Platform polish tails
 
 - **StaffMind Step 1:** `StaffUser.meta_json` — `role_metadata` (title/department) и `assigned_location_ids`; `PATCH /api/admin/staff/{id}`; UI в **Настройки → Команда**.
