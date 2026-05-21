@@ -12,6 +12,16 @@
 - **Control Plane Phase 2 (start):** `trace_context.py` — `contextvars`, seed из WhatsApp `message_id`; propagation webhook → ARQ → `emit_event` → `order_meta` / AI logs; structured `[trace_id=…]` в логах. Тесты: [`tests/test_control_plane_trace.py`](tests/test_control_plane_trace.py). Хвост: iiko/outbound/operator, causal chain, timeline UI — см. [`docs/CONTROL_PLANE.md`](docs/CONTROL_PLANE.md).
 - **Admin UI:** Voice call log strip в `aiCenterTab=final_mile` (placeholder до `GET /voice/calls`); StaffMind tracker (шаги, Q&A, темы) в **Настройки → Команда**; SupplyMind — раскрываемые чеклисты с session checks в Final Mile.
 
+### Добавлено (2026-05-21) — Launch prep (voice pagination · Control Plane tail · deploy checklist)
+
+- **`GET /voice/calls`:** пагинация `limit`/`offset`, `total`, опциональный `location_id` (payload filter), RBAC локаций.
+- **Control Plane Phase 2 tail:** `parent_event_id`/`caused_by` на `BusinessEvent`; trace в iiko/WA/operator logs; `GET /trace-timeline`; [`trace_timeline.py`](app/services/trace_timeline.py).
+- **Ops:** секция **D. Deploy** в [`docs/FINAL_MILE_OPS_SIGNOFF.md`](docs/FINAL_MILE_OPS_SIGNOFF.md) — `alembic upgrade head`, перезапуск ARQ, cron ticks.
+
+### Добавлено (2026-05-21) — Voice call log API
+
+- **`GET /api/admin/intelligence/voice/calls`:** список `voice_call_logs` (status, mode, transcript, `duration_sec`/`recording_url` из `payload_json`); tenant scope; тест `test_voice_calls_api_lists_org_logs`.
+
 ### Исправлено (2026-05-21) — Alpine null-safe + revenue-leak 500
 
 - **Frontend:** `shiftState`, `revenueLeak`, `moneyQueue` инициализируются пустыми объектами (`adminDefault*()`); optional chaining в sidebar/bottom nav/operator queue; сброс при смене локации — без `null` (Alpine не ломает реактивный цикл до fetch).

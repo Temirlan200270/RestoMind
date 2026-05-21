@@ -30,6 +30,22 @@
 
 ---
 
+## D. Deploy — migrations + ARQ workers
+
+Перед ops sign-off (A–C) на **staging/production**:
+
+| Шаг | OK | Дата | Примечание |
+|-----|----|------|------------|
+| `alembic upgrade head` (до `20260521_superadmin_audit` + `20260522_iiko_office_inventory`) | [ ] | | Supabase SQL или Render shell |
+| Перезапуск **web** + **ARQ worker** после деплоя | [ ] | | `python -m arq app.worker.WorkerSettings` |
+| Cron зарегистрирован: `daily_os_digest_scheduled_tick` | [ ] | | Утренняя сводка → Telegram |
+| Cron зарегистрирован: `external_reviews_sync_scheduled_tick` | [ ] | | 2GIS sync 02:10 / 14:10 UTC |
+| Cron зарегистрирован: `iiko_inventory_sync` | [ ] | | Остатки iiko Office ~6 ч |
+
+**Sign-off deploy:** _________________ Дата: _______
+
+---
+
 ## A. iiko Office live smoke → ROADMAP SupplyMind L130
 
 1. Admin → **Настройки → Подключения → iiko Office** (admin): host, login, password, `store_id`.

@@ -210,6 +210,61 @@ async def test_voice_status_api_realtime_ready(asgi_memory_client, monkeypatch) 
 
 
 @pytest.mark.asyncio
+async def test_voice_calls_api_lists_org_logs(asgi_memory_client) -> None:
+    client, session_factory = asgi_memory_client
+    org_id, _ = await _seed_voice_org(session_factory, mode="realtime")
+
+    async with session_factory() as db:
+        from app.db.models import Organization, VoiceCallLog
+
+        other = Organization(name="Other Voice", slug="other-voice", meta_json={})
+        db.add(other)
+        await db.flush()
+        db.add_all([
+            VoiceCallLog(
+                organization_id=org_id,
+                call_sid="CA-LIST-001",
+                phone="+77051234567",
+                mode="realtime",
+                status="completed",
+                transcript="Здравствуйте",
+                payload_json={"duration_sec": 42, "recording_url": "https://example.test/rec.mp3"},
+            ),
+            VoiceCallLog(
+                organization_id=int(other.id),
+                call_sid="CA-OTHER-001",
+                phone="+77059999999",
+                status="started",
+            ),
+        ])
+        await db.commit()
+
+    login = await client.post(
+        "/api/admin/auth/login",
+        json={"username": "voice-staging@test.kz", "password": "secret123"},
+    )
+    assert login.status_code == 200
+
+    res = await client.get("/api/admin/intelligence/voice/calls?limit=15")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["ok"] is True
+    assert body["organization_id"] == org_id
+    assert body["total"] == 1
+    assert body["offset"] == 0
+    assert len(body["items"]) == 1
+    row = body["items"][0]
+    assert row["call_sid"] == "CA-LIST-001"
+    assert row["phone"] == "+77051234567"
+    assert row["status"] == "completed"
+    assert row["mode"] == "realtime"
+    assert row["transcript"] == "Здравствуйте"
+    assert row["duration_sec"] == 42
+    assert row["recording_url"] == "https://example.test/rec.mp3"
+    assert isinstance(row["payload"], dict)
+
+
+@pytest.mark.asyncio
 async def test_voice_config_requires_admin_role(asgi_memory_client, monkeypatch) -> None:
     client, session_factory = asgi_memory_client
     org_id, _ = await _seed_voice_org(session_factory, mode="stt_fallback")

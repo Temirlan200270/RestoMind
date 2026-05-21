@@ -76,6 +76,67 @@ async def test_emit_event_injects_trace_from_context(db_session: AsyncSession) -
 
 
 @pytest.mark.asyncio
+async def test_emit_event_stores_causal_chain_fields(db_session: AsyncSession) -> None:
+    from app.db.models import Organization
+
+    org = Organization(name="Causal Org", slug="causal-org")
+    db_session.add(org)
+    await db_session.flush()
+    parent_id = "parent-event-uuid"
+    result = await emit_event(
+        db_session,
+        BusinessEvent(
+            org_id=int(org.id),
+            type="order.confirmed",
+            actor="system",
+            payload={"order_id": 42},
+            parent_event_id=parent_id,
+            caused_by="payment.completed",
+        ),
+    )
+    assert result is not None
+    row = await db_session.get(SystemEvent, result.id)
+    payload = row.payload_json or {}
+    assert payload.get("parent_event_id") == parent_id
+    assert payload.get("caused_by") == "payment.completed"
+
+
+@pytest.mark.asyncio
+async def test_build_trace_timeline_merges_events_and_chat(db_session: AsyncSession) -> None:
+    from app.db.models import ChatLog, Organization, User
+    from app.services.trace_timeline import build_trace_timeline
+
+    org = Organization(name="Trace TL Org", slug="trace-tl-org")
+    db_session.add(org)
+    await db_session.flush()
+    user = User(organization_id=int(org.id), phone="+77005550101")
+    db_session.add(user)
+    await db_session.flush()
+    tid = "trace-timeline-test-001"
+    with trace_context(tid, "conv-1"):
+        await emit_event(
+            db_session,
+            BusinessEvent(org_id=int(org.id), type="ai.response.generated", actor="ai", payload={"intent": "chat"}),
+        )
+    db_session.add(
+        ChatLog(
+            organization_id=int(org.id),
+            user_id=int(user.id),
+            role="user",
+            content="Привет",
+            meta_json={"trace_id": tid, "conversation_id": "conv-1"},
+        ),
+    )
+    await db_session.flush()
+
+    out = await build_trace_timeline(db_session, org_id=int(org.id), trace_id=tid)
+    assert out["total"] >= 2
+    kinds = {entry["kind"] for entry in out["entries"]}
+    assert "system_event" in kinds
+    assert "chat_log" in kinds
+
+
+@pytest.mark.asyncio
 async def test_process_with_retry_forwards_trace_id(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.api import webhooks
     from app.db.models import Base, Organization

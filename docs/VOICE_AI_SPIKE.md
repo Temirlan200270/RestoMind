@@ -43,6 +43,7 @@ flowchart LR
 
 - Per-org: `voice_ai_enabled`, `voice_ai_mode` (`stt_fallback` | `realtime`).
 - Admin: `GET /api/admin/intelligence/voice/status` (`realtime_ready` when API key + mode=realtime).
+- Admin: `GET /api/admin/intelligence/voice/calls?limit=` — journal from `voice_call_logs` (Final Mile UI).
 - Admin: `POST /api/admin/intelligence/voice/config` — `{ enabled, mode }`.
 - LLM/STT/Realtime runs **outside** request DB transaction (read → close → AI → write).
 

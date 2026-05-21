@@ -1410,6 +1410,53 @@ async def voice_ai_config(
     return {"ok": True, "item": status}
 
 
+@router.get("/voice/calls")
+async def voice_ai_call_logs(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    limit: int = Query(15, ge=1, le=100, description="Макс. записей на странице"),
+    offset: int = Query(0, ge=0, description="Смещение для пагинации"),
+    location_id: Annotated[int | None, Query(ge=1)] = None,
+) -> dict:
+    """Журнал звонков Voice AI для Final Mile UI (voice_call_logs)."""
+    from app.services.voice_ai import list_voice_call_logs
+
+    org_id = admin_org_from_session(request)
+    staff = await _session_staff_user(request, db)
+    is_super = await _session_is_superadmin(request, db)
+    allowed_location_ids = await allowed_location_ids_for_staff(
+        db,
+        staff=staff,
+        org_id=org_id,
+        is_superadmin=is_super,
+    )
+    if location_id is not None and allowed_location_ids is not None and int(location_id) not in allowed_location_ids:
+        raise HTTPException(status_code=403, detail="Location is not allowed")
+    result = await list_voice_call_logs(
+        db,
+        org_id=org_id,
+        limit=limit,
+        offset=offset,
+        location_id=location_id,
+    )
+    return {"ok": True, "organization_id": org_id, **result}
+
+
+@router.get("/trace-timeline")
+async def intelligence_trace_timeline(
+    request: Request,
+    trace_id: Annotated[str, Query(min_length=8, max_length=120)],
+    db: AsyncSession = Depends(get_db),
+    limit: int = Query(100, ge=1, le=200),
+) -> dict:
+    """Control Plane: хронология SystemEvent + ChatLog по одному trace_id."""
+    from app.services.trace_timeline import build_trace_timeline
+
+    org_id = admin_org_from_session(request)
+    timeline = await build_trace_timeline(db, org_id=org_id, trace_id=trace_id, limit=limit)
+    return {"ok": True, **timeline}
+
+
 # ─── Phase 2.3 OS: Event-Driven Aggregates ───────────────────────────────────
 
 

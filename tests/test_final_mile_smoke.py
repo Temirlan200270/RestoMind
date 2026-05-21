@@ -40,6 +40,7 @@ async def test_final_mile_http_smoke_endpoints(asgi_memory_client) -> None:
         ("GET", "/api/admin/intelligence/supplymind/drafts"),
         ("GET", "/api/admin/inventory/sync-status"),
         ("GET", "/api/admin/intelligence/voice/status"),
+        ("GET", "/api/admin/intelligence/voice/calls"),
         ("GET", "/api/admin/intelligence/reviews/external"),
         ("GET", "/api/admin/shift/state"),
         ("GET", "/api/admin/organization/iiko-office"),

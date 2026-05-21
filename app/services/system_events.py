@@ -37,6 +37,8 @@ class BusinessEvent:
     entity_type: str | None = None
     entity_id: str | int | None = None
     version: int = 1
+    parent_event_id: str | None = None
+    caused_by: str | None = None
 
 
 async def emit_event(db: AsyncSession, event: BusinessEvent) -> SystemEvent | None:
@@ -53,6 +55,12 @@ async def emit_event(db: AsyncSession, event: BusinessEvent) -> SystemEvent | No
         "_actor": event.actor,
         "_version": event.version,
     }
+    if event.parent_event_id:
+        enriched_payload["parent_event_id"] = event.parent_event_id
+        enriched_payload["_parent_event_id"] = event.parent_event_id
+    if event.caused_by:
+        enriched_payload["caused_by"] = event.caused_by
+        enriched_payload["_caused_by"] = event.caused_by
     location_id = event.location_id if event.location_id is not None else int(event.org_id)
     enriched_payload["_location_id"] = location_id
 

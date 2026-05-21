@@ -17,9 +17,9 @@ This file tracks what is still needed outside the backend MVP that is already im
 |------|--------------|-----------------|
 | **iiko Office inventory sync** | ✅ `iiko_office_client`, `iiko_inventory_sync`, `inventory_sync` router, ARQ cron, Final Mile status/manual sync UI, [`tests/test_iiko_inventory_sync.py`](tests/test_iiko_inventory_sync.py) | Per-org `integration_config_json.iiko_office` + smoke against **live** iiko Office |
 | **SupplyMind checklist** | ✅ lifecycle API + CSV + UI «Чеклисты закупки»; tests in `test_ultimate_platform_sprint.py` | Role gates + operator smoke in AI Center |
-| **Voice Realtime** | ✅ `voice_realtime/*`, `twilio_routing`, webhook branch; call log strip UI in Final Mile; tests `test_voice_realtime.py`, `test_twilio_routing.py`, `test_voice_staging.py` | **Staging gate:** manual call (`mode=realtime`) on real Twilio + latency/cost notes ([`docs/VOICE_AI_SPIKE.md`](VOICE_AI_SPIKE.md)). **Backend gap:** `GET /api/admin/intelligence/voice/calls` not implemented — UI shows placeholder |
+| **Voice Realtime** | ✅ `voice_realtime/*`, `twilio_routing`, webhook branch; call log strip UI + `GET /voice/calls`; tests `test_voice_realtime.py`, `test_twilio_routing.py`, `test_voice_staging.py` | **Staging gate:** manual call (`mode=realtime`) on real Twilio + latency/cost notes ([`docs/VOICE_AI_SPIKE.md`](VOICE_AI_SPIKE.md)) |
 | **Superadmin audit** | ✅ `SuperadminAuditLog`, `GET /api/superadmin/audit`, UI journal, migration `20260521_superadmin_audit`; tests `test_superadmin_audit.py` | Run migration on deploy; optional filters/export later |
-| **Control Plane trace_id** | ✅ Phase 2 foundation — `trace_context.py`, webhook/ARQ/emit_event; tests `test_control_plane_trace.py` | iiko/outbound/operator propagation, causal chain, timeline UI — see [`docs/CONTROL_PLANE.md`](CONTROL_PLANE.md) |
+| **Control Plane trace_id** | ✅ Phase 2 foundation + tail: iiko/WA/operator logs, causal fields, `GET /trace-timeline`; tests `test_control_plane_trace.py` | Timeline UI panel; Phase 3 replay harness — see [`docs/CONTROL_PLANE.md`](CONTROL_PLANE.md) |
 
 ### iiko Office inventory sync
 
@@ -58,5 +58,4 @@ This file tracks what is still needed outside the backend MVP that is already im
 
 - **Ops (закрыть ROADMAP Voice `[ ]` + iiko smoke):** заполнить [`docs/FINAL_MILE_OPS_SIGNOFF.md`](FINAL_MILE_OPS_SIGNOFF.md), затем `[x]` в ROADMAP.
 - Run `alembic upgrade head` (`20260521_superadmin_audit`); restart workers.
-- Implement `GET /api/admin/intelligence/voice/calls` to wire Voice call log strip (table `voice_call_logs` exists).
 - Browser smoke: [`docs/FINAL_MILE_BROWSER_SMOKE.md`](FINAL_MILE_BROWSER_SMOKE.md); optional PNG via `scripts/capture_admin_u0_baseline.py`.

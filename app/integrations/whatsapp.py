@@ -288,9 +288,12 @@ async def send_message(phone: str, text: str) -> WhatsAppSendResult:
     Отправить текстовое сообщение клиенту в WhatsApp.
     Если токен не настроен — логирует (режим разработки) и возвращает ok без wamid.
     """
+    from app.services.trace_context import trace_log_prefix
+
     text = _strip_markdown_for_whatsapp(text)
+    trace_prefix = trace_log_prefix()
     if not settings.whatsapp_api_token:
-        logger.info("WhatsApp (dev, no token) -> %s: %s", phone, text[:200])
+        logger.info("%sWhatsApp (dev, no token) -> %s: %s", trace_prefix, phone, text[:200])
         return WhatsAppSendResult(ok=True, message_id=None)
 
     candidates = _whatsapp_to_candidates(phone)

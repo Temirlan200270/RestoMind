@@ -369,7 +369,7 @@
                     </div>
                     <div x-show="voiceCallLogsLoading && !(voiceCallLogs || []).length" class="h-16 rounded-xl bg-slate-100 animate-pulse"></div>
                     <div x-show="voiceCallLogsUnavailable" x-cloak class="rounded-xl border border-dashed border-slate-200 px-4 py-3 text-sm text-slate-500">
-                        API журнала звонков пока недоступен. Нужен <code class="text-slate-600">GET /api/admin/intelligence/voice/calls</code>.
+                        Не удалось загрузить журнал звонков. Проверьте доступ к API или повторите позже.
                     </div>
                     <template x-if="!voiceCallLogsLoading && !voiceCallLogsUnavailable && !(voiceCallLogs || []).length">
                         <div class="text-sm text-slate-400 rounded-xl border border-dashed border-slate-200 p-4 text-center">Звонков пока нет</div>

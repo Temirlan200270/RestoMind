@@ -44,10 +44,10 @@ Implemented:
 
 Remaining (still paper / not done):
 
-- full propagation through iiko client calls, outbound WhatsApp send, operator admin actions;
-- causal chain fields (`parent_event_id`, `caused_by`) on durable events;
-- unified order/chat timeline UI around one operational stream keyed by `trace_id`;
-- admin search/filter by `trace_id`.
+- full propagation through iiko client calls (structured `[trace_id=…]` logs in [`iiko_client.py`](app/integrations/iiko_client.py)), outbound WhatsApp send ([`whatsapp.py`](app/integrations/whatsapp.py)), operator admin replies ([`chats.py`](app/api/admin/chats.py) reuses conversation trace + stamps `ChatLog.meta_json`);
+- causal chain fields (`parent_event_id`, `caused_by`) on `BusinessEvent` → `SystemEvent.payload_json`;
+- `GET /api/admin/intelligence/trace-timeline?trace_id=` — merged SystemEvent + ChatLog timeline ([`trace_timeline.py`](app/services/trace_timeline.py));
+- admin search/filter UI by `trace_id` (full timeline panel in admin — not done);
 
 ## Phase 3: Replay Harness
 

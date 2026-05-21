@@ -106,6 +106,10 @@ class IikoClient:
 
         await self._ensure_token()
 
+        from app.services.trace_context import trace_log_prefix
+
+        trace_prefix = trace_log_prefix()
+
         last_exc: Exception | None = None
         refreshed = False
         max_attempts = MAX_RETRIES if retry_transient else 1
@@ -122,7 +126,7 @@ class IikoClient:
 
                 if response.status_code == 401 and not refreshed:
                     # Токен протух: переавторизация и один повтор в рамках того же attempt.
-                    logger.warning("iiko: 401 на %s %s — переавторизация", method, path)
+                    logger.warning("%siiko: 401 на %s %s — переавторизация", trace_prefix, method, path)
                     await self._authenticate()
                     refreshed = True
                     response = await self._http.request(
@@ -136,7 +140,8 @@ class IikoClient:
                 if response.status_code >= 400:
                     body_preview = (response.text or "")[:2000]
                     logger.error(
-                        "iiko: %s %s HTTP %s (попытка %d/%d). body=%s",
+                        "%siiko: %s %s HTTP %s (попытка %d/%d). body=%s",
+                        trace_prefix,
                         method,
                         path,
                         response.status_code,

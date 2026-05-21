@@ -560,6 +560,21 @@ async def admin_send_message(
     org_id = admin_org_from_session(request)
     user = await get_or_create_user(db, phone, org_id)
     now = datetime.now(timezone.utc)
+    from app.services.trace_context import (
+        build_trace_id,
+        publish_chat_event,
+        trace_context,
+        trace_log_prefix,
+        trace_payload,
+    )
+    from app.services.trace_timeline import latest_trace_for_phone
+
+    existing_trace, conversation_id = await latest_trace_for_phone(
+        db,
+        org_id=org_id,
+        phone=phone,
+    )
+    trace_id = existing_trace or build_trace_id(f"operator:{org_id}:{phone}:{int(now.timestamp())}")
     op_log = ChatLog(
         user_id=user.id,
         organization_id=org_id,
@@ -567,20 +582,24 @@ async def admin_send_message(
         content=body.text,
         delivery_status="sending",
         status_updated_at=now,
+        meta_json=trace_payload(trace_id=trace_id, conversation_id=conversation_id),
     )
     db.add(op_log)
     await db.commit()
     await db.refresh(op_log)
     log_id = int(op_log.id)
 
-    # UI-event только после commit: иначе фантомная запись, если транзакция упадёт.
-    from app.services.trace_context import publish_chat_event
-    await publish_chat_event(
-        phone=phone, role="operator", content=body.text,
-        organization_id=org_id, chat_log_id=log_id,
-    )
-
-    wa = await send_message(phone, body.text)
+    with trace_context(trace_id, conversation_id):
+        await publish_chat_event(
+            phone=phone,
+            role="operator",
+            content=body.text,
+            organization_id=org_id,
+            chat_log_id=log_id,
+            trace_id=trace_id,
+            conversation_id=conversation_id,
+        )
+        wa = await send_message(phone, body.text)
 
     # finalize после внешнего I/O, но в той же сессии (важно для тестов/фикстур)
     evt = await finalize_outbound_delivery(
@@ -594,8 +613,18 @@ async def admin_send_message(
         from app.services.message_accounting import schedule_log_message
         schedule_log_message(org_id, "outbound", "operator", "text")
 
-    logger.info("Оператор отправил сообщение в %s: %s", phone, body.text[:50])
-    return {"status": "sent" if wa.ok else "failed", "phone": phone, "chat_log_id": log_id}
+    logger.info(
+        "%sОператор отправил сообщение в %s: %s",
+        trace_log_prefix(),
+        phone,
+        body.text[:50],
+    )
+    return {
+        "status": "sent" if wa.ok else "failed",
+        "phone": phone,
+        "chat_log_id": log_id,
+        "trace_id": trace_id,
+    }
 
 
 @chats_router.post("/chats/{phone}/messages/{chat_log_id}/resend")
