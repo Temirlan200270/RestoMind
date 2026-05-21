@@ -1,0 +1,40 @@
+{# Focus-Driven OS — Mode Bar (Sprint 1 shell).
+   Alpine contract (adminApp root): currentMode ∈ shift|control|intelligence; setMode(mode). #}
+{% macro mode_bar(extra_class='') %}
+<nav class="ds-mode-bar {{ extra_class }}"
+    role="navigation"
+    aria-label="Режим панели">
+    <div class="ds-segmented ds-mode-bar-segmented" role="group" aria-label="Режим работы">
+        <button type="button"
+            class="ds-mode-bar-btn ds-status-shift"
+            :class="currentMode === 'shift' ? 'ds-segmented-active ds-mode-bar-btn--active' : ''"
+            @click="setMode('shift')"
+            :aria-current="currentMode === 'shift' ? 'page' : false"
+            aria-label="Смена — режим оператора">
+            <span class="ds-mode-bar-indicator ds-status-shift" aria-hidden="true"></span>
+            <span class="ds-mode-bar-label hidden sm:inline">Смена</span>
+            <span class="ds-mode-bar-label-short sm:hidden">SHIFT</span>
+        </button>
+        <button type="button"
+            class="ds-mode-bar-btn ds-status-control"
+            :class="currentMode === 'control' ? 'ds-segmented-active ds-mode-bar-btn--active' : ''"
+            @click="setMode('control')"
+            :aria-current="currentMode === 'control' ? 'page' : false"
+            aria-label="Контроль — режим менеджера">
+            <span class="ds-mode-bar-indicator ds-status-control" aria-hidden="true"></span>
+            <span class="ds-mode-bar-label hidden sm:inline">Контроль</span>
+            <span class="ds-mode-bar-label-short sm:hidden">CONTROL</span>
+        </button>
+        <button type="button"
+            class="ds-mode-bar-btn ds-status-intelligence"
+            :class="currentMode === 'intelligence' ? 'ds-segmented-active ds-mode-bar-btn--active' : ''"
+            @click="setMode('intelligence')"
+            :aria-current="currentMode === 'intelligence' ? 'page' : false"
+            aria-label="Intelligence — режим владельца">
+            <span class="ds-mode-bar-indicator ds-status-intelligence" aria-hidden="true"></span>
+            <span class="ds-mode-bar-label hidden sm:inline">Intelligence</span>
+            <span class="ds-mode-bar-label-short sm:hidden">INTELLIGENCE</span>
+        </button>
+    </div>
+</nav>
+{% endmacro %}

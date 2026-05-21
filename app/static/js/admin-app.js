@@ -453,6 +453,70 @@ const ADMIN_TOP_TAB_IDS = new Set([
     'shift', 'dashboard', 'inbox', 'ai_center', 'marketing', 'orders', 'bookings', 'chats', 'menu', 'settings',
 ]);
 
+/**
+ * Focus-Driven OS — Mode Engine (Sprint 1, Strangler).
+ * Matrix: docs/UI_MAP.md § Focus-Driven Admin Shell, docs/UI_DESIGN_SYSTEM.md § Focus-Driven OS.
+ */
+const ADMIN_MODE_STORAGE_KEY = 'restomind_admin_mode';
+
+const ADMIN_MODES = Object.freeze(['shift', 'control', 'intelligence']);
+
+const ADMIN_MODE_DEFAULT_TAB = Object.freeze({
+    shift: 'shift',
+    control: 'inbox',
+    intelligence: 'dashboard',
+});
+
+/** nav id `shift` → `_tab_shift_control.html`. */
+const ADMIN_MODE_TABS = Object.freeze({
+    shift: Object.freeze(['shift']),
+    control: Object.freeze(['inbox', 'orders', 'chats', 'bookings', 'menu']),
+    intelligence: Object.freeze(['dashboard', 'ai_center', 'settings', 'marketing']),
+});
+
+const ADMIN_VALID_MODES = new Set(ADMIN_MODES);
+
+function adminNormalizeAdminMode(mode) {
+    const m = String(mode || '').trim().toLowerCase();
+    return ADMIN_VALID_MODES.has(m) ? m : null;
+}
+
+function adminModeForTab(tabId) {
+    const id = String(tabId || '').trim();
+    if (!id) return null;
+    for (const mode of ADMIN_MODES) {
+        if (ADMIN_MODE_TABS[mode].includes(id)) return mode;
+    }
+    return null;
+}
+
+function adminTabBelongsToMode(tabId, mode) {
+    const m = adminNormalizeAdminMode(mode);
+    if (!m) return false;
+    return ADMIN_MODE_TABS[m].includes(String(tabId || '').trim());
+}
+
+function adminDefaultTabForMode(mode) {
+    const m = adminNormalizeAdminMode(mode);
+    return m ? (ADMIN_MODE_DEFAULT_TAB[m] || ADMIN_MODE_DEFAULT_TAB.control) : ADMIN_MODE_DEFAULT_TAB.control;
+}
+
+function adminTabsForMode(mode) {
+    const m = adminNormalizeAdminMode(mode);
+    return m ? [...ADMIN_MODE_TABS[m]] : [...ADMIN_MODE_TABS.control];
+}
+
+if (typeof window !== 'undefined') {
+    window.adminModeEngine = {
+        MODES: ADMIN_MODES,
+        STORAGE_KEY: ADMIN_MODE_STORAGE_KEY,
+        modeForTab: adminModeForTab,
+        tabsForMode: adminTabsForMode,
+        defaultTabForMode: adminDefaultTabForMode,
+        tabBelongsToMode: adminTabBelongsToMode,
+    };
+}
+
 /** Начальное состояние GET /integrations/status — чтобы Alpine не падал на undefined до первой загрузки. */
 function defaultIntegrationStatus() {
     return {
@@ -3676,9 +3740,11 @@ function adminMixinAuthKnowledge() {
                     const parsed = adminParseLocationHash();
                     if (!parsed.tab) {
                         this.currentTab = this.staffRole === 'operator' ? 'shift' : 'dashboard';
+                        this._bootstrapAdminMode({ tabFromHash: null });
                         this._pushAdminHash();
                     } else {
                         this._applyParsedHash(parsed);
+                        this._bootstrapAdminMode({ tabFromHash: this.currentTab });
                     }
                     this._installAdminHashWatch();
                     this.connectWebSocket();
@@ -3737,9 +3803,11 @@ function adminMixinAuthKnowledge() {
                 const parsedLogin = adminParseLocationHash();
                 if (!parsedLogin.tab) {
                     this.currentTab = this.staffRole === 'operator' ? 'shift' : 'dashboard';
+                    this._bootstrapAdminMode({ tabFromHash: null });
                     this._pushAdminHash();
                 } else {
                     this._applyParsedHash(parsedLogin);
+                    this._bootstrapAdminMode({ tabFromHash: this.currentTab });
                 }
                 this._installAdminHashWatch();
                 this.connectWebSocket();
@@ -3783,9 +3851,11 @@ function adminMixinAuthKnowledge() {
                 const parsedLogin = adminParseLocationHash();
                 if (!parsedLogin.tab) {
                     this.currentTab = 'dashboard';
+                    this._bootstrapAdminMode({ tabFromHash: null });
                     this._pushAdminHash();
                 } else {
                     this._applyParsedHash(parsedLogin);
+                    this._bootstrapAdminMode({ tabFromHash: this.currentTab });
                 }
                 this._installAdminHashWatch();
                 this.connectWebSocket();
@@ -6051,6 +6121,112 @@ function adminMixinWebSocketEvents() {
     };
 }
 
+/** Focus-Driven OS — currentMode, setMode, mode↔tab helpers (Sprint 1). */
+function adminMixinModeEngine() {
+    return {
+        /** @type {'shift'|'control'|'intelligence'} */
+        currentMode: 'shift',
+
+        get isShiftMode() {
+            return this.currentMode === 'shift';
+        },
+
+        get isControlMode() {
+            return this.currentMode === 'control';
+        },
+
+        get isIntelligenceMode() {
+            return this.currentMode === 'intelligence';
+        },
+
+        _readStoredAdminMode() {
+            try {
+                return adminNormalizeAdminMode(window.localStorage?.getItem(ADMIN_MODE_STORAGE_KEY));
+            } catch (_e) {
+                return null;
+            }
+        },
+
+        _persistAdminMode() {
+            try {
+                window.localStorage?.setItem(ADMIN_MODE_STORAGE_KEY, this.currentMode);
+            } catch (_e) { /* ignore */ }
+        },
+
+        /**
+         * Sidebar/hash navigation: sync mode to match the opened tab (Strangler).
+         * Mode Bar calls setMode() explicitly; legacy sidebar stays fully functional.
+         * We sync on tab change so currentMode always reflects the active screen family.
+         */
+        _syncModeFromTab(tabId) {
+            const inferred = adminModeForTab(tabId);
+            if (!inferred || inferred === this.currentMode) return;
+            this.currentMode = inferred;
+            this._persistAdminMode();
+        },
+
+        defaultTabForMode(mode) {
+            return adminDefaultTabForMode(mode);
+        },
+
+        tabsForMode(mode) {
+            return adminTabsForMode(mode);
+        },
+
+        tabsForCurrentMode() {
+            return adminTabsForMode(this.currentMode);
+        },
+
+        isTabInCurrentMode(tabId) {
+            return adminTabBelongsToMode(tabId, this.currentMode);
+        },
+
+        /**
+         * Switch Focus-Driven OS mode; maps to allowed tabs without hiding the legacy sidebar yet.
+         * @param {'shift'|'control'|'intelligence'} mode
+         * @param {{ navigate?: boolean }} [opts]
+         */
+        setMode(mode, opts) {
+            const m = adminNormalizeAdminMode(mode);
+            if (!m) return;
+            const o = opts && typeof opts === 'object' ? opts : {};
+            const navigate = o.navigate !== false;
+            const prev = this.currentMode;
+            this.currentMode = m;
+            this._persistAdminMode();
+            if (navigate && !adminTabBelongsToMode(this.currentTab, m)) {
+                this.navigateToTab(adminDefaultTabForMode(m));
+            }
+            if (prev !== m) {
+                try {
+                    window.dispatchEvent(new CustomEvent('restomind:admin-mode', {
+                        detail: { mode: m, previous: prev },
+                    }));
+                } catch (_e) { /* ignore */ }
+            }
+        },
+
+        /**
+         * After auth: hash tab wins; else restore stored mode; else derive mode from role default tab.
+         * @param {{ tabFromHash?: string | null }} [ctx]
+         */
+        _bootstrapAdminMode(ctx) {
+            const fromHash = ctx?.tabFromHash ?? null;
+            if (fromHash) {
+                this._syncModeFromTab(fromHash);
+                return;
+            }
+            const stored = this._readStoredAdminMode();
+            if (stored) {
+                this.currentMode = stored;
+                this.currentTab = adminDefaultTabForMode(stored);
+                return;
+            }
+            this._syncModeFromTab(this.currentTab);
+        },
+    };
+}
+
 /** Список чатов, сообщения, takeover */
 function adminMixinLiveChat() {
     return {
@@ -6117,7 +6293,10 @@ function adminMixinLiveChat() {
             if (this._adminHashWatchInstalled) return;
             this._adminHashWatchInstalled = true;
             try {
-                this.$watch('currentTab', () => this._schedulePushAdminHash());
+                this.$watch('currentTab', (tab) => {
+                    this._syncModeFromTab(tab);
+                    this._schedulePushAdminHash();
+                });
                 this.$watch('settingsTab', () => {
                     if (this.currentTab === 'settings') this._schedulePushAdminHash();
                 });
@@ -10485,6 +10664,7 @@ function mergeAdminMixins(...sources) {
 function adminApp() {
     return mergeAdminMixins(
         adminMixinState(),
+        adminMixinModeEngine(),
         adminMixinMenuOrdersUi(),
         adminMixinSearchBookings(),
         adminMixinAuthKnowledge(),

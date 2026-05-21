@@ -6,6 +6,11 @@
 
 ## [Unreleased] — 2026-03-20
 
+### Добавлено (2026-05-21) — Focus-Driven OS Sprint 1 (Mode Bar shell)
+
+- **`components/_mode_bar.html`:** три режима (Смена / Контроль / Intelligence) на `ds-segmented` + placeholder-классы `ds-status-shift|control|intelligence`; Alpine `@click="setMode(...)"`, active через `currentMode`.
+- **`screens/_header.html`:** Mode Bar над существующей шапкой при `authenticated`; сайдбар P1.5 и hash-редиректы без изменений.
+
 ### Исправлено (2026-05-21) — Admin checkSession 500 (prod resilience)
 
 - **`check_operational_status`:** сравнение `force_closed_until` с aware UTC — устранён `TypeError` на `GET /organization/profile` при naive timestamp из Postgres.
@@ -21,6 +26,14 @@
 - **Admin API:** `await _session_staff_user` / `_session_is_superadmin` в `chats.py`, `bookings.py`, `orders.py` — устранены 500 на `/chats/{phone}`, `/bookings`, ручной заказ.
 - **Analytics:** безопасное чтение `daily_org_stats` при отставании миграций на prod (`/stats`, `/funnel` fallback на SQL).
 - Тесты: [`tests/test_admin_session_deps_http.py`](tests/test_admin_session_deps_http.py).
+
+### Добавлено (2026-05-21) — Focus-Driven OS Sprint 1 (CSS)
+
+- Universal Semantics в [`src/css/admin-input.css`](src/css/admin-input.css): токены `--color-ai`, `--color-status-*`, `--color-mode-*`; классы `ds-status-ok|warn|danger|ai|inactive` (+ composable `ds-status-dot`, `ds-status-surface`, `ds-status-ring`) для pulse, бейджей и focus-карточек. Сборка: `npm run build:admin-css`.
+
+### Добавлено (2026-05-21) — Focus-Driven OS Sprint 1 · Mode Engine
+
+- **`admin-app.js`:** `currentMode` (`shift` \| `control` \| `intelligence`), `setMode()`, helpers `isShiftMode` / `isControlMode` / `isIntelligenceMode`, persistence `localStorage.restomind_admin_mode`, matrix mode↔tab по [`docs/UI_MAP.md`](docs/UI_MAP.md); sidebar/hash sync mode (Strangler, sidebar не удалён); `window.adminModeEngine` + event `restomind:admin-mode`.
 
 ### Документация (2026-05-21) — Focus-Driven OS (Admin Shell)
 

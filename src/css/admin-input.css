@@ -8,6 +8,20 @@
     --color-surface: #ffffff;
     --color-surface-muted: #f8fafc;
     --color-border: #e5e7eb;
+    --color-ai: #7c3aed;
+    /* Universal status semantics (Focus-Driven OS, G5 pulse aligned) */
+    --color-status-ok: #34d399;
+    --color-status-ok-strong: #059669;
+    --color-status-warn: #fbbf24;
+    --color-status-warn-strong: #d97706;
+    --color-status-danger: #ef4444;
+    --color-status-danger-strong: #dc2626;
+    --color-status-inactive: #94a3b8;
+    --color-status-inactive-strong: #64748b;
+    /* Mode Bar accents (SHIFT / CONTROL / INTELLIGENCE) */
+    --color-mode-shift: var(--color-status-ok);
+    --color-mode-control: var(--color-status-warn);
+    --color-mode-intelligence: #2563eb;
     --space-2: 0.5rem;
     --space-3: 0.75rem;
     --space-4: 1rem;
@@ -481,6 +495,97 @@ aside.bg-brand-900 nav.admin-sidebar-scroll::-webkit-scrollbar-thumb:hover {
 /* p15:tour — плавное перемещение «прожектора» coach-marks */
 .admin-root .ds-p15-tour-hole {
     transition: top 0.18s ease, left 0.18s ease, width 0.18s ease, height 0.18s ease;
+}
+
+/*
+ * Focus-Driven OS — Universal status semantics (Sprint 1).
+ * Комбинируйте ds-status-* с ds-status-dot | ds-status-surface | ds-status-ring.
+ * G5 pulse: ok/warn/danger; AI — --color-ai; inactive — архив / human_mode.
+ */
+.admin-root .ds-status-dot {
+    @apply inline-block h-2 w-2 shrink-0 rounded-full;
+}
+.admin-root .ds-status-surface {
+    @apply rounded-xl border;
+    background: var(--color-surface);
+    border-color: var(--color-border);
+}
+.admin-root .ds-status-ring {
+    box-shadow:
+        0 0 0 2px color-mix(in srgb, var(--ds-status-accent, var(--color-border)) 55%, transparent),
+        0 1px 2px rgb(15 23 42 / 6%);
+    border-color: color-mix(
+        in srgb,
+        var(--ds-status-accent, var(--color-border)) 40%,
+        var(--color-border)
+    ) !important;
+}
+
+.admin-root .ds-status-ok {
+    color: var(--color-status-ok-strong);
+    --ds-status-accent: var(--color-status-ok);
+}
+.admin-root .ds-status-dot.ds-status-ok {
+    background-color: var(--color-status-ok);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-status-ok) 18%, transparent);
+}
+.admin-root .ds-status-surface.ds-status-ok {
+    background: color-mix(in srgb, var(--color-status-ok) 8%, var(--color-surface));
+    border-color: color-mix(in srgb, var(--color-status-ok) 35%, var(--color-border));
+}
+
+.admin-root .ds-status-warn {
+    color: var(--color-status-warn-strong);
+    --ds-status-accent: var(--color-status-warn);
+}
+.admin-root .ds-status-dot.ds-status-warn {
+    background-color: var(--color-status-warn);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-status-warn) 14%, transparent);
+}
+.admin-root .ds-status-surface.ds-status-warn {
+    background: color-mix(in srgb, var(--color-status-warn) 8%, var(--color-surface));
+    border-color: color-mix(in srgb, var(--color-status-warn) 35%, var(--color-border));
+}
+
+.admin-root .ds-status-danger {
+    color: var(--color-status-danger-strong);
+    --ds-status-accent: var(--color-status-danger);
+}
+.admin-root .ds-status-dot.ds-status-danger {
+    background-color: var(--color-status-danger);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-status-danger) 18%, transparent);
+    animation: pulseAlert 2s infinite;
+}
+.admin-root .ds-status-surface.ds-status-danger {
+    background: color-mix(in srgb, var(--color-status-danger) 8%, var(--color-surface));
+    border-color: color-mix(in srgb, var(--color-status-danger) 35%, var(--color-border));
+}
+
+.admin-root .ds-status-ai {
+    color: var(--color-ai);
+    --ds-status-accent: var(--color-ai);
+}
+.admin-root .ds-status-dot.ds-status-ai {
+    background-color: var(--color-ai);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-ai) 18%, transparent);
+}
+.admin-root .ds-status-surface.ds-status-ai {
+    background: color-mix(in srgb, var(--color-ai) 8%, var(--color-surface));
+    border-color: var(--color-ai);
+}
+
+.admin-root .ds-status-inactive {
+    color: var(--color-status-inactive-strong);
+    --ds-status-accent: var(--color-status-inactive);
+}
+.admin-root .ds-status-dot.ds-status-inactive {
+    background-color: var(--color-status-inactive);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-status-inactive) 14%, transparent);
+}
+.admin-root .ds-status-surface.ds-status-inactive {
+    background: var(--color-surface-muted);
+    border-color: var(--color-border);
+    color: var(--color-text-muted);
 }
 
 /* P1.5: AI confidence — мягкое предупреждение на карточке заказа */

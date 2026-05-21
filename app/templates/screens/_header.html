@@ -1,5 +1,10 @@
         <header class="ds-admin-tenant-stripe-header shrink-0 glass border-b border-gray-200 px-3 sm:px-4 md:px-8 py-2.5 md:py-4 z-10 min-w-0 max-w-full overflow-x-clip"
             :class="currentTab === 'chats' && activeChatPhone ? 'max-md:hidden' : ''">
+            {# Focus-Driven OS — Mode Bar (Sprint 1 shell; sidebar P1.5 остаётся) #}
+            <div x-show="authenticated" x-cloak
+                class="mb-2.5 md:mb-3 flex justify-center sm:justify-start min-w-0 overflow-x-auto">
+                {{ mode_bar('w-full sm:w-auto max-w-full') }}
+            </div>
             <!-- Мобильная шапка: один компактный ряд -->
             <div class="flex items-center gap-2 md:hidden min-w-0">
                 <h1 class="flex-1 min-w-0 text-base font-bold text-gray-900 truncate"
