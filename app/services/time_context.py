@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -91,6 +90,13 @@ def default_schedule_json() -> dict[str, Any]:
     return OrganizationSchedule().model_dump(mode="json")
 
 
+def _as_utc_aware(dt: datetime) -> datetime:
+    """Normalize DB datetimes (often naive UTC on Postgres/SQLite) for comparisons."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 def parse_schedule_json(schedule_json: dict[str, Any] | None) -> OrganizationSchedule:
     src = schedule_json if isinstance(schedule_json, dict) else default_schedule_json()
     try:
@@ -159,11 +165,12 @@ def check_operational_status(
 ) -> OperationalStatus:
     norm = zoneinfo_or_default(timezone_name, default=DEFAULT_ORG_TIMEZONE)
     z = norm.zone
-    now_utc = now if now is not None else datetime.now(tz=ZoneInfo("UTC"))
+    now_utc = _as_utc_aware(now) if now is not None else datetime.now(tz=timezone.utc)
     now_local = now_utc.astimezone(z)
 
     # Экстренное закрытие: проверяем до расписания
-    if force_closed_until is not None and now_utc < force_closed_until:
+    fc_until = _as_utc_aware(force_closed_until) if force_closed_until is not None else None
+    if fc_until is not None and now_utc < fc_until:
         reason_text = (force_closed_reason or "").strip()
         label = f"Заведение временно закрыто.{' ' + reason_text if reason_text else ''}"
         instr = (

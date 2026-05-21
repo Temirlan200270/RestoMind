@@ -6,12 +6,25 @@
 
 ## [Unreleased] — 2026-03-20
 
+### Исправлено (2026-05-21) — Admin checkSession 500 (prod resilience)
+
+- **`check_operational_status`:** сравнение `force_closed_until` с aware UTC — устранён `TypeError` на `GET /organization/profile` при naive timestamp из Postgres.
+- **`integration_health`:** безопасное чтение `organization_integration_sync` при отставании миграции `20260522_iiko_office_inventory` (`last_inventory_sync_*`).
+- **Location scope fallback:** `money_queue`, `revenue_leak`, `GET /chats` — retry без `location_id` фильтра при schema lag (`20260520_locations_phase11`).
+- **`shift_state_engine`:** Redis S1 latch / focus lease / exclusions не рвут `GET /shift/state` при недоступном Redis.
+- Тесты: [`tests/test_admin_session_deps_http.py`](tests/test_admin_session_deps_http.py) (`checkSession` smoke), [`tests/test_time_context_schedule.py`](tests/test_time_context_schedule.py) (naive `force_closed_until`).
+
 ### Исправлено (2026-05-21) — Admin 500 и Alpine latencyData
 
 - **Alpine:** `latencyData?.sla_violations` в `_tab_intelligence.html` — убран crash до загрузки Intelligence.
 - **Admin API:** `await _session_staff_user` / `_session_is_superadmin` в `chats.py`, `bookings.py`, `orders.py` — устранены 500 на `/chats/{phone}`, `/bookings`, ручной заказ.
 - **Analytics:** безопасное чтение `daily_org_stats` при отставании миграций на prod (`/stats`, `/funnel` fallback на SQL).
 - Тесты: [`tests/test_admin_session_deps_http.py`](tests/test_admin_session_deps_http.py).
+
+### Документация (2026-05-21) — Focus-Driven OS (Admin Shell)
+
+- Зафиксированы три закона Execution OS, матрица режимов SHIFT/CONTROL/INTELLIGENCE, Universal Semantics (`ds-status-*`), mobile staged nav, locality voice calls, Focus Card ↔ `GET /shift/state`.
+- Обновлены: [`docs/UI_DESIGN_SYSTEM.md`](docs/UI_DESIGN_SYSTEM.md), [`docs/OS_TRANSITION_PLAN.md`](docs/OS_TRANSITION_PLAN.md) § UI Layer, [`docs/ROADMAP.md`](docs/ROADMAP.md) P5 (4 спринта, без дублирования G7/G10/Voice API).
 
 ### Добавлено (2026-05-21) — Superadmin · Control Plane · Admin UI
 

@@ -37,6 +37,7 @@ from app.services.bot_sla_status import (
 from app.services.events import publish_event
 from app.services.intent_router import get_or_create_user
 from app.services.system_events import BusinessEvent, emit_event
+from app.services.db_schema_fallback import with_location_scope_fallback
 from app.services.tenant_scope import allowed_location_ids_for_staff, chat_logs_location_filter
 
 from .deps import (
@@ -142,52 +143,60 @@ async def list_chats_sidebar(
         except Exception:
             cur_dt = None
 
-    # last message per user via window function (portable for Postgres/SQLite).
-    base_sq = (
-        select(
-            ChatLog.id.label("log_id"),
-            ChatLog.user_id.label("user_id"),
-            ChatLog.created_at.label("last_at"),
-            ChatLog.content.label("content"),
-            ChatLog.role.label("last_role"),
-            User.phone.label("phone"),
-            User.name.label("user_name"),
-            User.meta_json.label("user_meta"),
-            func.row_number()
-            .over(
-                partition_by=ChatLog.user_id,
-                order_by=(ChatLog.created_at.desc(), ChatLog.id.desc()),
+    async def _load_chat_rows(
+        loc_id: int | None,
+        allowed: set[int] | None,
+    ) -> list[Any]:
+        base_sq = (
+            select(
+                ChatLog.id.label("log_id"),
+                ChatLog.user_id.label("user_id"),
+                ChatLog.created_at.label("last_at"),
+                ChatLog.content.label("content"),
+                ChatLog.role.label("last_role"),
+                User.phone.label("phone"),
+                User.name.label("user_name"),
+                User.meta_json.label("user_meta"),
+                func.row_number()
+                .over(
+                    partition_by=ChatLog.user_id,
+                    order_by=(ChatLog.created_at.desc(), ChatLog.id.desc()),
+                )
+                .label("rn"),
             )
-            .label("rn"),
-        )
-        .join(User, User.id == ChatLog.user_id)
-        .where(
-            User.organization_id == org_id,
-            chat_logs_location_filter(allowed_location_ids, location_id),
-        )
-        .subquery()
-    )
-
-    stmt = (
-        select(base_sq)
-        .where(base_sq.c.rn == 1)
-    )
-    if cur_dt is not None and cursor_id is not None:
-        stmt = stmt.where(
-            or_(
-                base_sq.c.last_at < cur_dt,
-                and_(base_sq.c.last_at == cur_dt, base_sq.c.log_id < int(cursor_id)),
+            .join(User, User.id == ChatLog.user_id)
+            .where(
+                User.organization_id == org_id,
+                chat_logs_location_filter(allowed, loc_id),
             )
+            .subquery()
         )
-    elif cur_dt is not None:
-        stmt = stmt.where(base_sq.c.last_at < cur_dt)
-    elif cursor_id is not None:
-        stmt = stmt.where(base_sq.c.log_id < int(cursor_id))
 
-    stmt = stmt.order_by(base_sq.c.last_at.desc(), base_sq.c.log_id.desc()).limit(limit + 1)
+        inner_stmt = select(base_sq).where(base_sq.c.rn == 1)
+        if cur_dt is not None and cursor_id is not None:
+            inner_stmt = inner_stmt.where(
+                or_(
+                    base_sq.c.last_at < cur_dt,
+                    and_(base_sq.c.last_at == cur_dt, base_sq.c.log_id < int(cursor_id)),
+                )
+            )
+        elif cur_dt is not None:
+            inner_stmt = inner_stmt.where(base_sq.c.last_at < cur_dt)
+        elif cursor_id is not None:
+            inner_stmt = inner_stmt.where(base_sq.c.log_id < int(cursor_id))
 
-    result = await db.execute(stmt)
-    rows = result.all()
+        inner_stmt = inner_stmt.order_by(
+            base_sq.c.last_at.desc(),
+            base_sq.c.log_id.desc(),
+        ).limit(limit + 1)
+        result = await db.execute(inner_stmt)
+        return list(result.all())
+
+    rows = await with_location_scope_fallback(
+        location_id=location_id,
+        allowed_location_ids=allowed_location_ids,
+        run=_load_chat_rows,
+    )
 
     has_more = len(rows) > limit
     rows = rows[:limit]

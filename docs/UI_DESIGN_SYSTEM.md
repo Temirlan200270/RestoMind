@@ -159,6 +159,69 @@ Operations‑интерфейс должен работать в двух реж
 
 ---
 
+## Focus-Driven OS (Admin Shell) — G10.4+
+
+> **Контекст:** переход от P1.5.0 (сайдбар + вкладки) к **трёхрежимной операционной оболочке**. Backend G10 уже реализован; этот раздел — **UI-контракт**. Engineering plan: ROADMAP P5 «Focus-Driven OS», стратегия Strangler — [`OS_TRANSITION_PLAN.md`](OS_TRANSITION_PLAN.md) § UI Layer.
+
+### Execution OS — три закона
+
+1. **LAW 1 — Single Focus Principle** — в SHIFT MODE один `shiftState.focus`; Alpine не пересчитывает state/queue (см. [`G10_SEMANTIC_CONTRACT.md`](G10_SEMANTIC_CONTRACT.md) §5).
+2. **LAW 2 — Sequential Mobile Cognition** — на `<lg` не две колонки, а **Staged Focus Navigation**: экран Focus (карточка + CTA) → экран Context (чат/заказ) с фиксированной кнопкой **«⬅ Назад к задаче»**.
+3. **LAW 3 — Locality of Operations** — операционные виджеты (риск, чаты, звонки Voice AI, стоп-листы) фильтруются по **`location_id`** в шапке; сводка по всей org — только в INTELLIGENCE MODE.
+
+### Режимы интерфейса (целевая матрица)
+
+| Режим | Цвет | Аудитория | Allowed tabs | Сайдбар | Location в шапке |
+|-------|------|-----------|--------------|---------|------------------|
+| **SHIFT MODE** | 🟢 | Оператор | `shift_control` | **Скрыт** | Обязателен (locality) |
+| **CONTROL MODE** | 🟡 | Менеджер | `inbox`, `orders`, `chats`, `bookings`, `menu` | Операции (P1.5) | Обязателен |
+| **INTELLIGENCE MODE** | 🔵 | Владелец | `dashboard`, `ai_center`, `settings` | Управление | Опционально / вся сеть |
+
+**Сейчас в prod-коде:** единый сайдбар со всеми `navItems`; `_tab_shift_control.html` — одна колонка без Context Dock. Mode Bar и split — Sprint 1–2 ROADMAP.
+
+**Связь с IA P1.5.0:** Inbox / Dashboard / AI Center **не удаляются** — они **перераспределяются по режимам** (CONTROL vs INTELLIGENCE). Hash-редиректы (`#operator_queue` → `#inbox`) сохраняются.
+
+### Universal Semantics (единая палитра статусов)
+
+Для списков, pulse, бейджей и focus-карточек — **один контракт** (Sprint 1: CSS-токены в `src/css/admin-input.css`):
+
+| Семантика | Класс / токен | Когда |
+|-----------|---------------|--------|
+| 🟢 OK | `ds-status-ok` | Задача закрыта, pulse green, ИИ в авто-режиме |
+| 🟡 Warn | `ds-status-warn` | Нужна реакция, pulse amber, AI confidence low |
+| 🔴 Danger | `ds-status-danger` | Риск денег: pulse red, отмена, сбой оплаты |
+| 🟣 AI | `ds-status-ai` | ИИ на паузе, AI-bubble, snooze, intent panel |
+| ⚫ Inactive | `ds-status-inactive` | Архив, human_mode, неактивная точка |
+
+**Существующие аналоги (не дублировать):** Live Pulse G5 в чатах (`chatPulseStatus`), `--color-ai` в § AI in UI, `ds-badge-warning-soft` для confidence. Новые `ds-status-*` — **унификация**, постепенная замена ad-hoc Tailwind в operations-зонах.
+
+### Shift Mode — layout
+
+**Desktop (`≥lg`):** split — **Left Panel** (Focus Deck: focus + queue preview ≤5) + **Right Panel** (Context Dock по `focus.kind`).
+
+**Mobile (`<lg`):** Staged Focus Navigation (LAW 2).
+
+**Пустой focus при ненулевом риске:** гибрид — TTL `skip` 600s **и** вторичная CTA **`reset_skips`** при `shift_empty_focus_while_risk_positive` (✅ FM-3). Не делать `reset_skips` primary CTA на каждом экране.
+
+### Focus Card ↔ `GET /shift/state`
+
+UI рендерит поля **`focus`** как отдано API ([`_focus_payload`](../app/services/shift_state_engine.py)): `id`, `kind`, `type`, `title`, `subtitle`, `value_kzt`, `wait_minutes`, `pulse`, `phone`, `order_id`, `actions`, `reason`. Не вводить параллельные имена (`risk_kzt`, `color_code`, `entity.*`) на фронте без ADR.
+
+**Context Dock (Sprint 2):**
+
+| `focus.kind` | Шаблон |
+|--------------|--------|
+| `slow_chat` (pulse red/amber) | `_shift_focus_chat.html` — чат + Order Card + AI Intent |
+| `abandoned_draft`, `pending_prepay` | `_shift_focus_order.html` — состав корзины + recovery CTA |
+
+### Voice call log (locality)
+
+- При выбранной точке: `GET /voice/calls?location_id={selectedLocationId}&limit=…` (✅ API + RBAC).
+- Без точки / Intelligence summary: org-wide список допустим.
+- Backlog: писать `location_id` в payload при `record_voice_call` — см. ROADMAP P5.
+
+---
+
 ## Миграция: новая страница / блок
 
 1. Проверить [`app/templates/components/`](../app/templates/components/) — есть ли готовый макрос.  
@@ -181,6 +244,8 @@ Operations‑интерфейс должен работать в двух реж
 
 ## Связанные документы
 
-- `docs/ROADMAP.md` — единственный трекер задач/техдолга.  
+- `docs/ROADMAP.md` — единственный трекер задач/техдолга; блок **Focus-Driven OS (Admin Shell)** в P5.  
+- `docs/OS_TRANSITION_PLAN.md` — § UI Layer (Phase 6), Strangler-выкатка.  
+- `docs/G10_SHIFT_CONTROL_PLANE.md`, `docs/G10_SEMANTIC_CONTRACT.md` — backend смены и focus contract.  
 - `docs/ui/baseline/` — фиксированные baseline-скрины для визуальной регрессии.  
 - `docs/ui/lighthouse/` — отчёты Lighthouse и таблица сводки.  

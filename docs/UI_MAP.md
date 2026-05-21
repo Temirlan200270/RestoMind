@@ -17,6 +17,18 @@
 
 Все экраны подключаются из `app/templates/admin.html` через `{% include "screens/…" %}`. Верхнеуровневые вкладки задаются в `admin-app.js` (`navItems`: `inbox`, `orders`, `chats`, `bookings`, `dashboard`, `ai_center`, `menu`, `settings`). Старые hash-URL (`#operator_queue`, `#incidents`, `#analytics`, …) редиректятся в JS на новые.
 
+### Целевая модель: Focus-Driven Admin Shell (G10.4+, ⏳)
+
+> **Сейчас:** один authenticated shell + сайдбар P1.5.0. **Цель:** Mode Bar (`shift` \| `control` \| `intelligence`) поверх тех же экранов — см. [`docs/UI_DESIGN_SYSTEM.md`](UI_DESIGN_SYSTEM.md) § Focus-Driven OS.
+
+| Режим | Экраны (include) | Новые шаблоны (Sprint 2) |
+|-------|------------------|--------------------------|
+| SHIFT 🟢 | `_tab_shift_control.html` (Focus Deck) | `_shift_focus_chat.html`, `_shift_focus_order.html` (Context Dock) |
+| CONTROL 🟡 | `_tab_inbox.html`, `_tab_orders.html`, `_tab_chats.html`, `_tab_bookings.html`, `_tab_menu.html` | Inbox → Action Queue UI (Sprint 3) |
+| INTELLIGENCE 🔵 | `_tab_dashboard.html`, `_tab_ai_center.html`, `_tab_settings_*.html` | — |
+
+`_tab_shift_control.html` — стартовая вкладка для роли `operator` (G9); после Sprint 1–2 живёт **только** в SHIFT MODE (сайдбар скрыт).
+
 ### Операции (`section: operations`)
 
 - `_tab_inbox.html` — **«Требует внимания»**: под-табы «От клиентов» / «Системные» (объединяет сценарии бывших отдельных экранов очереди и инцидентов, P1.5.0).

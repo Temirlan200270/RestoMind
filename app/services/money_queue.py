@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.db.models import ChatLog, Order, OrderStatus, User
 from app.services.bot_sla_status import chat_live_pulse
+from app.services.db_schema_fallback import with_location_scope_fallback
 from app.services.tenant_scope import chat_logs_location_filter, orders_location_filter, orders_tenant_clause
 
 DRAFT_STALE_MINUTES = 30
@@ -355,7 +356,7 @@ async def summarize_queue_counts(
     }
 
 
-async def build_money_queue(
+async def _build_money_queue_impl(
     db: AsyncSession,
     org_id: int,
     *,
@@ -409,3 +410,22 @@ async def build_money_queue(
         },
         "location_id": location_id,
     }
+
+
+async def build_money_queue(
+    db: AsyncSession,
+    org_id: int,
+    *,
+    location_id: int | None = None,
+    allowed_location_ids: set[int] | None = None,
+) -> dict[str, Any]:
+    return await with_location_scope_fallback(
+        location_id=location_id,
+        allowed_location_ids=allowed_location_ids,
+        run=lambda loc_id, allowed: _build_money_queue_impl(
+            db,
+            org_id,
+            location_id=loc_id,
+            allowed_location_ids=allowed,
+        ),
+    )

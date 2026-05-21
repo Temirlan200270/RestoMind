@@ -5,12 +5,16 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 from sqlalchemy import delete as sql_delete, func, or_, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import IntegrationEvent, IntegrationHealth, OrganizationIntegrationSync
+
+logger = logging.getLogger(__name__)
 
 ROW_ID = 1
 _MAX_EVENTS = 100
@@ -185,16 +189,25 @@ async def build_status_payload(
     whatsapp_configured: bool,
 ) -> dict:
     """JSON для GET /api/admin/integrations/status — слоты last_* по активному филиалу."""
-    org_row = await db.get(OrganizationIntegrationSync, int(organization_id))
+    slot = _neutral_slot()
+    neutral = {
+        "iiko_configured": iiko_configured,
+        "whatsapp_configured": whatsapp_configured,
+        "last_stoplist": {**slot},
+        "last_menu_sync": {**slot},
+        "last_inventory_sync": {**slot},
+    }
+    try:
+        org_row = await db.get(OrganizationIntegrationSync, int(organization_id))
+    except SQLAlchemyError as exc:
+        logger.warning(
+            "organization_integration_sync read failed org=%s: %s",
+            organization_id,
+            exc,
+        )
+        return neutral
     if org_row is None:
-        slot = _neutral_slot()
-        return {
-            "iiko_configured": iiko_configured,
-            "whatsapp_configured": whatsapp_configured,
-            "last_stoplist": {**slot},
-            "last_menu_sync": {**slot},
-            "last_inventory_sync": {**slot},
-        }
+        return neutral
     return {
         "iiko_configured": iiko_configured,
         "whatsapp_configured": whatsapp_configured,
@@ -209,9 +222,9 @@ async def build_status_payload(
             "error": org_row.last_menu_sync_error or None,
         },
         "last_inventory_sync": {
-            "at": _iso(org_row.last_inventory_sync_at),
-            "ok": bool(org_row.last_inventory_sync_ok),
-            "error": org_row.last_inventory_sync_error or None,
+            "at": _iso(getattr(org_row, "last_inventory_sync_at", None)),
+            "ok": bool(getattr(org_row, "last_inventory_sync_ok", False)),
+            "error": getattr(org_row, "last_inventory_sync_error", None) or None,
         },
     }
 
@@ -224,14 +237,22 @@ async def build_inventory_sync_status(
     iiko_cloud_configured: bool,
 ) -> dict:
     """JSON для GET /api/admin/inventory/sync-status."""
-    org_row = await db.get(OrganizationIntegrationSync, int(organization_id))
     slot = _neutral_slot()
     last = slot
+    try:
+        org_row = await db.get(OrganizationIntegrationSync, int(organization_id))
+    except SQLAlchemyError as exc:
+        logger.warning(
+            "organization_integration_sync read failed org=%s: %s",
+            organization_id,
+            exc,
+        )
+        org_row = None
     if org_row is not None:
         last = {
-            "at": _iso(org_row.last_inventory_sync_at),
-            "ok": bool(org_row.last_inventory_sync_ok),
-            "error": org_row.last_inventory_sync_error or None,
+            "at": _iso(getattr(org_row, "last_inventory_sync_at", None)),
+            "ok": bool(getattr(org_row, "last_inventory_sync_ok", False)),
+            "error": getattr(org_row, "last_inventory_sync_error", None) or None,
         }
     return {
         "iiko_office_configured": iiko_office_configured,

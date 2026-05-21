@@ -125,6 +125,27 @@
 
 > Цель: владелец «чувствует» работу ОС. «Лента решений» превращает RestoMind из «софта» в «цифрового сотрудника».
 
+### Focus-Driven OS (Admin Shell) — целевая UI-модель G10.4+
+
+> **Статус:** архитектурный контракт зафиксирован; **код сейчас** — P1.5.0 (сайдбар + вкладки) + G10 `_tab_shift_control.html` (один экран, без Mode Engine). Детали: [`docs/UI_DESIGN_SYSTEM.md`](UI_DESIGN_SYSTEM.md) § Focus-Driven OS, [`docs/OS_TRANSITION_PLAN.md`](OS_TRANSITION_PLAN.md) § UI Layer.
+
+**Принятые решения (2026-05-21):**
+
+| Вопрос | Решение | Где в коде / доках |
+|--------|---------|-------------------|
+| Mobile Shift Mode | **Staged Focus Navigation** (`focus` ↔ `context`, кнопка «Назад к задаче» на `<lg`) | UI_DESIGN_SYSTEM LAW 2; реализация — Sprint 2 |
+| Пустой focus при риске | **Гибрид:** TTL skip 600s + CTA `reset_skips` при `shift_empty_focus_while_risk_positive` | ✅ [`_tab_shift_control.html`](app/templates/screens/_tab_shift_control.html), FM-3 в ROADMAP |
+| Voice call log | **Strict `location_id`** при выбранной точке; org-wide — только summary в Intelligence | ✅ `GET /voice/calls?location_id=`; backlog — запись `location_id` в payload |
+
+**Спринты (Strangler — без остановки прода):**
+
+- [ ] **Sprint 1 — Mode Engine + Universal Semantics:** `currentMode` (`shift` \| `control` \| `intelligence`) в `admin-app.js`; Mode Bar в шапке; условный сайдбар; CSS-токены `ds-status-ok|warn|danger|ai|inactive` в `src/css/admin-input.css` → `npm run build:admin-css`. Backend без изменений (`GET /shift/state` ✅).
+- [ ] **Sprint 2 — Shift split + mobile staged nav:** `_shift_focus_chat.html`, `_shift_focus_order.html`; правая панель Context Dock по `shiftState.focus.kind`; mobile `mobileActiveScreen` focus/context.
+- [ ] **Sprint 3 — Action Queue inbox + voice tail:** эволюция `_tab_inbox.html` (карточки `money_queue.py`, не дублировать G7 backend); Final Mile call strip с `locationQueryParams()`; закрыть backlog `location_id` в `record_voice_call`.
+- [ ] **Sprint 4 — Command Bar (Ctrl+K):** префиксы `/leak`, `/red`, `/force-close` поверх существующего глобального поиска.
+
+**Не дублировать (уже сделано):** G7 money queue, G9/G10 shift engine, FM-3 `reset_skips`, Voice `GET /voice/calls` (пагинация + RBAC) — см. чекбоксы ниже в P5.
+
 - [x] **OS Decision Feed UI:** «Лента решений ОС» в `aiCenterTab=os` ([`_tab_ai_center.html`](app/templates/screens/_tab_ai_center.html)), `loadAuditLog()`, WS `os.audit`, блок «Живая ОС» (`dashLiveFeed`) на дашборде, refresh по `order.*` / `payment.*` / `booking.*` в `handleWsEvent`. UI-тексты — язык оператора («данные ОС», не dev-жаргон).
 - [x] **Websocket audit push:** [`audit_consumer.py`](app/services/audit_consumer.py) публикует `os.audit` с `org_id` после записи в `audit_log`.
 - [x] **Daily OS Digest (backend):** [`daily_os_digest.py`](app/services/daily_os_digest.py) — `GET /daily-os-digest/preview`, cron `daily_os_digest_scheduled_tick` (окно 09:00 по `Organization.timezone`). Staging-проверка Telegram — [`docs/TELEGRAM_DIGEST_STAGING.md`](docs/TELEGRAM_DIGEST_STAGING.md).

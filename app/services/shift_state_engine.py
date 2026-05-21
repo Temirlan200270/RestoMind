@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Awaitable
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -28,6 +29,15 @@ S1_ENTER_RISK_KZT = 10000
 S1_EXIT_RISK_KZT = 7000
 S1_ENTER_DRAFTS_KZT = 8000
 S1_EXIT_DRAFTS_KZT = 6000
+
+
+async def _redis_safe(coro: Awaitable[Any], default: Any) -> Any:
+    """Shift plane degrades gracefully when Redis is unavailable (Render cold start / outage)."""
+    try:
+        return await coro
+    except Exception as exc:
+        logger.warning("shift redis unavailable: %s", exc)
+        return default
 
 KIND_TO_TYPE = {
     "abandoned_draft": "draft",
@@ -131,14 +141,14 @@ async def resolve_state_effective(org_id: int, i: ShiftInput) -> tuple[str, bool
     base = resolve_state(i)
     latch_key = _s1_latch_key(org_id)
     if base == "S5":
-        await redis_client.delete(latch_key)
+        await _redis_safe(redis_client.delete(latch_key), None)
         return base, False
     if _is_s1(i):
-        await redis_client.setex(latch_key, S1_LATCH_TTL_SEC, "1")
+        await _redis_safe(redis_client.setex(latch_key, S1_LATCH_TTL_SEC, "1"), None)
         return "S1", False
-    if await redis_client.get(latch_key) and not _can_exit_s1_latch(i):
+    if await _redis_safe(redis_client.get(latch_key), None) and not _can_exit_s1_latch(i):
         return "S1", True
-    await redis_client.delete(latch_key)
+    await _redis_safe(redis_client.delete(latch_key), None)
     return base, False
 
 
@@ -344,20 +354,25 @@ async def _prune_exclusion_set(org_id: int, set_key: str, item_key_prefix: str) 
 
 
 async def _load_excluded(org_id: int) -> tuple[set[str], set[str], set[str], set[str]]:
-    oid = int(org_id)
-    skipped = await _prune_exclusion_set(oid, _skip_set_key(oid), "shift:skip:")
-    next_ids = await _prune_exclusion_set(oid, _next_set_key(oid), "shift:next:")
-    done = await _prune_exclusion_set(oid, _done_set_key(oid), "shift:done:")
+    try:
+        oid = int(org_id)
+        skipped = await _prune_exclusion_set(oid, _skip_set_key(oid), "shift:skip:")
+        next_ids = await _prune_exclusion_set(oid, _next_set_key(oid), "shift:next:")
+        done = await _prune_exclusion_set(oid, _done_set_key(oid), "shift:done:")
 
-    if not skipped:
-        skipped = await _scan_focus_ids(oid, "shift:skip:")
-    if not next_ids:
-        next_ids = await _scan_focus_ids(oid, "shift:next:")
-    if not done:
-        done = await _scan_focus_ids(oid, "shift:done:")
+        if not skipped:
+            skipped = await _scan_focus_ids(oid, "shift:skip:")
+        if not next_ids:
+            next_ids = await _scan_focus_ids(oid, "shift:next:")
+        if not done:
+            done = await _scan_focus_ids(oid, "shift:done:")
 
-    excluded = skipped | next_ids | done
-    return excluded, skipped, next_ids, done
+        excluded = skipped | next_ids | done
+        return excluded, skipped, next_ids, done
+    except Exception as exc:
+        logger.warning("shift exclusion load failed org=%s: %s", org_id, exc)
+        empty: set[str] = set()
+        return empty, empty, empty, empty
 
 
 async def _register_exclusion(
@@ -455,54 +470,67 @@ async def _resolve_focus(
 ) -> tuple[dict[str, Any] | None, FocusOwnership]:
     op = _normalize_operator_id(operator_id)
     if not active_items:
-        await _clear_active_focus(org_id, op)
+        await _redis_safe(_clear_active_focus(org_id, op), None)
         return None, "none"
 
-    leases = await _scan_active_focus_leases(org_id)
-    lease_key = _active_focus_key(org_id, op)
-    current_id = await redis_client.get(lease_key)
-    candidate: dict[str, Any] | None = None
-    reason = "highest_priority_score"
-
-    if current_id:
-        current_id = str(current_id)
-        leased_item = next(
-            (it for it in active_items if str(it.get("id") or "") == current_id),
-            None,
-        )
-        if leased_item:
-            await redis_client.expire(lease_key, FOCUS_LEASE_TTL_SEC)
-            candidate = leased_item
-            reason = "active_focus_lease"
-        else:
-            await _clear_active_focus(org_id, op)
-            leases = await _scan_active_focus_leases(org_id)
-
-    if candidate is None:
-        busy_ids = set(leases.keys())
-        pool = [
-            it for it in active_items if str(it.get("id") or "") not in busy_ids
-        ]
-        picked = select_focus(pool) if pool else None
-        if not picked:
-            return None, "none"
-        candidate = next(
-            (it for it in active_items if str(it.get("id") or "") == str(picked.get("id") or "")),
-            None,
-        )
-        if candidate is None:
-            return None, "none"
-        focus_id = str(candidate.get("id") or "")
-        await redis_client.setex(lease_key, FOCUS_LEASE_TTL_SEC, focus_id)
-        leases[focus_id] = op
+    try:
+        leases = await _scan_active_focus_leases(org_id)
+        lease_key = _active_focus_key(org_id, op)
+        current_id = await _redis_safe(redis_client.get(lease_key), None)
+        candidate: dict[str, Any] | None = None
         reason = "highest_priority_score"
 
-    focus_id = str(candidate.get("id") or "")
-    ownership = _ownership_for_focus(focus_id, op, leases)
-    payload = _focus_payload(candidate, reason=reason)
-    payload["priority_score"] = round(item_priority_score(candidate), 2)
-    payload["ownership"] = ownership
-    return payload, ownership
+        if current_id:
+            current_id = str(current_id)
+            leased_item = next(
+                (it for it in active_items if str(it.get("id") or "") == current_id),
+                None,
+            )
+            if leased_item:
+                await _redis_safe(redis_client.expire(lease_key, FOCUS_LEASE_TTL_SEC), None)
+                candidate = leased_item
+                reason = "active_focus_lease"
+            else:
+                await _redis_safe(_clear_active_focus(org_id, op), None)
+                leases = await _scan_active_focus_leases(org_id)
+
+        if candidate is None:
+            busy_ids = set(leases.keys())
+            pool = [
+                it for it in active_items if str(it.get("id") or "") not in busy_ids
+            ]
+            picked = select_focus(pool) if pool else None
+            if not picked:
+                return None, "none"
+            candidate = next(
+                (it for it in active_items if str(it.get("id") or "") == str(picked.get("id") or "")),
+                None,
+            )
+            if candidate is None:
+                return None, "none"
+            focus_id = str(candidate.get("id") or "")
+            await _redis_safe(
+                redis_client.setex(lease_key, FOCUS_LEASE_TTL_SEC, focus_id),
+                None,
+            )
+            leases[focus_id] = op
+            reason = "highest_priority_score"
+
+        focus_id = str(candidate.get("id") or "")
+        ownership = _ownership_for_focus(focus_id, op, leases)
+        payload = _focus_payload(candidate, reason=reason)
+        payload["priority_score"] = round(item_priority_score(candidate), 2)
+        payload["ownership"] = ownership
+        return payload, ownership
+    except Exception as exc:
+        logger.warning("shift focus resolve failed org=%s: %s", org_id, exc)
+        picked = select_focus(active_items)
+        if not picked:
+            return None, "none"
+        payload = _focus_payload(picked, reason="highest_priority_score")
+        payload["priority_score"] = round(item_priority_score(picked), 2)
+        payload["ownership"] = "unclaimed"
+        return payload, "unclaimed"
 
 
 def _empty_focus_reason(

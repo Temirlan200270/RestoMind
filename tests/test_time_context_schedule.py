@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from app.services.time_context import check_operational_status, format_org_current_time_block
@@ -41,6 +41,18 @@ def test_format_time_block_contains_operational_status() -> None:
     block = format_org_current_time_block("Asia/Almaty", None)
     assert "OPERATIONAL_STATUS" in block
     assert "TIMEZONE: Asia/Almaty" in block
+
+
+def test_force_closed_naive_datetime_does_not_crash() -> None:
+    naive_future = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=2)
+    op = check_operational_status(
+        "Asia/Almaty",
+        None,
+        force_closed_until=naive_future,
+        force_closed_reason="Техработы",
+    )
+    assert op.is_business_open is False
+    assert op.is_kitchen_open is False
 
 
 def test_soft_close_warning_added_for_kitchen_buffer() -> None:

@@ -17,6 +17,7 @@
 | Phase 5: Full OS Behavior | Predictive + autopilot pricing (single + bulk), healing 2.0 WA, digest backend, GuestCare, stock alerts, Decision Feed UI | **~98%** | `owner_dashboard.py`, `healing_actions.py`, `intelligence.py` |
 | Final Mile (backend) | SupplyMind + iiko Office sync, StaffMind onboarding, Voice (`stt_fallback` + Realtime code), Daily OS Digest cron, GuestCare 2GIS sync | **MVP ✅** | [`docs/FINAL_MILE_IMPLEMENTED.md`](FINAL_MILE_IMPLEMENTED.md) |
 | Final Mile (UI) | SupplyMind / StaffMind / Voice toggle / digest preview / GuestCare sync в админке | **wired ✅** | [`docs/REMAINING_UPDATES.md`](REMAINING_UPDATES.md) — **ops gates** |
+| **UI Layer (Phase 6)** | Focus-Driven Admin Shell: 3 режима, split Shift, Action Queue inbox, Command Bar | **контракт ✅ / код ⏳** | [`docs/UI_DESIGN_SYSTEM.md`](UI_DESIGN_SYSTEM.md), ROADMAP P5 «Focus-Driven OS» |
 
 **Главный вывод (2026-05-22):** RestoMind OS — **Industrial Platform** с закрытыми фазами 1–4 и Phase 3 (~100%). Final Mile backend+UI в репо; следующий слой — **staging/ops**: Telegram digest, WS `os.audit`, iiko Office live pilot, Twilio Realtime call + cost report.
 
@@ -306,6 +307,71 @@ Decision Engine: `max_discount_pct = 15` по policy ресторана → от
 - Predictive insights: прогноз выручки, предсказание спроса
 - Auto-recommendations без ручного refresh
 - Self-healing: система сама детектирует и эскалирует операционные проблемы
+
+**Статус (2026-05-22):** ~98% — см. ROADMAP P4/P5. Backend OS-слои закрыты; остаются ops-gates Final Mile и **UI-слой Focus-Driven Admin Shell** (ниже).
+
+---
+
+## UI Layer — Focus-Driven Admin Shell (Phase 6, Strangler)
+
+> **Не новая бизнес-логика.** Перенос «центра тяжести» с SaaS-вкладок на **трёхрежимную операционную оболочку** (Admin Shell), связанную с G10 Shift Control Plane. Прод не останавливается: старые hash-URL и сайдбар P1.5.0 живут параллельно до Sprint 4.
+
+### Три закона Execution OS
+
+| Закон | Смысл |
+|-------|--------|
+| **LAW 1 — Single Focus** | В SHIFT MODE ровно один `shiftState.focus`; UI не сортирует очередь и не считает S0–S5 (см. [`G10_SEMANTIC_CONTRACT.md`](G10_SEMANTIC_CONTRACT.md) §5). |
+| **LAW 2 — Sequential Mobile Cognition** | На `<lg` смена = два экрана (Focus → Context), не две колонки. |
+| **LAW 3 — Locality of Operations** | Операционные сигналы (риск, чаты, звонки, стоп-листы) scoped по `location_id` шапки; org-wide aggregate — только Intelligence / owner summary. |
+
+### Режимы (целевая матрица)
+
+| Режим | Аудитория | Вкладки (allowed `currentTab`) | Сайдбар | Селектор точки |
+|-------|-----------|----------------------------------|---------|----------------|
+| **SHIFT** 🟢 | Оператор | `shift_control` | Скрыт | Виден (locality) |
+| **CONTROL** 🟡 | Менеджер | `inbox`, `orders`, `chats`, `bookings`, `menu` | Виден (Операции) | Виден |
+| **INTELLIGENCE** 🔵 | Владелец | `dashboard`, `ai_center`, `settings` | Виден (Управление) | Опционально «вся сеть» / без фильтра |
+
+**Текущее состояние кода:** все вкладки в одном сайдбаре (`navItems` в `admin-app.js`); `_tab_shift_control.html` — отдельная вкладка без split Context Dock и без Mode Bar. Миграция — ROADMAP P5 «Focus-Driven OS», 4 спринта.
+
+### Архитектурные решения (зафиксированы)
+
+1. **Mobile Shift:** Staged Focus Navigation (экран Focus → экран Context, `⬅ Назад к задаче`).
+2. **Starvation / skip:** Redis TTL 600s на `skip` + кнопка **`reset_skips`** при `metrics.shift_empty_focus_while_risk_positive` и ненулевых `excluded_skip|excluded_next` (не ждать только TTL). Реализовано: FM-3, [`_tab_shift_control.html`](../app/templates/screens/_tab_shift_control.html).
+3. **Voice calls:** `GET /api/admin/intelligence/voice/calls?location_id=` при активной точке; без точки — org-wide список (read-only). Фильтр API ✅; запись `location_id` в `voice_call_logs.payload_json` — backlog ROADMAP.
+
+### Engineering plan (4 спринта)
+
+```text
+Sprint 1: Mode Engine + ds-status-* tokens + admin.html shell
+    ↓
+Sprint 2: _shift_focus_chat / _shift_focus_order + mobile staged nav
+    ↓
+Sprint 3: Inbox → Action Queue UI + voice strip + location_id payload
+    ↓
+Sprint 4: Command Bar (Ctrl+K): /leak, /red, /force-close
+```
+
+**Backend Sprint 1:** без изменений — `GET/POST /shift/*`, `money_queue`, `emit_event` уже покрывают модель.
+
+**Ключевые файлы (целевые):** [`admin.html`](../app/templates/admin.html), [`admin-app.js`](../app/static/js/admin-app.js), [`docs/UI_DESIGN_SYSTEM.md`](UI_DESIGN_SYSTEM.md), [`docs/UI_MAP.md`](UI_MAP.md), [`G10_SHIFT_CONTROL_PLANE.md`](G10_SHIFT_CONTROL_PLANE.md).
+
+### Focus Card (контракт UI ↔ API)
+
+Поле `focus` в `GET /shift/state` — projection из [`shift_state_engine._focus_payload`](../app/services/shift_state_engine.py), **не** произвольный JSON:
+
+| Поле | Тип | Назначение |
+|------|-----|------------|
+| `id`, `kind` | string | Идентификатор и тип (`slow_chat`, `abandoned_draft`, `pending_prepay`, …) |
+| `type` | string | UI-группа: `chat` \| … (`KIND_TO_TYPE`) |
+| `title`, `subtitle` | string | Заголовки карточки |
+| `value_kzt` | number | Сумма риска/упущения (не `risk_kzt` в focus) |
+| `wait_minutes`, `pulse` | int / string | Для чатов (G5 Live Pulse) |
+| `phone`, `order_id` | string / int | Контекст для Context Dock |
+| `actions` | array | ≤3 subtype из G10 (`complete`, `skip`, `next`, …) |
+| `reason` | string | Engine reason (`highest_priority_score`, `active_focus_lease`, …) |
+
+Context Dock (Sprint 2): `kind` ∈ {`slow_chat`, pulse red/amber} → `_shift_focus_chat.html`; `abandoned_draft` \| `pending_prepay` → `_shift_focus_order.html`.
 
 ---
 

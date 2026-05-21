@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.db.models import ChatLog, Order, OrderStatus
+from app.services.db_schema_fallback import with_location_scope_fallback
 from app.services.tenant_scope import chat_logs_location_filter, orders_location_filter, orders_tenant_clause
 
 logger = logging.getLogger(__name__)
@@ -353,7 +354,7 @@ async def build_leak_action_surfaces(
     return surfaces
 
 
-async def build_revenue_leak(
+async def _build_revenue_leak_impl(
     db: AsyncSession,
     org_id: int,
     *,
@@ -413,3 +414,22 @@ async def build_revenue_leak(
             "menu_confusion": "Путаница в меню",
         },
     }
+
+
+async def build_revenue_leak(
+    db: AsyncSession,
+    org_id: int,
+    *,
+    location_id: int | None = None,
+    allowed_location_ids: set[int] | None = None,
+) -> dict:
+    return await with_location_scope_fallback(
+        location_id=location_id,
+        allowed_location_ids=allowed_location_ids,
+        run=lambda loc_id, allowed: _build_revenue_leak_impl(
+            db,
+            org_id,
+            location_id=loc_id,
+            allowed_location_ids=allowed,
+        ),
+    )

@@ -4,6 +4,8 @@
 
 **Код:** [`app/services/shift_state_engine.py`](../app/services/shift_state_engine.py) · **API:** `GET /api/admin/shift/state`, `POST /api/admin/shift/action` · **UI:** [`_tab_shift_control.html`](../app/templates/screens/_tab_shift_control.html)
 
+**UI roadmap (Admin Shell, split, mobile):** [`docs/UI_DESIGN_SYSTEM.md`](UI_DESIGN_SYSTEM.md) § Focus-Driven OS · ROADMAP P5 «Focus-Driven OS».
+
 **Статус v1:** реализовано монолитом в main (см. ROADMAP G10). Ниже — как **безопасно выкатывать по PR**, если разрезать историю, и что **ломает продукт в проде** (failure modes).
 
 ---
