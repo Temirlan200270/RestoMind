@@ -1,0 +1,228 @@
+"""
+Асинхронный клиент iiko Office (склад / остатки).
+
+Конфигурация в ``Organization.integration_config_json``:
+
+.. code-block:: json
+
+    {
+      "iiko_office": {
+        "host": "https://office.example.iiko.it",
+        "login": "api_user",
+        "password_enc": "<Fernet token>",
+        "store_id": "<UUID склада>",
+        "department_id": "<UUID подразделения, опционально>"
+      }
+    }
+
+Секреты: ``password_enc`` через ``encrypt_secret`` (``APP_SECRETS_FERNET_KEY``),
+как ``iiko_api_login_enc`` в ``org_iiko.py``.
+
+Эндпоинты (типовой REST iiko Office; без live-кредов — тесты через fixture):
+
+- ``POST {host}/resto/api/auth`` — логин/пароль → ключ сессии
+- ``GET {host}/resto/api/v2/reports/balance/stores`` — остатки по складу
+  (query: ``store`` = store_id, ``department`` = department_id при наличии)
+
+Формат ответа (нормализуется в ``IikoOfficeStockRow``):
+
+.. code-block:: json
+
+    {"items": [{"productId": "...", "productNum": "SKU", "productName": "...",
+                "unit": "кг", "amount": 1.0, "minAmount": 3.0}]}
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import httpx
+
+from app.services.org_iiko_office import OrgIikoOfficeCredentials
+
+logger = logging.getLogger(__name__)
+
+REQUEST_TIMEOUT = 30.0
+AUTH_PATH = "/resto/api/auth"
+BALANCE_PATH = "/resto/api/v2/reports/balance/stores"
+
+
+@dataclass(frozen=True)
+class IikoOfficeStockRow:
+    product_id: str
+    sku: str
+    name: str
+    unit: str
+    quantity: float
+    min_quantity: float | None
+    raw: dict[str, Any]
+
+
+def _coerce_float(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def parse_stock_balances_payload(data: dict[str, Any] | list[Any]) -> list[IikoOfficeStockRow]:
+    """Разбор ответа iiko Office / fixture в единый список строк остатков."""
+    items: list[Any]
+    if isinstance(data, list):
+        items = data
+    elif isinstance(data, dict):
+        raw_items = data.get("items") or data.get("stockBalances") or data.get("balances")
+        items = raw_items if isinstance(raw_items, list) else []
+    else:
+        items = []
+
+    rows: list[IikoOfficeStockRow] = []
+    for entry in items:
+        if not isinstance(entry, dict):
+            continue
+        product_id = str(
+            entry.get("productId")
+            or entry.get("product_id")
+            or entry.get("id")
+            or "",
+        ).strip()
+        sku = str(
+            entry.get("productNum")
+            or entry.get("num")
+            or entry.get("sku")
+            or product_id,
+        ).strip()
+        name = str(
+            entry.get("productName")
+            or entry.get("name")
+            or entry.get("ingredient")
+            or sku,
+        ).strip()
+        if not sku and not product_id:
+            continue
+        rows.append(
+            IikoOfficeStockRow(
+                product_id=product_id or sku,
+                sku=sku or product_id,
+                name=name,
+                unit=str(entry.get("unit") or entry.get("measureUnit") or "").strip(),
+                quantity=_coerce_float(entry.get("amount") or entry.get("quantity")),
+                min_quantity=(
+                    _coerce_float(entry.get("minAmount") or entry.get("min_quantity"))
+                    if entry.get("minAmount") is not None or entry.get("min_quantity") is not None
+                    else None
+                ),
+                raw=entry,
+            ),
+        )
+    return rows
+
+
+def _session_key_from_auth_response(response: httpx.Response) -> str:
+    content_type = response.headers.get("content-type", "").lower()
+    if "json" in content_type:
+        try:
+            data = response.json()
+        except ValueError:
+            data = None
+        if isinstance(data, dict):
+            return str(data.get("key") or data.get("token") or data.get("sessionKey") or "").strip()
+        if isinstance(data, str):
+            return data.strip().strip('"')
+
+    text = (response.text or "").strip()
+    if text.startswith("{"):
+        try:
+            data = json.loads(text)
+        except ValueError:
+            data = None
+        if isinstance(data, dict):
+            return str(data.get("key") or data.get("token") or data.get("sessionKey") or "").strip()
+    return text.strip('"')
+
+
+class IikoOfficeClient:
+    """httpx-клиент iiko Office с опциональной подгрузкой fixture (тесты / dev)."""
+
+    def __init__(
+        self,
+        creds: OrgIikoOfficeCredentials,
+        *,
+        fixture_path: str | Path | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        self._creds = creds
+        self._fixture_path = Path(fixture_path) if fixture_path else None
+        self._transport = transport
+        self._session_key: str | None = None
+        self._http: httpx.AsyncClient | None = None
+
+    async def __aenter__(self) -> "IikoOfficeClient":
+        self._http = httpx.AsyncClient(
+            base_url=self._creds.host.rstrip("/"),
+            timeout=REQUEST_TIMEOUT,
+            follow_redirects=True,
+            transport=self._transport,
+        )
+        if self._fixture_path is None:
+            await self._authenticate()
+        return self
+
+    async def __aexit__(self, *args: Any) -> None:
+        if self._http:
+            await self._http.aclose()
+
+    async def _authenticate(self) -> None:
+        if not self._http:
+            raise RuntimeError("HTTP client not initialized")
+        response: httpx.Response | None = None
+        attempts: list[tuple[str, dict[str, Any]]] = [
+            ("POST", {"params": {"login": self._creds.login, "pass": self._creds.password}}),
+            ("POST", {"data": {"login": self._creds.login, "pass": self._creds.password}}),
+            ("POST", {"json": {"login": self._creds.login, "pass": self._creds.password}}),
+            ("GET", {"params": {"login": self._creds.login, "pass": self._creds.password}}),
+        ]
+        for method, kwargs in attempts:
+            response = await self._http.request(method, AUTH_PATH, **kwargs)
+            if response.status_code < 400:
+                break
+            if response.status_code not in {400, 404, 405, 415}:
+                response.raise_for_status()
+        if response is None:
+            raise RuntimeError("iiko Office auth: request was not sent")
+        response.raise_for_status()
+        key = _session_key_from_auth_response(response)
+        if not key:
+            raise ValueError("iiko Office auth: ответ без key/token")
+        self._session_key = str(key)
+        logger.info("iiko Office: авторизация успешна host=%s", self._creds.host)
+
+    def _auth_params(self) -> dict[str, str]:
+        if not self._session_key:
+            raise RuntimeError("iiko Office: нет ключа сессии")
+        return {"key": self._session_key}
+
+    async def fetch_stock_balances(self) -> list[IikoOfficeStockRow]:
+        """
+        Остатки по складу из iiko Office.
+        При ``fixture_path`` читает JSON с диска (без HTTP).
+        """
+        if self._fixture_path is not None:
+            raw = json.loads(self._fixture_path.read_text(encoding="utf-8"))
+            return parse_stock_balances_payload(raw)
+
+        if not self._http:
+            raise RuntimeError("HTTP client not initialized")
+        params: dict[str, str] = {**self._auth_params(), "store": self._creds.store_id}
+        if self._creds.department_id:
+            params["department"] = self._creds.department_id
+        response = await self._http.get(BALANCE_PATH, params=params)
+        response.raise_for_status()
+        data = response.json()
+        if not isinstance(data, dict):
+            raise ValueError("iiko Office balance: ожидался JSON object")
+        return parse_stock_balances_payload(data)

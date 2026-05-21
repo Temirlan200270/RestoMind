@@ -377,6 +377,47 @@ async def test_presentation_empty_focus_when_filtered(db_session, monkeypatch) -
     assert after["presentation"]["empty_focus_reason"] in {"all_filtered", "action_queue_cleared"}
     assert after["presentation"]["projection_gap"] is True
     assert after["presentation"]["ui_may_show_calm_empty"] is False
+    assert after["metrics"]["risk_kzt"] > 0
+    assert after["metrics"]["shift_empty_focus_while_risk_positive"] == 1
+
+
+@pytest.mark.asyncio
+async def test_reset_skips_restores_focus_after_projection_gap(db_session, monkeypatch) -> None:
+    from app.services import shift_state_engine as sse
+
+    org = Organization(name="Reset Skip Org", slug="reset-skip-org")
+    db_session.add(org)
+    await db_session.flush()
+    user = User(organization_id=int(org.id), phone="+77005557018")
+    db_session.add(user)
+    await db_session.flush()
+    db_session.add(
+        Order(
+            organization_id=int(org.id),
+            user_id=int(user.id),
+            status=OrderStatus.DRAFT.value,
+            total_price=7000,
+            items_json={"items": [{"name": "Reset", "quantity": 1, "item_total": 7000}]},
+            updated_at=datetime.now(timezone.utc) - timedelta(minutes=55),
+        )
+    )
+    await db_session.flush()
+
+    fake = FakeRedis()
+    monkeypatch.setattr(sse, "redis_client", fake)
+
+    before = await build_shift_state(db_session, int(org.id), operator_id="op-reset")
+    focus_id = before["focus"]["id"]
+    await apply_shift_action(db_session, int(org.id), "skip", focus_id, operator_id="op-reset")
+    gap = await build_shift_state(db_session, int(org.id), operator_id="op-reset")
+    assert gap["focus"] is None
+    assert gap["metrics"]["shift_empty_focus_while_risk_positive"] == 1
+
+    await apply_shift_action(db_session, int(org.id), "reset_skips", None, operator_id="op-reset")
+    restored = await build_shift_state(db_session, int(org.id), operator_id="op-reset")
+    assert restored["focus"] is not None
+    assert restored["focus"]["id"] == focus_id
+    assert restored["metrics"]["excluded_skip"] == 0
 
 
 @pytest.mark.asyncio

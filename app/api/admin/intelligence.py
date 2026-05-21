@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +15,8 @@ from app.api.admin.deps import (
     _session_staff_user,
     admin_org_from_session,
     require_admin_session_active,
+    require_staff_admin,
+    require_staff_manager_or_admin,
 )
 from sqlalchemy import select
 from app.db.models import (
@@ -47,6 +50,10 @@ from app.services.intelligence import (
     list_insights,
     revenue_orders_summary,
     simulate_operator_capacity,
+)
+from app.services.inventory_snapshots import (
+    InventorySnapshotUpsertItem,
+    upsert_inventory_snapshots as upsert_inventory_snapshot_rows,
 )
 from app.services.tenant_scope import allowed_location_ids_for_staff
 
@@ -967,6 +974,10 @@ class SupplyDraftBody(BaseModel):
     cover_days: int = Field(default=7, ge=1, le=30)
 
 
+class SupplyDraftStatusBody(BaseModel):
+    status: str = Field(..., pattern="^(draft|approved|completed|cancelled)$")
+
+
 class StaffOnboardingStartBody(BaseModel):
     phone: str = Field(..., min_length=5, max_length=32)
     role: str = Field(default="staff", max_length=80)
@@ -1010,7 +1021,49 @@ async def list_external_reviews(
         .limit(50)
     )).scalars().all()
     items = [_external_review_public(r) for r in rows]
-    return {"ok": True, "items": items, "count": len(items)}
+    org = await db.get(Organization, org_id)
+    sync_meta = {}
+    if org is not None and isinstance(org.meta_json, dict):
+        sync_meta = dict(org.meta_json.get("guestcare_sync") or {})
+    return {
+        "ok": True,
+        "items": items,
+        "count": len(items),
+        "sync_meta": sync_meta,
+    }
+
+
+@router.post("/reviews/external/sync")
+async def sync_external_reviews(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Fetch 2GIS (and optional Google) review pages and upsert into external_reviews."""
+    from app.services.external_reviews_sync import sync_external_reviews_for_org
+
+    org_id = admin_org_from_session(request)
+    try:
+        stats = await sync_external_reviews_for_org(db, org_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await db.commit()
+    org = await db.get(Organization, org_id)
+    sync_meta = {}
+    if org is not None and isinstance(org.meta_json, dict):
+        sync_meta = dict(org.meta_json.get("guestcare_sync") or {})
+    rows = (await db.execute(
+        select(ExternalReview)
+        .where(ExternalReview.organization_id == org_id)
+        .order_by(ExternalReview.imported_at.desc(), ExternalReview.id.desc())
+        .limit(50)
+    )).scalars().all()
+    return {
+        "ok": stats.get("ok", True),
+        "stats": stats,
+        "sync_meta": sync_meta,
+        "items": [_external_review_public(r) for r in rows],
+        "count": len(rows),
+    }
 
 
 @router.post("/reviews/external/import")
@@ -1085,37 +1138,31 @@ async def external_review_reply_draft(
 async def upsert_inventory_snapshots(
     body: InventoryStockBulkBody,
     request: Request,
+    _perm: None = Depends(require_staff_manager_or_admin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Upsert latest inventory read model used by OS stock alerts."""
     org_id = admin_org_from_session(request)
-    updated = 0
-    for item in body.items:
-        row = await db.scalar(
-            select(InventoryStockSnapshot).where(
-                InventoryStockSnapshot.organization_id == org_id,
-                InventoryStockSnapshot.location_id == item.location_id,
-                InventoryStockSnapshot.source == item.source,
-                InventoryStockSnapshot.sku == item.sku,
-            )
-        )
-        if row is None:
-            row = InventoryStockSnapshot(
-                organization_id=org_id,
+    updated = await upsert_inventory_snapshot_rows(
+        db,
+        org_id,
+        [
+            InventorySnapshotUpsertItem(
+                sku=item.sku,
+                ingredient=item.ingredient,
+                quantity=item.quantity,
+                unit=item.unit or "",
+                min_quantity=item.min_quantity,
+                reorder_quantity=item.reorder_quantity,
+                daily_usage_estimate=item.daily_usage_estimate,
                 location_id=item.location_id,
                 source=item.source,
-                sku=item.sku,
+                external_id=item.external_id,
+                payload=item.payload,
             )
-            db.add(row)
-        row.ingredient = item.ingredient
-        row.quantity = item.quantity
-        row.unit = item.unit or ""
-        row.min_quantity = item.min_quantity
-        row.reorder_quantity = item.reorder_quantity
-        row.daily_usage_estimate = item.daily_usage_estimate
-        row.external_id = item.external_id
-        row.payload_json = item.payload
-        updated += 1
+            for item in body.items
+        ],
+    )
     await db.commit()
     return {"ok": True, "updated": updated}
 
@@ -1161,6 +1208,7 @@ async def inventory_stock_alerts(
 async def create_supplymind_draft(
     body: SupplyDraftBody,
     request: Request,
+    _perm: None = Depends(require_staff_manager_or_admin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     from app.services.supplymind import build_supplymind_draft, supply_draft_public
@@ -1183,16 +1231,76 @@ async def list_supplymind_drafts(
     db: AsyncSession = Depends(get_db),
     limit: int = Query(20, ge=1, le=100),
 ) -> dict:
-    from app.services.supplymind import supply_draft_public
+    from app.services.supplymind import list_supply_drafts, supply_draft_public
 
     org_id = admin_org_from_session(request)
-    rows = (await db.execute(
-        select(SupplyPurchaseDraft)
-        .where(SupplyPurchaseDraft.organization_id == org_id)
-        .order_by(SupplyPurchaseDraft.created_at.desc())
-        .limit(limit)
-    )).scalars().all()
+    rows = await list_supply_drafts(db, org_id, limit=limit)
     return {"ok": True, "items": [supply_draft_public(r) for r in rows], "count": len(rows)}
+
+
+@router.get("/supplymind/drafts/{draft_id}")
+async def get_supplymind_draft(
+    draft_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    from app.services.supplymind import get_supply_draft, supply_draft_public
+
+    org_id = admin_org_from_session(request)
+    draft = await get_supply_draft(db, org_id, draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Чеклист закупки не найден")
+    return {"ok": True, "item": supply_draft_public(draft)}
+
+
+@router.patch("/supplymind/drafts/{draft_id}")
+async def patch_supplymind_draft(
+    draft_id: int,
+    body: SupplyDraftStatusBody,
+    request: Request,
+    _perm: None = Depends(require_staff_manager_or_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    from app.services.supplymind import supply_draft_public, update_draft_status
+
+    org_id = admin_org_from_session(request)
+    try:
+        draft = await update_draft_status(db, org_id, draft_id, body.status)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Чеклист закупки не найден") from None
+    except ValueError as exc:
+        code = str(exc)
+        if code.startswith("invalid_status:"):
+            raise HTTPException(status_code=400, detail="Недопустимый статус чеклиста") from None
+        if code.startswith("invalid_transition:"):
+            raise HTTPException(status_code=409, detail="Переход статуса недопустим") from None
+        raise HTTPException(status_code=400, detail="Не удалось обновить статус") from None
+    await db.commit()
+    await db.refresh(draft)
+    return {"ok": True, "item": supply_draft_public(draft)}
+
+
+@router.get("/supplymind/drafts/{draft_id}/export")
+async def export_supplymind_draft(
+    draft_id: int,
+    request: Request,
+    _perm: None = Depends(require_staff_manager_or_admin),
+    db: AsyncSession = Depends(get_db),
+    format: str = Query("csv", pattern="^csv$"),
+) -> Response:
+    from app.services.supplymind import export_draft_csv, get_supply_draft
+
+    org_id = admin_org_from_session(request)
+    draft = await get_supply_draft(db, org_id, draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Чеклист закупки не найден")
+    csv_text = export_draft_csv(draft)
+    filename = f"supplymind_checklist_{draft_id}.csv"
+    return Response(
+        content=csv_text.encode("utf-8-sig"),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post("/staffmind/onboarding")
@@ -1285,6 +1393,7 @@ async def voice_ai_config(
     body: VoiceConfigBody,
     request: Request,
     db: AsyncSession = Depends(get_db),
+    _perm: None = Depends(require_staff_admin),
 ) -> dict:
     from app.services.voice_ai import set_voice_enabled
 
@@ -1432,16 +1541,22 @@ async def replay_ai_decision(
 
     business_state = row.business_state or {}
 
-    # Phase G3: если снапшот содержит frozen menu_context_text — используем его
-    # для точного воспроизведения контекста меню как он был в момент решения.
-    # Иначе — перезагружаем из БД (старые снапшоты до G3).
-    frozen_menu_ctx: str | None = business_state.get("menu_context_text")
-    if frozen_menu_ctx:
+    # Phase G3: frozen menu_context_text → точный replay; иначе snapshot цен → synthetic context;
+    # иначе текущее меню из БД (legacy снапшоты).
+    from app.services.context_engine import build_menu_context_from_prices_snapshot
+
+    frozen_menu_ctx = business_state.get("menu_context_text")
+    if isinstance(frozen_menu_ctx, str) and frozen_menu_ctx.strip():
         menu_context = frozen_menu_ctx
     else:
-        # Fallback: используем текущее меню из БД
-        menu_items = await load_available_menu(db, organization_id=org_id, include_unavailable=True)
-        menu_context = await build_menu_context_for_ai(menu_items, user_text)
+        prices_ctx = build_menu_context_from_prices_snapshot(
+            business_state.get("menu_prices_snapshot"),
+        )
+        if prices_ctx:
+            menu_context = prices_ctx
+        else:
+            menu_items = await load_available_menu(db, organization_id=org_id, include_unavailable=True)
+            menu_context = await build_menu_context_for_ai(menu_items, user_text)
 
     customer_ctx = (row.customer_state or {}).get("customer_ctx_snippet", "")
     history = (row.customer_state or {}).get("chat_history_slice") or []

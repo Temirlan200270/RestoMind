@@ -150,6 +150,31 @@ async def require_staff_admin(request: Request, db: AsyncSession = Depends(get_d
         raise HTTPException(status_code=403, detail="Недостаточно прав")
 
 
+async def require_staff_manager_or_admin(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """
+    SupplyMind / inventory sync: admin и manager; operator — только чтение через GET.
+    Legacy-сессия без staff_id — полный доступ (как у require_staff_admin).
+    """
+    await require_admin_session_active(request, db)
+    sid = request.session.get("staff_id")
+    if sid is None:
+        return
+    staff = await db.get(StaffUser, int(sid))
+    if staff is None or not staff.is_active:
+        raise HTTPException(status_code=403, detail="Недостаточно прав")
+    if not await _session_organization_allowed_for_staff(request, db, staff):
+        raise HTTPException(status_code=403, detail="Недостаточно прав")
+    role = (staff.role or "").strip().lower()
+    if role == StaffRole.OPERATOR.value:
+        raise HTTPException(
+            status_code=403,
+            detail="Недостаточно прав: оператору доступен только просмотр",
+        )
+
+
 async def _session_staff_user(request: Request, db: AsyncSession) -> StaffUser | None:
     sid = request.session.get("staff_id")
     if sid is None:

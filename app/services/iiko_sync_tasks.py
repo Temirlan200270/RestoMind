@@ -124,6 +124,60 @@ async def run_menu_sync(org_id: int) -> dict[str, Any]:
     return {"ok": ok, "error": error, "stats": stats, "org_id": org_id}
 
 
+async def run_inventory_sync(org_id: int) -> dict[str, Any]:
+    """
+    Синхронизирует остатки iiko Office для одной организации.
+    Возвращает dict: ok, error, stats, org_id.
+    """
+    from app.db.session import async_session_factory
+    from app.services.events import publish_event
+    from app.services.integration_health import record_inventory_sync
+    from app.services.iiko_inventory_sync import sync_inventory_from_iiko_office
+    from app.services.org_iiko_office import resolve_org_iiko_office_credentials
+
+    async with async_session_factory() as db:
+        creds = await resolve_org_iiko_office_credentials(db, org_id)
+        if creds is None:
+            logger.warning(
+                "run_inventory_sync: org_id=%s — iiko Office credentials not configured",
+                org_id,
+            )
+            return {
+                "ok": False,
+                "error": "iiko Office credentials not configured",
+                "org_id": org_id,
+            }
+
+        ok = False
+        error = ""
+        stats: dict[str, Any] = {}
+        try:
+            stats = await sync_inventory_from_iiko_office(db, org_id, creds=creds)
+            ok = True
+        except Exception as exc:
+            error = str(exc)
+            logger.warning("run_inventory_sync org_id=%s failed: %s", org_id, exc)
+
+        await record_inventory_sync(
+            db,
+            ok=ok,
+            error=error,
+            detail=str(stats) if stats else None,
+            organization_id=org_id,
+        )
+        await db.commit()
+
+    await publish_event("inventory_updated", {
+        "organization_id": org_id,
+        "ok": ok,
+        "stats": stats,
+        "error": error or None,
+    })
+
+    logger.info("run_inventory_sync org_id=%s ok=%s stats=%s", org_id, ok, stats)
+    return {"ok": ok, "error": error, "stats": stats, "org_id": org_id}
+
+
 async def run_full_iiko_sync_for_org(org_id: int) -> None:
     """Полная ручная синхронизация: номенклатура, затем стоп-листы (для BackgroundTasks)."""
     await run_menu_sync(org_id)

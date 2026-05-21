@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -15,6 +17,17 @@ class DummyRequest:
     def __init__(self, method: str = "GET") -> None:
         self.method = method
         self.session: dict = {}
+
+
+def test_superadmin_passwords_use_acknowledged_modal() -> None:
+    html = Path("app/templates/superadmin.html").read_text(encoding="utf-8")
+
+    assert "passwordModal.open" in html
+    assert "showPasswordModal" in html
+    assert "copyPasswordModal" in html
+    assert ":disabled=\"!passwordModal.copied\"" in html
+    assert "generated_password ? `" not in html
+    assert "Новый пароль: ${out.new_password}" not in html
 
 
 @pytest.mark.asyncio

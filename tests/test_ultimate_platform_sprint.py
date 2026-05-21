@@ -255,6 +255,112 @@ async def test_supplymind_creates_purchase_draft_from_stock_alerts(asgi_memory_c
 
 
 @pytest.mark.asyncio
+async def test_supplymind_draft_status_lifecycle_and_csv_export(asgi_memory_client) -> None:
+    from app.core.passwords import hash_password
+    from app.db.models import StaffUser, SupplyPurchaseDraft
+
+    client, session_factory = asgi_memory_client
+    async with session_factory() as db:
+        org = Organization(name="Supply Lifecycle Org", slug="supply-lifecycle-org")
+        db.add(org)
+        await db.flush()
+        db.add(StaffUser(
+            organization_id=org.id,
+            email="supply-lifecycle@test.kz",
+            password_hash=hash_password("secret123"),
+            role="admin",
+            is_active=True,
+        ))
+        await db.commit()
+
+    await client.post("/api/admin/auth/login", json={"username": "supply-lifecycle@test.kz", "password": "secret123"})
+    await client.post(
+        "/api/admin/intelligence/inventory/snapshots/bulk",
+        json={"items": [{
+            "sku": "oil",
+            "ingredient": "Масло",
+            "quantity": 1,
+            "unit": "л",
+            "min_quantity": 5,
+            "daily_usage_estimate": 2,
+        }]},
+    )
+    create_res = await client.post("/api/admin/intelligence/supplymind/drafts", json={"cover_days": 7})
+    assert create_res.status_code == 200
+    draft_id = create_res.json()["item"]["id"]
+    assert create_res.json()["item"]["status"] == "draft"
+
+    get_res = await client.get(f"/api/admin/intelligence/supplymind/drafts/{draft_id}")
+    assert get_res.status_code == 200
+    assert get_res.json()["item"]["items"][0]["ingredient"] == "Масло"
+
+    approve_res = await client.patch(
+        f"/api/admin/intelligence/supplymind/drafts/{draft_id}",
+        json={"status": "approved"},
+    )
+    assert approve_res.status_code == 200
+    assert approve_res.json()["item"]["status"] == "approved"
+
+    complete_res = await client.patch(
+        f"/api/admin/intelligence/supplymind/drafts/{draft_id}",
+        json={"status": "completed"},
+    )
+    assert complete_res.status_code == 200
+    assert complete_res.json()["item"]["status"] == "completed"
+
+    conflict_res = await client.patch(
+        f"/api/admin/intelligence/supplymind/drafts/{draft_id}",
+        json={"status": "cancelled"},
+    )
+    assert conflict_res.status_code == 409
+
+    export_res = await client.get(
+        f"/api/admin/intelligence/supplymind/drafts/{draft_id}/export?format=csv",
+    )
+    assert export_res.status_code == 200
+    assert "text/csv" in export_res.headers.get("content-type", "")
+    body = export_res.content.decode("utf-8-sig")
+    assert "ingredient" in body
+    assert "Масло" in body
+
+    async with session_factory() as db:
+        row = await db.scalar(select(SupplyPurchaseDraft).where(SupplyPurchaseDraft.id == draft_id))
+        assert row is not None
+        assert row.status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_supplymind_draft_cancel_from_draft(asgi_memory_client) -> None:
+    from app.core.passwords import hash_password
+    from app.db.models import StaffUser
+
+    client, session_factory = asgi_memory_client
+    async with session_factory() as db:
+        org = Organization(name="Supply Cancel Org", slug="supply-cancel-org")
+        db.add(org)
+        await db.flush()
+        db.add(StaffUser(
+            organization_id=org.id,
+            email="supply-cancel@test.kz",
+            password_hash=hash_password("secret123"),
+            role="admin",
+            is_active=True,
+        ))
+        await db.commit()
+
+    await client.post("/api/admin/auth/login", json={"username": "supply-cancel@test.kz", "password": "secret123"})
+    create_res = await client.post("/api/admin/intelligence/supplymind/drafts", json={"cover_days": 3})
+    draft_id = create_res.json()["item"]["id"]
+
+    cancel_res = await client.patch(
+        f"/api/admin/intelligence/supplymind/drafts/{draft_id}",
+        json={"status": "cancelled"},
+    )
+    assert cancel_res.status_code == 200
+    assert cancel_res.json()["item"]["status"] == "cancelled"
+
+
+@pytest.mark.asyncio
 async def test_staffmind_answers_from_knowledge_base(asgi_memory_client) -> None:
     from app.core.passwords import hash_password
     from app.db.models import StaffUser

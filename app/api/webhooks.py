@@ -148,8 +148,10 @@ def _verify_whatsapp_hub_signature256(raw_body: bytes, signature_header: str | N
 
 router = APIRouter(prefix="/whatsapp", tags=["WhatsApp Webhook"])
 
-# Twilio CallSid → From (E.164), если Redis выключен — только один инстанс
+# Twilio CallSid → From (E.164) / org_id, если Redis выключен — только один инстанс
 _twilio_caller_memory: dict[str, str] = {}
+_twilio_org_memory: dict[str, int] = {}
+_twilio_mode_memory: dict[str, str] = {}
 
 
 def _twilio_stream_wss_url() -> str:
@@ -166,17 +168,31 @@ def _twilio_stream_wss_url() -> str:
     return f"wss://{base}/api/whatsapp/voice/stream"
 
 
-async def _store_twilio_caller(call_sid: str, phone: str) -> None:
+async def _store_twilio_caller(
+    call_sid: str,
+    phone: str,
+    org_id: int | None = None,
+    *,
+    voice_mode: str | None = None,
+) -> None:
     if not call_sid or not phone:
         return
     key = f"twilio:caller:{call_sid}"
     if settings.redis_enabled:
         try:
             await redis_client.setex(key, 600, phone)
+            if org_id is not None:
+                await redis_client.setex(f"twilio:org:{call_sid}", 600, str(int(org_id)))
+            if voice_mode:
+                await redis_client.setex(f"twilio:mode:{call_sid}", 600, voice_mode)
             return
         except Exception as exc:
             logger.warning("Redis twilio caller cache: %s", exc)
     _twilio_caller_memory[call_sid] = phone
+    if org_id is not None:
+        _twilio_org_memory[call_sid] = int(org_id)
+    if voice_mode:
+        _twilio_mode_memory[call_sid] = voice_mode
 
 
 async def _get_twilio_caller(call_sid: str) -> str:
@@ -191,6 +207,33 @@ async def _get_twilio_caller(call_sid: str) -> str:
         except Exception:
             pass
     return (_twilio_caller_memory.get(call_sid) or "").strip()
+
+
+async def _get_twilio_org_id(call_sid: str) -> int:
+    if not call_sid:
+        return int(settings.default_organization_id)
+    if settings.redis_enabled:
+        try:
+            raw = await redis_client.get(f"twilio:org:{call_sid}")
+            if raw:
+                return int(str(raw).strip())
+        except Exception:
+            pass
+    return int(_twilio_org_memory.get(call_sid) or settings.default_organization_id)
+
+
+async def _get_twilio_voice_mode(call_sid: str) -> str:
+    if not call_sid:
+        return "stt_fallback"
+    if settings.redis_enabled:
+        try:
+            raw = await redis_client.get(f"twilio:mode:{call_sid}")
+            if raw:
+                mode = str(raw).strip().lower()
+                return "realtime" if mode == "realtime" else "stt_fallback"
+        except Exception:
+            pass
+    return _twilio_mode_memory.get(call_sid) or "stt_fallback"
 
 
 def _normalize_phone_e164(phone: str) -> str:
@@ -2110,7 +2153,14 @@ async def process_voice_message(
             logger.error("Не удалось отправить сообщение об ошибке голоса → %s", phone)
 
 
-async def _flush_twilio_voice_chunk(phone: str, call_sid: str, mulaw: bytes) -> None:
+async def _flush_twilio_voice_chunk(
+    phone: str,
+    call_sid: str,
+    mulaw: bytes,
+    *,
+    org_id: int,
+    mode: str = "stt_fallback",
+) -> None:
     """
     μ-law → WAV → Whisper STT → тот же пайплайн, что WhatsApp (process_message).
     Ответ уходит в TwiML Say, если задан контекст CallSid.
@@ -2132,11 +2182,12 @@ async def _flush_twilio_voice_chunk(phone: str, call_sid: str, mulaw: bytes) -> 
         async with async_session_factory() as db:
             await record_voice_call(
                 db,
-                org_id=int(settings.default_organization_id),
+                org_id=int(org_id),
                 call_sid=call_sid,
                 phone=phone,
                 status="transcribed",
                 transcript=text,
+                mode=mode,
             )
             await db.commit()
     except Exception:
@@ -2148,10 +2199,120 @@ async def _flush_twilio_voice_chunk(phone: str, call_sid: str, mulaw: bytes) -> 
             phone,
             text,
             whatsapp_message_id=mid,
-            organization_id=int(settings.default_organization_id),
+            organization_id=int(org_id),
         )
     finally:
         reset_twilio_call_context(tok)
+
+
+async def _await_twilio_stream_start(
+    websocket: WebSocket,
+) -> tuple[str, str, int, str, str, str]:
+    """Read Twilio WS until «start»; return call_sid, phone, org_id, voice_mode, org_name, stream_sid."""
+    call_sid = ""
+    phone = ""
+    org_id = int(settings.default_organization_id)
+    voice_mode = "stt_fallback"
+    org_name = ""
+    stream_sid = ""
+    while not call_sid:
+        try:
+            raw = await websocket.receive_text()
+        except WebSocketDisconnect:
+            return "", "", org_id, voice_mode, org_name, stream_sid
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if data.get("event") == "connected":
+            continue
+        if data.get("event") != "start":
+            continue
+        st = data.get("start") or {}
+        call_sid = (st.get("callSid") or data.get("callSid") or "").strip()
+        stream_sid = (st.get("streamSid") or data.get("streamSid") or "").strip()
+        phone = await _get_twilio_caller(call_sid) if call_sid else ""
+        org_id = await _get_twilio_org_id(call_sid) if call_sid else org_id
+        voice_mode = await _get_twilio_voice_mode(call_sid) if call_sid else voice_mode
+        try:
+            async with async_session_factory() as db:
+                org = await db.get(Organization, org_id)
+                org_name = (org.name if org else "") or ""
+        except Exception:
+            pass
+    return call_sid, phone, org_id, voice_mode, org_name, stream_sid
+
+
+async def _run_stt_fallback_voice_stream(
+    websocket: WebSocket,
+    *,
+    call_sid: str,
+    phone: str,
+    org_id: int,
+) -> None:
+    """
+    Twilio Media Streams (входящий μ-law 8 kHz).
+    Накопление буфера → транскрипт Whisper → process_message → Twilio Say.
+    """
+    buf = bytearray()
+    processing = False
+    threshold = int(settings.twilio_voice_buffer_bytes)
+    mode = "stt_fallback"
+
+    async def maybe_flush(force: bool = False) -> None:
+        nonlocal buf, processing
+        if processing or not phone or not call_sid:
+            return
+        if not force and len(buf) < threshold:
+            return
+        if not buf:
+            return
+        processing = True
+        chunk = bytes(buf)
+        buf.clear()
+        try:
+            await _flush_twilio_voice_chunk(phone, call_sid, chunk, org_id=org_id, mode=mode)
+        finally:
+            processing = False
+
+    logger.info(
+        "Twilio STT stream callSid=%s phone=%s org=%s",
+        (call_sid[:16] + "…") if len(call_sid) > 16 else call_sid,
+        phone,
+        org_id,
+    )
+
+    try:
+        while True:
+            try:
+                raw = await websocket.receive_text()
+            except WebSocketDisconnect:
+                break
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            ev = data.get("event")
+            if ev == "connected":
+                continue
+            if ev == "start":
+                continue
+            if ev == "media":
+                media = data.get("media") or {}
+                b64 = media.get("payload") or ""
+                if b64:
+                    try:
+                        buf.extend(base64.b64decode(b64))
+                    except Exception:
+                        pass
+                await maybe_flush(force=False)
+                continue
+            if ev == "stop":
+                await maybe_flush(force=True)
+                break
+    finally:
+        if phone and call_sid and buf and not processing:
+            await _flush_twilio_voice_chunk(phone, call_sid, bytes(buf), org_id=org_id, mode=mode)
 
 
 @router.post("/voice/incoming")
@@ -2171,16 +2332,20 @@ async def twilio_voice_incoming(request: Request) -> Response:
 
     call_sid = (params.get("CallSid") or "").strip()
     from_phone = (params.get("From") or "").strip()
-    if call_sid and from_phone:
-        await _store_twilio_caller(call_sid, from_phone)
+    to_phone = (params.get("To") or "").strip()
+    voice_mode = "stt_fallback"
+    org_id = int(settings.default_organization_id)
+    org_name = ""
 
     try:
-        from app.db.models import Organization
         from app.db.session import async_session_factory
-        from app.services.voice_ai import org_voice_enabled, record_voice_call
+        from app.services.twilio_routing import resolve_org_from_twilio_number
+        from app.services.voice_ai import get_voice_mode, org_voice_enabled, record_voice_call
 
         async with async_session_factory() as db:
-            org = await db.get(Organization, int(settings.default_organization_id))
+            org, org_id = await resolve_org_from_twilio_number(db, to_phone)
+            org_name = (org.name if org else "") or ""
+            voice_mode = get_voice_mode(org)
             if not org_voice_enabled(org):
                 return Response(
                     content="""<?xml version="1.0" encoding="UTF-8"?>
@@ -2190,13 +2355,21 @@ async def twilio_voice_incoming(request: Request) -> Response:
 </Response>""".strip(),
                     media_type="application/xml",
                 )
+            if call_sid and from_phone:
+                await _store_twilio_caller(
+                    call_sid,
+                    from_phone,
+                    org_id,
+                    voice_mode=voice_mode,
+                )
             if call_sid:
                 await record_voice_call(
                     db,
-                    org_id=int(settings.default_organization_id),
+                    org_id=org_id,
                     call_sid=call_sid,
                     phone=from_phone,
                     status="started",
+                    mode=voice_mode,
                 )
                 await db.commit()
     except Exception:
@@ -2225,71 +2398,39 @@ async def twilio_voice_incoming(request: Request) -> Response:
 @router.websocket("/voice/stream")
 async def twilio_voice_stream(websocket: WebSocket) -> None:
     """
-    Twilio Media Streams (входящий μ-law 8 kHz).
-    Накопление буфера → транскрипт Whisper → process_message → Twilio Say (см. customer_reply).
+    Twilio Media Streams: realtime (OpenAI WSS) or stt_fallback (Whisper buffer).
     """
     await websocket.accept()
-    buf = bytearray()
-    call_sid = ""
-    phone = ""
-    processing = False
-    threshold = int(settings.twilio_voice_buffer_bytes)
+    call_sid, phone, org_id, voice_mode, org_name, stream_sid = await _await_twilio_stream_start(websocket)
+    if not call_sid:
+        return
 
-    async def maybe_flush(force: bool = False) -> None:
-        nonlocal buf, processing
-        if processing or not phone or not call_sid:
-            return
-        if not force and len(buf) < threshold:
-            return
-        if not buf:
-            return
-        processing = True
-        chunk = bytes(buf)
-        buf.clear()
-        try:
-            await _flush_twilio_voice_chunk(phone, call_sid, chunk)
-        finally:
-            processing = False
+    logger.info(
+        "Twilio stream dispatch callSid=%s mode=%s org=%s",
+        (call_sid[:16] + "…") if len(call_sid) > 16 else call_sid,
+        voice_mode,
+        org_id,
+    )
 
-    try:
-        while True:
-            try:
-                raw = await websocket.receive_text()
-            except WebSocketDisconnect:
-                break
-            try:
-                data = json.loads(raw)
-            except json.JSONDecodeError:
-                continue
-            ev = data.get("event")
-            if ev == "connected":
-                continue
-            if ev == "start":
-                st = data.get("start") or {}
-                call_sid = (st.get("callSid") or data.get("callSid") or "").strip()
-                phone = await _get_twilio_caller(call_sid) if call_sid else ""
-                logger.info(
-                    "Twilio stream start callSid=%s phone=%s",
-                    (call_sid[:16] + "…") if len(call_sid) > 16 else call_sid,
-                    phone,
-                )
-                continue
-            if ev == "media":
-                media = data.get("media") or {}
-                b64 = media.get("payload") or ""
-                if b64:
-                    try:
-                        buf.extend(base64.b64decode(b64))
-                    except Exception:
-                        pass
-                await maybe_flush(force=False)
-                continue
-            if ev == "stop":
-                await maybe_flush(force=True)
-                break
-    finally:
-        if phone and call_sid and buf and not processing:
-            await _flush_twilio_voice_chunk(phone, call_sid, bytes(buf))
+    if voice_mode == "realtime":
+        from app.services.voice_realtime import run_realtime_voice_bridge
+
+        await run_realtime_voice_bridge(
+            websocket,
+            org_id=org_id,
+            phone=phone,
+            call_sid=call_sid,
+            org_name=org_name,
+            stream_sid=stream_sid,
+        )
+        return
+
+    await _run_stt_fallback_voice_stream(
+        websocket,
+        call_sid=call_sid,
+        phone=phone,
+        org_id=org_id,
+    )
 
 
 @router.get("/webhook")

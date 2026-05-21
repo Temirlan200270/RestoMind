@@ -78,3 +78,22 @@ async def twilio_speak_on_call(call_sid: str, text: str) -> bool:
     except Exception as exc:
         logger.error("Twilio speak error: %s", exc)
         return False
+
+
+async def twilio_hangup_on_call(call_sid: str) -> bool:
+    """Завершить активный звонок (Status=completed)."""
+    account = (settings.twilio_account_sid or "").strip()
+    token = (settings.twilio_auth_token or "").strip()
+    sid = (call_sid or "").strip()
+    if not account or not token or not sid:
+        return False
+    url = f"https://api.twilio.com/2010-04-01/Accounts/{account}/Calls/{sid}.json"
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.post(url, auth=(account, token), data={"Status": "completed"})
+        if not r.is_success:
+            logger.warning("Twilio hangup HTTP %s: %s", r.status_code, r.text[:300])
+        return r.is_success
+    except Exception as exc:
+        logger.error("Twilio hangup error: %s", exc)
+        return False

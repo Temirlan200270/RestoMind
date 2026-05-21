@@ -13,12 +13,21 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.passwords import hash_password
-from app.db.models import Organization, OrganizationPaymentConfig, StaffRole, StaffUser
+from app.db.models import Location, Organization, OrganizationPaymentConfig, StaffRole, StaffUser
 from app.db.session import get_db
-from app.services.tenant_scope import tenant_org_ids_for_staff_home
+from app.services.tenant_scope import list_locations_for_org, tenant_org_ids_for_staff_home
 from app.services.time_context import check_operational_status, parse_schedule_json
 from app.services.timezones import normalize_timezone_name
-from .deps import admin_org_from_session, require_admin_session_active, require_staff_admin
+from .deps import (
+    admin_org_from_session,
+    require_admin_session_active,
+    require_staff_admin,
+)
+from app.services.org_iiko_office import (
+    apply_iiko_office_config_patch,
+    iiko_office_config_public,
+)
+from app.services.secrets_crypto import fernet_or_none
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +51,29 @@ class OrganizationPrefsPatchBody(BaseModel):
     auto_send_to_iiko_after_payment: bool | None = Field(
         default=None,
         description="После оплаты (вебхук) автоматически подтвердить заказ и отправить в iiko",
+    )
+
+
+class IikoOfficeConfigPatchBody(BaseModel):
+    """Настройки iiko Office (складские остатки для SupplyMind)."""
+
+    host: str | None = Field(default=None, max_length=512)
+    login: str | None = Field(default=None, max_length=255)
+    password: str | None = Field(
+        default=None,
+        max_length=255,
+        description="Пустая строка — не менять; иначе сохранить (зашифровать при наличии Fernet)",
+    )
+    store_id: str | None = Field(default=None, max_length=120)
+    department_id: str | None = Field(default=None, max_length=120)
+    location_id: int | None = Field(
+        default=None,
+        ge=1,
+        description="RestoMind location_id для store_id (одна точка)",
+    )
+    store_location_map: dict[str, int] | None = Field(
+        default=None,
+        description="Маппинг store_id (iiko) → location_id для сети с несколькими точками",
     )
 
 
@@ -86,6 +118,13 @@ class ForceCloseBody(BaseModel):
     reason: str = Field(default="", max_length=255, description="Причина закрытия")
 
 
+class StaffRoleMetadataBody(BaseModel):
+    """Доп. метаданные роли для StaffMind / UI (хранятся в meta_json.role_metadata)."""
+
+    title: str = Field(default="", max_length=120)
+    department: str = Field(default="", max_length=120)
+
+
 class StaffCreateBody(BaseModel):
     email: str = Field(..., min_length=3, max_length=255)
     role: str = Field(default=StaffRole.OPERATOR.value, description="admin | manager | operator")
@@ -94,6 +133,79 @@ class StaffCreateBody(BaseModel):
         default=None,
         description="Филиалы для manager (подмножество сети); без списка — только домашний",
     )
+    assigned_location_ids: list[int] | None = Field(
+        default=None,
+        description="Точки/залы для operator/manager (подмножество locations org)",
+    )
+    role_metadata: StaffRoleMetadataBody | None = Field(
+        default=None,
+        description="Отображаемая должность/отдел для StaffMind",
+    )
+
+
+class StaffUpdateBody(BaseModel):
+    role: str | None = Field(default=None, description="admin | manager | operator")
+    is_active: bool | None = None
+    assigned_org_ids: list[int] | None = None
+    assigned_location_ids: list[int] | None = None
+    role_metadata: StaffRoleMetadataBody | None = None
+
+
+def _staff_role_metadata_dict(meta: dict) -> dict[str, str]:
+    raw = meta.get("role_metadata")
+    if not isinstance(raw, dict):
+        return {"title": "", "department": ""}
+    return {
+        "title": str(raw.get("title") or "").strip()[:120],
+        "department": str(raw.get("department") or "").strip()[:120],
+    }
+
+
+def _staff_user_public(u: StaffUser) -> dict:
+    meta = u.meta_json if isinstance(u.meta_json, dict) else {}
+    assigned_orgs = meta.get("assigned_org_ids") if isinstance(meta.get("assigned_org_ids"), list) else None
+    assigned_locs = meta.get("assigned_location_ids") if isinstance(meta.get("assigned_location_ids"), list) else None
+    return {
+        "id": int(u.id),
+        "email": u.email,
+        "role": u.role,
+        "is_active": bool(u.is_active),
+        "assigned_org_ids": assigned_orgs,
+        "assigned_location_ids": assigned_locs,
+        "role_metadata": _staff_role_metadata_dict(meta),
+        "created_at": u.created_at.isoformat() if u.created_at else None,
+    }
+
+
+async def _valid_location_ids_for_org(db: AsyncSession, org_id: int) -> set[int]:
+    locs = await list_locations_for_org(db, int(org_id))
+    return {int(loc.id) for loc in locs}
+
+
+def _merge_staff_meta(
+    existing: dict | None,
+    *,
+    assigned_org_ids: list[int] | None = None,
+    assigned_location_ids: list[int] | None = None,
+    role_metadata: StaffRoleMetadataBody | None = None,
+    clear_assigned_orgs: bool = False,
+    clear_assigned_locations: bool = False,
+) -> dict:
+    meta = dict(existing) if isinstance(existing, dict) else {}
+    if clear_assigned_orgs:
+        meta.pop("assigned_org_ids", None)
+    elif assigned_org_ids is not None:
+        meta["assigned_org_ids"] = assigned_org_ids
+    if clear_assigned_locations:
+        meta.pop("assigned_location_ids", None)
+    elif assigned_location_ids is not None:
+        meta["assigned_location_ids"] = assigned_location_ids
+    if role_metadata is not None:
+        meta["role_metadata"] = {
+            "title": (role_metadata.title or "").strip()[:120],
+            "department": (role_metadata.department or "").strip()[:120],
+        }
+    return meta
 
 
 _SUPPORTED_PAYMENT_PROVIDERS = {"freedom_pay", "kaspi", "cloudpayments"}
@@ -211,6 +323,69 @@ async def get_organization_profile(request: Request, db: AsyncSession = Depends(
     }
 
 
+@router.get("/organization/iiko-office")
+async def get_organization_iiko_office(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Конфиг iiko Office для SupplyMind (без пароля)."""
+    org_id = admin_org_from_session(request)
+    org = await db.get(Organization, org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    return {"ok": True, **iiko_office_config_public(org)}
+
+
+@router.patch("/organization/iiko-office")
+async def patch_organization_iiko_office(
+    request: Request,
+    body: IikoOfficeConfigPatchBody,
+    _perm: None = Depends(require_staff_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Сохранить учётные данные iiko Office в integration_config_json.iiko_office."""
+    org_id = admin_org_from_session(request)
+    org = await db.get(Organization, org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    host = body.host
+    login = body.login
+    if host is not None and not (host or "").strip():
+        raise HTTPException(status_code=400, detail="host не должен быть пустым")
+    if login is not None and not (login or "").strip():
+        raise HTTPException(status_code=400, detail="login не должен быть пустым")
+    if body.store_id is not None and not (body.store_id or "").strip():
+        raise HTTPException(status_code=400, detail="store_id не должен быть пустым")
+
+    if body.location_id is not None:
+        loc = await db.scalar(
+            select(Location.id).where(
+                Location.id == int(body.location_id),
+                Location.organization_id == int(org_id),
+                Location.is_active.is_(True),
+            )
+        )
+        if loc is None:
+            raise HTTPException(status_code=400, detail="location_id не найден в этом филиале")
+
+    encrypt_pw = fernet_or_none() is not None
+    apply_iiko_office_config_patch(
+        org,
+        host=host,
+        login=login,
+        password_plain=body.password if body.password is not None else None,
+        store_id=body.store_id,
+        department_id=body.department_id,
+        location_id=body.location_id,
+        store_location_map=body.store_location_map,
+        encrypt_password=encrypt_pw,
+    )
+    await db.commit()
+    await db.refresh(org)
+    return {"ok": True, **iiko_office_config_public(org)}
+
+
 @router.patch("/organization/profile")
 async def patch_organization_profile(
     request: Request,
@@ -323,21 +498,7 @@ async def list_staff(
             .order_by(StaffUser.created_at.desc(), StaffUser.id.desc())
         )
     ).scalars().all()
-    out: list[dict] = []
-    for u in rows:
-        meta = u.meta_json if isinstance(u.meta_json, dict) else {}
-        assigned = meta.get("assigned_org_ids") if isinstance(meta.get("assigned_org_ids"), list) else None
-        out.append(
-            {
-                "id": int(u.id),
-                "email": u.email,
-                "role": u.role,
-                "is_active": bool(u.is_active),
-                "assigned_org_ids": assigned,
-                "created_at": u.created_at.isoformat() if u.created_at else None,
-            }
-        )
-    return {"ok": True, "users": out}
+    return {"ok": True, "users": [_staff_user_public(u) for u in rows]}
 
 
 @router.post("/staff")
@@ -369,16 +530,29 @@ async def create_staff(
     if exists_id is not None:
         raise HTTPException(status_code=409, detail="Пользователь с таким email уже существует")
 
+    valid_locs = await _valid_location_ids_for_org(db, org_id)
     meta_json: dict | None = None
+    assigned_orgs: list[int] | None = None
     if role == StaffRole.MANAGER.value and body.assigned_org_ids is not None:
         allowed = await tenant_org_ids_for_staff_home(db, org_id)
-        assigned = [int(x) for x in body.assigned_org_ids if int(x) in allowed]
-        if not assigned:
+        assigned_orgs = [int(x) for x in body.assigned_org_ids if int(x) in allowed]
+        if not assigned_orgs:
             raise HTTPException(
                 status_code=400,
                 detail="assigned_org_ids должны быть активными филиалами вашей сети",
             )
-        meta_json = {"assigned_org_ids": assigned}
+    assigned_locs: list[int] | None = None
+    if body.assigned_location_ids is not None:
+        assigned_locs = [int(x) for x in body.assigned_location_ids if int(x) in valid_locs]
+        if not assigned_locs:
+            raise HTTPException(status_code=400, detail="assigned_location_ids должны быть точками этого филиала")
+    if assigned_orgs is not None or assigned_locs is not None or body.role_metadata is not None:
+        meta_json = _merge_staff_meta(
+            None,
+            assigned_org_ids=assigned_orgs,
+            assigned_location_ids=assigned_locs,
+            role_metadata=body.role_metadata,
+        )
 
     u = StaffUser(
         organization_id=org_id,
@@ -394,7 +568,83 @@ async def create_staff(
     except IntegrityError:
         await db.rollback()
         raise HTTPException(status_code=409, detail="Не удалось создать пользователя") from None
-    return {"ok": True, "user": {"id": int(u.id), "email": u.email, "role": u.role}, "temp_password": pwd}
+    return {
+        "ok": True,
+        "user": _staff_user_public(u),
+        "temp_password": pwd,
+    }
+
+
+@router.patch("/staff/{staff_id}")
+async def update_staff(
+    request: Request,
+    staff_id: int,
+    body: StaffUpdateBody,
+    _perm: None = Depends(require_staff_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    org_id = admin_org_from_session(request)
+    u = await db.get(StaffUser, int(staff_id))
+    if u is None or int(u.organization_id) != int(org_id):
+        raise HTTPException(status_code=404, detail="Сотрудник не найден")
+
+    if body.role is not None:
+        role = (body.role or "").strip().lower()
+        if role not in (
+            StaffRole.ADMIN.value,
+            StaffRole.MANAGER.value,
+            StaffRole.OPERATOR.value,
+        ):
+            raise HTTPException(status_code=400, detail="Некорректная роль")
+        u.role = role
+
+    if body.is_active is not None:
+        u.is_active = bool(body.is_active)
+
+    valid_locs = await _valid_location_ids_for_org(db, org_id)
+    role_now = (u.role or "").strip().lower()
+    clear_orgs = False
+    clear_locs = False
+    assigned_orgs_val: list[int] | None = None
+    assigned_locs_val: list[int] | None = None
+
+    if body.assigned_org_ids is not None:
+        if role_now != StaffRole.MANAGER.value:
+            clear_orgs = True
+        else:
+            allowed = await tenant_org_ids_for_staff_home(db, org_id)
+            assigned_orgs_val = [int(x) for x in body.assigned_org_ids if int(x) in allowed]
+            if not assigned_orgs_val:
+                raise HTTPException(
+                    status_code=400,
+                    detail="assigned_org_ids должны быть активными филиалами вашей сети",
+                )
+
+    if body.assigned_location_ids is not None:
+        if role_now not in (StaffRole.MANAGER.value, StaffRole.OPERATOR.value):
+            clear_locs = True
+        else:
+            assigned_locs_val = [int(x) for x in body.assigned_location_ids if int(x) in valid_locs]
+            if not assigned_locs_val:
+                raise HTTPException(
+                    status_code=400,
+                    detail="assigned_location_ids должны быть точками этого филиала",
+                )
+
+    u.meta_json = _merge_staff_meta(
+        u.meta_json if isinstance(u.meta_json, dict) else None,
+        assigned_org_ids=assigned_orgs_val,
+        assigned_location_ids=assigned_locs_val,
+        role_metadata=body.role_metadata,
+        clear_assigned_orgs=clear_orgs,
+        clear_assigned_locations=clear_locs,
+    )
+    if not u.meta_json:
+        u.meta_json = None
+
+    await db.commit()
+    await db.refresh(u)
+    return {"ok": True, "user": _staff_user_public(u)}
 
 
 # ─── Payment Provider Config ─────────────────────────────────────────────────

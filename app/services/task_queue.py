@@ -157,6 +157,7 @@ def _get_background_fn(job_name: str) -> Any:
         "send_blast_batch": ("app.services.marketing", "run_send_blast_batch"),
         "iiko_stoplist_sync": ("app.services.iiko_sync_tasks", "run_stoplist_sync"),
         "iiko_menu_sync": ("app.services.iiko_sync_tasks", "run_menu_sync"),
+        "iiko_inventory_sync": ("app.services.iiko_sync_tasks", "run_inventory_sync"),
     }
     if job_name not in _map:
         return None

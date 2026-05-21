@@ -6,6 +6,38 @@
 
 ## [Unreleased] — 2026-03-20
 
+### Добавлено (2026-05-21) — Platform polish tails
+
+- **StaffMind Step 1:** `StaffUser.meta_json` — `role_metadata` (title/department) и `assigned_location_ids`; `PATCH /api/admin/staff/{id}`; UI в **Настройки → Команда**.
+- **Franchise Phase 1.2:** per-location analytics rollup из `SystemEvent` (`rollup_location_event_stats`) для non-shift маршрутов в [`analytics.py`](app/api/admin/analytics.py).
+- **P15 coach-marks:** `POST /api/admin/auth/tour-complete` → `StaffUser.meta_json.tour_completed_at`; `/auth/me` отдаёт флаг.
+- **AI Context Snapshot:** replay из `menu_prices_snapshot`, если `menu_context_text` пуст.
+- **Ops:** [`docs/TELEGRAM_DIGEST_STAGING.md`](docs/TELEGRAM_DIGEST_STAGING.md).
+- **Тесты:** [`tests/test_platform_polish_tails.py`](tests/test_platform_polish_tails.py).
+
+### Удалено (2026-05-21) — G10.3 Legacy shift cleanup
+
+- **API:** удалён `GET /api/admin/shift-control` (G9); единственный контракт смены — `GET /api/admin/shift/state`, `POST /api/admin/shift/action`, heartbeat `POST|DELETE /shift/heartbeat`.
+- **Сервис:** [`shift_control.py`](app/services/shift_control.py) — только `_saved_today_kzt` для engine; `build_shift_control` удалён.
+- **UI:** heartbeat смены без legacy `owner_token` в [`admin-app.js`](app/static/js/admin-app.js); polling 45s сохранён (WS push не добавлялся).
+- **Тесты:** `test_legacy_shift_control_endpoint_removed`, `test_shift_control.py` → метрики; регрессия shift: `pytest tests/test_shift_api_http.py tests/test_shift_state_engine.py tests/test_shift_control.py -q`.
+
+### Добавлено (2026-05-21) — GuestCare External auto-sync
+
+- **GuestCare parser + sync:** [`guestcare_parser.py`](app/services/guestcare_parser.py) — conservative JSON-LD / embedded state parse для 2GIS; Google — best-effort + documented Places API limitation. [`external_reviews_sync.py`](app/services/external_reviews_sync.py) — upsert в `external_reviews` с dedupe `(organization_id, source, external_id)`.
+- **API:** `POST /api/admin/intelligence/reviews/external/sync`; `GET …/reviews/external` возвращает `sync_meta` из `Organization.meta_json.guestcare_sync`.
+- **Worker:** ARQ `external_reviews_sync` + cron `external_reviews_sync_scheduled_tick` (02:10, 14:10 UTC); env `GUESTCARE_SYNC_ENABLED`.
+- **UI:** кнопка «Синхронизировать» во вкладке `guestcare` (`_tab_ai_center.html`, `syncGuestCareReviews` в `admin-app.js`).
+- **Тесты:** [`tests/test_guestcare_parser.py`](tests/test_guestcare_parser.py), fixtures [`tests/fixtures/guestcare/`](tests/fixtures/guestcare/).
+
+### Добавлено (2026-05-20) — Integration epics (SupplyMind · Voice)
+
+- **SupplyMind — чеклист закупки:** `supply_purchase_drafts` как внутренний чеклист (без экспорта в iiko); статусы `draft` → `approved` → `completed` / `cancelled`; `GET/PATCH /api/admin/intelligence/supplymind/drafts/{id}`, `GET …/export?format=csv`; панель «Чеклист закупки» в `aiCenterTab=final_mile` ([`docs/SUPPLYMIND_STAFFMIND.md`](docs/SUPPLYMIND_STAFFMIND.md)).
+- **SupplyMind — iiko Office inventory sync (partial):** [`iiko_office_client.py`](app/integrations/iiko_office_client.py), [`iiko_inventory_sync.py`](app/services/iiko_inventory_sync.py) → upsert `inventory_stock_snapshots` (`source=iiko_office`); `POST/GET /api/admin/inventory/sync-iiko|sync-status`; `GET/PATCH /api/admin/organization/iiko-office` (шифрование пароля, UI в Настройки → Подключения); маппинг `store_id` → `location_id` (`location_id`, `store_location_map`); RBAC `require_staff_manager_or_admin` на sync/мутации SupplyMind; ARQ cron 6 ч; status/manual sync в `aiCenterTab=final_mile`. Без live Office — тесты на fixture.
+- **Voice AI — OpenAI Realtime connector:** `voice_ai_mode=realtime` — bridge Twilio μ-law ↔ OpenAI Realtime WSS ([`voice_realtime/`](app/services/voice_realtime/), [`twilio_routing.py`](app/services/twilio_routing.py)); `stt_fallback` сохранён; env `OPENAI_REALTIME_*`. **Хвост:** staging call на реальном Twilio номере ([`docs/VOICE_AI_SPIKE.md`](docs/VOICE_AI_SPIKE.md)).
+- **Voice AI — production tail:** Realtime tools `lookup_menu` (menu DB по `organization_id`) и `escalate_to_whatsapp` (отправка WA + message accounting); `require_staff_admin` на `POST /voice/config`; UI — `realtime_ready` + 403 hint; чеклист [`docs/VOICE_STAGING_CHECKLIST.md`](docs/VOICE_STAGING_CHECKLIST.md); тесты [`test_voice_realtime.py`](tests/test_voice_realtime.py), [`test_voice_staging.py`](tests/test_voice_staging.py).
+- **Тесты (integration tails):** [`test_shift_api_http.py`](tests/test_shift_api_http.py) (GET/POST shift API), [`test_healing_actions_cron.py`](tests/test_healing_actions_cron.py) (cancellation_surge, ai_message_drop), [`test_voice_staging.py`](tests/test_voice_staging.py) (incoming TwiML + dispatch), iiko HTTP mock в [`test_iiko_inventory_sync.py`](tests/test_iiko_inventory_sync.py).
+
 ### Изменено (2026-05-20) — G10 Simplification Map (текущая модель)
 
 - **Chat:** [`chat_serializer.py`](app/services/chat_serializer.py) — `chat:lock` (15s) + FIFO `chat:queue`; убраны `active_pipeline`, epoch, shadow.

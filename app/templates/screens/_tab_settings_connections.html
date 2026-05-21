@@ -105,6 +105,72 @@
                         </div>
                     </details>
 
+                    <details class="hint-details rounded-xl border border-slate-200 bg-slate-50/50 p-4 mb-6"
+                        :open="!iikoOfficeConfig?.configured">
+                        <summary class="cursor-pointer select-none list-none flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                                <h4 class="text-sm font-bold text-gray-900">iiko Office (склад / SupplyMind)</h4>
+                                <p class="text-xs text-gray-600 mt-1"
+                                    x-text="iikoOfficeConfig?.configured ? 'Подключено — остатки синхронизируются в AI Center → Final Mile.' : 'Укажите хост, логин и склад (store_id) для синхронизации остатков.'"></p>
+                            </div>
+                            <span class="inline-flex min-h-[44px] items-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700">
+                                Настроить
+                            </span>
+                        </summary>
+                        <div class="mt-4 border-t border-slate-200 pt-4 space-y-3 max-w-xl" @input="iikoOfficeDirty = true">
+                            <div>
+                                <label class="block text-[11px] font-semibold text-gray-500 uppercase mb-1">Хост iiko Office</label>
+                                <input type="url" x-model="iikoOfficeDraft.host" placeholder="https://office.example.local"
+                                    class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm font-mono">
+                            </div>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div>
+                                    <label class="block text-[11px] font-semibold text-gray-500 uppercase mb-1">Логин</label>
+                                    <input type="text" autocomplete="off" x-model="iikoOfficeDraft.login"
+                                        class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
+                                </div>
+                                <div>
+                                    <label class="block text-[11px] font-semibold text-gray-500 uppercase mb-1">Пароль</label>
+                                    <input type="password" autocomplete="new-password" x-model="iikoOfficeDraft.password"
+                                        :placeholder="iikoOfficeConfig?.password_set ? '•••••••• (оставьте пустым, чтобы не менять)' : 'Пароль API'"
+                                        class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div>
+                                    <label class="block text-[11px] font-semibold text-gray-500 uppercase mb-1">store_id (склад)</label>
+                                    <input type="text" x-model="iikoOfficeDraft.store_id" placeholder="UUID склада в iiko"
+                                        class="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs font-mono">
+                                </div>
+                                <div>
+                                    <label class="block text-[11px] font-semibold text-gray-500 uppercase mb-1">department_id (опц.)</label>
+                                    <input type="text" x-model="iikoOfficeDraft.department_id"
+                                        class="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs font-mono">
+                                </div>
+                            </div>
+                            <div x-show="(userData?.available_locations || []).length > 1" x-cloak>
+                                <label class="block text-[11px] font-semibold text-gray-500 uppercase mb-1">Точка RestoMind</label>
+                                <select x-model="iikoOfficeDraft.location_id" class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
+                                    <option value="">Без привязки (вся организация)</option>
+                                    <template x-for="loc in (userData?.available_locations || [])" :key="loc.id">
+                                        <option :value="String(loc.id)" x-text="loc.name"></option>
+                                    </template>
+                                </select>
+                                <p class="text-[10px] text-gray-500 mt-1">Остатки с этого склада попадут в снапшоты с выбранным location_id.</p>
+                            </div>
+                            <p class="text-[10px] text-amber-800" x-show="iikoOfficeConfig?.secrets_encrypt_ready === false">
+                                Шифрование секретов не настроено на сервере — пароль сохранится в JSON (только для dev/staging).
+                            </p>
+                            <div class="flex flex-wrap gap-2">
+                                <button type="button" @click="saveIikoOfficeConfig()" :disabled="iikoOfficeSaving"
+                                    class="px-4 py-2 rounded-xl bg-slate-800 text-white text-sm font-semibold hover:bg-slate-900 disabled:opacity-40">
+                                    <span x-show="!iikoOfficeSaving">Сохранить iiko Office</span>
+                                    <span x-show="iikoOfficeSaving" x-cloak>Сохраняем…</span>
+                                </button>
+                            </div>
+                        </div>
+                    </details>
+
                     <div class="space-y-5">
                         <!-- iiko -->
                         <div class="rm-card-surface p-6">

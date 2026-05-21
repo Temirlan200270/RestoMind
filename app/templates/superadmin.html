@@ -276,6 +276,46 @@
         </div>
     </section>
 
+    <div x-show="passwordModal.open" x-cloak class="fixed inset-0 z-[130] bg-black/50 backdrop-blur-sm p-4 flex items-center justify-center" @click.self="passwordModal.copied ? closePasswordModal() : null">
+        <div class="w-full max-w-lg rounded-2xl bg-white border border-slate-200 shadow-2xl overflow-hidden" role="dialog" aria-modal="true" aria-labelledby="superadmin-password-modal-title">
+            <div class="px-5 py-4 border-b border-slate-200 flex items-start justify-between gap-3">
+                <div>
+                    <h3 id="superadmin-password-modal-title" class="text-base font-bold text-slate-900">Временный пароль</h3>
+                    <p class="text-xs text-slate-500" x-text="passwordModal.context"></p>
+                </div>
+                <button type="button" class="text-slate-400 hover:text-slate-700 text-xl leading-none" @click="passwordModal.copied ? closePasswordModal() : null" aria-label="Закрыть окно пароля">&times;</button>
+            </div>
+            <div class="p-5 space-y-4">
+                <div class="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                    Пароль показывается один раз. Скопируйте и сохраните его до закрытия окна.
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold uppercase text-slate-500 mb-1">Пароль</label>
+                    <div class="flex items-center gap-2">
+                        <input readonly :value="passwordModal.password" class="flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-sm text-slate-900">
+                        <button type="button" @click="copyPasswordModal()" class="px-3 py-2 rounded-lg text-xs font-semibold bg-brand-600 text-white hover:bg-brand-700">
+                            Копировать
+                        </button>
+                    </div>
+                </div>
+                <label class="flex items-start gap-2 text-sm text-slate-700">
+                    <input type="checkbox" x-model="passwordModal.copied" class="mt-1 rounded border-slate-300 text-brand-600 focus:ring-brand-500">
+                    <span>Я скопировал и сохранил пароль в безопасном месте.</span>
+                </label>
+            </div>
+            <div class="px-5 py-4 border-t border-slate-200 flex items-center justify-end gap-2">
+                <button type="button" @click="copyPasswordModal()" class="px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                    Скопировать ещё раз
+                </button>
+                <button type="button" @click="closePasswordModal()" :disabled="!passwordModal.copied"
+                    class="px-3 py-2 rounded-lg text-xs font-semibold"
+                    :class="passwordModal.copied ? 'bg-brand-600 text-white hover:bg-brand-700' : 'bg-slate-200 text-slate-500 cursor-not-allowed'">
+                    Закрыть
+                </button>
+            </div>
+        </div>
+    </div>
+
     <section class="rounded-2xl bg-white border border-slate-200 shadow-sm p-5 mt-6">
         <div class="flex items-center justify-between gap-3 mb-4">
             <div>
@@ -468,6 +508,12 @@ function superAdminPage() {
         scheduleEditorOrgName: '',
         scheduleEditorFallbackUsed: false,
         scheduleEditor: {},
+        passwordModal: {
+            open: false,
+            context: '',
+            password: '',
+            copied: false,
+        },
         dayRows: [
             { key: 'mon', label: 'Понедельник' },
             { key: 'tue', label: 'Вторник' },
@@ -533,6 +579,44 @@ function superAdminPage() {
         setToast(msg) {
             this.toast = msg;
             setTimeout(() => { this.toast = ''; }, 3500);
+        },
+        showPasswordModal(context, password) {
+            this.passwordModal = {
+                open: true,
+                context: context || '',
+                password: String(password || ''),
+                copied: false,
+            };
+        },
+        async copyPasswordModal() {
+            const pwd = String(this.passwordModal.password || '');
+            if (!pwd) return;
+            try {
+                if (navigator.clipboard?.writeText) {
+                    await navigator.clipboard.writeText(pwd);
+                } else {
+                    const el = document.createElement('textarea');
+                    el.value = pwd;
+                    el.setAttribute('readonly', 'readonly');
+                    el.style.position = 'fixed';
+                    el.style.opacity = '0';
+                    document.body.appendChild(el);
+                    el.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(el);
+                }
+                this.passwordModal.copied = true;
+                this.setToast('Пароль скопирован');
+            } catch (_e) {
+                this.error = 'Не удалось скопировать пароль автоматически. Скопируйте его вручную.';
+            }
+        },
+        closePasswordModal() {
+            if (!this.passwordModal.copied) return;
+            this.passwordModal.open = false;
+            this.passwordModal.context = '';
+            this.passwordModal.password = '';
+            this.passwordModal.copied = false;
         },
         async loadRequests() {
             try {
@@ -600,8 +684,10 @@ function superAdminPage() {
                     method: 'POST',
                     body: JSON.stringify({}),
                 });
-                const pwd = out.generated_password ? ` Временный пароль: ${out.generated_password}` : '';
-                this.setToast(`Заявка одобрена.${pwd}`);
+                this.setToast('Заявка одобрена');
+                if (out.generated_password) {
+                    this.showPasswordModal(`Заявка #${row.id}: ${row.restaurant_name || 'ресторан'}`, out.generated_password);
+                }
                 await Promise.all([this.loadRequests(), this.loadOrganizations()]);
             } catch (e) {
                 this.error = e.message || 'Не удалось одобрить заявку';
@@ -625,8 +711,10 @@ function superAdminPage() {
                     method: 'POST',
                     body: JSON.stringify(this.createForm),
                 });
-                const pwd = out.generated_password ? ` Временный пароль: ${out.generated_password}` : '';
-                this.setToast(`Организация создана.${pwd}`);
+                this.setToast('Организация создана');
+                if (out.generated_password) {
+                    this.showPasswordModal(this.createForm.restaurant_name || 'Новая организация', out.generated_password);
+                }
                 this.createForm.restaurant_name = '';
                 this.createForm.tenant_name = '';
                 this.createForm.admin_email = '';
@@ -806,7 +894,7 @@ function superAdminPage() {
                     method: 'POST',
                     body: JSON.stringify({}),
                 });
-                this.setToast(`Новый пароль: ${out.new_password}`);
+                this.showPasswordModal(`${org.name || 'Организация'}: сброс пароля`, out.new_password);
             } catch (e) {
                 this.error = e.message || 'Не удалось сбросить пароль';
             }

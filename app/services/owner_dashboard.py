@@ -74,14 +74,210 @@ async def fetch_daily_revenue_history_from_events(
     *,
     days: int = 28,
     now_utc: datetime | None = None,
+    location_id: int | None = None,
+    allowed_location_ids: set[int] | None = None,
 ) -> dict[str, float]:
-    """Выручка по дням из DailyOrgStats.revenue_kzt (event-driven).
-
-    Делегирует в get_event_stats — единственный источник чтения из DailyOrgStats.
-    """
+    """Выручка по дням из DailyOrgStats (org) или rollup SystemEvent (per-location)."""
+    if location_id is not None or allowed_location_ids is not None:
+        rows = await rollup_location_event_stats(
+            db,
+            org_id,
+            days=days,
+            now_utc=now_utc,
+            location_id=location_id,
+            allowed_location_ids=allowed_location_ids,
+        )
+        return {r["date"]: float(r["revenue_kzt"] or 0) for r in rows}
     from app.services.analytics_consumer import get_event_stats
     rows = await get_event_stats(db, org_id, days=days)
     return {r["date"]: float(r["revenue_kzt"] or 0) for r in rows}
+
+
+def _payload_location_id(payload: dict[str, Any] | None) -> int | None:
+    if not isinstance(payload, dict):
+        return None
+    raw = payload.get("_location_id") or payload.get("location_id")
+    try:
+        return int(raw) if raw is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _event_matches_location_scope(
+    payload: dict[str, Any] | None,
+    *,
+    location_id: int | None,
+    allowed_location_ids: set[int] | None,
+) -> bool:
+    loc = _payload_location_id(payload)
+    if loc is None:
+        return False
+    if location_id is not None:
+        return int(loc) == int(location_id)
+    if allowed_location_ids is not None:
+        return int(loc) in allowed_location_ids
+    return True
+
+
+async def rollup_location_event_stats(
+    db: AsyncSession,
+    org_id: int,
+    *,
+    days: int = 7,
+    now_utc: datetime | None = None,
+    location_id: int | None = None,
+    allowed_location_ids: set[int] | None = None,
+) -> list[dict[str, Any]]:
+    """Phase 1.2: дневные агрегаты из SystemEvent по `_location_id` в payload."""
+    from app.db.models import SystemEvent
+    from app.services.analytics_consumer import HANDLED_EVENT_TYPES
+
+    now_utc = now_utc or datetime.now(tz=timezone.utc)
+    today = now_utc.date()
+    floor = today - timedelta(days=max(days - 1, 0))
+    floor_dt = _sql_dt_for_filter(datetime.combine(floor, datetime.min.time(), tzinfo=timezone.utc))
+
+    rows = (
+        await db.execute(
+            select(
+                SystemEvent.event_type,
+                SystemEvent.payload_json,
+                SystemEvent.created_at,
+            ).where(
+                SystemEvent.organization_id == int(org_id),
+                SystemEvent.event_type.in_(tuple(HANDLED_EVENT_TYPES)),
+                SystemEvent.created_at >= floor_dt,
+            )
+        )
+    ).all()
+
+    _EVENT_COLUMN: dict[str, str] = {
+        "order.created": "orders_created",
+        "order.confirmed": "orders_confirmed",
+        "order.cancelled": "orders_cancelled",
+        "booking.created": "bookings_created",
+        "booking.confirmed": "bookings_confirmed",
+        "booking.cancelled": "bookings_cancelled",
+        "payment.completed": "payments_completed",
+        "payment.failed": "payments_failed",
+        "payment.expired": "payments_failed",
+        "ai.escalated": "escalations",
+        "ai.response.generated": "ai_messages_count",
+        "ai.dialog.started": "dialogs_count",
+        "operator.took_over": "operator_takeovers",
+    }
+
+    buckets: dict[str, dict[str, float | int]] = defaultdict(
+        lambda: {
+            "orders_created": 0,
+            "orders_confirmed": 0,
+            "orders_cancelled": 0,
+            "bookings_created": 0,
+            "bookings_confirmed": 0,
+            "bookings_cancelled": 0,
+            "payments_completed": 0,
+            "payments_failed": 0,
+            "revenue_kzt": 0.0,
+            "escalations": 0,
+            "operator_takeovers": 0,
+            "ai_messages_count": 0,
+            "dialogs_count": 0,
+        }
+    )
+
+    for event_type, payload_json, created_at in rows:
+        payload = payload_json if isinstance(payload_json, dict) else {}
+        if not _event_matches_location_scope(
+            payload,
+            location_id=location_id,
+            allowed_location_ids=allowed_location_ids,
+        ):
+            continue
+        dk = _order_day_key_utc(created_at)
+        if not dk:
+            continue
+        bucket = buckets[dk]
+        if event_type == "payment.completed":
+            bucket["payments_completed"] = int(bucket["payments_completed"]) + 1
+            bucket["revenue_kzt"] = float(bucket["revenue_kzt"]) + float(payload.get("amount") or 0)
+            continue
+        col = _EVENT_COLUMN.get(str(event_type))
+        if col:
+            bucket[col] = int(bucket[col]) + 1
+
+    out: list[dict[str, Any]] = []
+    for dk in sorted(buckets.keys(), reverse=True):
+        b = buckets[dk]
+        out.append(
+            {
+                "date": dk,
+                "orders_created": int(b["orders_created"]),
+                "orders_confirmed": int(b["orders_confirmed"]),
+                "orders_cancelled": int(b["orders_cancelled"]),
+                "bookings_created": int(b["bookings_created"]),
+                "bookings_confirmed": int(b["bookings_confirmed"]),
+                "bookings_cancelled": int(b["bookings_cancelled"]),
+                "payments_completed": int(b["payments_completed"]),
+                "payments_failed": int(b["payments_failed"]),
+                "revenue_kzt": float(b["revenue_kzt"]),
+                "escalations": int(b["escalations"]),
+                "operator_takeovers": int(b["operator_takeovers"]),
+                "ai_messages_count": int(b["ai_messages_count"]),
+                "dialogs_count": int(b["dialogs_count"]),
+            }
+        )
+    return out
+
+
+async def rollup_location_today_summary(
+    db: AsyncSession,
+    org_id: int,
+    *,
+    location_id: int | None = None,
+    allowed_location_ids: set[int] | None = None,
+) -> dict[str, Any]:
+    """Сводка за сегодня (UTC) из event-stream, отфильтрованная по location."""
+    rows = await rollup_location_event_stats(
+        db,
+        org_id,
+        days=1,
+        location_id=location_id,
+        allowed_location_ids=allowed_location_ids,
+    )
+    today_key = datetime.now(tz=timezone.utc).date().isoformat()
+    row = next((r for r in rows if r["date"] == today_key), None)
+    zero: dict[str, Any] = {
+        "orders_created": 0,
+        "orders_confirmed": 0,
+        "orders_cancelled": 0,
+        "bookings_created": 0,
+        "bookings_confirmed": 0,
+        "payments_completed": 0,
+        "payments_failed": 0,
+        "revenue_kzt": 0.0,
+        "escalations": 0,
+        "operator_takeovers": 0,
+        "ai_messages_count": 0,
+        "dialogs_count": 0,
+        "source": "event_driven_location",
+    }
+    if row is None:
+        return zero
+    return {
+        "orders_created": int(row.get("orders_created") or 0),
+        "orders_confirmed": int(row.get("orders_confirmed") or 0),
+        "orders_cancelled": int(row.get("orders_cancelled") or 0),
+        "bookings_created": int(row.get("bookings_created") or 0),
+        "bookings_confirmed": int(row.get("bookings_confirmed") or 0),
+        "payments_completed": int(row.get("payments_completed") or 0),
+        "payments_failed": int(row.get("payments_failed") or 0),
+        "revenue_kzt": float(row.get("revenue_kzt") or 0),
+        "escalations": int(row.get("escalations") or 0),
+        "operator_takeovers": int(row.get("operator_takeovers") or 0),
+        "ai_messages_count": int(row.get("ai_messages_count") or 0),
+        "dialogs_count": int(row.get("dialogs_count") or 0),
+        "source": "event_driven_location",
+    }
 
 
 def event_revenue_history_usable(revenue_by_date: dict[str, float], *, min_days: int = 3) -> bool:

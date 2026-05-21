@@ -46,8 +46,13 @@ WEIGHTS = {
 WAIT_MIN_CAP = 30
 WAIT_MIN_WEIGHT = 50
 
-ShiftSubtype = Literal["next", "skip", "complete"]
-ACTION_INTENT = {"next": "advance", "skip": "reject", "complete": "complete"}
+ShiftSubtype = Literal["next", "skip", "complete", "reset_skips"]
+ACTION_INTENT = {
+    "next": "advance",
+    "skip": "reject",
+    "complete": "complete",
+    "reset_skips": "reset_skip_memory",
+}
 
 EmptyFocusReason = Literal[
     "no_signals",
@@ -370,6 +375,23 @@ async def _register_exclusion(
         await redis_client.sadd(_next_set_key(oid), focus_id)
 
 
+async def reset_shift_skip_exclusions(org_id: int) -> int:
+    """Clear operator skip/next memory for an org; completed items stay excluded."""
+    oid = int(org_id)
+    cleared = 0
+    for set_key, prefix in (
+        (_skip_set_key(oid), "shift:skip:"),
+        (_next_set_key(oid), "shift:next:"),
+    ):
+        members = await _smembers_ids(set_key)
+        scanned = await _scan_focus_ids(oid, prefix)
+        for fid in members | scanned:
+            await redis_client.delete(f"{prefix}{oid}:{fid}")
+            cleared += 1
+        await redis_client.delete(set_key)
+    return cleared
+
+
 def _ownership_for_focus(
     focus_id: str,
     operator_id: str,
@@ -646,6 +668,8 @@ async def build_shift_state(
     )
     summary = money.get("summary") or {}
     op_norm = _normalize_operator_id(operator_id)
+    risk_kzt = float(summary.get("money_at_risk_kzt") or shift_input.risk_kzt)
+    empty_focus_while_risk_positive = focus_item is None and risk_kzt > 0
     presentation = _build_presentation(
         state=state,
         shift_input=shift_input,
@@ -671,16 +695,34 @@ async def build_shift_state(
         "focus": focus_item,
         "queue": queue_preview,
         "metrics": {
-            "risk_kzt": float(summary.get("money_at_risk_kzt") or shift_input.risk_kzt),
+            "risk_kzt": risk_kzt,
             "active_risk_kzt": active_shift_input.risk_kzt,
             "saved_today_kzt": saved_today,
             "at_risk_count": int(summary.get("total") or shift_input.queue_size),
             "queue_size": shift_input.queue_size,
             "queue_size_active": len(active_items),
+            "shift_empty_focus_while_risk_positive": int(empty_focus_while_risk_positive),
+            "excluded_skip": len(skipped),
+            "excluded_next": len(next_ids),
+            "excluded_done": len(done),
         },
         "actions": _shift_actions(has_focus=focus_item is not None, ownership=ownership),
         "presentation": presentation,
     }
+
+    if empty_focus_while_risk_positive:
+        logger.warning(
+            "shift_empty_focus_while_risk_positive org_id=%s operator_id=%s state=%s "
+            "state_reason=%s risk_kzt=%s queue_total=%s queue_active=%s empty_focus_reason=%s",
+            org_id,
+            op_norm,
+            state,
+            state_reason,
+            round(risk_kzt, 2),
+            shift_input.queue_size,
+            len(active_items),
+            empty_reason,
+        )
 
     logger.info(
         "shift_state_built org_id=%s operator_id=%s state=%s state_reason=%s projection_gap=%s "
@@ -712,6 +754,17 @@ async def apply_shift_action(
     fid = str(focus_id or "").strip()
     intent = ACTION_INTENT.get(subtype, subtype)
     op = _normalize_operator_id(operator_id)
+
+    if subtype == "reset_skips":
+        cleared = await reset_shift_skip_exclusions(org_id)
+        await _clear_active_focus(org_id, op)
+        logger.warning(
+            "shift_skip_memory_reset org_id=%s operator_id=%s cleared=%s event_emitted=false",
+            org_id,
+            op,
+            cleared,
+        )
+        return
 
     if subtype in ("next", "skip"):
         if not fid:

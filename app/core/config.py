@@ -183,6 +183,29 @@ class Settings(BaseSettings):
         ge=4000,
         validation_alias=AliasChoices("TWILIO_VOICE_BUFFER_BYTES", "twilio_voice_buffer_bytes"),
     )
+    # E.164 номер Twilio Voice (fallback маршрутизации, если в org.meta_json нет twilio_voice_number)
+    twilio_voice_number: str = Field(
+        default="",
+        validation_alias=AliasChoices("TWILIO_VOICE_NUMBER", "twilio_voice_number"),
+    )
+    # OpenAI Realtime Voice (bidirectional Twilio Media Stream)
+    openai_realtime_model: str = Field(
+        default="gpt-4o-realtime-preview-2024-12-17",
+        validation_alias=AliasChoices("OPENAI_REALTIME_MODEL", "openai_realtime_model"),
+    )
+    openai_realtime_voice: str = Field(
+        default="alloy",
+        validation_alias=AliasChoices("OPENAI_REALTIME_VOICE", "openai_realtime_voice"),
+    )
+    voice_realtime_max_session_sec: int = Field(
+        default=300,
+        ge=30,
+        le=3600,
+        validation_alias=AliasChoices(
+            "VOICE_REALTIME_MAX_SESSION_SEC",
+            "voice_realtime_max_session_sec",
+        ),
+    )
     # Публичный URL сайта (https://your-domain.com) — для подсказки URL вебхука в админке
     public_base_url: str = Field(default="", validation_alias=AliasChoices("PUBLIC_BASE_URL", "public_base_url"))
     # Публичная ссылка на меню/сайт — бот отдаёт её в FAQ при запросе «меню», «ссылка» и т.п.
@@ -580,6 +603,11 @@ class Settings(BaseSettings):
         ge=60,
         validation_alias=AliasChoices("REVIEW_REQUEST_DELAY_SEC", "review_request_delay_sec"),
         description="Задержка перед запросом отзыва после SENT_TO_IIKO/COMPLETED (сек; по умолчанию 30 мин)",
+    )
+    guestcare_sync_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("GUESTCARE_SYNC_ENABLED", "guestcare_sync_enabled"),
+        description="ARQ cron: авто-синхронизация внешних отзывов (2GIS/Google) в external_reviews",
     )
     draft_recovery_enabled: bool = Field(
         default=True,

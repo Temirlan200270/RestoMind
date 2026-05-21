@@ -2,8 +2,8 @@
 
 | Поле | Значение |
 |------|----------|
-| Дата | 2026-05-03 |
-| Коммит | `2455aae584f7f64838ffacda955d0044cc9949ab` |
+| Дата | 2026-05-20 |
+| Коммит | working tree P1/P5 refresh |
 | Viewport | 1440×900 (Playwright Chromium, headless) |
 | Вход | «Попробовать демо» на `/admin` |
 | Автоматизация | [`scripts/capture_admin_u0_baseline.py`](../../scripts/capture_admin_u0_baseline.py) — Playwright Chromium headless; тот же маршрут и hash, что в Phase U0 для MCP (Chrome DevTools / Playwright MCP можно использовать вручную для пересъёмки). После запуска скрипта в той же оболочке задайте `APP_DEBUG=true` перед `pytest`, если в окружении было `APP_DEBUG=false` (иначе `SessionMiddleware` с `https_only` ломает cookie в тестах по `http://test`). |
@@ -31,5 +31,6 @@
 | `admin_orders.png` | `#orders` |
 | `admin_analytics.png` | `#analytics` |
 | `admin_ai_value.png` | `#ai_value` |
+| `admin_ai_center_final_mile.png` | `#ai_center?tab=final_mile` |
 
 Тот же обход можно повторить вручную через Chrome DevTools MCP / Playwright MCP (см. [`docs/UI_DESIGN_SYSTEM.md`](../../UI_DESIGN_SYSTEM.md) и `scripts/run_admin_lighthouse.mjs`).

@@ -142,7 +142,7 @@ Redis: `shift:active_focus:{org}:{operator}`.
 | 2 | Закрыть вкладку / stop heartbeat | через ≤45s lease истекает, B может взять задачу |
 | 3 | Вкладка A без renew, B владеет focus | heartbeat A → `renewed=false` → UI `loadShiftState(true)` |
 
-`owner_token` в body опционален (legacy); engine сравнивает только `focus_id` в lease.
+Heartbeat body: только `focus_id`; engine сравнивает lease по `focus_id` + operator.
 
 ---
 

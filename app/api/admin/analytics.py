@@ -51,6 +51,8 @@ from app.services.owner_dashboard import (
     event_revenue_history_usable,
     fetch_daily_revenue_history,
     fetch_daily_revenue_history_from_events,
+    rollup_location_event_stats,
+    rollup_location_today_summary,
 )
 from app.services.owner_roi import aggregate_org_window, build_achievements_week, build_today_narrative_ru
 from app.services.readiness import build_admin_readiness_payload
@@ -97,6 +99,12 @@ async def _location_scope_for_request(
     if location_id is not None and allowed is not None and int(location_id) not in allowed:
         raise HTTPException(status_code=403, detail="Location is not allowed")
     return allowed, bool(location_id is not None or allowed is not None)
+
+
+def _location_stats_source(location_scoped: bool, event_active: bool) -> str:
+    if not location_scoped:
+        return "event_driven_or_sql"
+    return "event_driven_location" if event_active else "sql_location"
 
 
 # ─── Даты заказов (UTC) — общие для /stats и /analytics ───
@@ -799,27 +807,25 @@ async def dashboard_stats(
     not_cancelled = Order.status != OrderStatus.CANCELLED
     org_orders = _orders_tenant_clause(org_id)
 
-    # Phase 5 OS: event-first metrics — получаем данные из DailyOrgStats первыми
-    _event_summary = (
-        {
-            "orders_created": 0,
-            "orders_confirmed": 0,
-            "orders_cancelled": 0,
-            "bookings_created": 0,
-            "bookings_confirmed": 0,
-            "payments_completed": 0,
-            "payments_failed": 0,
-            "escalations": 0,
-            "operator_takeovers": 0,
-            "ai_messages_count": 0,
-            "dialogs_count": 0,
-            "revenue_kzt": 0.0,
-        }
-        if location_scoped
-        else await get_today_event_summary(db, org_id)
-    )
-    _event_rows_2d = [] if location_scoped else await get_event_stats(db, org_id, days=2)
-    _event_data_active = (not location_scoped) and (
+    # Phase 5 OS: event-first metrics — DailyOrgStats (org) или rollup SystemEvent (location)
+    if location_scoped:
+        _event_summary = await rollup_location_today_summary(
+            db,
+            org_id,
+            location_id=location_id,
+            allowed_location_ids=allowed_location_ids,
+        )
+        _event_rows_2d = await rollup_location_event_stats(
+            db,
+            org_id,
+            days=2,
+            location_id=location_id,
+            allowed_location_ids=allowed_location_ids,
+        )
+    else:
+        _event_summary = await get_today_event_summary(db, org_id)
+        _event_rows_2d = await get_event_stats(db, org_id, days=2)
+    _event_data_active = (
         _event_summary.get("orders_confirmed", 0) > 0
         or _event_summary.get("revenue_kzt", 0) > 0
     )
@@ -908,7 +914,16 @@ async def dashboard_stats(
             ai_profit_bucket[dk] += float(rev_ai or 0.0)
 
     # Event-driven revenue/orders для daily_series
-    event_rows_7d = [] if location_scoped else await get_event_stats(db, org_id, days=7)
+    if location_scoped:
+        event_rows_7d = await rollup_location_event_stats(
+            db,
+            org_id,
+            days=7,
+            location_id=location_id,
+            allowed_location_ids=allowed_location_ids,
+        )
+    else:
+        event_rows_7d = await get_event_stats(db, org_id, days=7)
     event_rev_map = {r["date"]: (r["revenue_kzt"], r["orders_confirmed"]) for r in event_rows_7d}
 
     # SQL fallback для дней без event-данных
@@ -1119,8 +1134,13 @@ async def dashboard_stats(
         bot_handled_pct = round(100 * bot_orders_today / today_orders, 1)
 
     # Пробуем event-driven источник первым; fallback на SQL только если данных мало
-    revenue_history_events = {} if location_scoped else await fetch_daily_revenue_history_from_events(
-        db, org_id, days=28, now_utc=now_utc,
+    revenue_history_events = await fetch_daily_revenue_history_from_events(
+        db,
+        org_id,
+        days=28,
+        now_utc=now_utc,
+        location_id=location_id if location_scoped else None,
+        allowed_location_ids=allowed_location_ids if location_scoped else None,
     )
     if event_revenue_history_usable(revenue_history_events):
         revenue_for_forecast = revenue_history_events
@@ -1208,7 +1228,7 @@ async def dashboard_stats(
     result["event_driven_stats"] = _event_summary
     result["location_scope"] = {
         "location_id": int(location_id) if location_id is not None else None,
-        "source": "sql_location" if location_scoped else "event_driven_or_sql",
+        "source": _location_stats_source(location_scoped, _event_data_active),
     }
 
     return result
@@ -1243,14 +1263,24 @@ async def admin_funnel(
     churn_cutoff_sql = _sql_dt_for_filter(churn_cutoff)
 
     # Phase 5 OS: funnel — event-first для dialogs и completed (orders_confirmed)
-    _funnel_event_rows = await get_event_stats_for_range(
-        db, org_id,
-        start_date=(now_utc.date() - timedelta(days=days - 1)),
-        end_date=now_utc.date(),
-    )
+    if location_scoped:
+        _funnel_event_rows = await rollup_location_event_stats(
+            db,
+            org_id,
+            days=days,
+            location_id=location_id,
+            allowed_location_ids=allowed_location_ids,
+        )
+    else:
+        _funnel_event_rows = await get_event_stats_for_range(
+            db,
+            org_id,
+            start_date=(now_utc.date() - timedelta(days=days - 1)),
+            end_date=now_utc.date(),
+        )
     _funnel_dialogs_event = sum(r["dialogs_count"] for r in _funnel_event_rows)
     _funnel_completed_event = sum(r["orders_confirmed"] for r in _funnel_event_rows)
-    _funnel_event_active = (not location_scoped) and (_funnel_completed_event > 0 or _funnel_dialogs_event > 0)
+    _funnel_event_active = _funnel_completed_event > 0 or _funnel_dialogs_event > 0
 
     if _funnel_event_active and _funnel_dialogs_event > 0:
         dialogs_count = _funnel_dialogs_event
@@ -1388,7 +1418,7 @@ async def admin_funnel(
         "period_days": days,
         "location_scope": {
             "location_id": int(location_id) if location_id is not None else None,
-            "source": "sql_location" if location_scoped else "event_driven_or_sql",
+            "source": _location_stats_source(location_scoped, _funnel_event_active),
         },
         "funnel": {
             "dialogs": dialogs_count,
@@ -2009,15 +2039,32 @@ async def analytics(
     not_cancelled = Order.status != OrderStatus.CANCELLED
 
     # Phase 5 OS: event-first для revenue/orders по периоду
-    _analytics_event_rows = [] if location_scoped else await get_event_stats_for_range(
-        db, org_id,
-        start_date=_dt_as_utc(start).date(),
-        end_date=_dt_as_utc(end).date(),
-    )
+    _period_start = _dt_as_utc(start).date()
+    _period_end = _dt_as_utc(end).date()
+    if location_scoped:
+        _span_days = max((_period_end - _period_start).days + 1, 1)
+        _rollup_rows = await rollup_location_event_stats(
+            db,
+            org_id,
+            days=_span_days,
+            location_id=location_id,
+            allowed_location_ids=allowed_location_ids,
+        )
+        _analytics_event_rows = [
+            r for r in _rollup_rows
+            if _period_start.isoformat() <= str(r["date"]) <= _period_end.isoformat()
+        ]
+    else:
+        _analytics_event_rows = await get_event_stats_for_range(
+            db,
+            org_id,
+            start_date=_period_start,
+            end_date=_period_end,
+        )
     _analytics_event_map: dict[str, dict] = {r["date"]: r for r in _analytics_event_rows}
     _analytics_event_orders = sum(r["orders_confirmed"] for r in _analytics_event_rows)
     _analytics_event_revenue = sum(r["revenue_kzt"] for r in _analytics_event_rows)
-    _analytics_event_active = (not location_scoped) and (_analytics_event_orders > 0 or _analytics_event_revenue > 0)
+    _analytics_event_active = _analytics_event_orders > 0 or _analytics_event_revenue > 0
 
     if _analytics_event_active:
         current_count = _analytics_event_orders
@@ -2337,7 +2384,7 @@ async def analytics(
         "period": period,
         "location_scope": {
             "location_id": int(location_id) if location_id is not None else None,
-            "source": "sql_location" if location_scoped else "event_driven_or_sql",
+            "source": _location_stats_source(location_scoped, _analytics_event_active),
         },
         "date_from": start.strftime("%Y-%m-%d"),
         "date_to": end.strftime("%Y-%m-%d"),
@@ -2426,42 +2473,13 @@ async def inbox_money_queue(
     )
 
 
-@router.get("/shift-control")
-async def shift_control(
-    request: Request,
-    location_id: Annotated[int | None, Query(ge=1)] = None,
-    db: AsyncSession = Depends(get_db),
-) -> dict[str, Any]:
-    """Единый экран смены: очередь денег G5–G8, focus, leak summary, system."""
-    from app.services.shift_control import build_shift_control
-
-    org_id = admin_org_from_session(request)
-    allowed_location_ids, _ = await _location_scope_for_request(
-        request,
-        db,
-        org_id,
-        location_id,
-    )
-    payload = await build_shift_control(
-        db,
-        org_id,
-        location_id=location_id,
-        allowed_location_ids=allowed_location_ids,
-    )
-    return {"ok": True, "organization_id": org_id, **payload}
-
-
 class ShiftActionBody(BaseModel):
-    subtype: Literal["next", "skip", "complete"] = Field(description="Тип действия смены")
+    subtype: Literal["next", "skip", "complete", "reset_skips"] = Field(description="Тип действия смены")
     focus_id: str | None = Field(default=None, description="ID focus item из GET /shift/state")
 
 
 class ShiftHeartbeatBody(BaseModel):
     focus_id: str = Field(description="ID focus item для продления lease")
-    owner_token: str | None = Field(
-        default=None,
-        description="Session-bound token из GET /shift/state focus.owner_token",
-    )
 
 
 @router.post("/shift/heartbeat")
@@ -2474,16 +2492,14 @@ async def shift_heartbeat(
     from app.services.shift_state_engine import renew_focus_claim
 
     org_id = admin_org_from_session(request)
-    renewed, owner_token = await renew_focus_claim(
+    renewed, _ = await renew_focus_claim(
         org_id,
         body.focus_id,
         request.session.get("staff_id"),
-        owner_token=body.owner_token,
     )
     return {
         "ok": True,
         "renewed": renewed,
-        "owner_token": owner_token if renewed else None,
         "organization_id": org_id,
     }
 
@@ -2502,7 +2518,6 @@ async def shift_heartbeat_release(
         org_id,
         body.focus_id,
         request.session.get("staff_id"),
-        owner_token=body.owner_token,
     )
     return {"ok": True, "released": released, "organization_id": org_id}
 

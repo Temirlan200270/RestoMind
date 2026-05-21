@@ -92,7 +92,7 @@ Structured: `shift_state_built`, `shift_action_applied` с `focus_id`, `focus_re
 - Ключ: `shift:active_focus:{org}:{operator_id}` = `focus_id`
 - Renew: heartbeat если stored id совпадает с текущим focus
 - Release: skip/complete/next, DELETE heartbeat, TTL expiry
-- UI может слать legacy `owner_token` в body — backend игнорирует; при `renewed=false` → `loadShiftState(true)`
+- При `renewed=false` → `loadShiftState(true)` (polling/heartbeat fallback)
 
 ---
 

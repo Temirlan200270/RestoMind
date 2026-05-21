@@ -174,6 +174,14 @@ class Organization(Base):
         nullable=True,
         comment="Расширяемые org-настройки без отдельной таблицы; MVP GuestCare External хранит импорт отзывов",
     )
+    integration_config_json: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON,
+        nullable=True,
+        comment=(
+            "Per-org интеграции: iiko_office {host, login, password_enc, store_id, department_id}, "
+            "другие адаптеры без новых колонок"
+        ),
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_demo: Mapped[bool] = mapped_column(
         Boolean,
@@ -1693,6 +1701,11 @@ class OrganizationIntegrationSync(Base):
     )
     last_menu_sync_ok: Mapped[bool] = mapped_column(Boolean, default=False)
     last_menu_sync_error: Mapped[str] = mapped_column(Text, default="")
+    last_inventory_sync_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    last_inventory_sync_ok: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_inventory_sync_error: Mapped[str] = mapped_column(Text, default="")
 
 
 

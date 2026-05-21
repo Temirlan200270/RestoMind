@@ -16,15 +16,34 @@ def org_voice_enabled(org: Organization | None) -> bool:
     return bool(meta.get("voice_ai_enabled"))
 
 
+def get_voice_mode(org: Organization | None) -> str:
+    """stt_fallback | realtime from Organization.meta_json.voice_ai_mode."""
+    if org is None:
+        return "stt_fallback"
+    raw = str((org.meta_json or {}).get("voice_ai_mode") or "").strip().lower()
+    return "realtime" if raw == "realtime" else "stt_fallback"
+
+
+def realtime_ready_for_org(org: Organization | None) -> bool:
+    """OpenAI Realtime path is configured and org mode is realtime."""
+    if get_voice_mode(org) != "realtime":
+        return False
+    if not (settings.openai_api_key or "").strip():
+        return False
+    if not (settings.public_base_url or "").strip():
+        return False
+    return True
+
+
 def voice_status_for_org(org: Organization | None) -> dict[str, Any]:
     enabled = org_voice_enabled(org)
-    mode = "realtime" if str((org.meta_json or {}).get("voice_ai_mode") if org else "").lower() == "realtime" else "stt_fallback"
+    mode = get_voice_mode(org)
     return {
         "enabled": enabled,
         "mode": mode,
         "twilio_configured": bool(settings.twilio_auth_token.strip() or settings.public_base_url.strip()),
         "stt_supported": bool(settings.openai_api_key.strip() or settings.gemini_api_key.strip()),
-        "realtime_ready": bool(settings.openai_api_key.strip()) and mode == "realtime",
+        "realtime_ready": realtime_ready_for_org(org) if enabled else False,
     }
 
 

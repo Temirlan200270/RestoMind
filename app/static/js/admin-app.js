@@ -392,6 +392,7 @@ function adminParseLocationHash() {
         else if (subTab === 'load') ac = 'load';
         else if (subTab === 'os') ac = 'os';
         else if (subTab === 'guestcare') ac = 'guestcare';
+        else if (subTab === 'final_mile') ac = 'final_mile';
         else if (subTab === 'value') ac = 'value';
         return { ...empty, tab: 'ai_center', phone, aiCenterTab: ac };
     }
@@ -552,7 +553,23 @@ function adminMixinState() {
         teamNewEmail: '',
         teamNewRole: 'operator',
         teamNewPassword: '',
+        teamNewMetaTitle: '',
+        teamNewMetaDepartment: '',
+        teamNewLocationIds: [],
+        teamEditId: null,
+        teamEditRole: 'operator',
+        teamEditMetaTitle: '',
+        teamEditMetaDepartment: '',
+        teamEditLocationIds: [],
+        teamEditSaving: false,
         teamTempPassword: '',
+        staffMindSessions: [],
+        staffMindLoading: false,
+        staffMindStartLoading: false,
+        staffMindAskLoadingId: null,
+        staffMindPhone: '',
+        staffMindRole: 'staff',
+        staffMindQuestionById: {},
 
         packagingRules: [],
         packagingFilter: 'all',
@@ -801,12 +818,33 @@ function adminMixinState() {
         /** Phase 5 OS: OS Autopilot dashboard data from /intelligence/os-dashboard */
         osDashboardData: null,
         osDashboardLoading: false,
+        /** Phase 5 Final Mile UI */
+        dailyDigestPreview: null,
+        dailyDigestLoading: false,
+        supplyMindDrafts: [],
+        supplyMindAlerts: [],
+        supplyMindLoading: false,
+        supplyMindCreateLoading: false,
+        supplyMindUpdateLoading: null,
+        supplyMindExportLoading: null,
+        supplyMindCoverDays: 7,
+        inventorySyncStatus: null,
+        inventorySyncLoading: false,
+        inventorySyncRunning: false,
+        voiceAiStatus: null,
+        voiceAiLoading: false,
+        voiceAiSaving: false,
+        voiceAiEnabledDraft: false,
+        voiceAiModeDraft: 'stt_fallback',
         /** Phase 5 OS: Audit log feed (OS Decision Feed) */
         auditLog: [],
         auditLogLoading: false,
         auditLogDetail: null,
         guestCareReviews: [],
         guestCareLoading: false,
+        guestCareSyncLoading: false,
+        guestCareSyncMeta: null,
+        guestCareSyncMessage: '',
         guestCareImportUrl: '',
         applyPricingBulkLoading: false,
         intelligenceLoading: false,
@@ -1000,6 +1038,19 @@ function adminMixinState() {
         iikoOnboardTerminal: '',
         iikoOnboardVerifyLoading: false,
         iikoOnboardSetupLoading: false,
+        /** iiko Office (SupplyMind inventory) — GET/PATCH /api/admin/organization/iiko-office */
+        iikoOfficeConfig: null,
+        iikoOfficeDraft: {
+            host: '',
+            login: '',
+            password: '',
+            store_id: '',
+            department_id: '',
+            location_id: '',
+        },
+        iikoOfficeLoading: false,
+        iikoOfficeSaving: false,
+        iikoOfficeDirty: false,
         /** Правила допродаж (CRUD). */
         upsellRules: [],
         upsellLoading: false,
@@ -4773,6 +4824,72 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
             }
         },
 
+        async loadIikoOfficeConfig() {
+            if (this.iikoOfficeLoading) return;
+            this.iikoOfficeLoading = true;
+            try {
+                const { ok, data } = await this.apiJsonResponse('/api/admin/organization/iiko-office');
+                if (!ok || !data) return;
+                this.iikoOfficeConfig = data;
+                this.iikoOfficeDraft = {
+                    host: String(data.host || '').trim(),
+                    login: String(data.login || '').trim(),
+                    password: '',
+                    store_id: String(data.store_id || '').trim(),
+                    department_id: String(data.department_id || '').trim(),
+                    location_id: data.location_id != null ? String(data.location_id) : '',
+                };
+                this.iikoOfficeDirty = false;
+            } catch (_e) { /* noop */ } finally {
+                this.iikoOfficeLoading = false;
+            }
+        },
+
+        async saveIikoOfficeConfig() {
+            if (this.iikoOfficeSaving) return;
+            const host = String(this.iikoOfficeDraft?.host || '').trim();
+            const login = String(this.iikoOfficeDraft?.login || '').trim();
+            const storeId = String(this.iikoOfficeDraft?.store_id || '').trim();
+            if (!host || !login || !storeId) {
+                void this.showUiAlert('Заполните хост, логин и store_id склада iiko Office.', 'Подсказка');
+                return;
+            }
+            this.iikoOfficeSaving = true;
+            try {
+                const body = {
+                    host,
+                    login,
+                    store_id: storeId,
+                    department_id: String(this.iikoOfficeDraft?.department_id || '').trim(),
+                };
+                const pwd = String(this.iikoOfficeDraft?.password || '').trim();
+                if (pwd) body.password = pwd;
+                const locRaw = String(this.iikoOfficeDraft?.location_id || '').trim();
+                if (locRaw) body.location_id = Number(locRaw);
+                const { ok, data } = await this.apiJsonResponse('/api/admin/organization/iiko-office', {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                if (!ok) {
+                    void this.showUiAlert(this.formatApiError(data?.detail) || 'Не удалось сохранить iiko Office', 'Ошибка');
+                    return;
+                }
+                this.iikoOfficeConfig = data;
+                this.iikoOfficeDraft.password = '';
+                this.iikoOfficeDirty = false;
+                void this.showUiAlert('Настройки iiko Office сохранены.', 'SupplyMind');
+                if (this.currentTab === 'ai_center' && this.aiCenterTab === 'final_mile') {
+                    await this.loadInventorySyncStatus();
+                }
+            } catch (e) {
+                adminLogger.error('[admin] saveIikoOfficeConfig', e);
+                void this.showUiAlert('Ошибка сети. Проверьте соединение.', 'Ошибка');
+            } finally {
+                this.iikoOfficeSaving = false;
+            }
+        },
+
         async loadUpsellRules() {
             this.upsellLoading = true;
             try {
@@ -6025,6 +6142,7 @@ function adminMixinLiveChat() {
                     else if (a === 'load') this.aiCenterTab = 'load';
                     else if (a === 'os') this.aiCenterTab = 'os';
                     else if (a === 'guestcare') this.aiCenterTab = 'guestcare';
+                    else if (a === 'final_mile') this.aiCenterTab = 'final_mile';
                     else this.aiCenterTab = 'value';
                 } else {
                     this.aiCenterTab = 'value';
@@ -6081,6 +6199,10 @@ function adminMixinLiveChat() {
             try {
                 done = window.localStorage.getItem(this.p15TourStorageKey()) === '1';
             } catch (_e) { /* ignore */ }
+            if (!force && !done && this.userData && this.userData.tour_completed_at) {
+                done = true;
+                try { window.localStorage.setItem(this.p15TourStorageKey(), '1'); } catch (_e2) { /* ignore */ }
+            }
             if (!force && done) return;
             if (this._p15TourOnResize) {
                 try { window.removeEventListener('resize', this._p15TourOnResize); } catch (_e2) { /* ignore */ }
@@ -6164,9 +6286,19 @@ function adminMixinLiveChat() {
         finishP15CoachTour() {
             this.p15TourActive = false;
             this.p15TourStepIndex = 0;
+            const completedAt = new Date().toISOString();
             try {
                 window.localStorage.setItem(this.p15TourStorageKey(), '1');
             } catch (_e) { /* ignore */ }
+            void this.apiJsonResponse('/api/admin/auth/tour-complete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ completed_at: completedAt }),
+            }).then(({ ok, data }) => {
+                if (ok && data?.tour_completed_at && this.userData) {
+                    this.userData.tour_completed_at = data.tour_completed_at;
+                }
+            }).catch(() => { /* noop */ });
             if (this._p15TourOnResize) {
                 try { window.removeEventListener('resize', this._p15TourOnResize); } catch (_e2) { /* ignore */ }
                 this._p15TourOnResize = null;
@@ -6230,6 +6362,7 @@ function adminMixinLiveChat() {
                 else if (ac === 'load') this.aiCenterTab = 'load';
                 else if (ac === 'os') this.aiCenterTab = 'os';
                 else if (ac === 'guestcare') this.aiCenterTab = 'guestcare';
+                else if (ac === 'final_mile') this.aiCenterTab = 'final_mile';
                 else this.aiCenterTab = 'value';
             } else {
                 this.aiCenterTab = 'value';
@@ -7022,6 +7155,8 @@ function adminMixinDataChartsSettings() {
                         await this.loadOsDashboard();
                     } else if (this.aiCenterTab === 'guestcare') {
                         await this.loadGuestCareReviews();
+                    } else if (this.aiCenterTab === 'final_mile') {
+                        await this.loadFinalMileUi();
                     } else {
                         await this.loadAiValue();
                     }
@@ -7049,12 +7184,15 @@ function adminMixinDataChartsSettings() {
                     }
                 } else if (this.currentTab === 'settings') {
                     if (this.settingsTab === 'connections') {
-                        await this.loadIntegrationStatus();
+                        await Promise.all([
+                            this.loadIntegrationStatus(),
+                            this.loadIikoOfficeConfig(),
+                        ]);
                         void this.refreshTaskQueueHealth();
                     } else if (this.settingsTab === 'smart_sales') {
                         await this.loadUpsellRules();
                     } else if (this.settingsTab === 'team') {
-                        await this.loadTeam();
+                        await Promise.all([this.loadTeam(), this.loadStaffMindOnboarding()]);
                     } else if (this.settingsTab === 'health') {
                         await this.loadReadiness();
                     } else if (this.settingsTab === 'technical') {
@@ -7126,7 +7264,6 @@ function adminMixinDataChartsSettings() {
 
         async sendShiftHeartbeat() {
             const focusId = this.shiftState?.focus?.id;
-            const ownerToken = this.shiftState?.focus?.owner_token || null;
             const ownership = this.shiftState?.presentation?.focus_ownership
                 || this.shiftState?.focus?.ownership;
             if (!focusId || ownership === 'other') return;
@@ -7136,16 +7273,12 @@ function adminMixinDataChartsSettings() {
                 const { ok, data } = await this.apiJsonResponse(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ focus_id: focusId, owner_token: ownerToken }),
+                    body: JSON.stringify({ focus_id: focusId }),
                 });
                 if (!ok || !data?.renewed) {
                     if (this.currentTab === 'shift') {
                         await this.loadShiftState(true);
                     }
-                    return;
-                }
-                if (data.owner_token && this.shiftState?.focus) {
-                    this.shiftState.focus.owner_token = data.owner_token;
                 }
             } catch (e) {
                 adminLogger.debug('[admin] sendShiftHeartbeat', e);
@@ -7154,14 +7287,13 @@ function adminMixinDataChartsSettings() {
 
         releaseShiftFocusClaim() {
             const focusId = this.shiftState?.focus?.id;
-            const ownerToken = this.shiftState?.focus?.owner_token || null;
             if (!focusId) return;
             const locQuery = this.locationQueryParams().toString();
             const url = locQuery ? `/api/admin/shift/heartbeat?${locQuery}` : '/api/admin/shift/heartbeat';
             void fetch(url, {
                 method: 'DELETE',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ focus_id: focusId, owner_token: ownerToken }),
+                body: JSON.stringify({ focus_id: focusId }),
                 keepalive: true,
                 credentials: 'same-origin',
             }).catch((e) => adminLogger.debug('[admin] releaseShiftFocusClaim', e));
@@ -7979,6 +8111,221 @@ function adminMixinDataChartsSettings() {
             if (!this.auditLog.length) void this.loadAuditLog();
         },
 
+        async loadFinalMileUi() {
+            await Promise.all([
+                this.loadDailyDigestPreview(),
+                this.loadSupplyMind(),
+                this.loadInventorySyncStatus(),
+                this.loadVoiceAiStatus(),
+            ]);
+        },
+
+        async loadDailyDigestPreview() {
+            if (this.dailyDigestLoading) return;
+            this.dailyDigestLoading = true;
+            try {
+                const { ok, data } = await this.apiJsonResponse('/api/admin/intelligence/daily-os-digest/preview');
+                if (ok && data?.item) this.dailyDigestPreview = data.item;
+            } catch (_e) { /* noop */ } finally {
+                this.dailyDigestLoading = false;
+            }
+        },
+
+        async loadSupplyMind() {
+            if (this.supplyMindLoading) return;
+            this.supplyMindLoading = true;
+            try {
+                const [draftsRes, alertsRes] = await Promise.all([
+                    this.apiJsonResponse('/api/admin/intelligence/supplymind/drafts?limit=10'),
+                    this.apiJsonResponse(`/api/admin/intelligence/inventory/stock-alerts${this.locationQueryString('?')}`),
+                ]);
+                if (draftsRes.ok && draftsRes.data?.items) this.supplyMindDrafts = draftsRes.data.items;
+                if (alertsRes.ok && alertsRes.data?.items) this.supplyMindAlerts = alertsRes.data.items;
+            } catch (_e) { /* noop */ } finally {
+                this.supplyMindLoading = false;
+            }
+        },
+
+        async loadInventorySyncStatus() {
+            if (this.inventorySyncLoading) return;
+            this.inventorySyncLoading = true;
+            try {
+                const { ok, data } = await this.apiJsonResponse('/api/admin/inventory/sync-status');
+                if (ok && data) this.inventorySyncStatus = data;
+            } catch (_e) { /* noop */ } finally {
+                this.inventorySyncLoading = false;
+            }
+        },
+
+        async runInventorySyncIiko() {
+            if (this.inventorySyncRunning) return;
+            this.inventorySyncRunning = true;
+            try {
+                const { ok, data } = await this.apiJsonResponse('/api/admin/inventory/sync-iiko', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: '{}',
+                });
+                if (ok && data?.ok) {
+                    this.setToast(`iiko Office: обновлено ${data.updated ?? 0} остатков`);
+                    await Promise.all([
+                        this.loadInventorySyncStatus(),
+                        this.loadSupplyMind(),
+                    ]);
+                } else {
+                    void this.showUiAlert(this.formatApiError(data?.detail) || 'Не удалось синхронизировать остатки iiko Office', 'SupplyMind');
+                }
+            } catch (e) {
+                adminLogger.error('[admin] inventory iiko sync', e);
+                void this.showUiAlert('Ошибка сети. Проверьте соединение.', 'SupplyMind');
+            } finally {
+                this.inventorySyncRunning = false;
+            }
+        },
+
+        inventorySyncStatusLabel() {
+            const st = this.inventorySyncStatus;
+            if (!st) return this.inventorySyncLoading ? 'Проверяем…' : 'Статус неизвестен';
+            if (!st.iiko_office_configured) return 'iiko Office не настроен';
+            const last = st.last_inventory_sync || {};
+            if (!last.at) return 'Готов к первому sync';
+            return last.ok ? `Последний sync: ${this.fmt.date(last.at)}` : `Ошибка sync: ${last.error || 'см. логи'}`;
+        },
+
+        async createSupplyMindDraft() {
+            if (this.supplyMindCreateLoading) return;
+            this.supplyMindCreateLoading = true;
+            try {
+                const body = {
+                    cover_days: Number(this.supplyMindCoverDays) || 7,
+                    location_id: this.selectedLocationId ? Number(this.selectedLocationId) : null,
+                };
+                const { ok, data } = await this.apiJsonResponse('/api/admin/intelligence/supplymind/drafts', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                if (ok && data?.item) {
+                    this.supplyMindDrafts = [data.item, ...(this.supplyMindDrafts || [])];
+                    this.setToast('SupplyMind создал чеклист закупки');
+                } else {
+                    void this.showUiAlert(this.formatApiError(data?.detail) || 'Не удалось создать чеклист закупки', 'SupplyMind');
+                }
+            } finally {
+                this.supplyMindCreateLoading = false;
+            }
+        },
+
+        supplyMindStatusLabel(status) {
+            const labels = {
+                draft: 'Черновик',
+                approved: 'Утверждён',
+                completed: 'Завершён',
+                cancelled: 'Отменён',
+            };
+            return labels[status] || status || '—';
+        },
+
+        async updateSupplyMindDraft(draftId, status) {
+            if (this.supplyMindUpdateLoading) return;
+            this.supplyMindUpdateLoading = draftId;
+            try {
+                const { ok, data } = await this.apiJsonResponse(
+                    `/api/admin/intelligence/supplymind/drafts/${draftId}`,
+                    {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ status }),
+                    },
+                );
+                if (ok && data?.item) {
+                    this.supplyMindDrafts = (this.supplyMindDrafts || []).map((d) =>
+                        d.id === draftId ? data.item : d,
+                    );
+                    this.setToast('Статус чеклиста обновлён');
+                } else {
+                    void this.showUiAlert(
+                        this.formatApiError(data?.detail) || 'Не удалось обновить чеклист',
+                        'SupplyMind',
+                    );
+                }
+            } finally {
+                this.supplyMindUpdateLoading = null;
+            }
+        },
+
+        async exportSupplyMindDraft(draftId) {
+            if (this.supplyMindExportLoading) return;
+            this.supplyMindExportLoading = draftId;
+            try {
+                const res = await this.apiFetch(
+                    `/api/admin/intelligence/supplymind/drafts/${draftId}/export?format=csv`,
+                );
+                if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    void this.showUiAlert(this.formatApiError(data?.detail) || 'Ошибка выгрузки CSV', 'SupplyMind');
+                    return;
+                }
+                const blob = await res.blob();
+                const u = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = u;
+                a.download = `supplymind_checklist_${draftId}.csv`;
+                a.click();
+                URL.revokeObjectURL(u);
+            } catch (e) {
+                adminLogger.error('[admin] supplymind export csv', e);
+                void this.showUiAlert('Ошибка сети. Проверьте соединение.', 'SupplyMind');
+            } finally {
+                this.supplyMindExportLoading = null;
+            }
+        },
+
+        async loadVoiceAiStatus() {
+            if (this.voiceAiLoading) return;
+            this.voiceAiLoading = true;
+            try {
+                const { ok, data } = await this.apiJsonResponse('/api/admin/intelligence/voice/status');
+                if (ok && data?.item) {
+                    this.voiceAiStatus = data.item;
+                    this.voiceAiEnabledDraft = !!data.item.enabled;
+                    this.voiceAiModeDraft = data.item.mode === 'realtime' ? 'realtime' : 'stt_fallback';
+                }
+            } catch (_e) { /* noop */ } finally {
+                this.voiceAiLoading = false;
+            }
+        },
+
+        async saveVoiceAiConfig() {
+            if (this.voiceAiSaving) return;
+            this.voiceAiSaving = true;
+            try {
+                const { ok, status, data } = await this.apiJsonResponse('/api/admin/intelligence/voice/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        enabled: !!this.voiceAiEnabledDraft,
+                        mode: this.voiceAiModeDraft === 'realtime' ? 'realtime' : 'stt_fallback',
+                    }),
+                });
+                if (ok && data?.item) {
+                    this.voiceAiStatus = data.item;
+                    this.voiceAiEnabledDraft = !!data.item.enabled;
+                    this.voiceAiModeDraft = data.item.mode === 'realtime' ? 'realtime' : 'stt_fallback';
+                    this.setToast('Voice AI настройки сохранены');
+                } else if (status === 403) {
+                    void this.showUiAlert(
+                        this.formatApiError(data?.detail) || 'Только администратор может менять Voice AI',
+                        'Voice AI',
+                    );
+                } else {
+                    void this.showUiAlert(this.formatApiError(data?.detail) || 'Не удалось сохранить Voice AI', 'Voice AI');
+                }
+            } finally {
+                this.voiceAiSaving = false;
+            }
+        },
+
         async loadOsDecisionFeed() {
             return this.loadAuditLog();
         },
@@ -8022,8 +8369,51 @@ function adminMixinDataChartsSettings() {
             try {
                 const { ok, data } = await this.apiJsonResponse('/api/admin/intelligence/reviews/external');
                 if (ok && data?.items) this.guestCareReviews = data.items;
+                if (ok && data?.sync_meta) this.guestCareSyncMeta = data.sync_meta;
             } catch (_e) { /* noop */ } finally {
                 this.guestCareLoading = false;
+            }
+        },
+
+        async syncGuestCareReviews() {
+            if (this.guestCareSyncLoading) return;
+            this.guestCareSyncLoading = true;
+            this.guestCareSyncMessage = '';
+            try {
+                const { ok, data } = await this.apiJsonResponse(
+                    '/api/admin/intelligence/reviews/external/sync',
+                    { method: 'POST' },
+                );
+                if (!ok) {
+                    this.guestCareSyncMessage = (data && data.detail) || 'Не удалось синхронизировать отзывы';
+                    return;
+                }
+                if (data?.items) this.guestCareReviews = data.items;
+                const stats = data?.stats || {};
+                if (stats.sync_meta) this.guestCareSyncMeta = stats.sync_meta;
+                else if (data?.stats?.sources) {
+                    this.guestCareSyncMeta = {
+                        last_at: new Date().toISOString(),
+                        inserted: stats.inserted,
+                        updated: stats.updated,
+                        parsed: stats.parsed,
+                    };
+                }
+                if (stats.skipped && stats.reason === 'no_review_urls') {
+                    this.guestCareSyncMessage = 'Укажите ссылку 2GIS в настройках ресторана (review_url_2gis).';
+                    return;
+                }
+                const inserted = Number(stats.inserted || 0);
+                const updated = Number(stats.updated || 0);
+                const parsed = Number(stats.parsed || 0);
+                this.guestCareSyncMessage = `Готово: найдено ${parsed}, новых ${inserted}, обновлено ${updated}.`;
+                if (Array.isArray(stats.errors) && stats.errors.length) {
+                    this.guestCareSyncMessage += ` Ошибки: ${stats.errors.length}.`;
+                }
+            } catch (_e) {
+                this.guestCareSyncMessage = 'Ошибка синхронизации отзывов';
+            } finally {
+                this.guestCareSyncLoading = false;
             }
         },
 
@@ -8447,6 +8837,60 @@ function adminMixinDataChartsSettings() {
             }
         },
 
+        teamLocationOptions() {
+            const locs = (this.userData && Array.isArray(this.userData.available_locations))
+                ? this.userData.available_locations
+                : [];
+            return locs.map((l) => ({ id: Number(l.id), name: String(l.name || l.slug || l.id) }));
+        },
+
+        openTeamEdit(u) {
+            if (!u || !u.id) return;
+            this.teamEditId = Number(u.id);
+            this.teamEditRole = String(u.role || 'operator');
+            const meta = (u.role_metadata && typeof u.role_metadata === 'object') ? u.role_metadata : {};
+            this.teamEditMetaTitle = String(meta.title || '');
+            this.teamEditMetaDepartment = String(meta.department || '');
+            const ids = Array.isArray(u.assigned_location_ids) ? u.assigned_location_ids.map((x) => Number(x)) : [];
+            this.teamEditLocationIds = ids.filter((x) => Number.isFinite(x) && x > 0);
+        },
+
+        cancelTeamEdit() {
+            this.teamEditId = null;
+            this.teamEditSaving = false;
+        },
+
+        async saveTeamMemberMeta() {
+            const id = Number(this.teamEditId);
+            if (!Number.isFinite(id) || id < 1) return;
+            this.teamEditSaving = true;
+            this.teamError = '';
+            try {
+                const payload = {
+                    role: String(this.teamEditRole || 'operator'),
+                    assigned_location_ids: (this.teamEditLocationIds || []).map((x) => Number(x)).filter((x) => x > 0),
+                    role_metadata: {
+                        title: String(this.teamEditMetaTitle || '').trim(),
+                        department: String(this.teamEditMetaDepartment || '').trim(),
+                    },
+                };
+                const { ok, data } = await this.apiJsonResponse(`/api/admin/staff/${id}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                if (!ok) {
+                    this.teamError = this.formatApiError(data?.detail) || 'Не удалось сохранить настройки сотрудника';
+                    return;
+                }
+                this.teamEditId = null;
+                await this.loadTeam();
+                this.setToast('Настройки сотрудника сохранены');
+            } finally {
+                this.teamEditSaving = false;
+            }
+        },
+
         async createTeamMember() {
             this.teamError = '';
             this.teamTempPassword = '';
@@ -8457,14 +8901,22 @@ function adminMixinDataChartsSettings() {
             }
             this.teamCreateLoading = true;
             try {
+                const body = {
+                    email,
+                    role: (this.teamNewRole || 'operator'),
+                    password: (this.teamNewPassword || ''),
+                };
+                const locIds = (this.teamNewLocationIds || []).map((x) => Number(x)).filter((x) => x > 0);
+                if (locIds.length) body.assigned_location_ids = locIds;
+                const title = String(this.teamNewMetaTitle || '').trim();
+                const dept = String(this.teamNewMetaDepartment || '').trim();
+                if (title || dept) {
+                    body.role_metadata = { title, department: dept };
+                }
                 const { ok, data } = await this.apiJsonResponse('/api/admin/staff', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        email,
-                        role: (this.teamNewRole || 'operator'),
-                        password: (this.teamNewPassword || ''),
-                    }),
+                    body: JSON.stringify(body),
                 });
                 if (!ok) {
                     this.teamError = this.formatApiError(data.detail) || 'Не удалось добавить сотрудника';
@@ -8475,6 +8927,9 @@ function adminMixinDataChartsSettings() {
                 }
                 this.teamNewEmail = '';
                 this.teamNewPassword = '';
+                this.teamNewMetaTitle = '';
+                this.teamNewMetaDepartment = '';
+                this.teamNewLocationIds = [];
                 await this.loadTeam();
             } finally {
                 this.teamCreateLoading = false;
@@ -9811,7 +10266,7 @@ function marketingTab() {
             try {
                 const r = await fetch('/api/admin/marketing/blasts');
                 if (r.ok) { const d = await r.json(); this.blasts = d.items || []; }
-            } catch(e) {}
+            } catch(_e) {}
             this.loading = false;
         },
 
@@ -9820,7 +10275,7 @@ function marketingTab() {
             try {
                 const r = await fetch(`/api/admin/marketing/segment-preview/${this.form.segment_type}`);
                 if (r.ok) { const d = await r.json(); this.segmentCount = d.count; }
-            } catch(e) {}
+            } catch(_e) {}
         },
 
         async createBlast() {
@@ -9847,7 +10302,7 @@ function marketingTab() {
                     const d = await r.json();
                     this.formError = d.detail || 'Ошибка создания';
                 }
-            } catch(e) { this.formError = 'Сетевая ошибка'; }
+            } catch(_e) { this.formError = 'Сетевая ошибка'; }
             this.saving = false;
         },
 
@@ -9857,7 +10312,7 @@ function marketingTab() {
             try {
                 await fetch(`/api/admin/marketing/blasts/${id}/send`, { method: 'POST' });
                 await this.loadBlasts();
-            } catch(e) {}
+            } catch(_e) {}
         },
 
         async cancelBlast(id) {
@@ -9866,7 +10321,7 @@ function marketingTab() {
             try {
                 await fetch(`/api/admin/marketing/blasts/${id}/cancel`, { method: 'POST' });
                 await this.loadBlasts();
-            } catch(e) {}
+            } catch(_e) {}
         },
 
         duplicateBlast(blast) {
@@ -9887,14 +10342,14 @@ function marketingTab() {
             try {
                 await fetch(`/api/admin/marketing/blasts/${id}`, { method: 'DELETE' });
                 await this.loadBlasts();
-            } catch(e) {}
+            } catch(_e) {}
         },
 
         async loadLoyalty() {
             try {
-                const r = await fetch('/api/admin/system/task-queue-health');
+                await fetch('/api/admin/system/task-queue-health');
                 this.loyaltyEnabled = document.cookie.includes('LOYALTY') || false;
-            } catch(e) {}
+            } catch(_e) {}
         },
 
         async loadLoyaltyHistory() {
@@ -9908,7 +10363,7 @@ function marketingTab() {
                     this.loyaltyHistory = d.transactions || [];
                     this.loyaltyBalance = d.balance || 0;
                 }
-            } catch(e) {}
+            } catch(_e) {}
         },
 
         async submitAdjust() {
@@ -9929,7 +10384,7 @@ function marketingTab() {
                     const d = await r.json();
                     this.adjustResult = `❌ ${d.detail || 'Ошибка'}`;
                 }
-            } catch(e) { this.adjustResult = '❌ Сетевая ошибка'; }
+            } catch(_e) { this.adjustResult = '❌ Сетевая ошибка'; }
         },
     };
 }

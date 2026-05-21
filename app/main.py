@@ -29,7 +29,9 @@ from app.api.admin.orders import router as admin_orders_router
 from app.api.admin.organization import router as admin_organization_router
 from app.api.admin.rules import router as admin_rules_router
 from app.api.admin.intelligence import router as admin_intelligence_router
+from app.api.admin.inventory_sync import router as admin_inventory_sync_router
 from app.api.admin.network import network_router as admin_network_router
+from app.api.admin.test_bot import test_bot_router as admin_test_bot_router
 from app.api.iiko_webhook import router as iiko_webhook_router
 from app.api.admin.marketing import loyalty_router as admin_loyalty_router
 from app.api.admin.marketing import router as admin_marketing_router
@@ -758,7 +760,9 @@ app.include_router(admin_orders_router, prefix="/api")
 app.include_router(admin_organization_router, prefix="/api")
 app.include_router(admin_rules_router, prefix="/api")
 app.include_router(admin_intelligence_router, prefix="/api")
+app.include_router(admin_inventory_sync_router, prefix="/api")
 app.include_router(admin_network_router, prefix="/api")
+app.include_router(admin_test_bot_router, prefix="/api")
 app.include_router(admin_marketing_router, prefix="/api")
 app.include_router(admin_loyalty_router, prefix="/api")
 app.include_router(admin_ws_router, prefix="/api")

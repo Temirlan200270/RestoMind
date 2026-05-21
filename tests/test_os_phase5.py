@@ -235,6 +235,44 @@ class TestOsAutopilotUI:
         assert "osDashboardLoading" in js
         assert "/api/admin/intelligence/os-dashboard" in js
 
+    def test_final_mile_ui_wired_to_backend_contracts(self):
+        """Final Mile UI keeps digest, SupplyMind, and Voice AI wired to backend APIs."""
+        import pathlib
+
+        html = pathlib.Path("app/templates/screens/_tab_ai_center.html").read_text(encoding="utf-8")
+        js = pathlib.Path("app/static/js/admin-app.js").read_text(encoding="utf-8")
+        header = pathlib.Path("app/templates/screens/_header.html").read_text(encoding="utf-8")
+
+        assert "aiCenterTab === 'final_mile'" in html
+        assert "loadFinalMileUi()" in html
+        assert "Daily OS Digest" in html
+        assert "SupplyMind" in html
+        assert "Voice AI" in html
+        assert "премиальный режим" in html
+        assert "aiCenterTab === 'final_mile'" in header
+
+        assert "loadFinalMileUi" in js
+        assert "/api/admin/intelligence/daily-os-digest/preview" in js
+        assert "/api/admin/intelligence/inventory/stock-alerts" in js
+        assert "/api/admin/intelligence/supplymind/drafts" in js
+        assert "/api/admin/inventory/sync-status" in js
+        assert "/api/admin/inventory/sync-iiko" in js
+        assert "/api/admin/intelligence/voice/status" in js
+        assert "/api/admin/intelligence/voice/config" in js
+
+    def test_staffmind_team_settings_ui_wired(self):
+        """StaffMind team settings section calls the onboarding helpers."""
+        import pathlib
+
+        html = pathlib.Path("app/templates/screens/_tab_settings_team.html").read_text(encoding="utf-8")
+        js = pathlib.Path("app/static/js/admin-app.js").read_text(encoding="utf-8")
+
+        assert "StaffMind onboarding" in html
+        assert "loadStaffMindOnboarding()" in html
+        assert "startStaffMindOnboarding()" in html
+        assert "askStaffMind(s.id)" in html
+        assert "/api/admin/intelligence/staffmind/onboarding" in js
+
     def test_event_bus_badge_in_ui(self):
         """Индикатор event-driven источника в OS Autopilot (язык оператора, не dev-жаргон)."""
         import pathlib

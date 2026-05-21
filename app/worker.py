@@ -192,6 +192,50 @@ async def iiko_menu_sync(
     await run_menu_sync(org_id)
 
 
+async def iiko_inventory_sync(
+    ctx: dict[str, Any],
+    *,
+    org_id: int,
+) -> None:
+    from app.services.iiko_sync_tasks import run_inventory_sync
+    await run_inventory_sync(org_id)
+
+
+async def external_reviews_sync(ctx: dict[str, Any], *, organization_id: int) -> None:
+    """ARQ: GuestCare external reviews sync for one organization."""
+    from app.db.session import async_session_factory
+    from app.services.external_reviews_sync import sync_external_reviews_for_org
+
+    async with async_session_factory() as db:
+        await sync_external_reviews_for_org(db, organization_id)
+        await db.commit()
+
+
+async def external_reviews_sync_scheduled_tick(ctx: dict[str, Any]) -> None:
+    """Cron: sync 2GIS/Google reviews for orgs with review URLs configured."""
+    from app.services.external_reviews_sync import run_external_reviews_scheduled_sync
+
+    await run_external_reviews_scheduled_sync()
+
+
+async def iiko_inventory_sync_scheduled_tick(ctx: dict[str, Any]) -> None:
+    """Cron каждые 6 часов: остатки iiko Office для всех филиалов с конфигом."""
+    import logging
+    from app.db.session import async_session_factory
+    from app.services.iiko_sync_tasks import run_inventory_sync
+    from app.services.org_iiko_office import list_organizations_with_iiko_office_db
+
+    logger = logging.getLogger(__name__)
+    async with async_session_factory() as db:
+        orgs = await list_organizations_with_iiko_office_db(db)
+    for org in orgs:
+        try:
+            await run_inventory_sync(int(org.id))
+        except Exception:
+            logger.exception("iiko_inventory_sync_scheduled_tick: org_id=%s", org.id)
+    logger.info("iiko_inventory_sync_scheduled_tick: %d orgs processed", len(orgs))
+
+
 class WorkerSettings:
     # Это имена задач, которые мы enqueue_job("name", **kwargs) будем вызывать.
     # Важно: web-процесс ставит задачи в эту же очередь через task_queue._queue_name().
@@ -207,6 +251,10 @@ class WorkerSettings:
         morning_preorders_tick,
         iiko_stoplist_sync,
         iiko_menu_sync,
+        iiko_inventory_sync,
+        iiko_inventory_sync_scheduled_tick,
+        external_reviews_sync,
+        external_reviews_sync_scheduled_tick,
         ai_incidents_hourly_tick,
         daily_os_digest_scheduled_tick,
         draft_recovery_scheduled_tick,
@@ -222,6 +270,8 @@ class WorkerSettings:
             cron(draft_recovery_scheduled_tick, minute={2, 12, 22, 32, 42, 52}),
             cron(scheduled_blasts_tick, minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55}),
             cron(ai_incidents_hourly_tick, minute=5),
+            cron(iiko_inventory_sync_scheduled_tick, hour={0, 6, 12, 18}, minute=20),
+            cron(external_reviews_sync_scheduled_tick, hour={2, 14}, minute=10),
         ]
         if cron is not None
         else [],

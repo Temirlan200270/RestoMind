@@ -117,6 +117,28 @@ async def record_menu_sync(
     await _append_integration_event(db, "menu_sync", ok, msg, organization_id=organization_id)
 
 
+async def record_inventory_sync(
+    db: AsyncSession,
+    ok: bool,
+    error: str | None = None,
+    *,
+    detail: str | None = None,
+    organization_id: int | None = None,
+) -> None:
+    """Зафиксировать результат синхронизации остатков iiko Office."""
+    now = datetime.now(timezone.utc)
+    msg = detail or (
+        f"Остатки iiko Office: {'успех' if ok else 'ошибка'}"
+        + (f" — {error[:300]}" if error and not ok else "")
+    )
+    if organization_id is not None:
+        orow = await _get_or_create_org_row(db, int(organization_id))
+        orow.last_inventory_sync_at = now
+        orow.last_inventory_sync_ok = ok
+        orow.last_inventory_sync_error = (error or "")[:2000]
+    await _append_integration_event(db, "inventory_sync", ok, msg, organization_id=organization_id)
+
+
 async def list_integration_events(
     db: AsyncSession,
     limit: int = 40,
@@ -171,6 +193,7 @@ async def build_status_payload(
             "whatsapp_configured": whatsapp_configured,
             "last_stoplist": {**slot},
             "last_menu_sync": {**slot},
+            "last_inventory_sync": {**slot},
         }
     return {
         "iiko_configured": iiko_configured,
@@ -185,4 +208,33 @@ async def build_status_payload(
             "ok": bool(org_row.last_menu_sync_ok),
             "error": org_row.last_menu_sync_error or None,
         },
+        "last_inventory_sync": {
+            "at": _iso(org_row.last_inventory_sync_at),
+            "ok": bool(org_row.last_inventory_sync_ok),
+            "error": org_row.last_inventory_sync_error or None,
+        },
+    }
+
+
+async def build_inventory_sync_status(
+    db: AsyncSession,
+    *,
+    organization_id: int,
+    iiko_office_configured: bool,
+    iiko_cloud_configured: bool,
+) -> dict:
+    """JSON для GET /api/admin/inventory/sync-status."""
+    org_row = await db.get(OrganizationIntegrationSync, int(organization_id))
+    slot = _neutral_slot()
+    last = slot
+    if org_row is not None:
+        last = {
+            "at": _iso(org_row.last_inventory_sync_at),
+            "ok": bool(org_row.last_inventory_sync_ok),
+            "error": org_row.last_inventory_sync_error or None,
+        }
+    return {
+        "iiko_office_configured": iiko_office_configured,
+        "iiko_cloud_configured": iiko_cloud_configured,
+        "last_inventory_sync": last,
     }

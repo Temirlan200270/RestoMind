@@ -119,7 +119,7 @@ GET /shift/state → UI (Alpine, без своей сортировки/state)
 - RBAC: `_location_scope_for_request`
 - Idempotency на `complete`
 
-**Не включает:** удаление legacy `/shift-control`.
+**Legacy:** `GET /shift-control` удалён в G10.3 (2026-05-21).
 
 | Риск | Проверка |
 |------|----------|
@@ -159,19 +159,16 @@ GET /shift/state → UI (Alpine, без своей сортировки/state)
 
 ---
 
-### PR6 — Legacy cleanup (`/shift-control`)
+### PR6 — Legacy cleanup (`/shift-control`) ✅ G10.3
 
 **Цель:** одна реальность — только `/shift/state`.
 
-**Включает:**
+**Сделано (2026-05-21):**
 
-- Deprecate `GET /shift-control` (410 или proxy → state)
-- Удалить мёртвый `shiftControl` JS (уже нет в templates)
-- Документировать migration для внешних интеграций
-
-| Риск | Проверка |
-|------|----------|
-| **Высокий, если рано** | Делать **после** PR4 стабилизации в проде ≥1 спринт |
+- Удалён `GET /shift-control`
+- `shift_control.py` — только `_saved_today_kzt`
+- Heartbeat API/JS без `owner_token`
+- Polling 45s на вкладке «Смена» (WS push не добавлялся)
 
 ---
 
@@ -334,8 +331,8 @@ sequenceDiagram
 |---|---|
 | **Симптом** | После серии skip — `focus=null`, пустой экран при ненулевом риске |
 | **Причина** | Все items в skip/done; state всё ещё S4/S2 |
-| **Fix** | UI: при `focus==null` && `state in (S1,S2,S4)` — banner «Всё просмотрено» + CTA «Следующее» / сброс skip по TTL; опционально server fallback после expired skip |
-| **Detect** | Metric `shift_empty_focus_while_risk_positive` |
+| **Fix** | UI: при `focus==null` && `state in (S1,S2,S4)` — banner «Всё просмотрено» + CTA «Показать пропущенные снова» (`POST /shift/action` subtype `reset_skips`); done-items остаются закрытыми |
+| **Detect** | Metric `metrics.shift_empty_focus_while_risk_positive` in `GET /shift/state` + warning log `shift_empty_focus_while_risk_positive` |
 
 ---
 
@@ -435,7 +432,7 @@ sequenceDiagram
 |------|------------|---------|
 | **G10 Simplification** | lock+queue, single `active_focus`, `heal:mute` — freeze layers | [`G10_SIMPLIFICATION.md`](G10_SIMPLIFICATION.md) |
 | **G10.2 Hardening** | S1 hysteresis, failure sim, degraded UI | [`G10_FAILURE_SIMULATION.md`](G10_FAILURE_SIMULATION.md) |
-| **G10.3 Legacy removal** | Deprecate `/shift-control` | после 2 недель stable |
+| **G10.3 Legacy removal** | `/shift-control` удалён | [x] ROADMAP |
 
 **Не делать сейчас:** ML пороги, per-org tuning, time-of-day weights, collapse dashboard, payment closure E2E.
 
@@ -448,7 +445,7 @@ sequenceDiagram
 | Engine | `app/services/shift_state_engine.py` |
 | API | `app/api/admin/analytics.py` |
 | Tests | `tests/test_shift_state_engine.py` |
-| Legacy G9 | `app/services/shift_control.py`, `GET /shift-control` |
+| Metrics helper | `app/services/shift_control.py` (`_saved_today_kzt`) |
 | Money pipeline | `money_queue.py`, `revenue_leak.py`, `draft_recovery.py`, `bot_sla_status.py` |
 
 **Regression one-liner:**

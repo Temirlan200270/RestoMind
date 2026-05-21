@@ -16,9 +16,9 @@
 | Phase 4: Decision Engine | 8 правил DE + `tenant` в `AIReadContext`, интеграция в WhatsApp pipeline | **✅ 100%** | `decision_engine.py`, `webhooks.py` |
 | Phase 5: Full OS Behavior | Predictive + autopilot pricing (single + bulk), healing 2.0 WA, digest backend, GuestCare, stock alerts, Decision Feed UI | **~98%** | `owner_dashboard.py`, `healing_actions.py`, `intelligence.py` |
 | Final Mile (backend) | SupplyMind snapshots/drafts, StaffMind onboarding, Voice status/config, Daily OS Digest cron, `external_reviews` | **MVP ✅** | [`docs/FINAL_MILE_IMPLEMENTED.md`](FINAL_MILE_IMPLEMENTED.md) |
-| Final Mile (UI) | SupplyMind / StaffMind / Voice toggle / digest preview в админке | **backlog** | [`docs/REMAINING_UPDATES.md`](REMAINING_UPDATES.md) |
+| Final Mile (UI) | SupplyMind / StaffMind / Voice toggle / digest preview в админке | **wired ✅** | [`docs/REMAINING_UPDATES.md`](REMAINING_UPDATES.md) |
 
-**Главный вывод (2026-05-20):** RestoMind OS — **Industrial Platform** с закрытыми фазами 1–4 и Launch Window по Phase 5. Бэкенд Final Mile готов; следующий инженерный слой — **видимость модулей в UI** (SupplyMind, StaffMind, Voice, digest preview) и staging-проверки Telegram digest / WS `os.audit`.
+**Главный вывод (2026-05-20):** RestoMind OS — **Industrial Platform** с закрытыми фазами 1–4 и Launch Window по Phase 5. Final Mile UI подключён; следующий инженерный слой — staging-проверки Telegram digest / WS `os.audit`, iiko Office pilot и Voice staging call.
 
 ### Что остаётся для 100%
 
@@ -29,7 +29,7 @@
 | `websocket_consumer` полный (org-scoped channel) | ~85% | `os.audit` и business events org-scoped; полный channel-per-org — hardening |
 | `audit_consumer` для admin-действий (вне emit_event) | Не реализован | Ручные PATCH меню/настроек — вне `emit_event` |
 | Admin UI i18n kk | Не реализован | Админка — русский inline; kk — отдельный эпик |
-| Event-first per-location aggregate | Не реализован | `DailyOrgStats` остаётся org-level; при `location_id` API использует SQL/Redis fallback |
+| Event-first per-location aggregate | ✅ Phase 1.2 | Rollup из `SystemEvent._location_id` в `owner_dashboard.py`; org-level `DailyOrgStats` без изменений |
 
 ---
 

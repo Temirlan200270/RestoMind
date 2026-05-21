@@ -1,0 +1,20 @@
+{
+  "items": [
+    {
+      "productId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "productNum": "RICE-01",
+      "productName": "Рис басмати",
+      "unit": "кг",
+      "amount": 2.5,
+      "minAmount": 5.0
+    },
+    {
+      "productId": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+      "productNum": "FLOUR-02",
+      "productName": "Мука пшеничная",
+      "unit": "кг",
+      "amount": 8.0,
+      "minAmount": 10.0
+    }
+  ]
+}

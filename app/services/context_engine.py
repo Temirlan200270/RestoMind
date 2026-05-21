@@ -223,6 +223,30 @@ async def _load_chat_history_slice(
     return out
 
 
+def build_menu_context_from_prices_snapshot(
+    menu_prices_snapshot: list[dict[str, object]] | None,
+) -> str | None:
+    """Восстанавливает текст меню для replay, если menu_context_text не сохранён (G3 edge-case)."""
+    if not menu_prices_snapshot or not isinstance(menu_prices_snapshot, list):
+        return None
+    lines: list[str] = []
+    for row in menu_prices_snapshot:
+        if not isinstance(row, dict):
+            continue
+        iiko_id = str(row.get("iiko_id") or "").strip()
+        try:
+            price = float(row.get("price") or 0)
+        except (TypeError, ValueError):
+            price = 0.0
+        available = bool(row.get("is_available", True))
+        label = iiko_id or "item"
+        stop_tag = "" if available else " [СТОП — временно недоступно]"
+        lines.append(f"- {label}: {price:.0f} ₸ [id: {iiko_id}]{stop_tag}" if iiko_id else f"- {label}: {price:.0f} ₸{stop_tag}")
+    if not lines:
+        return None
+    return "\n".join(lines)
+
+
 async def _load_recent_event_slice(
     db,
     organization_id: int,

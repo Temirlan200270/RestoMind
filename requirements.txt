@@ -23,6 +23,7 @@ pydantic-settings>=2.7.0
 
 # === HTTP-клиент (для интеграций WhatsApp, iiko) ===
 httpx>=0.28.0
+websockets>=14.0
 
 # === Бесплатный TTS (ответ голосом в WhatsApp, опционально) ===
 edge-tts>=7.0.0

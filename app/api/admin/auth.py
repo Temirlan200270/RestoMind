@@ -10,6 +10,7 @@ logout, me, переключение филиала.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -23,13 +24,18 @@ from app.core.passwords import verify_password
 from app.db.models import Organization, RegistrationRequest, StaffRole, StaffUser, Tenant
 from app.db.session import get_db
 from app.services.admin_tokens import create_admin_ws_token
+from app.services.billing_guard import (
+    billing_suspended_http_exception,
+    load_tenant_for_organization,
+    tenant_is_billing_suspended,
+)
 from app.services.tenant_scope import (
     allowed_location_ids_for_staff,
     available_organizations_for_admin_session,
-    branding_placeholder_e21,
     ensure_default_location,
     list_locations_for_org,
     organization_id_allowed_for_admin_session,
+    resolve_branding_for_session,
     resolve_tenant_summary_for_session,
 )
 
@@ -122,6 +128,23 @@ class SelectOrgBody(BaseModel):
     organization_id: int = Field(..., ge=1)
 
 
+class TourCompleteBody(BaseModel):
+    """P15: завершение coach-marks в админке (синхронизация с StaffUser.meta_json)."""
+
+    completed_at: str | None = Field(
+        default=None,
+        description="ISO timestamp; если пусто — сервер ставит now() UTC",
+    )
+
+
+def _staff_tour_completed_at(staff: StaffUser | None) -> str | None:
+    if staff is None:
+        return None
+    meta = staff.meta_json if isinstance(staff.meta_json, dict) else {}
+    raw = meta.get("tour_completed_at")
+    return str(raw).strip() if raw else None
+
+
 @auth_router.post("/login")
 async def admin_login(request: Request, body: LoginBody, db: AsyncSession = Depends(get_db)) -> dict:
     """Staff по email или legacy ADMIN_USERNAME / ADMIN_PASSWORD."""
@@ -144,6 +167,9 @@ async def admin_login(request: Request, body: LoginBody, db: AsyncSession = Depe
                         status_code=403,
                         detail="Подписка приостановлена. Свяжитесь с администратором.",
                     )
+                tenant_st = await load_tenant_for_organization(db, int(staff.organization_id))
+                if tenant_is_billing_suspended(tenant_st):
+                    raise billing_suspended_http_exception()
             request.session["admin_ok"] = True
             request.session["admin_user"] = staff.email
             request.session["staff_id"] = int(staff.id)
@@ -171,6 +197,9 @@ async def admin_login(request: Request, body: LoginBody, db: AsyncSession = Depe
         org_login = await db.get(Organization, oid)
         if org_login is not None and not bool(org_login.is_active):
             raise HTTPException(status_code=403, detail="Подписка приостановлена. Свяжитесь с администратором.")
+        tenant_st = await load_tenant_for_organization(db, oid)
+        if tenant_is_billing_suspended(tenant_st):
+            raise billing_suspended_http_exception()
         request.session["admin_ok"] = True
         request.session["admin_user"] = body.username.strip()
         request.session["organization_id"] = oid
@@ -241,6 +270,10 @@ async def admin_demo_login(request: Request, db: AsyncSession = Depends(get_db))
         raise HTTPException(status_code=503, detail="Демо временно недоступно")
     if not bool(demo_org.is_active):
         raise HTTPException(status_code=503, detail="Демо временно отключено")
+
+    tenant_st = await load_tenant_for_organization(db, int(demo_org.id))
+    if tenant_is_billing_suspended(tenant_st):
+        raise HTTPException(status_code=503, detail="Демо временно недоступно")
 
     request.session["admin_ok"] = True
     request.session["admin_user"] = "demo-guest"
@@ -342,6 +375,10 @@ async def _admin_auth_me_payload(request: Request, db: AsyncSession) -> dict[str
         if org_me is not None and not bool(org_me.is_active):
             raise HTTPException(status_code=403, detail="Подписка приостановлена. Свяжитесь с администратором.")
 
+        tenant_me = await load_tenant_for_organization(db, int(oid))
+        if tenant_is_billing_suspended(tenant_me):
+            raise billing_suspended_http_exception()
+
     available = await available_organizations_for_admin_session(
         db,
         staff=staff_me,
@@ -368,7 +405,11 @@ async def _admin_auth_me_payload(request: Request, db: AsyncSession) -> dict[str
         staff=staff_me,
         active_organization_id=int(oid),
     )
-    branding = branding_placeholder_e21()
+    branding = await resolve_branding_for_session(
+        db,
+        staff=staff_me,
+        active_organization_id=int(oid),
+    )
 
     staff_id_val: int | None = int(sid) if sid is not None else None
     email_out = str(user)
@@ -398,11 +439,40 @@ async def _admin_auth_me_payload(request: Request, db: AsyncSession) -> dict[str
         "available_locations": available_locations,
         "tenant": tenant_payload,
         "branding": branding,
+        "billing_blocked": False,
+        "tour_completed_at": _staff_tour_completed_at(staff_me),
     }
     is_net, net_orgs = await _resolve_network_info(db, int(oid))
     result["is_network"] = is_net
     result["network_orgs"] = net_orgs
     return result
+
+
+@auth_router.post("/tour-complete")
+async def admin_tour_complete(
+    request: Request,
+    body: TourCompleteBody,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Сохранить завершение P15 coach-marks в StaffUser.meta_json.tour_completed_at."""
+    if not request.session.get("admin_ok"):
+        raise HTTPException(status_code=401, detail="Не авторизован")
+    sid = request.session.get("staff_id")
+    if sid is None:
+        return {"ok": True, "tour_completed_at": None, "persisted": False}
+    staff = await db.get(StaffUser, int(sid))
+    if staff is None or not staff.is_active:
+        raise HTTPException(status_code=403, detail="Недостаточно прав")
+    completed_raw = (body.completed_at or "").strip()
+    if completed_raw:
+        completed_at = completed_raw
+    else:
+        completed_at = datetime.now(tz=timezone.utc).isoformat()
+    meta = dict(staff.meta_json) if isinstance(staff.meta_json, dict) else {}
+    meta["tour_completed_at"] = completed_at
+    staff.meta_json = meta
+    await db.commit()
+    return {"ok": True, "tour_completed_at": completed_at, "persisted": True}
 
 
 @auth_router.get("/me")
@@ -449,6 +519,11 @@ async def admin_select_org(
         raise HTTPException(status_code=404, detail="Организация не найдена")
     if not is_superadmin and not bool(target.is_active):
         raise HTTPException(status_code=403, detail="Подписка приостановлена. Свяжитесь с администратором.")
+
+    if not is_superadmin:
+        tenant_t = await load_tenant_for_organization(db, int(body.organization_id))
+        if tenant_is_billing_suspended(tenant_t):
+            raise billing_suspended_http_exception()
 
     request.session["organization_id"] = int(body.organization_id)
     return await _admin_auth_me_payload(request, db)

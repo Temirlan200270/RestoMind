@@ -354,11 +354,14 @@ Location scope поддержан в:
 
 ### GuestCare External
 
-- `GET /api/admin/intelligence/reviews/external`
-- `POST /api/admin/intelligence/reviews/external/import` — URL или полный payload (`author`, `rating`, `text`)
+- `GET /api/admin/intelligence/reviews/external` — список + `sync_meta` (последний cron/ручной sync)
+- `POST /api/admin/intelligence/reviews/external/sync` — fetch страницы 2GIS (`Organization.review_url_2gis`) и опционально Google (`meta_json.review_url_google`), upsert в `external_reviews`
+- `POST /api/admin/intelligence/reviews/external/import` — ручной URL или полный payload (`author`, `rating`, `text`)
 - `POST /api/admin/intelligence/reviews/external/{review_id}/reply-draft`
 
-Хранение: таблица `external_reviews` (не `Organization.meta_json`).
+Хранение: таблица `external_reviews` (не `Organization.meta_json` для самих отзывов; метаданные sync — `meta_json.guestcare_sync`).
+
+**Парсинг (ограничения):** без headless browser; 2GIS — JSON-LD + embedded `__INITIAL_STATE__` при наличии в HTML. Google Maps без **Places API** key обычно не отдаёт отзывы в статическом HTML (ToS/conservative). Production Google — официальный Places API.
 
 ---
 
@@ -412,7 +415,7 @@ Location scope поддержан в:
 - [x] Audit Log Feed в UI (лента решений ОС, `loadAuditLog`, `dashLiveFeed`)
 - [x] Websocket push `os.audit` при новых AuditLog entries
 - [x] Daily OS Digest backend (Telegram preview endpoint + cron)
-- [ ] Admin UI для SupplyMind drafts, StaffMind onboarding, Voice toggle, digest preview
+- [x] Admin UI для SupplyMind drafts, StaffMind onboarding, Voice toggle, digest preview
 - [ ] Staging smoke: Telegram digest delivery, Twilio voice stream
 - [ ] Hourly baselines (нужен накопленный датасет)
 - [ ] Causal graph (корреляции между метриками)

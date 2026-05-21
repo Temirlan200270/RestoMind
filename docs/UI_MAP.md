@@ -42,7 +42,7 @@
 - `_tab_settings_branding.html` — брендинг шапки.
 - `_tab_settings_connections.html` — интеграции (iiko, WhatsApp, Telegram).
 - `_tab_settings_smart_sales.html` — правила допродаж.
-- `_tab_settings_team.html` — команда и роли. **StaffMind:** JS-хелперы (`loadStaffMindOnboarding`, `startStaffMindOnboarding`, `askStaffMind`) в `admin-app.js` — разметка пока не подключена.
+- `_tab_settings_team.html` — команда и роли. **StaffMind:** onboarding-сессии и Q&A подключены через `loadStaffMindOnboarding`, `startStaffMindOnboarding`, `askStaffMind`.
 - `_tab_settings_health.html` — проверки окружения.
 - `_tab_settings_technical.html` — экспорт, retention, опасные действия.
 - `_tab_settings_bot_test.html` — лаборатория бота / тестовый чат.
@@ -109,7 +109,7 @@
 
 ## Known Follow-Ups
 
-- **Final Mile UI:** подключить экраны/секции для SupplyMind drafts, StaffMind onboarding (JS уже есть), Voice AI toggle, Daily OS Digest preview — см. [`docs/REMAINING_UPDATES.md`](REMAINING_UPDATES.md).
+- **Final Mile UI:** `aiCenterTab=final_mile` подключает SupplyMind drafts, Voice AI toggle и Daily OS Digest preview; StaffMind подключён в настройках команды.
 - Разбить `admin-app.js` на небольшие доменные модули: dashboard, orders, menu, chats, settings.
 - Постепенно убрать гибриды `rm-*`/raw Tailwind в экранах, когда файл всё равно открыт для правок.
 - Решить, нужен ли Lazy DOM слой для тяжёлых экранов. Сейчас все include рендерятся сразу ради простоты и предсказуемости.

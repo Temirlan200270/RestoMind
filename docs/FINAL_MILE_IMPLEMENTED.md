@@ -51,8 +51,8 @@ Implemented backend MVPs for the remaining Ultimate Platform modules.
 |--------|---------|----------|
 | OS Decision Feed + `os.audit` | ✅ | ✅ (`_tab_ai_center.html`, `dashLiveFeed`) |
 | GuestCare External | ✅ | ✅ (`aiCenterTab=guestcare`) |
-| Daily OS Digest | ✅ preview + cron | ❌ preview panel not wired |
-| SupplyMind drafts | ✅ | ❌ |
-| StaffMind onboarding | ✅ | ⚠️ JS helpers in `admin-app.js`, no template |
-| Voice AI toggle | ✅ status/config API | ❌ |
+| Daily OS Digest | ✅ preview + cron | ✅ `aiCenterTab=final_mile` preview panel |
+| SupplyMind drafts | ✅ | ✅ stock alerts + draft list/create in `aiCenterTab=final_mile` |
+| StaffMind onboarding | ✅ | ✅ `_tab_settings_team.html` sessions + Q&A |
+| Voice AI toggle | ✅ status/config API | ✅ enable/mode controls in `aiCenterTab=final_mile` |
 | PWA | ✅ manifest + sw | ✅ registered in admin |
