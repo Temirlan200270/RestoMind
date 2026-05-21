@@ -397,7 +397,8 @@ def _location_allowed_expr(model, allowed_location_ids: set[int] | None, locatio
     if lid is not None:
         if allowed_location_ids is not None and lid not in allowed_location_ids:
             return model.id == -1
-        return model.location_id == lid
+        # NULL = legacy rows before location backfill; show them for any selected location.
+        return or_(model.location_id.is_(None), model.location_id == lid)
     if allowed_location_ids is None:
         return True
     if not allowed_location_ids:

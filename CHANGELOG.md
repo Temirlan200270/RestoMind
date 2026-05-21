@@ -11,6 +11,7 @@
 - **`check_operational_status`:** сравнение `force_closed_until` с aware UTC — устранён `TypeError` на `GET /organization/profile` при naive timestamp из Postgres.
 - **`integration_health`:** безопасное чтение `organization_integration_sync` при отставании миграции `20260522_iiko_office_inventory` (`last_inventory_sync_*`).
 - **Location scope fallback:** `money_queue`, `revenue_leak`, `GET /chats` — retry без `location_id` фильтра при schema lag (`20260520_locations_phase11`).
+- **`GET /chats` + `location_id`:** legacy `chat_logs` с `location_id IS NULL` снова видны при выборе точки (до backfill после миграции Phase 1.1).
 - **`shift_state_engine`:** Redis S1 latch / focus lease / exclusions не рвут `GET /shift/state` при недоступном Redis.
 - Тесты: [`tests/test_admin_session_deps_http.py`](tests/test_admin_session_deps_http.py) (`checkSession` smoke), [`tests/test_time_context_schedule.py`](tests/test_time_context_schedule.py) (naive `force_closed_until`).
 

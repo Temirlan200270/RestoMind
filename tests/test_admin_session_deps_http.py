@@ -122,3 +122,55 @@ async def test_checksession_endpoints_http_smoke(asgi_memory_client) -> None:
     for path in endpoints:
         res = await client.get(path)
         assert res.status_code == 200, f"GET {path} -> {res.status_code}: {res.text[:300]}"
+
+
+@pytest.mark.asyncio
+async def test_chats_list_includes_legacy_null_location_id(asgi_memory_client) -> None:
+    """Legacy chat_logs without location_id must appear when UI passes location_id=1."""
+    client, session_factory = asgi_memory_client
+    async with session_factory() as db:
+        org = Organization(name="Legacy Chat Org", slug="legacy-chat-org")
+        db.add(org)
+        await db.flush()
+        org_id = int(org.id)
+        loc = Location(organization_id=org_id, name="Main", slug="main-legacy", is_active=True)
+        db.add(loc)
+        await db.flush()
+        user = User(organization_id=org_id, phone="77051310838", name="Legacy Guest")
+        db.add(user)
+        await db.flush()
+        db.add(
+            ChatLog(
+                organization_id=org_id,
+                user_id=int(user.id),
+                role="user",
+                content="Старое сообщение без location_id",
+                created_at=datetime.now(timezone.utc),
+                location_id=None,
+            )
+        )
+        db.add(
+            StaffUser(
+                organization_id=org_id,
+                email="legacy-chat@test.kz",
+                password_hash=hash_password("secret123"),
+                role="admin",
+                is_active=True,
+            )
+        )
+        await db.commit()
+        loc_id = int(loc.id)
+        phone = "77051310838"
+        username = "legacy-chat@test.kz"
+
+    login = await client.post(
+        "/api/admin/auth/login",
+        json={"username": username, "password": "secret123"},
+    )
+    assert login.status_code == 200
+
+    res = await client.get(f"/api/admin/chats?limit=60&mode=active&location_id={loc_id}")
+    assert res.status_code == 200
+    body = res.json()
+    phones = [c.get("phone") for c in body.get("chats") or []]
+    assert phone in phones
