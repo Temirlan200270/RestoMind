@@ -33,7 +33,7 @@ _FETCH_TIMEOUT = 20.0
 
 
 def org_review_sources(org: Organization) -> dict[str, str]:
-    """Return configured review page URLs for an organization."""
+    """Return configured review page URLs (all sources, for display/import)."""
     urls: dict[str, str] = {}
     gis = (getattr(org, "review_url_2gis", None) or "").strip()
     if gis:
@@ -43,6 +43,14 @@ def org_review_sources(org: Organization) -> dict[str, str]:
     if google:
         urls["google"] = google
     return urls
+
+
+def org_review_auto_sync_sources(org: Organization) -> dict[str, str]:
+    """URLs for cron + «Синхронизировать» — 2GIS only (Google Places API not in scope)."""
+    gis = (getattr(org, "review_url_2gis", None) or "").strip()
+    if not gis:
+        return {}
+    return {"2gis": gis}
 
 
 async def fetch_review_page_html(
@@ -113,19 +121,21 @@ async def sync_external_reviews_for_org(
     if org is None:
         raise ValueError(f"Organization {organization_id} not found")
 
-    sources = org_review_sources(org)
+    sources = org_review_auto_sync_sources(org)
     if not sources:
+        has_google_only = bool(org_review_sources(org)) and not (getattr(org, "review_url_2gis", None) or "").strip()
+        reason = "google_manual_only" if has_google_only else "no_review_urls"
         return {
             "ok": True,
             "organization_id": organization_id,
             "skipped": True,
-            "reason": "no_review_urls",
+            "reason": reason,
             "sources": {},
             "inserted": 0,
             "updated": 0,
             "parsed": 0,
             "errors": [],
-            "limitations": [GOOGLE_REVIEWS_LIMITATION] if "google" not in sources else [],
+            "limitations": [GOOGLE_REVIEWS_LIMITATION],
         }
 
     inserted = 0
@@ -208,7 +218,7 @@ async def list_organizations_with_review_urls(db: AsyncSession) -> list[Organiza
     )).scalars().all()
     out: list[Organization] = []
     for org in rows:
-        if org_review_sources(org):
+        if org_review_auto_sync_sources(org):
             out.append(org)
     return out
 

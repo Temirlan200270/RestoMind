@@ -27,7 +27,7 @@ Implemented backend MVPs for the remaining Ultimate Platform modules.
 ## GuestCare External
 
 - Imported reviews are stored in `external_reviews`.
-- **Auto-sync:** 2GIS via `review_url_2gis` (parser + cron); Google best-effort via `meta_json.review_url_google`.
+- **Auto-sync:** 2GIS via `review_url_2gis` only (parser + cron). Google URL — manual import only (Places API not in scope).
 - Manual import still accepts parsed `author`, `rating`, and `text` payloads.
 - Reply drafts are persisted per review.
 
@@ -49,12 +49,25 @@ Implemented backend MVPs for the remaining Ultimate Platform modules.
 
 ## Admin UI status (2026-05-22)
 
-| Module | Backend | Admin UI |
-|--------|---------|----------|
-| OS Decision Feed + `os.audit` | ✅ | ✅ (`_tab_ai_center.html`, `dashLiveFeed`) |
-| GuestCare External + sync | ✅ | ✅ (`aiCenterTab=guestcare`) |
-| Daily OS Digest | ✅ preview + cron | ✅ `aiCenterTab=final_mile` preview panel |
-| SupplyMind drafts + iiko Office | ✅ | ✅ stock alerts, drafts, sync status in `aiCenterTab=final_mile` |
-| StaffMind onboarding | ✅ | ✅ `_tab_settings_team.html` sessions + Q&A |
-| Voice AI (`stt_fallback` + `realtime`) | ✅ code | ✅ enable/mode in `aiCenterTab=final_mile`; Realtime = staging smoke |
-| PWA | ✅ manifest + sw | ✅ registered in admin |
+| Module | Backend | Admin UI | Gap status |
+|--------|---------|----------|------------|
+| OS Decision Feed + `os.audit` | ✅ | ✅ | Closed |
+| GuestCare External + sync | ✅ 2GIS auto-sync | ✅ | **Google auto-sync closed (WONTFIX Places API)** — manual import only |
+| Daily OS Digest | ✅ preview + cron | ✅ | Ops: [`TELEGRAM_DIGEST_STAGING.md`](TELEGRAM_DIGEST_STAGING.md) |
+| SupplyMind + iiko Office | ✅ | ✅ connections + final_mile | **iiko Office RBAC UI ✅**; ops: [`FINAL_MILE_OPS_SIGNOFF.md`](FINAL_MILE_OPS_SIGNOFF.md) §A |
+| StaffMind onboarding | ✅ | ✅ team settings | Closed |
+| Voice AI Realtime | ✅ code | ✅ toggle | Ops: [`FINAL_MILE_OPS_SIGNOFF.md`](FINAL_MILE_OPS_SIGNOFF.md) §B, ROADMAP `[ ]` until sign-off |
+| Shift G10 | ✅ | ✅ shift tab | Closed |
+| Browser smoke | pytest HTTP + checklist | — | [`FINAL_MILE_BROWSER_SMOKE.md`](FINAL_MILE_BROWSER_SMOKE.md), `tests/test_final_mile_smoke.py` |
+| Admin i18n ru/kk | — | ru inline | **Deferred** — ROADMAP L141, not Final Mile blocker |
+
+## GuestCare product (2026-05)
+
+- **Auto-sync:** only `review_url_2gis` (cron + button).
+- **Google URL:** manual import in GuestCare tab only; no Places API integration planned.
+
+## Remaining ops (not code)
+
+1. iiko Office live sync on pilot venue — [`FINAL_MILE_OPS_SIGNOFF.md`](FINAL_MILE_OPS_SIGNOFF.md) §A
+2. Voice Realtime Twilio call — §B + [`VOICE_STAGING_CHECKLIST.md`](VOICE_STAGING_CHECKLIST.md)
+3. Manual browser pass — [`FINAL_MILE_BROWSER_SMOKE.md`](FINAL_MILE_BROWSER_SMOKE.md)

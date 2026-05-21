@@ -543,5 +543,11 @@ async def test_inventory_sync_forbidden_for_operator(asgi_memory_client) -> None
     sync_res = await client.post("/api/admin/inventory/sync-iiko")
     assert sync_res.status_code == 403
 
+    patch_office = await client.patch(
+        "/api/admin/organization/iiko-office",
+        json={"host": "https://office.test", "login": "u", "password": "p", "store_id": "s1"},
+    )
+    assert patch_office.status_code == 403
+
     status_res = await client.get("/api/admin/inventory/sync-status")
     assert status_res.status_code == 200

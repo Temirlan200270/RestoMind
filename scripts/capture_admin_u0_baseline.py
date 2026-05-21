@@ -50,6 +50,8 @@ SHOTS: list[tuple[str, str]] = [
     ("admin_analytics.png", "dashboard?tab=analytics"),
     ("admin_ai_value.png", "ai_center?tab=value"),
     ("admin_ai_center_final_mile.png", "ai_center?tab=final_mile"),
+    ("admin_ai_center_guestcare.png", "ai_center?tab=guestcare"),
+    ("admin_shift_control.png", "shift"),
 ]
 
 

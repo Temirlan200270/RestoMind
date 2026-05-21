@@ -9,7 +9,7 @@ This file tracks what is still needed outside the backend MVP that is already im
 - **Frontend (wired):** `aiCenterTab=final_mile` — Daily OS Digest preview, SupplyMind stock alerts/drafts, Voice AI enable/mode. `_tab_settings_team.html` — StaffMind onboarding.
 - **Permissions:** decide which staff roles can create supply drafts and change checklist status; StaffMind POST onboarding — `require_staff_manager_or_admin`; Voice toggle — `require_staff_admin` on `POST /voice/config`.
 - **Operations:** confirm every organization has a valid `timezone`, especially for the 09:00 Daily OS Digest.
-- **Staging checks (ops gate):** Telegram digest delivery (`TELEGRAM_BOT_TOKEN`, ops chat IDs); WebSocket `os.audit` fanout; Twilio voice stream — STT path + **Realtime** manual call on real Twilio Media Stream (code ✅, see [`docs/VOICE_STAGING_CHECKLIST.md`](VOICE_STAGING_CHECKLIST.md)).
+- **Staging checks (ops gate):** consolidated sign-off [`docs/FINAL_MILE_OPS_SIGNOFF.md`](FINAL_MILE_OPS_SIGNOFF.md) — iiko Office live smoke, Voice Realtime call, browser smoke [`docs/FINAL_MILE_BROWSER_SMOKE.md`](FINAL_MILE_BROWSER_SMOKE.md); Telegram [`docs/TELEGRAM_DIGEST_STAGING.md`](TELEGRAM_DIGEST_STAGING.md).
 
 ## Integration Epics (2026-05) — status
 
@@ -43,8 +43,8 @@ This file tracks what is still needed outside the backend MVP that is already im
 
 ## External Integrations — status
 
-- **GuestCare 2GIS:** ✅ auto-sync — [`guestcare_parser.py`](app/services/guestcare_parser.py), [`external_reviews_sync.py`](app/services/external_reviews_sync.py), `POST /reviews/external/sync`, ARQ cron, UI «Синхронизировать» in `aiCenterTab=guestcare`.
-- **GuestCare Google:** best-effort via `meta_json.review_url_google` (static HTML often empty without Places API); production Google → official Places API.
+- **GuestCare 2GIS:** ✅ auto-sync — **product 100% = 2GIS** ([`guestcare_parser.py`](app/services/guestcare_parser.py), cron, UI). Sign-off не требуется.
+- **GuestCare Google:** опционально; без Places API — best-effort / ручной import (не блокер Final Mile).
 - **Telegram delivery check:** verify `TELEGRAM_BOT_TOKEN` and ops chat IDs for Daily OS Digest in staging ([`docs/TELEGRAM_DIGEST_STAGING.md`](TELEGRAM_DIGEST_STAGING.md)).
 
 ## Docs That Should Be Cleaned Later
@@ -54,7 +54,6 @@ This file tracks what is still needed outside the backend MVP that is already im
 
 ## Suggested Next Engineering Sprint
 
+- **Ops (закрыть ROADMAP Voice `[ ]` + iiko smoke):** заполнить [`docs/FINAL_MILE_OPS_SIGNOFF.md`](FINAL_MILE_OPS_SIGNOFF.md), затем `[x]` в ROADMAP.
 - Run `alembic upgrade head` (`20260522_iiko_office_inventory`); restart workers.
-- Harden Final Mile admin UI permissions and browser smoke (SupplyMind checklist, StaffMind, Voice toggle, digest preview).
-- Staging smoke: Telegram Daily OS Digest, WebSocket `os.audit`, Twilio voice (STT + Realtime report).
-- iiko Office pilot with live credentials; captured fixtures in `tests/fixtures/iiko_office/`.
+- Browser smoke: [`docs/FINAL_MILE_BROWSER_SMOKE.md`](FINAL_MILE_BROWSER_SMOKE.md); optional PNG via `scripts/capture_admin_u0_baseline.py`.

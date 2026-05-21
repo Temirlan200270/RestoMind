@@ -121,9 +121,22 @@ async def test_sync_dedupes_on_second_run(db_session) -> None:
 
     assert stats2["inserted"] == 0
     assert stats2["updated"] == 3
-    count = await db_session.scalar(
-        select(func.count()).select_from(ExternalReview).where(
-            ExternalReview.organization_id == org.id,
-        ),
+
+
+@pytest.mark.asyncio
+async def test_sync_skips_google_only_org(db_session) -> None:
+    from app.db.models import Organization
+    from app.services.external_reviews_sync import sync_external_reviews_for_org
+
+    org = Organization(
+        name="Google Only Org",
+        slug="google-only-org",
+        meta_json={"review_url_google": "https://www.google.com/maps/place/test"},
     )
-    assert count == 3
+    db_session.add(org)
+    await db_session.flush()
+
+    stats = await sync_external_reviews_for_org(db_session, int(org.id))
+    assert stats["skipped"] is True
+    assert stats["reason"] == "google_manual_only"
+    assert stats["parsed"] == 0

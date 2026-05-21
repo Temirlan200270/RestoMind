@@ -481,11 +481,12 @@
                 <div class="ds-card p-4 space-y-3">
                     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                         <div>
-                            <div class="text-xs font-semibold text-slate-700">Авто-синхронизация</div>
+                            <div class="text-xs font-semibold text-slate-700">Авто-синхронизация (2GIS — основной канал)</div>
                             <p class="text-[11px] text-slate-500 mt-0.5">
-                                Подтягивает отзывы со страницы 2GIS из настроек ресторана
-                                (<code class="text-slate-600">review_url_2gis</code>). Google — только при
-                                <code class="text-slate-600">meta_json.review_url_google</code> (без Places API часто пусто).
+                                Подтягивает отзывы со страницы 2GIS из
+                                <strong>Настройки → Мой ресторан → Ссылка на 2GIS</strong>
+                                (<code class="text-slate-600">review_url_2gis</code>).
+                                Google — только ручной импорт по URL ниже (авто-sync только 2GIS).
                             </p>
                             <p x-show="guestCareSyncMeta?.last_at" class="text-[10px] text-slate-400 mt-1"
                                 x-text="'Последняя синхронизация: ' + (guestCareSyncMeta?.last_at || '')"></p>
@@ -497,6 +498,13 @@
                         </button>
                     </div>
                     <p x-show="guestCareSyncMessage" class="text-xs text-slate-600" x-text="guestCareSyncMessage"></p>
+                    <template x-if="(guestCareSyncMeta?.limitations || []).length">
+                        <ul class="text-[11px] text-amber-800/90 list-disc pl-4 space-y-0.5">
+                            <template x-for="(lim, li) in (guestCareSyncMeta?.limitations || [])" :key="'gcl-' + li">
+                                <li x-text="lim"></li>
+                            </template>
+                        </ul>
+                    </template>
                 </div>
                 <div class="ds-card p-4">
                     <div class="text-xs font-semibold text-slate-700 mb-2">Ссылка на отзыв (2GIS или Google)</div>

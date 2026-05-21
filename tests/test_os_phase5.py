@@ -260,6 +260,32 @@ class TestOsAutopilotUI:
         assert "/api/admin/intelligence/voice/status" in js
         assert "/api/admin/intelligence/voice/config" in js
 
+    def test_iiko_office_connections_rbac_ui_wired(self):
+        """iiko Office save form is admin-only in UI (matches require_staff_admin on PATCH)."""
+        import pathlib
+
+        html = pathlib.Path("app/templates/screens/_tab_settings_connections.html").read_text(encoding="utf-8")
+        js = pathlib.Path("app/static/js/admin-app.js").read_text(encoding="utf-8")
+
+        assert "canStaffAdminOnly()" in html
+        assert "staffRbacHint('admin')" in html
+        assert "saveIikoOfficeConfig()" in html
+        assert "canStaffAdminOnly()" in js
+        assert "saveIikoOfficeConfig" in js
+        assert "Только администратор может менять iiko Office" in js
+
+    def test_final_mile_gap_closure_docs_and_smoke(self):
+        """Final Mile ops/browser smoke docs exist; GuestCare 2GIS-only product documented."""
+        import pathlib
+
+        repo = pathlib.Path(".")
+        assert (repo / "docs/FINAL_MILE_BROWSER_SMOKE.md").is_file()
+        assert (repo / "docs/FINAL_MILE_OPS_SIGNOFF.md").is_file()
+        assert (repo / "docs/VOICE_STAGING_CHECKLIST.md").is_file()
+
+        html = (repo / "app/templates/screens/_tab_ai_center.html").read_text(encoding="utf-8")
+        assert "авто-sync только 2GIS" in html.lower() or "только 2GIS" in html
+
     def test_staffmind_team_settings_ui_wired(self):
         """StaffMind team settings section calls the onboarding helpers."""
         import pathlib

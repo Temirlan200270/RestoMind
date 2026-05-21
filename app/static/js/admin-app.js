@@ -4887,6 +4887,10 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
         },
 
         async saveIikoOfficeConfig() {
+            if (!this.canStaffAdminOnly()) {
+                void this.showUiAlert(this.staffRbacHint('admin') || 'Недостаточно прав', 'iiko Office');
+                return;
+            }
             if (this.iikoOfficeSaving) return;
             const host = String(this.iikoOfficeDraft?.host || '').trim();
             const login = String(this.iikoOfficeDraft?.login || '').trim();
@@ -4907,13 +4911,20 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                 if (pwd) body.password = pwd;
                 const locRaw = String(this.iikoOfficeDraft?.location_id || '').trim();
                 if (locRaw) body.location_id = Number(locRaw);
-                const { ok, data } = await this.apiJsonResponse('/api/admin/organization/iiko-office', {
+                const { ok, status, data } = await this.apiJsonResponse('/api/admin/organization/iiko-office', {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(body),
                 });
                 if (!ok) {
-                    void this.showUiAlert(this.formatApiError(data?.detail) || 'Не удалось сохранить iiko Office', 'Ошибка');
+                    if (status === 403) {
+                        void this.showUiAlert(
+                            this.formatApiError(data?.detail) || 'Только администратор может менять iiko Office',
+                            'iiko Office',
+                        );
+                    } else {
+                        void this.showUiAlert(this.formatApiError(data?.detail) || 'Не удалось сохранить iiko Office', 'Ошибка');
+                    }
                     return;
                 }
                 this.iikoOfficeConfig = data;
@@ -8464,12 +8475,20 @@ function adminMixinDataChartsSettings() {
                     this.guestCareSyncMessage = 'Укажите ссылку 2GIS в настройках ресторана (review_url_2gis).';
                     return;
                 }
+                if (stats.skipped && stats.reason === 'google_manual_only') {
+                    this.guestCareSyncMessage = 'Авто-sync только для 2GIS. Для Google используйте ручной импорт по URL ниже.';
+                    return;
+                }
                 const inserted = Number(stats.inserted || 0);
                 const updated = Number(stats.updated || 0);
                 const parsed = Number(stats.parsed || 0);
                 this.guestCareSyncMessage = `Готово: найдено ${parsed}, новых ${inserted}, обновлено ${updated}.`;
                 if (Array.isArray(stats.errors) && stats.errors.length) {
                     this.guestCareSyncMessage += ` Ошибки: ${stats.errors.length}.`;
+                }
+                const lims = stats.sync_meta?.limitations || [];
+                if (Array.isArray(lims) && lims.length) {
+                    this.guestCareSyncMessage += ' См. ограничения ниже.';
                 }
             } catch (_e) {
                 this.guestCareSyncMessage = 'Ошибка синхронизации отзывов';

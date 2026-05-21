@@ -371,7 +371,9 @@ Location scope поддержан в:
 
 Хранение: таблица `external_reviews` (не `Organization.meta_json` для самих отзывов; метаданные sync — `meta_json.guestcare_sync`).
 
-**Парсинг (ограничения):** без headless browser; 2GIS — JSON-LD + embedded `__INITIAL_STATE__` при наличии в HTML. Google Maps без **Places API** key обычно не отдаёт отзывы в статическом HTML (ToS/conservative). Production Google — официальный Places API.
+**Парсинг (ограничения):** без headless browser; 2GIS — JSON-LD + embedded `__INITIAL_STATE__` при наличии в HTML. Google Maps без **Places API** key обычно не отдаёт отзывы в статическом HTML (ToS/conservative).
+
+**Продуктовое решение (2026-05):** GuestCare **100% = 2GIS auto-sync**; Google Places API **не в scope** — Google URL опционален (best-effort + ручной import по URL).
 
 ---
 
