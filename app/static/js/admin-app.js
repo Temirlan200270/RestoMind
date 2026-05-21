@@ -63,6 +63,54 @@ function adminDefaultReadinessPayload() {
     return { checks: [], links: {}, generated_at: '' };
 }
 
+/** Пустые структуры вместо null — Alpine не падает на shiftState.metrics до fetch. */
+function adminDefaultShiftState() {
+    return {
+        state: null,
+        metrics: {
+            risk_kzt: 0,
+            saved_today_kzt: 0,
+            at_risk_count: 0,
+            queue_size: 0,
+            queue_size_active: 0,
+            excluded_skip: 0,
+            excluded_next: 0,
+            shift_empty_focus_while_risk_positive: false,
+        },
+        presentation: {},
+        focus: null,
+        queue: [],
+        actions: [],
+    };
+}
+
+function adminDefaultRevenueLeak() {
+    return {
+        total_leak_kzt: 0,
+        action_risk_kzt: 0,
+        surfaces: [],
+        breakdown: {
+            abandoned_drafts_kzt: 0,
+            slow_response_kzt: 0,
+            cancelled_today_kzt: 0,
+            menu_confusion_kzt: 0,
+        },
+    };
+}
+
+function adminDefaultMoneyQueue() {
+    return {
+        summary: {
+            total: 0,
+            critical: 0,
+            abandoned_drafts: 0,
+            pending_prepay: 0,
+            slow_chats: 0,
+        },
+        items: [],
+    };
+}
+
 /** Общие настройки Chart.js (Phase U5): шрифты, сетка. */
 function adminChartJsCommonFont() {
     return { family: 'system-ui, -apple-system, Segoe UI, sans-serif', size: 11 };
@@ -802,10 +850,10 @@ function adminMixinState() {
         aiValueData: null,
         aiValueSource: '',
         /** Money MVP: Revenue Leak Detector */
-        revenueLeak: null,
+        revenueLeak: adminDefaultRevenueLeak(),
         revenueLeakLoading: false,
         revenueLeakActionLoading: '',
-        shiftState: null,
+        shiftState: adminDefaultShiftState(),
         shiftStateLoading: false,
         shiftStateFetchedAt: 0,
         shiftStateDegraded: false,
@@ -885,7 +933,7 @@ function adminMixinState() {
         /** GET /incidents?mode=summary — блок «Сейчас» на дашборде и счётчик в сайдбаре без тяжёлых групп */
         attentionSummary: null,
         attentionSummaryLoading: false,
-        moneyQueue: null,
+        moneyQueue: adminDefaultMoneyQueue(),
         moneyQueueLoading: false,
         /** Время последнего успешного GET /incidents?mode=summary (кэш ~45 с на дашборде) */
         attentionSummaryFetchedAt: 0,
@@ -3484,13 +3532,13 @@ function adminMixinAuthKnowledge() {
         },
 
         async onLocationFilterChanged() {
-            this.revenueLeak = null;
+            this.revenueLeak = adminDefaultRevenueLeak();
             this.dashStatsLoadedOnce = false;
             this.dashActivity = [];
             this.attentionSummary = null;
             this.attentionSummaryFetchedAt = 0;
-            this.moneyQueue = null;
-            this.shiftState = null;
+            this.moneyQueue = adminDefaultMoneyQueue();
+            this.shiftState = adminDefaultShiftState();
             this.shiftStateFetchedAt = 0;
             this.shiftStateDegraded = false;
             this.shiftStateLoadError = '';

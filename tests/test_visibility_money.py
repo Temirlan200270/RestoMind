@@ -291,7 +291,7 @@ def test_visibility_ui_hooks_are_present():
     assert "lastRole" in js
     assert "chatSlaDotClass" in chats
     assert "Бот в кратком режиме. Помогите ему" in chats
-    assert "revenueLeak.total_leak_kzt" in sidebar
+    assert "revenueLeak?.total_leak_kzt" in sidebar
     assert "runRevenueLeakAction" in js
     assert "runShiftStateAction" in js
     assert "loadShiftState" in js
@@ -304,3 +304,44 @@ def test_visibility_ui_hooks_are_present():
     assert "locationQueryParams" in js
     assert "available_locations" in js
     assert "Все точки" in header
+
+
+@pytest.mark.asyncio
+async def test_revenue_leak_http_with_location_id(asgi_memory_client) -> None:
+    """GET /revenue-leak?location_id= must not 500 (PG GROUP BY + location scope)."""
+    from app.core.passwords import hash_password
+    from app.db.models import StaffUser
+
+    client, session_factory = asgi_memory_client
+
+    async with session_factory() as db:
+        org = Organization(name="RL HTTP Org", slug="rl-http-org", integration_config_json={})
+        db.add(org)
+        await db.flush()
+        loc = Location(organization_id=int(org.id), name="Main", slug="main", is_active=True)
+        db.add(loc)
+        await db.flush()
+        db.add(
+            StaffUser(
+                organization_id=int(org.id),
+                email="rl-admin@test.kz",
+                password_hash=hash_password("secret123"),
+                role="admin",
+                is_active=True,
+            ),
+        )
+        await db.commit()
+        loc_id = int(loc.id)
+
+    login = await client.post(
+        "/api/admin/auth/login",
+        json={"username": "rl-admin@test.kz", "password": "secret123"},
+    )
+    assert login.status_code == 200
+
+    res = await client.get(f"/api/admin/intelligence/revenue-leak?location_id={loc_id}")
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body.get("ok") is True
+    assert body.get("location_id") == loc_id
+    assert "total_leak_kzt" in body

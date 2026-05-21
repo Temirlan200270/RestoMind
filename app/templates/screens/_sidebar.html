@@ -35,12 +35,12 @@
                                 <span x-text="item.label" class="font-medium text-sm"></span>
                                 <span x-show="item.id === 'shift' && shiftState && (shiftState.metrics?.risk_kzt ?? 0) > 0"
                                     class="ml-auto max-w-[5.75rem] truncate rounded-full bg-red-500/95 px-2 py-0.5 text-[10px] font-black tabular-nums text-white"
-                                    :title="'Под риском: ' + fmt.money(shiftState.metrics.risk_kzt)"
-                                    x-text="fmt.money(shiftState.metrics.risk_kzt)"></span>
-                                <span x-show="item.id === 'dashboard' && revenueLeak && revenueLeak.total_leak_kzt > 0"
+                                    :title="'Под риском: ' + fmt.money(shiftState?.metrics?.risk_kzt ?? 0)"
+                                    x-text="fmt.money(shiftState?.metrics?.risk_kzt ?? 0)"></span>
+                                <span x-show="item.id === 'dashboard' && (revenueLeak?.total_leak_kzt ?? 0) > 0"
                                     class="ml-auto max-w-[5.75rem] truncate rounded-full bg-red-500/95 px-2 py-0.5 text-[10px] font-black tabular-nums text-white"
-                                    :title="'Упущено сегодня: ' + fmt.money(revenueLeak.total_leak_kzt)"
-                                    x-text="fmt.money(revenueLeak.total_leak_kzt)"></span>
+                                    :title="'Упущено сегодня: ' + fmt.money(revenueLeak?.total_leak_kzt ?? 0)"
+                                    x-text="fmt.money(revenueLeak?.total_leak_kzt ?? 0)"></span>
                                 <span x-show="item.id === 'chats' && unreadChats > 0"
                                     class="absolute right-3 top-2 min-w-[1.25rem] h-5 px-1 bg-red-500 rounded-full text-[10px] font-bold flex items-center justify-center"
                                     x-text="unreadChats"></span>

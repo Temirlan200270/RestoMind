@@ -17,11 +17,11 @@
     <div x-show="!guestContextLoading && guestContext.activeOrder" class="rounded-xl border border-amber-200/80 bg-amber-50/40 p-3 shadow-sm">
         <p class="text-[10px] font-bold uppercase tracking-wider text-amber-900/80 mb-1">Активный заказ</p>
         <p class="text-sm font-bold text-gray-900">
-            #<span class="tabular-nums" x-text="guestContext.activeOrder.id"></span>
+            #<span class="tabular-nums" x-text="guestContext.activeOrder?.id"></span>
             <span class="text-gray-500 font-semibold">·</span>
-            <span x-text="statusConfig[guestContext.activeOrder.status]?.label || guestContext.activeOrder.status"></span>
+            <span x-text="statusConfig[guestContext.activeOrder?.status]?.label || guestContext.activeOrder?.status"></span>
         </p>
-        <p class="text-xs text-gray-600 mt-1 tabular-nums" x-text="fmt.money(guestContext.activeOrder.total_price)"></p>
+        <p class="text-xs text-gray-600 mt-1 tabular-nums" x-text="fmt.money(guestContext.activeOrder?.total_price)"></p>
         <button type="button"
             @click="openGuestContextOrder(guestContext.activeOrder)"
             class="mt-2 w-full min-h-[40px] rounded-lg text-xs font-bold bg-white border border-amber-300 text-amber-900 hover:bg-amber-50">
@@ -31,11 +31,11 @@
 
     <div x-show="!guestContextLoading && guestContext.activeBooking" class="rounded-xl border border-violet-200/80 bg-violet-50/40 p-3 shadow-sm">
         <p class="text-[10px] font-bold uppercase tracking-wider text-violet-900/80 mb-1">Бронирование</p>
-        <p class="text-sm font-bold text-gray-900" x-text="fmt.bookingDate(guestContext.activeBooking.date) + ' в ' + (String(guestContext.activeBooking.time || '').slice(0, 5) || '—')"></p>
+        <p class="text-sm font-bold text-gray-900" x-text="fmt.bookingDate(guestContext.activeBooking?.date) + ' в ' + (String(guestContext.activeBooking?.time || '').slice(0, 5) || '—')"></p>
         <p class="text-xs text-gray-600 mt-1">
-            <span x-text="guestContext.activeBooking.guests"></span> гост.
+            <span x-text="guestContext.activeBooking?.guests"></span> гост.
             <span class="mx-1">·</span>
-            <span x-text="guestContext.activeBooking.status"></span>
+            <span x-text="guestContext.activeBooking?.status"></span>
         </p>
         <button type="button"
             @click="openGuestContextBooking(guestContext.activeBooking)"
@@ -46,11 +46,11 @@
 
     <div x-show="!guestContextLoading && customerSummary.last_escalation" class="rounded-xl border border-orange-200/80 bg-orange-50/35 p-3 shadow-sm">
         <p class="text-[10px] font-bold uppercase tracking-wider text-orange-900/80 mb-1">Последняя эскалация</p>
-        <p class="text-[11px] text-gray-500 tabular-nums" x-text="customerSummary.last_escalation?.created_at ? fmt.dateTime(customerSummary.last_escalation.created_at) : '—'"></p>
+        <p class="text-[11px] text-gray-500 tabular-nums" x-text="customerSummary.last_escalation?.created_at ? fmt.dateTime(customerSummary.last_escalation?.created_at) : '—'"></p>
         <p class="text-xs text-gray-800 mt-1.5 leading-snug line-clamp-4" x-show="customerSummary.last_escalation?.user_message"
-            x-text="customerSummary.last_escalation.user_message"></p>
+            x-text="customerSummary.last_escalation?.user_message"></p>
         <p class="text-[11px] text-gray-600 mt-1 italic line-clamp-3" x-show="customerSummary.last_escalation?.reason"
-            x-text="customerSummary.last_escalation.reason"></p>
+            x-text="customerSummary.last_escalation?.reason"></p>
     </div>
 </div>
 {%- endmacro %}

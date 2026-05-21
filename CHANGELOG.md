@@ -6,7 +6,13 @@
 
 ## [Unreleased] — 2026-03-20
 
-### Final Mile gap closure (2026-05-22)
+### Исправлено (2026-05-21) — Alpine null-safe + revenue-leak 500
+
+- **Frontend:** `shiftState`, `revenueLeak`, `moneyQueue` инициализируются пустыми объектами (`adminDefault*()`); optional chaining в sidebar/bottom nav/operator queue; сброс при смене локации — без `null` (Alpine не ломает реактивный цикл до fetch).
+- **Backend:** `revenue_leak._slow_response_kzt` — `GROUP BY user_id` для PostgreSQL; `_menu_confusion_kzt` — убран невалидный `GROUP BY`; `GET /revenue-leak?location_id=` — FastAPI `int | None`.
+- **Syntax:** IndentationError в `intelligence.py` (replay snapshot → legacy menu fallback).
+
+### Final Mile gap closure (2026-05-21)
 
 - **iiko Office RBAC UI:** подтверждено тестами `test_iiko_office_connections_rbac_ui_wired`, operator PATCH → 403.
 - **GuestCare Google:** auto-sync только 2GIS; Google — `google_manual_only` + ручной import; Places API WONTFIX.
@@ -14,14 +20,14 @@
 - **Ops (остаётся вручную):** Voice Twilio + iiko Office live — [`docs/FINAL_MILE_OPS_SIGNOFF.md`](docs/FINAL_MILE_OPS_SIGNOFF.md).
 - **Admin i18n ru/kk:** deferred, ROADMAP L141.
 
-### Final Mile 100% — код и чеклисты (2026-05-22)
+### Final Mile 100% — код и чеклисты (2026-05-21)
 
 - **iiko Office RBAC UI:** `canStaffAdminOnly()` + disabled inputs/hint в Настройки → Подключения; guard и 403 в `saveIikoOfficeConfig()`; тест operator PATCH → 403.
 - **GuestCare 2GIS primary:** подсказки в настройках ресторана и вкладке guestcare; отображение `sync_meta.limitations`; ROADMAP/AI_OPERATIONS — Google Places API вне scope.
 - **Ops / smoke docs:** [`docs/FINAL_MILE_BROWSER_SMOKE.md`](docs/FINAL_MILE_BROWSER_SMOKE.md), [`docs/FINAL_MILE_OPS_SIGNOFF.md`](docs/FINAL_MILE_OPS_SIGNOFF.md); `capture_admin_u0_baseline.py` — shots guestcare + shift.
 - **ROADMAP:** Voice `[ ]` и iiko live smoke — только после sign-off в OPS doc (код ✅).
 
-### Документация (2026-05-22) — sync audit drift
+### Документация (2026-05-21) — sync audit drift
 
 - Синхронизированы [`docs/REMAINING_UPDATES.md`](docs/REMAINING_UPDATES.md), [`docs/FINAL_MILE_IMPLEMENTED.md`](docs/FINAL_MILE_IMPLEMENTED.md), [`docs/AI_OPERATIONS.md`](docs/AI_OPERATIONS.md), [`docs/OS_TRANSITION_PLAN.md`](docs/OS_TRANSITION_PLAN.md), [`docs/ROADMAP.md`](docs/ROADMAP.md): head `20260522_iiko_office_inventory`; iiko Office + Voice Realtime + GuestCare 2GIS — code ✅; Voice `[ ]` = ops/staging gate; Phase 3 ~100%; StaffMind UI + RBAC; единый контракт `GET/POST /snapshots*`.
 

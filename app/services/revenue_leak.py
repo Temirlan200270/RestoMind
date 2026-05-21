@@ -120,6 +120,7 @@ async def _slow_response_kzt(
             ChatLog.created_at <= threshold,
             chat_logs_location_filter(allowed_location_ids, location_id),
         )
+        .group_by(ChatLog.user_id)
     )).all()
 
     if not user_rows:
@@ -196,7 +197,6 @@ async def _menu_confusion_kzt(
             chat_logs_location_filter(allowed_location_ids, location_id),
             ChatLog.user_id.isnot(None),
         )
-        .group_by(ChatLog.user_id)
     )).all()
     markers = (
         "не нашёл в меню",

@@ -69,11 +69,11 @@
                     </div>
                     <p class="px-5 py-3 text-xs text-gray-500 border-t border-gray-100"
                         x-show="!moneyQueueLoading && moneyQueue?.summary?.total > 0">
-                        В очереди <span x-text="moneyQueue.summary.total"></span>
-                        · критичных <span x-text="moneyQueue.summary.critical"></span>
-                        · черновики <span x-text="moneyQueue.summary.abandoned_drafts"></span>
-                        · оплата <span x-text="moneyQueue.summary.pending_prepay"></span>
-                        · чаты <span x-text="moneyQueue.summary.slow_chats"></span>
+                        В очереди <span x-text="moneyQueue?.summary?.total ?? 0"></span>
+                        · критичных <span x-text="moneyQueue?.summary?.critical ?? 0"></span>
+                        · черновики <span x-text="moneyQueue?.summary?.abandoned_drafts ?? 0"></span>
+                        · оплата <span x-text="moneyQueue?.summary?.pending_prepay ?? 0"></span>
+                        · чаты <span x-text="moneyQueue?.summary?.slow_chats ?? 0"></span>
                     </p>
                 {% endcall %}
 
