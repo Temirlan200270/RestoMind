@@ -33,6 +33,7 @@
   - `load` — Digital Twin / нагрузка;
   - `os` — **Автопилот** (`GET /intelligence/os-dashboard`, лента решений `loadAuditLog()`, bulk pricing);
   - `guestcare` — **Отзывы** (внешние 2GIS/Google: `GET/POST /reviews/external*`).
+  - `final_mile` — **Final Mile:** Daily OS Digest preview, SupplyMind (stock alerts, drafts, checklist UX), Voice AI toggle + **журнал звонков** (`loadVoiceCallLogs` → `GET /voice/calls`).
   Legacy-файлы `_tab_ai_value.html`, `_tab_intelligence.html`, `_tab_digital_twin.html` остаются для редиректов hash.
 - `_tab_menu.html` — меню и стоп-лист.
 
@@ -42,7 +43,7 @@
 - `_tab_settings_branding.html` — брендинг шапки.
 - `_tab_settings_connections.html` — интеграции (iiko, WhatsApp, Telegram).
 - `_tab_settings_smart_sales.html` — правила допродаж.
-- `_tab_settings_team.html` — команда и роли. **StaffMind:** onboarding-сессии и Q&A подключены через `loadStaffMindOnboarding`, `startStaffMindOnboarding`, `askStaffMind`.
+- `_tab_settings_team.html` — команда и роли. **StaffMind:** onboarding-сессии, Q&A (`loadStaffMindOnboarding`, …) и **step tracker** (`staffMindTrackerMeta()` — часть метрик на эвристиках до backend).
 - `_tab_settings_health.html` — проверки окружения.
 - `_tab_settings_technical.html` — экспорт, retention, опасные действия.
 - `_tab_settings_bot_test.html` — лаборатория бота / тестовый чат.
@@ -109,7 +110,9 @@
 
 ## Known Follow-Ups
 
-- **Final Mile UI:** `aiCenterTab=final_mile` подключает SupplyMind drafts, Voice AI toggle и Daily OS Digest preview; StaffMind подключён в настройках команды.
+- **Final Mile UI:** `aiCenterTab=final_mile` — SupplyMind drafts/checklist, Voice AI toggle + call log strip (`GET /voice/calls`); StaffMind tracker — в **Настройки → Команда**.
+- **Control Plane:** `GET /trace-timeline?trace_id=` — API only; admin UI panel — backlog (ROADMAP).
+- **Superadmin:** `/superadmin` — tech fields (`iiko_api_login`, …), журнал `GET /api/superadmin/audit` (миграция `20260521_superadmin_audit` на env).
 - Разбить `admin-app.js` на небольшие доменные модули: dashboard, orders, menu, chats, settings.
 - Постепенно убрать гибриды `rm-*`/raw Tailwind в экранах, когда файл всё равно открыт для правок.
 - Решить, нужен ли Lazy DOM слой для тяжёлых экранов. Сейчас все include рендерятся сразу ради простоты и предсказуемости.

@@ -48,12 +48,13 @@ async def list_bookings(
         raise HTTPException(status_code=400, detail="date_from не может быть позже date_to")
 
     org_id = admin_org_from_session(request)
+    staff = await _session_staff_user(request, db)
+    is_super = await _session_is_superadmin(request, db)
     allowed_location_ids = await allowed_location_ids_for_staff(
         db,
         org_id=org_id,
-        staff=_session_staff_user(request),
-        is_superadmin=_session_is_superadmin(request),
-        is_demo=False,
+        staff=staff,
+        is_superadmin=is_super,
     )
     if location_id is not None and allowed_location_ids is not None and int(location_id) not in allowed_location_ids:
         raise HTTPException(status_code=403, detail="location_forbidden")

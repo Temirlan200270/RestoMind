@@ -100,8 +100,10 @@ Implemented bridge:
 
 | Module | Backend MVP | Integration epic | Admin UI |
 |--------|-------------|------------------|----------|
-| SupplyMind | ✅ snapshots + sync + checklist | live iiko Office smoke | ✅ final_mile panel |
-| StaffMind | ✅ sessions + Q&A | — | ✅ settings team |
+| SupplyMind | ✅ snapshots + sync + checklist lifecycle | live iiko Office smoke | ✅ final_mile panel (item checks session-local) |
+| StaffMind | ✅ sessions + Q&A | — | ✅ settings team + tracker UI (metrics partial) |
+
+**Known UI/API gaps:** SupplyMind item checkbox persist; StaffMind `test_passed` / `questions_asked` in API; Voice call log `location_id` in payload. See [`docs/ROADMAP.md`](ROADMAP.md) backlog lines.
 
 Tests: [`tests/test_ultimate_platform_sprint.py`](../tests/test_ultimate_platform_sprint.py), [`tests/test_iiko_inventory_sync.py`](../tests/test_iiko_inventory_sync.py) (lifecycle + RBAC).
 

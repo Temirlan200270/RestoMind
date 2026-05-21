@@ -48,7 +48,7 @@ RestoMind/
 │   │   │   └── _monolith.py       # временно: остальной admin API до завершения раскола E0.1
 │   │   ├── webhooks.py            # Meta WhatsApp: verify + входящие → обработка сообщений
 │   │   ├── payment_webhook.py     # внешние провайдеры оплаты (Bearer/HMAC)
-│   │   └── superadmin.py          # организации, заявки, аудит платёжных уведомлений, message accounting, AI tokens
+│   │   └── superadmin.py          # организации, заявки, SuperadminAuditLog, GET /audit, message accounting, AI tokens
 │   │
 │   ├── core/                      # config, rate_limiter, пароли, константы ИИ
 │   ├── db/
@@ -96,7 +96,10 @@ RestoMind/
 │   │   ├── revenue_leak.py        # Money MVP: abandoned drafts, slow response, cancellations
 │   │   ├── supplymind.py          # inventory snapshots, purchase draft builder
 │   │   ├── staffmind.py           # staff onboarding sessions, KB Q&A
-│   │   ├── voice_ai.py            # per-org voice flag, call logs, Twilio guard
+│   │   ├── voice_ai.py            # per-org voice flag, list_voice_call_logs, record_voice_call
+│   │   ├── trace_context.py       # trace_id contextvars, WS publish helpers
+│   │   ├── trace_timeline.py      # GET /trace-timeline: merge SystemEvent + ChatLog by trace_id
+│   │   ├── superadmin_audit.py    # SuperadminAuditLog write/list
 │   │   ├── daily_os_digest.py     # owner digest payload + Telegram send + ARQ tick
 │   │   ├── healing_actions.py     # self-healing + WA payment nudges 2.0
 │   │   ├── integration_health.py / readiness.py
@@ -145,10 +148,11 @@ RestoMind/
 | WhatsApp → бот | `api/webhooks.py` | preflight: канон. телефон, сброс DRAFT при пустой истории, stoplist_session; `dialog_mgr`, `intent_router`, `ai_brain`; operator_only / эскалация → `trace_context.publish_*` |
 | Админ UI | `templates/` + `static/js/admin-app.js` | `api/admin/` → сервисы, БД; чаты: FSM-бейдж, `formatChatDisplayContent`, takeover/release |
 | Live-обновления | WS `/api/admin/ws` | `services/events` + `trace_context`; `os.audit`, business events, `new_message`, `state_changed`, … |
-| Voice (Twilio) | `api/webhooks.py` voice routes | `voice_ai.py` → STT → `process_message`; guard `voice_ai_enabled` |
+| Voice (Twilio) | `api/webhooks.py` voice routes | `voice_ai.py` → STT/Realtime → `process_message`; `GET /voice/calls` journal |
+| Control Plane trace | WhatsApp webhook, ARQ, admin chats | `trace_context.py`, `trace_timeline.py`, `GET /intelligence/trace-timeline` |
 | Daily digest | ARQ `daily_os_digest_scheduled_tick` | `daily_os_digest.py` → Telegram ops chat |
 | Оплата провайдера | `api/payment_webhook.py` | заказ, `PaymentEvent`, фон: автопечать iiko при флаге org |
-| Superadmin | `api/superadmin.py` | организации, заявки, синхронизация меню, message accounting, AI-токены |
+| Superadmin | `api/superadmin.py` | организации, заявки, credentials, `GET /audit`, message accounting, AI-токены |
 
 ---
 

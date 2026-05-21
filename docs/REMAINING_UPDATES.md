@@ -6,7 +6,7 @@ This file tracks what is still needed outside the backend MVP that is already im
 
 - **Database:** run `alembic upgrade head`; expected head is `20260521_superadmin_audit` (chain: … → `20260522_iiko_office_inventory` → `20260521_superadmin_audit`).
 - **Workers:** restart ARQ workers so `daily_os_digest_scheduled_tick`, `iiko_inventory_sync`, and `external_reviews_sync_scheduled_tick` are registered.
-- **Frontend (wired):** `aiCenterTab=final_mile` — Daily OS Digest preview, SupplyMind stock alerts/drafts/checklist UX, Voice AI enable/mode + call log strip (placeholder until API). `_tab_settings_team.html` — StaffMind onboarding + step tracker. `GET /superadmin` — tech fields + audit journal (needs migration).
+- **Frontend (wired):** `aiCenterTab=final_mile` — Daily OS Digest preview, SupplyMind stock alerts/drafts/checklist UX, Voice AI enable/mode + call log strip (`GET /voice/calls` ✅). `_tab_settings_team.html` — StaffMind onboarding + step tracker (метрики частично на эвристиках UI). `/superadmin` — tech fields + audit journal ✅ (нужен `alembic upgrade head` на env).
 - **Permissions:** decide which staff roles can create supply drafts and change checklist status; StaffMind POST onboarding — `require_staff_manager_or_admin`; Voice toggle — `require_staff_admin` on `POST /voice/config`.
 - **Operations:** confirm every organization has a valid `timezone`, especially for the 09:00 Daily OS Digest.
 - **Staging checks (ops gate):** consolidated sign-off [`docs/FINAL_MILE_OPS_SIGNOFF.md`](FINAL_MILE_OPS_SIGNOFF.md) — iiko Office live smoke, Voice Realtime call, browser smoke [`docs/FINAL_MILE_BROWSER_SMOKE.md`](FINAL_MILE_BROWSER_SMOKE.md); Telegram [`docs/TELEGRAM_DIGEST_STAGING.md`](TELEGRAM_DIGEST_STAGING.md).
@@ -34,6 +34,17 @@ This file tracks what is still needed outside the backend MVP that is already im
 - **Product decision:** `supply_purchase_drafts` = operator **checklist**, not a purchase order in iiko. Export = **CSV for supplier/kitchen**, not `POST` into iiko Office.
 - **API:** `GET/PATCH /supplymind/drafts/{id}`, `GET /supplymind/drafts/{id}/export?format=csv` — implemented.
 - **UI copy:** «Чеклист закупки», not «Заказ в iiko».
+- **Gap (backlog):** галочки позиций в UI — session-local; для persist нужен `PATCH` с `items[]` (см. ROADMAP).
+
+### StaffMind — tracker metrics
+
+- **UI:** progress bar, темы, Q&A в **Настройки → Команда** ✅.
+- **Gap (backlog):** backend не отдаёт `progress.test_passed`, `questions_asked`, `step_target` — UI использует эвристики.
+
+### Voice — call log location filter
+
+- **`GET /voice/calls?location_id=`** фильтрует `payload_json.location_id`.
+- **Gap (backlog):** `record_voice_call()` пока не пишет `location_id` в payload; фильтр заработает после доработки webhook/Twilio routing.
 
 ### Voice — OpenAI Realtime (code ✅; staging gate)
 

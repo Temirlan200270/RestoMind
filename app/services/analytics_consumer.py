@@ -14,12 +14,42 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
     from app.services.system_events import BusinessEvent
 
 logger = logging.getLogger(__name__)
+
+
+def _zero_event_summary() -> dict:
+    return {
+        "orders_created": 0,
+        "orders_confirmed": 0,
+        "orders_cancelled": 0,
+        "bookings_created": 0,
+        "bookings_confirmed": 0,
+        "payments_completed": 0,
+        "payments_failed": 0,
+        "revenue_kzt": 0.0,
+        "escalations": 0,
+        "operator_takeovers": 0,
+        "ai_messages_count": 0,
+        "dialogs_count": 0,
+        "source": "event_driven",
+    }
+
+
+async def _safe_daily_stats_mappings(db: "AsyncSession", sql, params: dict):
+    """Read DailyOrgStats; return None on schema/DB errors (e.g. migration lag on prod)."""
+    try:
+        result = await db.execute(sql, params)
+        return result.mappings()
+    except SQLAlchemyError as exc:
+        logger.warning("daily_org_stats read failed org=%s: %s", params.get("org_id"), exc)
+        return None
+
 
 HANDLED_EVENT_TYPES = frozenset({
     "order.created",
@@ -139,8 +169,10 @@ async def get_event_stats(
           AND day >= CURRENT_DATE - :days
         ORDER BY day DESC
     """)
-    result = await db.execute(sql, {"org_id": org_id, "days": days - 1})
-    rows = result.mappings().all()
+    mappings = await _safe_daily_stats_mappings(db, sql, {"org_id": org_id, "days": days - 1})
+    if mappings is None:
+        return []
+    rows = mappings.all()
     return [
         {
             "date": str(r["day"]),
@@ -182,12 +214,18 @@ async def get_event_stats_for_range(
           AND day <= :end_date
         ORDER BY day ASC
     """)
-    result = await db.execute(sql, {
-        "org_id": org_id,
-        "start_date": start_date.isoformat(),
-        "end_date": end_date.isoformat(),
-    })
-    rows = result.mappings().all()
+    mappings = await _safe_daily_stats_mappings(
+        db,
+        sql,
+        {
+            "org_id": org_id,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+        },
+    )
+    if mappings is None:
+        return []
+    rows = mappings.all()
     return [
         {
             "date": str(r["day"]),
@@ -218,16 +256,11 @@ async def get_today_event_summary(
         WHERE organization_id = :org_id
           AND day = CURRENT_DATE
     """)
-    result = await db.execute(sql, {"org_id": org_id})
-    row = result.mappings().first()
-    zero: dict = {
-        "orders_created": 0, "orders_confirmed": 0, "orders_cancelled": 0,
-        "bookings_created": 0, "bookings_confirmed": 0,
-        "payments_completed": 0, "payments_failed": 0, "revenue_kzt": 0.0,
-        "escalations": 0, "operator_takeovers": 0,
-        "ai_messages_count": 0, "dialogs_count": 0,
-        "source": "event_driven",
-    }
+    mappings = await _safe_daily_stats_mappings(db, sql, {"org_id": org_id})
+    if mappings is None:
+        return _zero_event_summary()
+    row = mappings.first()
+    zero = _zero_event_summary()
     if row is None:
         return zero
     return {

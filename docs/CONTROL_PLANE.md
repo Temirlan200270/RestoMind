@@ -40,14 +40,15 @@ Implemented:
 - Order draft: `stamp_order_meta_trace` пишет trace в `items_json.order_meta` для join с timeline;
 - AI logs: `[trace_id=…]` prefix в [`ai_brain.py`](app/services/ai_brain.py);
 - Typed WS helpers: `publish_order_event`, `publish_chat_event`, `publish_human_event`, `publish_state_event` — канонические поля trace в payload;
+- iiko client, outbound WhatsApp, operator replies: structured `[trace_id=…]` logs / `ChatLog.meta_json` ([`iiko_client.py`](app/integrations/iiko_client.py), [`whatsapp.py`](app/integrations/whatsapp.py), [`chats.py`](app/api/admin/chats.py));
+- causal chain fields (`parent_event_id`, `caused_by`) on `BusinessEvent` → `SystemEvent.payload_json`;
+- `GET /api/admin/intelligence/trace-timeline?trace_id=` — merged SystemEvent + ChatLog timeline ([`trace_timeline.py`](app/services/trace_timeline.py));
 - Tests: [`tests/test_control_plane_trace.py`](tests/test_control_plane_trace.py).
 
 Remaining (still paper / not done):
 
-- full propagation through iiko client calls (structured `[trace_id=…]` logs in [`iiko_client.py`](app/integrations/iiko_client.py)), outbound WhatsApp send ([`whatsapp.py`](app/integrations/whatsapp.py)), operator admin replies ([`chats.py`](app/api/admin/chats.py) reuses conversation trace + stamps `ChatLog.meta_json`);
-- causal chain fields (`parent_event_id`, `caused_by`) on `BusinessEvent` → `SystemEvent.payload_json`;
-- `GET /api/admin/intelligence/trace-timeline?trace_id=` — merged SystemEvent + ChatLog timeline ([`trace_timeline.py`](app/services/trace_timeline.py));
-- admin search/filter UI by `trace_id` (full timeline panel in admin — not done);
+- admin timeline **UI panel** search/filter by `trace_id` (API ✅, UI — backlog ROADMAP);
+- Phase 3 replay harness; Phase 4 policy versioning.
 
 ## Phase 3: Replay Harness
 

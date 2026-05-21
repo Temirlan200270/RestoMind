@@ -6,21 +6,32 @@
 
 ## [Unreleased] — 2026-03-20
 
+### Исправлено (2026-05-21) — Admin 500 и Alpine latencyData
+
+- **Alpine:** `latencyData?.sla_violations` в `_tab_intelligence.html` — убран crash до загрузки Intelligence.
+- **Admin API:** `await _session_staff_user` / `_session_is_superadmin` в `chats.py`, `bookings.py`, `orders.py` — устранены 500 на `/chats/{phone}`, `/bookings`, ручной заказ.
+- **Analytics:** безопасное чтение `daily_org_stats` при отставании миграций на prod (`/stats`, `/funnel` fallback на SQL).
+- Тесты: [`tests/test_admin_session_deps_http.py`](tests/test_admin_session_deps_http.py).
+
 ### Добавлено (2026-05-21) — Superadmin · Control Plane · Admin UI
 
 - **Superadmin:** поля `iiko_api_login`, `iiko_terminal_group_id`, `telegram_ops_chat_id` в таблице ресторанов; `SuperadminAuditLog` + миграция `20260521_superadmin_audit`; `GET /api/superadmin/audit`; аудит на ключевых мутациях (status, credentials, schedule, sync, password reset, approve/reject). UI «Журнал действий Super Admin». Тесты: [`tests/test_superadmin_audit.py`](tests/test_superadmin_audit.py).
-- **Control Plane Phase 2 (start):** `trace_context.py` — `contextvars`, seed из WhatsApp `message_id`; propagation webhook → ARQ → `emit_event` → `order_meta` / AI logs; structured `[trace_id=…]` в логах. Тесты: [`tests/test_control_plane_trace.py`](tests/test_control_plane_trace.py). Хвост: iiko/outbound/operator, causal chain, timeline UI — см. [`docs/CONTROL_PLANE.md`](docs/CONTROL_PLANE.md).
-- **Admin UI:** Voice call log strip в `aiCenterTab=final_mile` (placeholder до `GET /voice/calls`); StaffMind tracker (шаги, Q&A, темы) в **Настройки → Команда**; SupplyMind — раскрываемые чеклисты с session checks в Final Mile.
+- **Control Plane Phase 2 (start):** `trace_context.py` — `contextvars`, seed из WhatsApp `message_id`; propagation webhook → ARQ → `emit_event` → `order_meta` / AI logs; structured `[trace_id=…]` в логах. Тесты: [`tests/test_control_plane_trace.py`](tests/test_control_plane_trace.py).
+- **Admin UI:** Voice call log strip, StaffMind step tracker, SupplyMind раскрываемые черновики в Final Mile / **Настройки → Команда** (см. backlog gaps в ROADMAP).
 
 ### Добавлено (2026-05-21) — Launch prep (voice pagination · Control Plane tail · deploy checklist)
 
-- **`GET /voice/calls`:** пагинация `limit`/`offset`, `total`, опциональный `location_id` (payload filter), RBAC локаций.
-- **Control Plane Phase 2 tail:** `parent_event_id`/`caused_by` на `BusinessEvent`; trace в iiko/WA/operator logs; `GET /trace-timeline`; [`trace_timeline.py`](app/services/trace_timeline.py).
+- **`GET /voice/calls`:** пагинация `limit`/`offset`, `total`, опциональный `location_id` (фильтр по `payload_json`, запись в webhook — backlog); RBAC локаций.
+- **Control Plane Phase 2 tail:** `parent_event_id`/`caused_by` на `BusinessEvent`; trace в iiko/WA/operator logs; `GET /trace-timeline` (API без UI-панели); [`trace_timeline.py`](app/services/trace_timeline.py).
 - **Ops:** секция **D. Deploy** в [`docs/FINAL_MILE_OPS_SIGNOFF.md`](docs/FINAL_MILE_OPS_SIGNOFF.md) — `alembic upgrade head`, перезапуск ARQ, cron ticks.
 
 ### Добавлено (2026-05-21) — Voice call log API
 
-- **`GET /api/admin/intelligence/voice/calls`:** список `voice_call_logs` (status, mode, transcript, `duration_sec`/`recording_url` из `payload_json`); tenant scope; тест `test_voice_calls_api_lists_org_logs`.
+- **`GET /api/admin/intelligence/voice/calls`:** список `voice_call_logs` (status, mode, transcript, `duration_sec`/`recording_url` из `payload_json`); tenant scope; тест `test_voice_calls_api_lists_org_logs`. UI: `loadVoiceCallLogs()` в Final Mile (пока без `locationQueryParams` / offset на клиенте).
+
+### Исправлено (2026-05-21) — docs↔code sync (audit drift)
+
+- Синхронизированы [`CHANGELOG.md`](CHANGELOG.md), [`docs/ROADMAP.md`](docs/ROADMAP.md), [`docs/REMAINING_UPDATES.md`](docs/REMAINING_UPDATES.md), [`docs/UI_MAP.md`](docs/UI_MAP.md), [`codebase.md`](codebase.md), [`docs/CONTROL_PLANE.md`](docs/CONTROL_PLANE.md), [`docs/SUPPLYMIND_STAFFMIND.md`](docs/SUPPLYMIND_STAFFMIND.md): убраны устаревшие «placeholder until API»; backlog gaps (SupplyMind item PATCH, StaffMind metrics, voice location_id payload, timeline UI) явно в ROADMAP `[ ]`.
 
 ### Исправлено (2026-05-21) — Alpine null-safe + revenue-leak 500
 

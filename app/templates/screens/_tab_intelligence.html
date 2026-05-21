@@ -150,7 +150,7 @@
                 <span x-text="`Период: ${latencyData?.period_hours ?? 24} ч`"></span>
                 <span x-show="(latencyData?.sla_violations ?? 0) > 0"
                     class="rounded-full bg-rose-100 px-2 py-0.5 text-rose-700 font-semibold"
-                    x-text="`${latencyData.sla_violations} нарушений SLA`"></span>
+                    x-text="`${latencyData?.sla_violations ?? 0} нарушений SLA`"></span>
             </div>
         </div>
     </details>

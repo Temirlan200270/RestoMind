@@ -175,6 +175,8 @@ UI открывает модалку “График” и сохраняет:
 - `staff.password_reset`
 - `registration_request.approve`, `registration_request.reject`
 
+**Не в scope:** блокировка отдельной **точки** (`Location`) — в superadmin API только org-level `organization.status_change` (`is_active`).
+
 UI: блок «Журнал действий Super Admin» вверху страницы, загрузка через `loadAuditLog()` при `init()`.
 
 ## 5) Аудит платёжных webhook (как пользоваться)
