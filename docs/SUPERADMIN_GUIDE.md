@@ -29,12 +29,15 @@ Super Admin — это **staff-пользователь** с флагом `is_su
 UI: `app/templates/superadmin.html`  
 API: `app/api/superadmin.py`  
 
-Страница сейчас состоит из 4 крупных блоков:
+Страница сейчас состоит из 5 крупных блоков:
 
-1) **Аудит платёжных webhook** (read-only)
-2) **Заявки на подключение** (модерация)
-3) **Создать ресторан вручную** (org + admin staff)
-4) **Рестораны** (список + базовое управление доступом и технастройкой)
+1) **Журнал действий Super Admin** (read-only, платформенный аудит)
+2) **Аудит платёжных webhook** (read-only)
+3) **Заявки на подключение** (модерация)
+4) **Создать ресторан вручную** (org + admin staff)
+5) **Рестораны** (список + базовое управление доступом и технастройкой)
+
+**Миграция:** таблица `superadmin_audit_log` — ревизия `20260521_superadmin_audit` (после `20260522_iiko_office_inventory`). Перед продом: `alembic upgrade head`.
 
 ## 1) Регистрация ресторана через заявку (как работает)
 
@@ -99,18 +102,15 @@ API: `app/api/superadmin.py`
 
 - `iiko_organization_id`
 - `whatsapp_phone_number_id`
+- `iiko_api_login` (password-поле: после сохранения очищается; если логин уже задан — placeholder «iiko api login (задан)»)
+- `iiko_terminal_group_id`
+- `telegram_ops_chat_id`
 
 Через:
 
 - `PATCH /api/superadmin/organizations/{organization_id}/credentials`
 
-**Замечание:** в API поддерживаются также:
-
-- `iiko_api_login` (с шифрованием в `iiko_api_login_enc`, если задан ключ Fernet)
-- `iiko_terminal_group_id`
-- `telegram_ops_chat_id`
-
-Но UI сейчас не показывает поля для `iiko_api_login`, `iiko_terminal_group_id`, `telegram_ops_chat_id`.
+**Секреты:** `iiko_api_login` при наличии `FERNET_KEY` шифруется в `iiko_api_login_enc`; в журнал аудита попадают только имена изменённых полей, не значения (`secrets_updated` в `details_json`).
 
 ### График работы (редактор расписания)
 
@@ -159,7 +159,25 @@ UI открывает модалку “График” и сохраняет:
 - создаёт staff admin (`role=admin`)
 - если пароль не задан — возвращает `generated_password`
 
-## 4) Аудит платёжных webhook (как пользоваться)
+## 4) Журнал действий Super Admin (как пользоваться)
+
+Иммутабельный аудит платформенных действий: кто менял доступ, креды, расписание, сбрасывал пароли, одобрял/отклонял заявки.
+
+Список:
+
+- `GET /api/superadmin/audit?limit=&offset=&organization_id=`
+
+Ответ: `{ items[], limit, offset, total }`. Каждая запись: `id`, `created_at`, `actor_staff_user_id`, `actor_email`, `action`, `target_type`, `target_id`, `organization_id`, `details_json`.
+
+Логируемые `action` (по коду):
+
+- `organization.create`, `organization.status_change`, `organization.credentials_update`, `organization.schedule_update`, `organization.sync_menu`
+- `staff.password_reset`
+- `registration_request.approve`, `registration_request.reject`
+
+UI: блок «Журнал действий Super Admin» вверху страницы, загрузка через `loadAuditLog()` при `init()`.
+
+## 5) Аудит платёжных webhook (как пользоваться)
 
 Блок “Аудит платёжных webhook” — read-only просмотр входящих webhook-запросов.
 
@@ -199,8 +217,8 @@ UI открывает модалку “График” и сохраняет:
 
 ### Сценарий: “у ресторана не работает меню / iiko”
 
-1) Проверить `has_iiko`, заполненность `iiko_organization_id`
-2) При необходимости добавить/исправить iiko креды (сейчас часть полей не выведена в UI)
+1) Проверить `has_iiko`, заполненность `iiko_organization_id`, `iiko_api_login`, `iiko_terminal_group_id`
+2) При необходимости добавить/исправить iiko креды прямо в таблице Super Admin
 3) Нажать “Force Sync”
 4) Открыть админку ресторана и проверить ошибки интеграций/стоп-листов
 
@@ -251,11 +269,10 @@ UI открывает модалку “График” и сохраняет:
 - **Маскирование** чувствительных полей в UI (например `iiko_api_login`):
   - показывать как `••••••` и раскрывать только в режиме “Edit”
   - отдельно кнопка “Сбросить”/“Заменить”
-- **Явный аудит действий superadmin**:
-  - кто заблокировал org
-  - кто сбросил пароль
-  - кто менял креды/расписание
-  - кто делал force sync
+- **Расширить аудит superadmin** (базовый журнал ✅ — см. §4):
+  - фильтры по `action`, `actor_email`, диапазону дат
+  - экспорт CSV
+  - retention policy
 
 ### E) Регистрация/заявки: процесс и коммуникация
 
@@ -287,7 +304,8 @@ UI открывает модалку “График” и сохраняет:
 
 1) **Модалка с паролем + copy** после approve/create (самая частая боль и риск).
 2) **Поиск + фильтры по ресторанам** (без этого платформа не масштабируется).
-3) **Технастройки iiko/WhatsApp как чеклист** + “Открыть админку ресторана”.
+3) **Технастройки iiko/WhatsApp как чеклист** + “Открыть админку ресторана” (поля кредов в UI ✅).
 4) **История заявок + причины** (потому что sales/process).
 5) **Платежный аудит**: фильтры по org/order/ext_id + ссылки на заказ.
+6) **Журнал superadmin**: фильтры по action/actor, экспорт (базовый журнал ✅).
 

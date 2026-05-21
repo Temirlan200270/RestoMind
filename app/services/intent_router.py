@@ -38,7 +38,7 @@ from app.services.dialog_mgr import UserState
 from app.services.upsell_utils import record_upsell_rejections_on_user
 from app.services.prepayment_legal import append_prepayment_legal_disclaimer
 from app.services.system_events import BusinessEvent, emit_event, emit_system_event
-from app.services.trace_context import trace_payload
+from app.services.trace_context import stamp_order_meta_trace, trace_payload
 from app.services.stoplist_session import compose_stoplist_notice
 from app.services.order_logic import (
     ValidatedOrder,
@@ -629,6 +629,12 @@ async def _handle_order(
         prev_items_list,
         validated.valid_items,
     )
+    if trace_id or conversation_id:
+        items_json = stamp_order_meta_trace(
+            items_json,
+            trace_id=trace_id,
+            conversation_id=conversation_id,
+        )
     reset_applied_action_ids = bool(
         existing_draft is not None
         and bool(ai_response.items)

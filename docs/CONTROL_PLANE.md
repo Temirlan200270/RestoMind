@@ -29,11 +29,25 @@ Remaining:
 
 ## Phase 2: Trace And Timeline
 
-Planned:
+Status: **in progress** (foundation shipped 2026-05-21).
 
-- propagate `trace_id` across webhook, ARQ, AI, iiko, outbound, operator actions;
-- add causal chain fields to durable events;
-- unify order/chat timeline around one operational stream.
+Implemented:
+
+- `app/services/trace_context.py` — `contextvars` для `trace_id` / `conversation_id`; `build_trace_id(seed)` (WhatsApp `message_id` как seed); `trace_log_prefix()` для structured logs;
+- WhatsApp inbound: `trace_context()` в `process_message` / `process_with_retry` ([`webhooks.py`](app/api/webhooks.py)); seed из `whatsapp_message_id`;
+- ARQ: `trace_id` пробрасывается через enqueue ([`task_queue.py`](app/services/task_queue.py)) и worker kwargs ([`worker.py`](app/worker.py));
+- Durable events: `emit_event` автоматически обогащает payload через `enrich_payload_with_trace` ([`system_events.py`](app/services/system_events.py));
+- Order draft: `stamp_order_meta_trace` пишет trace в `items_json.order_meta` для join с timeline;
+- AI logs: `[trace_id=…]` prefix в [`ai_brain.py`](app/services/ai_brain.py);
+- Typed WS helpers: `publish_order_event`, `publish_chat_event`, `publish_human_event`, `publish_state_event` — канонические поля trace в payload;
+- Tests: [`tests/test_control_plane_trace.py`](tests/test_control_plane_trace.py).
+
+Remaining (still paper / not done):
+
+- full propagation through iiko client calls, outbound WhatsApp send, operator admin actions;
+- causal chain fields (`parent_event_id`, `caused_by`) on durable events;
+- unified order/chat timeline UI around one operational stream keyed by `trace_id`;
+- admin search/filter by `trace_id`.
 
 ## Phase 3: Replay Harness
 

@@ -1800,3 +1800,38 @@ class AuditLog(Base):
 
     def __repr__(self) -> str:
         return f"<AuditLog id={self.id} org={self.organization_id} action={self.action}>"
+
+
+class SuperadminAuditLog(Base):
+    """Иммутабельный аудит действий Super Admin (платформенный уровень)."""
+
+    __tablename__ = "superadmin_audit_log"
+    __table_args__ = (
+        Index("ix_superadmin_audit_created", "created_at"),
+        Index("ix_superadmin_audit_org_created", "organization_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    actor_staff_user_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("staff_users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    actor_email: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default="")
+    action: Mapped[str] = mapped_column(String(100), nullable=False)
+    target_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    target_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    organization_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("organizations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    details_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False,
+    )
+
+    def __repr__(self) -> str:
+        return f"<SuperadminAuditLog id={self.id} action={self.action} target={self.target_type}:{self.target_id}>"

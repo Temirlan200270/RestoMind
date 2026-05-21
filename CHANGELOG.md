@@ -6,6 +6,12 @@
 
 ## [Unreleased] — 2026-03-20
 
+### Добавлено (2026-05-21) — Superadmin · Control Plane · Admin UI
+
+- **Superadmin:** поля `iiko_api_login`, `iiko_terminal_group_id`, `telegram_ops_chat_id` в таблице ресторанов; `SuperadminAuditLog` + миграция `20260521_superadmin_audit`; `GET /api/superadmin/audit`; аудит на ключевых мутациях (status, credentials, schedule, sync, password reset, approve/reject). UI «Журнал действий Super Admin». Тесты: [`tests/test_superadmin_audit.py`](tests/test_superadmin_audit.py).
+- **Control Plane Phase 2 (start):** `trace_context.py` — `contextvars`, seed из WhatsApp `message_id`; propagation webhook → ARQ → `emit_event` → `order_meta` / AI logs; structured `[trace_id=…]` в логах. Тесты: [`tests/test_control_plane_trace.py`](tests/test_control_plane_trace.py). Хвост: iiko/outbound/operator, causal chain, timeline UI — см. [`docs/CONTROL_PLANE.md`](docs/CONTROL_PLANE.md).
+- **Admin UI:** Voice call log strip в `aiCenterTab=final_mile` (placeholder до `GET /voice/calls`); StaffMind tracker (шаги, Q&A, темы) в **Настройки → Команда**; SupplyMind — раскрываемые чеклисты с session checks в Final Mile.
+
 ### Исправлено (2026-05-21) — Alpine null-safe + revenue-leak 500
 
 - **Frontend:** `shiftState`, `revenueLeak`, `moneyQueue` инициализируются пустыми объектами (`adminDefault*()`); optional chaining в sidebar/bottom nav/operator queue; сброс при смене локации — без `null` (Alpine не ломает реактивный цикл до fetch).

@@ -886,6 +886,11 @@ function adminMixinState() {
         voiceAiSaving: false,
         voiceAiEnabledDraft: false,
         voiceAiModeDraft: 'stt_fallback',
+        voiceCallLogs: [],
+        voiceCallLogsLoading: false,
+        voiceCallLogsUnavailable: false,
+        supplyMindExpandedDraftId: null,
+        supplyMindItemChecks: {},
         /** Phase 5 OS: Audit log feed (OS Decision Feed) */
         auditLog: [],
         auditLogLoading: false,
@@ -8217,6 +8222,7 @@ function adminMixinDataChartsSettings() {
                 this.loadSupplyMind(),
                 this.loadInventorySyncStatus(),
                 this.loadVoiceAiStatus(),
+                this.loadVoiceCallLogs(),
             ]);
         },
 
@@ -8334,6 +8340,45 @@ function adminMixinDataChartsSettings() {
             return labels[status] || status || '—';
         },
 
+        toggleSupplyMindDraftExpand(draftId) {
+            const id = Number(draftId);
+            if (!Number.isFinite(id) || id < 1) return;
+            this.supplyMindExpandedDraftId = this.supplyMindExpandedDraftId === id ? null : id;
+        },
+
+        supplyMindItemCheckKey(draftId, idx) {
+            return `${Number(draftId)}:${Number(idx)}`;
+        },
+
+        isSupplyMindItemChecked(draftId, idx) {
+            const draftKey = String(Number(draftId));
+            const checks = (this.supplyMindItemChecks && this.supplyMindItemChecks[draftKey]) || {};
+            return !!checks[String(Number(idx))];
+        },
+
+        toggleSupplyMindItem(draftId, idx) {
+            if (!this.canStaffManageSupply()) return;
+            const draftKey = String(Number(draftId));
+            const itemKey = String(Number(idx));
+            const prev = (this.supplyMindItemChecks && this.supplyMindItemChecks[draftKey]) || {};
+            this.supplyMindItemChecks = {
+                ...(this.supplyMindItemChecks || {}),
+                [draftKey]: { ...prev, [itemKey]: !prev[itemKey] },
+            };
+        },
+
+        supplyMindCheckedCount(draft) {
+            const items = Array.isArray(draft?.items) ? draft.items : [];
+            if (!items.length) return 0;
+            return items.reduce((n, _item, idx) => n + (this.isSupplyMindItemChecked(draft?.id, idx) ? 1 : 0), 0);
+        },
+
+        supplyMindDraftProgressPct(draft) {
+            const total = Array.isArray(draft?.items) ? draft.items.length : 0;
+            if (!total) return 0;
+            return Math.round((this.supplyMindCheckedCount(draft) / total) * 100);
+        },
+
         async updateSupplyMindDraft(draftId, status) {
             if (!this.canStaffManageSupply()) {
                 void this.showUiAlert(this.staffRbacHint('manager') || 'Недостаточно прав', 'SupplyMind');
@@ -8410,6 +8455,68 @@ function adminMixinDataChartsSettings() {
             } catch (_e) { /* noop */ } finally {
                 this.voiceAiLoading = false;
             }
+        },
+
+        async loadVoiceCallLogs() {
+            if (this.voiceCallLogsLoading) return;
+            this.voiceCallLogsLoading = true;
+            this.voiceCallLogsUnavailable = false;
+            try {
+                const { ok, status, data } = await this.apiJsonResponse(
+                    '/api/admin/intelligence/voice/calls?limit=15',
+                );
+                if (ok && Array.isArray(data?.items)) {
+                    this.voiceCallLogs = data.items;
+                    return;
+                }
+                if (status === 404 || status === 501) {
+                    this.voiceCallLogs = [];
+                    this.voiceCallLogsUnavailable = true;
+                    return;
+                }
+                this.voiceCallLogs = [];
+            } catch (_e) {
+                this.voiceCallLogs = [];
+            } finally {
+                this.voiceCallLogsLoading = false;
+            }
+        },
+
+        voiceCallStatusLabel(status) {
+            const raw = String(status || '').toLowerCase();
+            const labels = {
+                started: 'Начат',
+                transcribed: 'Расшифрован',
+                completed: 'Завершён',
+                escalated_whatsapp: 'Эскалация в WhatsApp',
+                escalated: 'Эскалация в WhatsApp',
+                error: 'Ошибка',
+            };
+            return labels[raw] || raw || '—';
+        },
+
+        voiceCallStatusClass(status) {
+            const raw = String(status || '').toLowerCase();
+            if (raw === 'completed') return 'bg-emerald-100 text-emerald-700';
+            if (raw === 'error') return 'bg-rose-100 text-rose-700';
+            if (raw.includes('escalat')) return 'bg-amber-100 text-amber-800';
+            return 'bg-slate-100 text-slate-600';
+        },
+
+        voiceCallDurationLabel(log) {
+            const payload = (log && typeof log.payload === 'object') ? log.payload : {};
+            const sec = Number(log?.duration_sec ?? payload?.duration_sec ?? payload?.duration ?? 0);
+            if (!Number.isFinite(sec) || sec <= 0) return '—';
+            if (sec < 60) return `${Math.round(sec)} с`;
+            const m = Math.floor(sec / 60);
+            const s = Math.round(sec % 60);
+            return `${m} мин ${s} с`;
+        },
+
+        voiceCallRecordingUrl(log) {
+            const payload = (log && typeof log.payload === 'object') ? log.payload : {};
+            const url = String(log?.recording_url || payload?.recording_url || payload?.recording || '').trim();
+            return url || '';
         },
 
         async saveVoiceAiConfig() {
@@ -8910,6 +9017,32 @@ function adminMixinDataChartsSettings() {
             } catch (_e) { /* noop */ } finally {
                 this.staffMindLoading = false;
             }
+        },
+
+        staffMindTrackerMeta(session) {
+            const s = (session && typeof session === 'object') ? session : {};
+            const progress = (s.progress && typeof s.progress === 'object') ? s.progress : {};
+            const topics = Array.isArray(progress.completed_topics) ? progress.completed_topics : [];
+            const questionsAsked = Number.isFinite(Number(progress.questions_asked))
+                ? Number(progress.questions_asked)
+                : (s.last_question ? 1 : 0);
+            const testPassed = progress.test_passed === true || String(s.status || '').toLowerCase() === 'completed';
+            const currentStep = Number(s.current_step) || topics.length || 0;
+            const stepTarget = Number(progress.step_target) || Math.max(5, currentStep, topics.length);
+            return {
+                currentStep,
+                stepTarget,
+                topicsCount: topics.length,
+                questionsAsked,
+                testPassed,
+                topics,
+            };
+        },
+
+        staffMindStepProgressPct(session) {
+            const meta = this.staffMindTrackerMeta(session);
+            if (!meta.stepTarget) return 0;
+            return Math.min(100, Math.round((meta.currentStep / meta.stepTarget) * 100));
         },
 
         async startStaffMindOnboarding() {

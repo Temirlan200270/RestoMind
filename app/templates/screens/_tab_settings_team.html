@@ -103,37 +103,66 @@
                     </div>
                     <p x-show="staffRbacHint('manager')" x-cloak class="text-[11px] text-amber-700/90 mb-5" x-text="staffRbacHint('manager')"></p>
 
-                    <div x-show="staffMindLoading && !staffMindSessions.length" class="h-20 rounded-xl bg-gray-100 animate-pulse"></div>
+                    <div x-show="staffMindLoading && !(staffMindSessions || []).length" class="h-20 rounded-xl bg-gray-100 animate-pulse"></div>
                     <div class="space-y-3">
-                        <template x-for="s in staffMindSessions" :key="'staffmind-' + s.id">
+                        <template x-for="s in (staffMindSessions || [])" :key="'staffmind-' + (s?.id || '')">
                             <div class="rounded-2xl border border-gray-100 bg-gray-50/60 p-4">
                                 <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                                    <div>
-                                        <div class="font-semibold text-gray-900 text-sm" x-text="s.phone"></div>
+                                    <div class="min-w-0">
+                                        <div class="font-semibold text-gray-900 text-sm" x-text="s?.phone || '—'"></div>
                                         <div class="text-xs text-gray-500">
-                                            <span x-text="s.role || 'staff'"></span> · шаг <span x-text="s.current_step || 0"></span>
+                                            <span x-text="s?.role || 'staff'"></span> ·
+                                            шаг <span x-text="staffMindTrackerMeta(s).currentStep"></span>
+                                            из <span x-text="staffMindTrackerMeta(s).stepTarget"></span>
                                         </div>
                                     </div>
-                                    <span class="self-start sm:self-auto text-[10px] font-bold uppercase px-2 py-0.5 rounded-full"
-                                        :class="s.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'"
-                                        x-text="s.status"></span>
+                                    <div class="flex flex-wrap items-center gap-1.5 self-start sm:self-auto">
+                                        <span class="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full"
+                                            :class="s?.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'"
+                                            x-text="s?.status || '—'"></span>
+                                        <span class="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full"
+                                            :class="staffMindTrackerMeta(s).testPassed ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-500'"
+                                            x-text="staffMindTrackerMeta(s).testPassed ? 'Тест пройден' : 'Тест не пройден'"></span>
+                                    </div>
+                                </div>
+                                <div class="mt-3 grid grid-cols-3 gap-2 text-center">
+                                    <div class="rounded-xl bg-white border border-gray-100 px-2 py-2">
+                                        <div class="text-[10px] uppercase font-bold text-gray-400">Шаг</div>
+                                        <div class="text-lg font-black text-gray-900 tabular-nums" x-text="staffMindTrackerMeta(s).currentStep"></div>
+                                    </div>
+                                    <div class="rounded-xl bg-white border border-gray-100 px-2 py-2">
+                                        <div class="text-[10px] uppercase font-bold text-gray-400">Вопросы</div>
+                                        <div class="text-lg font-black text-gray-900 tabular-nums" x-text="staffMindTrackerMeta(s).questionsAsked"></div>
+                                    </div>
+                                    <div class="rounded-xl bg-white border border-gray-100 px-2 py-2">
+                                        <div class="text-[10px] uppercase font-bold text-gray-400">Темы</div>
+                                        <div class="text-lg font-black text-gray-900 tabular-nums" x-text="staffMindTrackerMeta(s).topicsCount"></div>
+                                    </div>
+                                </div>
+                                <div class="mt-2 h-1.5 rounded-full bg-gray-200 overflow-hidden">
+                                    <div class="h-full bg-brand-600 transition-all" :style="'width:' + staffMindStepProgressPct(s) + '%'"></div>
+                                </div>
+                                <div x-show="(staffMindTrackerMeta(s).topics || []).length" x-cloak class="mt-2 flex flex-wrap gap-1">
+                                    <template x-for="topic in (staffMindTrackerMeta(s).topics || []).slice(0, 6)" :key="'staff-topic-' + (s?.id || '') + '-' + topic">
+                                        <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white border border-gray-200 text-gray-600" x-text="topic"></span>
+                                    </template>
                                 </div>
                                 <div class="mt-3 grid sm:grid-cols-[1fr_auto] gap-2">
                                     <input type="text" x-model="staffMindQuestionById[s.id]" placeholder="Вопрос сотрудника"
                                         :disabled="!canStaffStartStaffMind()"
                                         class="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:opacity-60">
                                     <button type="button" @click="askStaffMind(s.id)"
-                                        :disabled="staffMindAskLoadingId === s.id || !canStaffStartStaffMind()"
+                                        :disabled="staffMindAskLoadingId === s?.id || !canStaffStartStaffMind()"
                                         class="px-4 py-2.5 rounded-xl border border-gray-200 bg-white text-gray-800 font-semibold text-sm hover:bg-gray-50 transition disabled:opacity-50">
-                                        <span x-text="staffMindAskLoadingId === s.id ? '…' : 'Спросить'"></span>
+                                        <span x-text="staffMindAskLoadingId === s?.id ? '…' : 'Спросить'"></span>
                                     </button>
                                 </div>
-                                <div x-show="s.last_answer" x-cloak class="mt-3 rounded-xl bg-white border border-gray-100 p-3 text-sm text-gray-700 whitespace-pre-wrap" x-text="s.last_answer"></div>
+                                <div x-show="(s?.last_answer || '').trim()" x-cloak class="mt-3 rounded-xl bg-white border border-gray-100 p-3 text-sm text-gray-700 whitespace-pre-wrap" x-text="s?.last_answer || ''"></div>
                             </div>
                         </template>
                     </div>
 
-                    <div x-show="!staffMindLoading && staffMindSessions.length === 0" x-cloak class="rm-empty-panel py-8">
+                    <div x-show="!staffMindLoading && !(staffMindSessions || []).length" x-cloak class="rm-empty-panel py-8">
                         <p class="text-sm font-semibold text-gray-800 mb-1">Сессий StaffMind пока нет</p>
                         <p class="text-xs text-gray-500 max-w-sm">Добавьте телефон сотрудника и роль, чтобы стартовать onboarding.</p>
                     </div>

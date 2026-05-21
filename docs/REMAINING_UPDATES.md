@@ -4,9 +4,9 @@ This file tracks what is still needed outside the backend MVP that is already im
 
 ## Must Update Before Production
 
-- **Database:** run `alembic upgrade head`; expected head is `20260522_iiko_office_inventory` (chain: `20260521_final_mile` → inventory migration).
+- **Database:** run `alembic upgrade head`; expected head is `20260521_superadmin_audit` (chain: … → `20260522_iiko_office_inventory` → `20260521_superadmin_audit`).
 - **Workers:** restart ARQ workers so `daily_os_digest_scheduled_tick`, `iiko_inventory_sync`, and `external_reviews_sync_scheduled_tick` are registered.
-- **Frontend (wired):** `aiCenterTab=final_mile` — Daily OS Digest preview, SupplyMind stock alerts/drafts, Voice AI enable/mode. `_tab_settings_team.html` — StaffMind onboarding.
+- **Frontend (wired):** `aiCenterTab=final_mile` — Daily OS Digest preview, SupplyMind stock alerts/drafts/checklist UX, Voice AI enable/mode + call log strip (placeholder until API). `_tab_settings_team.html` — StaffMind onboarding + step tracker. `GET /superadmin` — tech fields + audit journal (needs migration).
 - **Permissions:** decide which staff roles can create supply drafts and change checklist status; StaffMind POST onboarding — `require_staff_manager_or_admin`; Voice toggle — `require_staff_admin` on `POST /voice/config`.
 - **Operations:** confirm every organization has a valid `timezone`, especially for the 09:00 Daily OS Digest.
 - **Staging checks (ops gate):** consolidated sign-off [`docs/FINAL_MILE_OPS_SIGNOFF.md`](FINAL_MILE_OPS_SIGNOFF.md) — iiko Office live smoke, Voice Realtime call, browser smoke [`docs/FINAL_MILE_BROWSER_SMOKE.md`](FINAL_MILE_BROWSER_SMOKE.md); Telegram [`docs/TELEGRAM_DIGEST_STAGING.md`](TELEGRAM_DIGEST_STAGING.md).
@@ -17,7 +17,9 @@ This file tracks what is still needed outside the backend MVP that is already im
 |------|--------------|-----------------|
 | **iiko Office inventory sync** | ✅ `iiko_office_client`, `iiko_inventory_sync`, `inventory_sync` router, ARQ cron, Final Mile status/manual sync UI, [`tests/test_iiko_inventory_sync.py`](tests/test_iiko_inventory_sync.py) | Per-org `integration_config_json.iiko_office` + smoke against **live** iiko Office |
 | **SupplyMind checklist** | ✅ lifecycle API + CSV + UI «Чеклисты закупки»; tests in `test_ultimate_platform_sprint.py` | Role gates + operator smoke in AI Center |
-| **Voice Realtime** | ✅ `voice_realtime/*`, `twilio_routing`, webhook branch; tests `test_voice_realtime.py`, `test_twilio_routing.py`, `test_voice_staging.py` | **Staging gate:** manual call (`mode=realtime`) on real Twilio + latency/cost notes ([`docs/VOICE_AI_SPIKE.md`](VOICE_AI_SPIKE.md)) |
+| **Voice Realtime** | ✅ `voice_realtime/*`, `twilio_routing`, webhook branch; call log strip UI in Final Mile; tests `test_voice_realtime.py`, `test_twilio_routing.py`, `test_voice_staging.py` | **Staging gate:** manual call (`mode=realtime`) on real Twilio + latency/cost notes ([`docs/VOICE_AI_SPIKE.md`](VOICE_AI_SPIKE.md)). **Backend gap:** `GET /api/admin/intelligence/voice/calls` not implemented — UI shows placeholder |
+| **Superadmin audit** | ✅ `SuperadminAuditLog`, `GET /api/superadmin/audit`, UI journal, migration `20260521_superadmin_audit`; tests `test_superadmin_audit.py` | Run migration on deploy; optional filters/export later |
+| **Control Plane trace_id** | ✅ Phase 2 foundation — `trace_context.py`, webhook/ARQ/emit_event; tests `test_control_plane_trace.py` | iiko/outbound/operator propagation, causal chain, timeline UI — see [`docs/CONTROL_PLANE.md`](CONTROL_PLANE.md) |
 
 ### iiko Office inventory sync
 
@@ -55,5 +57,6 @@ This file tracks what is still needed outside the backend MVP that is already im
 ## Suggested Next Engineering Sprint
 
 - **Ops (закрыть ROADMAP Voice `[ ]` + iiko smoke):** заполнить [`docs/FINAL_MILE_OPS_SIGNOFF.md`](FINAL_MILE_OPS_SIGNOFF.md), затем `[x]` в ROADMAP.
-- Run `alembic upgrade head` (`20260522_iiko_office_inventory`); restart workers.
+- Run `alembic upgrade head` (`20260521_superadmin_audit`); restart workers.
+- Implement `GET /api/admin/intelligence/voice/calls` to wire Voice call log strip (table `voice_call_logs` exists).
 - Browser smoke: [`docs/FINAL_MILE_BROWSER_SMOKE.md`](FINAL_MILE_BROWSER_SMOKE.md); optional PNG via `scripts/capture_admin_u0_baseline.py`.

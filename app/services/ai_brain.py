@@ -222,8 +222,13 @@ async def call_ai(
     current_time_context: str = "",
     *,
     raise_on_transient: bool = True,
+    trace_id: str | None = None,
 ) -> AIBrainResponse:
     """AI-агностичный вызов: провайдер выбирается по AI_PROVIDER."""
+    from app.services.trace_context import get_trace_id, trace_log_prefix
+
+    effective_trace = trace_id or get_trace_id()
+    prefix = f"[trace_id={effective_trace}] " if effective_trace else trace_log_prefix()
     provider = get_ai_client()
     t0 = time.perf_counter()
     try:
@@ -238,7 +243,8 @@ async def call_ai(
             current_time_context=current_time_context,
         )
         logger.info(
-            "[AI] dispatch provider=%s status=SUCCESS latency_ms=%d intent=%s",
+            "%s[AI] dispatch provider=%s status=SUCCESS latency_ms=%d intent=%s",
+            prefix,
             type(provider).__name__,
             int((time.perf_counter() - t0) * 1000),
             result.intent,
@@ -246,7 +252,8 @@ async def call_ai(
         return result
     except TransientAiError:
         logger.warning(
-            "[AI] dispatch provider=%s status=TRANSIENT latency_ms=%d",
+            "%s[AI] dispatch provider=%s status=TRANSIENT latency_ms=%d",
+            prefix,
             type(provider).__name__,
             int((time.perf_counter() - t0) * 1000),
         )
@@ -266,6 +273,7 @@ async def call_openai(
     current_time_context: str = "",
     *,
     raise_on_transient: bool = True,
+    trace_id: str | None = None,
 ) -> AIBrainResponse:
     """Backward-compat alias (AI-Engine v2.0)."""
     return await call_ai(
@@ -278,6 +286,7 @@ async def call_openai(
         customer_context=customer_context,
         current_time_context=current_time_context,
         raise_on_transient=raise_on_transient,
+        trace_id=trace_id,
     )
 
 

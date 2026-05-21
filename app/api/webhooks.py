@@ -78,6 +78,18 @@ from app.services.system_events import BusinessEvent, emit_event
 from app.services.decision_engine import decision_engine
 from app.services.org_resolve import organization_id_for_whatsapp_value
 from app.services.tenant_scope import ensure_default_location
+from app.services.trace_context import (
+    build_conversation_id,
+    build_trace_id,
+    get_trace_id,
+    merge_trace_meta,
+    publish_chat_event,
+    publish_human_event,
+    publish_state_event,
+    trace_context,
+    trace_log_prefix,
+    trace_payload,
+)
 from app.services.intent_router import (
     cancel_all_draft_orders_for_phone,
     cancel_booking,
@@ -426,6 +438,12 @@ async def _send_order_to_iiko(
         (False, None, None) — iiko не настроен в .env (ошибку в БД не пишем).
         (False, msg, None) — настроен, но отправка не удалась (msg для админки).
     """
+    prefix = trace_log_prefix()
+    order_meta = (items_json or {}).get("order_meta") if isinstance(items_json, dict) else {}
+    meta_trace = (order_meta or {}).get("trace_id") if isinstance(order_meta, dict) else None
+    if meta_trace and not get_trace_id():
+        prefix = f"[trace_id={meta_trace}] "
+    logger.info("%siiko send start order=%d org=%d", prefix, order_id, restaurant_organization_id)
     from app.services.org_iiko import resolve_org_iiko_credentials
 
     try:
@@ -925,6 +943,7 @@ async def process_with_retry(
     voice_audio: tuple[bytes, str] | None = None,
     webhook_value: dict[str, Any] | None = None,
     organization_id: int | None = None,
+    trace_id: str | None = None,
 ) -> None:
     """
     Обёртка с retry + exponential backoff.
@@ -978,6 +997,7 @@ async def process_with_retry(
                     voice_audio=item.voice_audio,
                     organization_id=int(item.organization_id),
                     pipeline_sw=pipeline_sw,
+                    trace_id=trace_id,
                 )
                 if wmid_item:
                     try:
@@ -1208,15 +1228,56 @@ async def process_message(
     voice_audio: tuple[bytes, str] | None = None,
     organization_id: int,
     pipeline_sw: PipelineStopwatch | None = None,
+    trace_id: str | None = None,
 ) -> None:
     """
     Полный цикл обработки входящего сообщения с учётом State Machine.
     """
     phone = _canonical_whatsapp_phone(phone)
+    conversation_id = build_conversation_id(organization_id, phone)
+    effective_trace_id = trace_id or build_trace_id(whatsapp_message_id)
+    try:
+        with trace_context(effective_trace_id, conversation_id):
+            await _process_message_inner(
+                phone,
+                message_text,
+                whatsapp_message_id=whatsapp_message_id,
+                voice_audio=voice_audio,
+                organization_id=organization_id,
+                pipeline_sw=pipeline_sw,
+                trace_id=effective_trace_id,
+                conversation_id=conversation_id,
+            )
+    except Exception as exc:
+        logger.error(
+            "%sОшибка обработки сообщения от %s: %s",
+            trace_log_prefix(),
+            phone,
+            exc,
+            exc_info=True,
+        )
+        raise
+
+
+async def _process_message_inner(
+    phone: str,
+    message_text: str = "",
+    *,
+    whatsapp_message_id: str = "",
+    voice_audio: tuple[bytes, str] | None = None,
+    organization_id: int,
+    pipeline_sw: PipelineStopwatch | None = None,
+    trace_id: str,
+    conversation_id: str,
+) -> None:
+    logger.info(
+        "%sprocess_message start org=%d phone=%s",
+        trace_log_prefix(),
+        organization_id,
+        _redact_msisdn_for_log(phone),
+    )
     try:
         pipe_sw = pipeline_sw or PipelineStopwatch()
-        conversation_id = build_conversation_id(organization_id, phone)
-        trace_id = build_trace_id(whatsapp_message_id)
         active_location_id: int | None = None
         state = await get_user_state(redis_client, phone, organization_id=organization_id)
         if message_text and _is_plain_greeting(message_text):
@@ -1357,7 +1418,6 @@ async def process_message(
             await append_to_history(
                 redis_client, phone, "assistant", _OPERATOR_ONLY_REPLY, organization_id=organization_id,
             )
-            from app.services.trace_context import publish_chat_event, publish_state_event
             await publish_chat_event(
                 phone=phone,
                 role="assistant",
@@ -1737,7 +1797,12 @@ async def process_message(
         ai_snapshot_id: str | None = None
         try:
             ai_snapshot_id = await save_ai_context_snapshot(
-                phone, organization_id, read_ctx, menu_context_text=menu_context,
+                phone,
+                organization_id,
+                read_ctx,
+                menu_context_text=menu_context,
+                trace_id=trace_id,
+                conversation_id=conversation_id,
             )
         except Exception:
             pass  # snapshot — аудит; потеря не критична
@@ -1795,6 +1860,7 @@ async def process_message(
                 # Временный сбой провайдера → тот же путь, что и «позвать человека»:
                 # escalate + HUMAN_MODE + Telegram + human_needed (без 3× retry на исключении).
                 raise_on_transient=False,
+                trace_id=trace_id,
             )
 
         if settings.pipeline_timing_enabled:
@@ -2005,7 +2071,6 @@ async def process_message(
         await append_to_history(
             redis_client, phone, "assistant", result.reply_text, organization_id=organization_id,
         )
-        from app.services.trace_context import publish_chat_event
         await publish_chat_event(
             phone=phone,
             role="assistant",
@@ -2066,7 +2131,6 @@ async def process_message(
                 logger.warning("edge-tts / отправка голоса: %s", tts_exc)
 
         if result.new_state == UserState.HUMAN_MODE:
-            from app.services.trace_context import publish_human_event, publish_state_event
             await publish_human_event(
                 phone=phone,
                 organization_id=organization_id,
@@ -2095,13 +2159,11 @@ async def process_message(
                 logger.warning("Telegram fallback alert не отправлен: %s", tg_exc)
 
         logger.info(
-            "Сообщение обработано: phone=%s, intent=%s, state=%s",
+            "%sСообщение обработано: phone=%s, intent=%s, state=%s",
+            trace_log_prefix(),
             phone, ai_response.intent, state.value,
         )
-    except Exception as exc:
-        logger.error("Ошибка обработки сообщения от %s: %s", phone, exc, exc_info=True)
-        # Не глотаем исключение: иначе process_with_retry не сможет записать FailedTask и сделать backoff.
-        # Сообщение клиенту после исчерпания попыток отправляет process_with_retry.
+    except Exception:
         raise
 
 
@@ -2111,6 +2173,7 @@ async def process_voice_message(
     *,
     whatsapp_message_id: str = "",
     webhook_value: dict[str, Any] | None = None,
+    trace_id: str | None = None,
 ) -> None:
     """
     Голосовое WhatsApp: скачать → STT (Whisper или Gemini, по AI_PROVIDER) + чат текущего AI в CHATTING
@@ -2141,6 +2204,7 @@ async def process_voice_message(
             whatsapp_message_id=whatsapp_message_id,
             voice_audio=(audio_bytes, mime_type),
             webhook_value=webhook_value,
+            trace_id=trace_id or build_trace_id(whatsapp_message_id),
         )
     except Exception as exc:
         logger.exception("Ошибка обработки голосового от %s: %s", phone, exc)
@@ -2535,6 +2599,7 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks) -
             if msg_type == "audio":
                 media_id = (msg.get("audio") or {}).get("id") or ""
                 if media_id:
+                    inbound_trace_id = build_trace_id(message_id)
                     from app.services.task_queue import dispatch_arq_or_background
 
                     await dispatch_arq_or_background(
@@ -2544,6 +2609,7 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks) -
                         media_id=media_id,
                         whatsapp_message_id=message_id,
                         webhook_value=value,
+                        trace_id=inbound_trace_id,
                     )
                     schedule_log_message(org_id, "inbound", "user", "voice")
                     logger.info("Голосовое от %s поставлено в очередь", phone)
@@ -2584,6 +2650,7 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks) -
                     lr = interactive.get("list_reply") or {}
                     message_text = (lr.get("title") or lr.get("id") or "").strip()
                 if message_text:
+                    inbound_trace_id = build_trace_id(message_id)
                     from app.services.task_queue import dispatch_arq_or_background
 
                     await dispatch_arq_or_background(
@@ -2593,15 +2660,18 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks) -
                         message_text=message_text,
                         whatsapp_message_id=message_id,
                         webhook_value=value,
+                        trace_id=inbound_trace_id,
                     )
                     schedule_log_message(org_id, "inbound", "user", "interactive")
                     logger.info(
-                        "Interactive (%s) от %s → '%s' поставлено в очередь",
+                        "[trace_id=%s] Interactive (%s) от %s → '%s' поставлено в очередь",
+                        inbound_trace_id,
                         interactive_type, phone, message_text,
                     )
             else:
                 message_text = (msg.get("text") or {}).get("body") or ""
                 if message_text:
+                    inbound_trace_id = build_trace_id(message_id)
                     from app.services.task_queue import dispatch_arq_or_background
 
                     await dispatch_arq_or_background(
@@ -2611,9 +2681,14 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks) -
                         message_text=message_text,
                         whatsapp_message_id=message_id,
                         webhook_value=value,
+                        trace_id=inbound_trace_id,
                     )
                     schedule_log_message(org_id, "inbound", "user", "text")
-                    logger.info("Сообщение от %s поставлено в очередь обработки", phone)
+                    logger.info(
+                        "[trace_id=%s] Сообщение от %s поставлено в очередь обработки",
+                        inbound_trace_id,
+                        phone,
+                    )
 
     except (IndexError, KeyError, TypeError) as exc:
         logger.error("Ошибка парсинга вебхука: %s", exc)

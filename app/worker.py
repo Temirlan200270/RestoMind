@@ -31,6 +31,7 @@ async def whatsapp_process_text(
     whatsapp_message_id: str = "",
     webhook_value: dict[str, Any] | None = None,
     organization_id: int | None = None,
+    trace_id: str | None = None,
 ) -> None:
     # Импорт внутри, чтобы worker не тащил FastAPI на импорт‑тайме
     from app.api.webhooks import process_with_retry
@@ -41,6 +42,7 @@ async def whatsapp_process_text(
         whatsapp_message_id=whatsapp_message_id,
         webhook_value=webhook_value,
         organization_id=organization_id,
+        trace_id=trace_id,
     )
 
 
@@ -51,6 +53,7 @@ async def whatsapp_process_voice(
     media_id: str,
     whatsapp_message_id: str = "",
     webhook_value: dict[str, Any] | None = None,
+    trace_id: str | None = None,
 ) -> None:
     from app.api.webhooks import process_voice_message
 
@@ -59,6 +62,7 @@ async def whatsapp_process_voice(
         media_id,
         whatsapp_message_id=whatsapp_message_id,
         webhook_value=webhook_value,
+        trace_id=trace_id,
     )
 
 

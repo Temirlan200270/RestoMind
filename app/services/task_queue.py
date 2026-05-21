@@ -87,6 +87,9 @@ async def enqueue_job(name: str, **kwargs: Any) -> None:
     }
     if job_id is not None:
         common["job_id"] = str(job_id)
+    trace_id = kwargs.get("trace_id")
+    if trace_id:
+        common["trace_id"] = str(trace_id)
 
     try:
         pool = await _get_pool()
@@ -115,8 +118,10 @@ async def enqueue_job(name: str, **kwargs: Any) -> None:
     real_job_id = getattr(result, "job_id", None) if result is not None else None
     if real_job_id and "job_id" not in common:
         common["job_id"] = str(real_job_id)
+    trace_prefix = f"[trace_id={trace_id}] " if trace_id else ""
     logger.info(
-        "task_queue_enqueue_ok queue=%s job=%s job_id=%s",
+        "%stask_queue_enqueue_ok queue=%s job=%s job_id=%s",
+        trace_prefix,
         queue,
         name,
         common.get("job_id") or "-",

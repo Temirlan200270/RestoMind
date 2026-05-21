@@ -23,6 +23,55 @@
     <section class="rounded-2xl bg-white border border-slate-200 shadow-sm p-5 mb-6">
         <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-4">
             <div>
+                <h2 class="text-lg font-bold text-slate-900">Журнал действий Super Admin</h2>
+                <p class="text-sm text-slate-500">Кто менял доступ, креды, расписание и сбрасывал пароли.</p>
+            </div>
+            <button type="button" @click="loadAuditLog()"
+                class="px-3 py-2 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Обновить</button>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full min-w-[920px] text-sm">
+                <thead class="text-slate-500">
+                <tr class="border-b border-slate-200">
+                    <th class="text-left py-2">Когда</th>
+                    <th class="text-left py-2">Кто</th>
+                    <th class="text-left py-2">Действие</th>
+                    <th class="text-left py-2">Цель</th>
+                    <th class="text-left py-2">Детали</th>
+                </tr>
+                </thead>
+                <tbody>
+                <template x-for="row in auditLog" :key="'audit-' + row.id">
+                    <tr class="border-b border-slate-100 align-top">
+                        <td class="py-2 text-xs text-slate-500" x-text="fmtDate(row.created_at)"></td>
+                        <td class="py-2">
+                            <div class="font-medium text-slate-900" x-text="row.actor_email || '—'"></div>
+                            <div class="text-[11px] text-slate-500" x-text="row.actor_staff_user_id ? ('staff #' + row.actor_staff_user_id) : '—'"></div>
+                        </td>
+                        <td class="py-2 font-mono text-xs text-slate-800" x-text="row.action"></td>
+                        <td class="py-2 text-xs text-slate-700">
+                            <div x-text="row.target_type + ' #' + row.target_id"></div>
+                            <div x-show="row.organization_id" class="text-slate-500" x-text="'org #' + row.organization_id"></div>
+                        </td>
+                        <td class="py-2 text-xs text-slate-600 max-w-[320px]">
+                            <pre class="whitespace-pre-wrap break-words font-sans" x-text="formatAuditDetails(row.details_json)"></pre>
+                        </td>
+                    </tr>
+                </template>
+                <tr x-show="!auditLog.length && !auditLogLoading">
+                    <td colspan="5" class="py-6 text-center text-slate-400">Записей пока нет.</td>
+                </tr>
+                <tr x-show="auditLogLoading">
+                    <td colspan="5" class="py-6 text-center text-slate-400">Загрузка…</td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="rounded-2xl bg-white border border-slate-200 shadow-sm p-5 mb-6">
+        <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-4">
+            <div>
                 <h2 class="text-lg font-bold text-slate-900">Аудит платёжных уведомлений</h2>
                 <p class="text-sm text-slate-500">Только чтение: входящие события, верификация и результат применения.</p>
             </div>
@@ -243,7 +292,13 @@
                         <td class="py-2">
                             <div class="space-y-1">
                                 <input :value="org.iiko_organization_id || ''" @change="updateOrgCredentials(org.id, { iiko_organization_id: $event.target.value })" placeholder="iiko org id" class="w-full rounded-lg border border-slate-200 px-2 py-1 text-xs">
+                                <input type="password" autocomplete="new-password"
+                                    :placeholder="org.has_iiko_api_login ? 'iiko api login (задан)' : 'iiko api login'"
+                                    @change="if (($event.target.value || '').trim()) { updateOrgCredentials(org.id, { iiko_api_login: $event.target.value }); $event.target.value = ''; }"
+                                    class="w-full rounded-lg border border-slate-200 px-2 py-1 text-xs">
+                                <input :value="org.iiko_terminal_group_id || ''" @change="updateOrgCredentials(org.id, { iiko_terminal_group_id: $event.target.value })" placeholder="iiko terminal group id" class="w-full rounded-lg border border-slate-200 px-2 py-1 text-xs">
                                 <input :value="org.whatsapp_phone_number_id || ''" @change="updateOrgCredentials(org.id, { whatsapp_phone_number_id: $event.target.value })" placeholder="WA phone_number_id" class="w-full rounded-lg border border-slate-200 px-2 py-1 text-xs">
+                                <input :value="org.telegram_ops_chat_id || ''" @change="updateOrgCredentials(org.id, { telegram_ops_chat_id: $event.target.value })" placeholder="telegram ops chat id" class="w-full rounded-lg border border-slate-200 px-2 py-1 text-xs">
                                 <div class="rounded-lg border border-slate-200 bg-slate-50 p-2">
                                     <div class="flex items-center justify-between gap-2">
                                         <div class="text-[11px] text-slate-700">
@@ -503,6 +558,8 @@ function superAdminPage() {
             provider: '',
             applied: '',
         },
+        auditLog: [],
+        auditLogLoading: false,
         scheduleEditorOpen: false,
         scheduleEditorOrgId: null,
         scheduleEditorOrgName: '',
@@ -532,7 +589,15 @@ function superAdminPage() {
         async init() {
             const ok = await this.guard();
             if (!ok) return;
-            await Promise.all([this.loadRequests(), this.loadOrganizations(), this.loadWebhookEvents(), this.loadAiUsage(), this.loadMsgAcct()]);
+            await Promise.all([this.loadRequests(), this.loadOrganizations(), this.loadWebhookEvents(), this.loadAiUsage(), this.loadMsgAcct(), this.loadAuditLog()]);
+        },
+        formatAuditDetails(v) {
+            if (v == null || v === '') return '—';
+            try {
+                return JSON.stringify(v, null, 2);
+            } catch (_e) {
+                return String(v);
+            }
         },
         fmtDate(iso) {
             if (!iso) return '—';
@@ -630,6 +695,16 @@ function superAdminPage() {
                 this.organizations = (await this.api('/api/superadmin/organizations')).items || [];
             } catch (e) {
                 this.error = e.message || 'Не удалось загрузить организации';
+            }
+        },
+        async loadAuditLog() {
+            this.auditLogLoading = true;
+            try {
+                this.auditLog = (await this.api('/api/superadmin/audit?limit=50')).items || [];
+            } catch (e) {
+                this.error = e.message || 'Не удалось загрузить журнал действий';
+            } finally {
+                this.auditLogLoading = false;
             }
         },
         async loadAiUsage() {
@@ -732,6 +807,7 @@ function superAdminPage() {
                 });
                 org.is_active = !org.is_active;
                 this.setToast(org.is_active ? 'Доступ восстановлен' : 'Организация заблокирована');
+                await this.loadAuditLog();
             } catch (e) {
                 this.error = e.message || 'Не удалось сменить статус';
             }
@@ -743,6 +819,7 @@ function superAdminPage() {
                     body: JSON.stringify(payload),
                 });
                 await this.loadOrganizations();
+                await this.loadAuditLog();
             } catch (e) {
                 this.error = e.message || 'Не удалось сохранить настройки';
             }
@@ -871,6 +948,7 @@ function superAdminPage() {
                 this.setToast('Расписание сохранено');
                 this.closeScheduleEditor();
                 await this.loadOrganizations();
+                await this.loadAuditLog();
             } catch (e) {
                 this.error = e.message || 'Не удалось сохранить расписание';
             }
@@ -879,6 +957,7 @@ function superAdminPage() {
             try {
                 await this.api(`/api/superadmin/organizations/${orgId}/sync-menu`, { method: 'POST' });
                 this.setToast('Синхронизация меню запущена');
+                await this.loadAuditLog();
             } catch (e) {
                 this.error = e.message || 'Не удалось синхронизировать меню';
             }
@@ -895,6 +974,7 @@ function superAdminPage() {
                     body: JSON.stringify({}),
                 });
                 this.showPasswordModal(`${org.name || 'Организация'}: сброс пароля`, out.new_password);
+                await this.loadAuditLog();
             } catch (e) {
                 this.error = e.message || 'Не удалось сбросить пароль';
             }

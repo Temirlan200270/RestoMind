@@ -17,12 +17,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.admin import require_admin_session
 from app.core.config import settings
 from app.core.passwords import hash_password
-from app.db.models import AiUsageLog, MessageAccountingLog, Order, Organization, PaymentWebhookEvent, RegistrationRequest, StaffRole, StaffUser, Tenant
+from app.db.models import (
+    AiUsageLog,
+    MessageAccountingLog,
+    Order,
+    Organization,
+    PaymentWebhookEvent,
+    RegistrationRequest,
+    StaffRole,
+    StaffUser,
+    SuperadminAuditLog,
+    Tenant,
+)
 from app.db.session import get_db
 from app.services.integration_health import record_menu_sync
 from app.services.menu_sync import sync_menu_from_iiko
 from app.services.org_iiko import resolve_org_iiko_credentials
 from app.services.secrets_crypto import encrypt_secret, fernet_or_none
+from app.services.superadmin_audit import list_superadmin_audit, log_superadmin_action, sanitize_credentials_audit_details
 from app.services.time_context import check_operational_status, parse_schedule_json
 
 router = APIRouter(prefix="/superadmin", tags=["Super Admin"])
@@ -30,6 +42,24 @@ router = APIRouter(prefix="/superadmin", tags=["Super Admin"])
 
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _has_iiko_api_login(org: Organization) -> bool:
+    return bool((org.iiko_api_login or "").strip() or (org.iiko_api_login_enc or "").strip())
+
+
+def _serialize_superadmin_audit(row: SuperadminAuditLog) -> dict[str, object]:
+    return {
+        "id": int(row.id),
+        "actor_staff_user_id": int(row.actor_staff_user_id) if row.actor_staff_user_id is not None else None,
+        "actor_email": row.actor_email or "",
+        "action": row.action,
+        "target_type": row.target_type,
+        "target_id": row.target_id,
+        "organization_id": int(row.organization_id) if row.organization_id is not None else None,
+        "details_json": row.details_json,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
 
 
 async def _send_superadmin_telegram_html(text: str) -> None:
@@ -175,9 +205,11 @@ async def superadmin_organizations(
                 "orders_30d": int(orders_30d or 0),
                 "revenue_30d": float(revenue_30d or 0),
                 "staff_count": int(staff_count or 0),
-                "has_iiko": bool((org.iiko_organization_id or "").strip() and ((org.iiko_api_login or "").strip() or (org.iiko_api_login_enc or "").strip())),
+                "has_iiko": bool((org.iiko_organization_id or "").strip() and _has_iiko_api_login(org)),
+                "has_iiko_api_login": _has_iiko_api_login(org),
                 "has_whatsapp": bool((org.whatsapp_phone_number_id or "").strip()),
                 "iiko_organization_id": (org.iiko_organization_id or "").strip(),
+                "iiko_terminal_group_id": (org.iiko_terminal_group_id or "").strip(),
                 "whatsapp_phone_number_id": (org.whatsapp_phone_number_id or "").strip(),
                 "telegram_ops_chat_id": (org.telegram_ops_chat_id or "").strip(),
                 "schedule_json": parse_schedule_json(getattr(org, "schedule_json", None)).model_dump(mode="json"),
@@ -189,10 +221,34 @@ async def superadmin_organizations(
     return {"items": rows}
 
 
+@router.get("/audit")
+async def superadmin_audit_log(
+    limit: int = 50,
+    offset: int = 0,
+    organization_id: int | None = None,
+    _staff: StaffUser = Depends(require_superadmin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    rows, total = await list_superadmin_audit(
+        db,
+        limit=limit,
+        offset=offset,
+        organization_id=organization_id,
+    )
+    lim = max(1, min(int(limit or 50), 200))
+    off = max(0, int(offset or 0))
+    return {
+        "items": [_serialize_superadmin_audit(row) for row in rows],
+        "limit": lim,
+        "offset": off,
+        "total": total,
+    }
+
+
 @router.post("/organizations")
 async def superadmin_create_organization(
     body: OrganizationCreateBody,
-    _staff: StaffUser = Depends(require_superadmin),
+    current: StaffUser = Depends(require_superadmin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     email = (body.admin_email or "").strip().lower()
@@ -230,6 +286,20 @@ async def superadmin_create_organization(
         is_active=True,
     )
     db.add(staff)
+    await log_superadmin_action(
+        db,
+        actor=current,
+        action="organization.create",
+        target_type="organization",
+        target_id=int(org.id),
+        organization_id=int(org.id),
+        details={
+            "organization_name": org.name,
+            "admin_email": email,
+            "tenant_name": tenant_name or None,
+            "generated_password": generated,
+        },
+    )
     await db.commit()
 
     return {
@@ -275,7 +345,7 @@ async def superadmin_reset_staff_password(
     organization_id: int,
     staff_id: int,
     body: PasswordResetBody,
-    _staff: StaffUser = Depends(require_superadmin),
+    current: StaffUser = Depends(require_superadmin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     org = await db.get(Organization, int(organization_id))
@@ -286,6 +356,19 @@ async def superadmin_reset_staff_password(
         raise HTTPException(status_code=404, detail="Сотрудник не найден")
     new_password = (body.password or "").strip() or secrets.token_urlsafe(10)
     target.password_hash = hash_password(new_password)
+    await log_superadmin_action(
+        db,
+        actor=current,
+        action="staff.password_reset",
+        target_type="staff_user",
+        target_id=int(target.id),
+        organization_id=int(organization_id),
+        details={
+            "organization_name": org.name,
+            "staff_email": target.email,
+            "staff_role": (target.role or "").strip().lower(),
+        },
+    )
     await db.commit()
     return {"ok": True, "staff_id": int(target.id), "new_password": new_password}
 
@@ -294,13 +377,25 @@ async def superadmin_reset_staff_password(
 async def superadmin_set_organization_status(
     organization_id: int,
     body: OrganizationStatusBody,
-    _staff: StaffUser = Depends(require_superadmin),
+    current: StaffUser = Depends(require_superadmin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     org = await db.get(Organization, int(organization_id))
     if org is None:
         raise HTTPException(status_code=404, detail="Организация не найдена")
     org.is_active = bool(body.is_active)
+    await log_superadmin_action(
+        db,
+        actor=current,
+        action="organization.status_change",
+        target_type="organization",
+        target_id=int(org.id),
+        organization_id=int(org.id),
+        details={
+            "organization_name": org.name,
+            "is_active": bool(org.is_active),
+        },
+    )
     await db.commit()
     return {"ok": True, "organization_id": int(org.id), "is_active": bool(org.is_active)}
 
@@ -309,23 +404,29 @@ async def superadmin_set_organization_status(
 async def superadmin_update_organization_credentials(
     organization_id: int,
     body: OrganizationCredentialsBody,
-    _staff: StaffUser = Depends(require_superadmin),
+    current: StaffUser = Depends(require_superadmin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     org = await db.get(Organization, int(organization_id))
     if org is None:
         raise HTTPException(status_code=404, detail="Организация не найдена")
 
+    changed_fields: list[str] = []
     if body.whatsapp_phone_number_id is not None:
         org.whatsapp_phone_number_id = (body.whatsapp_phone_number_id or "").strip()
+        changed_fields.append("whatsapp_phone_number_id")
     if body.telegram_ops_chat_id is not None:
         org.telegram_ops_chat_id = (body.telegram_ops_chat_id or "").strip()
+        changed_fields.append("telegram_ops_chat_id")
     if body.iiko_terminal_group_id is not None:
         org.iiko_terminal_group_id = (body.iiko_terminal_group_id or "").strip()
+        changed_fields.append("iiko_terminal_group_id")
     if body.iiko_organization_id is not None:
         org.iiko_organization_id = (body.iiko_organization_id or "").strip()
+        changed_fields.append("iiko_organization_id")
     if body.iiko_api_login is not None:
         login = (body.iiko_api_login or "").strip()
+        changed_fields.append("iiko_api_login")
         if login:
             if fernet_or_none() is not None:
                 org.iiko_api_login_enc = encrypt_secret(login)
@@ -337,6 +438,20 @@ async def superadmin_update_organization_credentials(
             org.iiko_api_login = ""
             org.iiko_api_login_enc = None
 
+    if changed_fields:
+        await log_superadmin_action(
+            db,
+            actor=current,
+            action="organization.credentials_update",
+            target_type="organization",
+            target_id=int(org.id),
+            organization_id=int(org.id),
+            details={
+                "organization_name": org.name,
+                **sanitize_credentials_audit_details(changed_fields),
+            },
+        )
+
     await db.commit()
     return {"ok": True}
 
@@ -345,13 +460,22 @@ async def superadmin_update_organization_credentials(
 async def superadmin_update_organization_schedule(
     organization_id: int,
     body: OrganizationScheduleBody,
-    _staff: StaffUser = Depends(require_superadmin),
+    current: StaffUser = Depends(require_superadmin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     org = await db.get(Organization, int(organization_id))
     if org is None:
         raise HTTPException(status_code=404, detail="Организация не найдена")
     org.schedule_json = parse_schedule_json(body.schedule_json).model_dump(mode="json")
+    await log_superadmin_action(
+        db,
+        actor=current,
+        action="organization.schedule_update",
+        target_type="organization",
+        target_id=int(org.id),
+        organization_id=int(org.id),
+        details={"organization_name": org.name},
+    )
     await db.commit()
     return {"ok": True, "organization_id": int(org.id), "schedule_json": org.schedule_json}
 
@@ -359,7 +483,7 @@ async def superadmin_update_organization_schedule(
 @router.post("/organizations/{organization_id}/sync-menu")
 async def superadmin_sync_org_menu(
     organization_id: int,
-    _staff: StaffUser = Depends(require_superadmin),
+    current: StaffUser = Depends(require_superadmin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     org = await db.get(Organization, int(organization_id))
@@ -383,6 +507,15 @@ async def superadmin_sync_org_menu(
             + ")"
         )
         await record_menu_sync(db, True, None, detail=detail_m, organization_id=int(org.id))
+        await log_superadmin_action(
+            db,
+            actor=current,
+            action="organization.sync_menu",
+            target_type="organization",
+            target_id=int(org.id),
+            organization_id=int(org.id),
+            details={"organization_name": org.name, "stats": stats},
+        )
         await db.commit()
         return {"ok": True, "stats": stats}
     except Exception as exc:
@@ -509,6 +642,20 @@ async def superadmin_approve_registration_request(
     req.status = "approved"
     req.decided_at = _now_utc()
     req.decided_by_staff_id = int(current.id)
+    await log_superadmin_action(
+        db,
+        actor=current,
+        action="registration_request.approve",
+        target_type="registration_request",
+        target_id=int(req.id),
+        organization_id=int(org.id),
+        details={
+            "restaurant_name": req.restaurant_name,
+            "organization_name": org.name,
+            "admin_email": email,
+            "generated_password": generated,
+        },
+    )
     await db.commit()
 
     return {
@@ -523,7 +670,7 @@ async def superadmin_approve_registration_request(
 @router.post("/registration-requests/{request_id}/reject")
 async def superadmin_reject_registration_request(
     request_id: int,
-    _body: RegistrationDecisionBody,
+    body: RegistrationDecisionBody,
     current: StaffUser = Depends(require_superadmin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
@@ -535,6 +682,17 @@ async def superadmin_reject_registration_request(
     req.status = "rejected"
     req.decided_at = _now_utc()
     req.decided_by_staff_id = int(current.id)
+    await log_superadmin_action(
+        db,
+        actor=current,
+        action="registration_request.reject",
+        target_type="registration_request",
+        target_id=int(req.id),
+        details={
+            "restaurant_name": req.restaurant_name,
+            "reason": (body.reason or "").strip() or None,
+        },
+    )
     await db.commit()
     return {"ok": True}
 

@@ -127,6 +127,8 @@ async def save_ai_context_snapshot(
     context: AIReadContext,
     *,
     menu_context_text: str | None = None,
+    trace_id: str | None = None,
+    conversation_id: str | None = None,
 ) -> str:
     """Сохраняет снимок AI-контекста перед LLM-вызовом. Возвращает snapshot_id (UUID).
 
@@ -134,6 +136,10 @@ async def save_ai_context_snapshot(
     Ошибки не пробрасывает: snapshot — аудит, не критичный путь.
     """
     snapshot_id = str(uuid.uuid4())
+    from app.services.trace_context import get_conversation_id, get_trace_id
+
+    effective_trace_id = trace_id or get_trace_id()
+    effective_conversation_id = conversation_id or get_conversation_id()
     try:
         # Минимальный снимок цен: только audit-поля нужные для query «цена X в момент T»
         # iiko_id — стабильный идентификатор (name может меняться при переименовании)
@@ -156,6 +162,8 @@ async def save_ai_context_snapshot(
             "menu_prices_snapshot": menu_prices_snapshot,
             # Frozen menu text passed to LLM — используется в replay для точного воспроизведения
             "menu_context_text": menu_context_text,
+            "trace_id": effective_trace_id,
+            "conversation_id": effective_conversation_id,
         }
         async with async_session_factory() as db:
             chat_history_slice = await _load_chat_history_slice(

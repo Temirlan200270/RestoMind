@@ -56,6 +56,17 @@ async def emit_event(db: AsyncSession, event: BusinessEvent) -> SystemEvent | No
     location_id = event.location_id if event.location_id is not None else int(event.org_id)
     enriched_payload["_location_id"] = location_id
 
+    from app.services.trace_context import enrich_payload_with_trace
+
+    enriched_payload = enrich_payload_with_trace(enriched_payload)
+    if enriched_payload.get("trace_id"):
+        logger.debug(
+            "%semit_event type=%s org=%d",
+            f"[trace_id={enriched_payload['trace_id']}] ",
+            event.type,
+            event.org_id,
+        )
+
     result = await emit_system_event(
         db,
         organization_id=event.org_id,
