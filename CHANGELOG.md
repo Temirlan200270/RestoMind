@@ -6,12 +6,16 @@
 
 ## [Unreleased] — 2026-03-20
 
-### Добавлено (2026-05-23) — P3 Growth: KPI офiciантов из iiko
+### Изменено (2026-05-22) — Docs: Launch Window sync
+
+- **UI_DESIGN_SYSTEM / ROADMAP / UI_MAP:** Role-First IA, P5 «выполнен», секция P3 Growth & BI (KPI iiko, iiko-маркетинг MVP), карта экранов оператора и «Официанты» в подробной аналитике.
+
+### Добавлено (2026-05-22) — P3 Growth: KPI официантов из iiko
 
 - **ETL:** [`iiko_waiter_kpi_sync.py`](app/services/iiko_waiter_kpi_sync.py) — iiko Cloud deliveries + iiko Office waiter report → `waiter_registry`, `waiter_kpi_daily`, audit `iiko_sync_runs`; миграция [`20260523_p3_waiter_kpi.py`](alembic/versions/20260523_p3_waiter_kpi.py).
 - **Cron:** `waiter_kpi_sync_scheduled_tick` (ежедневно 22:30 UTC) в [`worker.py`](app/worker.py).
 - **Admin API:** `POST/GET /api/admin/analytics/waiter-kpi/*` — sync, рейтинг, CSV, sync-status ([`waiter_kpi.py`](app/api/admin/waiter_kpi.py)).
-- **UI:** блок «Офiciанты» на вкладке расширенной аналитики ([`_tab_analytics.html`](app/templates/screens/_tab_analytics.html), [`admin-app.js`](app/static/js/admin-app.js)).
+- **UI:** блок «Официанты» на вкладке расширенной аналитики ([`_tab_analytics.html`](app/templates/screens/_tab_analytics.html), [`admin-app.js`](app/static/js/admin-app.js)).
 - **Spike:** [`docs/IIKO_WAITER_KPI_SPIKE.md`](docs/IIKO_WAITER_KPI_SPIKE.md) + fixtures Cloud/Office.
 - **Тесты:** [`test_iiko_waiter_kpi_sync.py`](tests/test_iiko_waiter_kpi_sync.py), [`test_waiter_kpi_api.py`](tests/test_waiter_kpi_api.py).
 

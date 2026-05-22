@@ -2,7 +2,7 @@
 
 Revision ID: 20260523_p3_waiter_kpi
 Revises: 20260521_superadmin_audit
-Create Date: 2026-05-23
+Create Date: 2026-05-22
 """
 
 from __future__ import annotations

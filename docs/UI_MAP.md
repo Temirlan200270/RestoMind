@@ -29,9 +29,9 @@
 
 | Экран | Шаблон | Примечание |
 |-------|--------|------------|
-| Смена | `_tab_shift_control.html` | Focus Deck + calm-empty CTA → inbox/chats |
-| Операции | `_tab_inbox.html`, orders, chats, bookings, menu | Очередь помощи в inbox |
-| Аналитика | `_tab_dashboard.html` + `_tab_analytics.html` | `analyticsDensity`: normal \| advanced |
+| Смена | `_tab_shift_control.html` | **Focus Deck** (1 задача из `GET /shift/state`) + **Context Dock** (`_shift_focus_chat.html` / `_shift_focus_order.html`); mobile staged nav `focus` ↔ `context`; calm-empty → inbox/chats |
+| Операции | `_tab_inbox.html`, orders, chats, bookings, menu | Inbox: «Очередь помощи», фильтры «В работе / Закрытые» |
+| Аналитика | `_tab_dashboard.html` + `_tab_analytics.html` | `analyticsDensity`: normal (Обзор) \| advanced (Подробно + **«Официанты»** KPI iiko) |
 
 `_tab_shift_control.html` — не default для оператора в спокойной смене; smart routing в `applyRoleDefaultLanding()`.
 
@@ -51,7 +51,7 @@
   - `load` — Digital Twin / нагрузка;
   - `os` — **Автопилот** (`GET /intelligence/os-dashboard`, лента решений `loadAuditLog()`, bulk pricing);
   - `guestcare` — **Отзывы** (внешние 2GIS/Google: `GET/POST /reviews/external*`).
-  - `final_mile` — **Финал:** предпросмотр ежедневной сводки ОС, Закупки (предупреждения по запасам, черновики, чеклисты), голосовой ИИ + **журнал звонков** (`loadVoiceCallLogs` → `GET /voice/calls`).
+  - `final_mile` — **Финал:** предпросмотр ежедневной сводки ОС, Закупки (предупреждения по запасам, черновики, чеклисты), голосовой ИИ + **журнал звонков** с playback (`loadVoiceCallLogs` → `GET /voice/calls`, пагинация, `location_id`).
   Legacy-файлы `_tab_ai_value.html`, `_tab_intelligence.html`, `_tab_digital_twin.html` остаются для редиректов hash.
 - `_tab_menu.html` — меню и стоп-лист.
 
@@ -128,7 +128,8 @@
 
 ## Known Follow-Ups
 
-- **Финал UI:** `aiCenterTab=final_mile` — чеклисты закупок, голосовой ИИ + журнал звонков (`GET /voice/calls`); обучение сотрудников — в **Настройки → Команда**.
+- **Финал UI:** `aiCenterTab=final_mile` — чеклисты закупок ✅, голосовой ИИ + журнал звонков ✅; обучение сотрудников — **Настройки → Команда** (StaffMind).
+- **KPI официантов:** блок «Официанты» в `analyticsDensity=advanced` ✅ — [`waiter_kpi.py`](app/api/admin/waiter_kpi.py).
 - **Control Plane:** `GET /trace-timeline?trace_id=` + панель «Цепочка trace_id» в AI Center → OS (`loadTraceTimeline()`).
 - **Superadmin:** `/superadmin` — tech fields (`iiko_api_login`, …), журнал `GET /api/superadmin/audit` (миграция `20260521_superadmin_audit` на env).
 - Разбить `admin-app.js` на небольшие доменные модули: dashboard, orders, menu, chats, settings.

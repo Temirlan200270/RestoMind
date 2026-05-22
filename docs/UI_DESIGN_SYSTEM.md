@@ -9,8 +9,9 @@
 | Принцип | Смысл |
 |--------|--------|
 | **Compact density** | Плотная сетка, без лишних полей; KPI и таблицы читаются с первого экрана. |
-| **Value-first** | Владелец видит вклад ИИ (бейдж в шапке, мини-метрики, ROI) без охоты по вкладкам — см. Phase U2. |
-| **Mobile-friendly** | На `<sm` модалки ведут себя как **bottom-sheet** (одна колонка, safe-area, крупные таргеты **≥ 44×44 px**). |
+| **Value-first** | Владелец видит вклад ИИ (ROI, упущенную выручку, спасенные сделки) без долгих переходов. |
+| **Mobile-friendly** | На `<sm` модалки ведут себя как **bottom-sheet** (safe-area, крупные таргеты **≥ 44×44 px**). |
+| **Role-First IA** | Интерфейс подстраивается под роль staff: оператор не видит лишней аналитики и настроек; владелец получает полную картину. Mode Bar в UI **убран** (G10.4+). |
 | **Dark-ready** | Токены в `:root` как CSS-переменные; тёмная тема не реализована, но имена и структура под неё допускают расширение. |
 
 ---
@@ -182,9 +183,9 @@ Operations‑интерфейс должен работать в двух реж
 ### Дашборд: Обычный / Расширенный
 
 - `analyticsDensity`: `normal` \| `advanced` (persist `localStorage.restomind_analytics_density`). UI: переключатель **«Обзор» / «Подробная аналитика»** (одна точка входа, без дублирующей кнопки).
-- **normal** — hero KPI, revenue leak, live feed (без тяжёлых графиков).
-- **advanced** — содержимое `_tab_analytics.html` (BI, OS autopilot и т.д.).
-- Toggle виден только `manager` / `admin` (`canToggleAnalyticsDensity()`).
+- **normal** (Обзор) — KPI за день, упущенный доход, ROI бота, live feed ОС, тепловой пик продаж (без тяжёлых графиков).
+- **advanced** (Подробно) — `_tab_analytics.html`: часы продаж, воронка, heatmap, **«Официанты»** (KPI из iiko ETL), menu engineering, география.
+- Toggle виден только `manager` / `admin` (`canToggleAnalyticsDensity()`); persist `localStorage.restomind_analytics_density`.
 
 ### Shift calm-empty
 

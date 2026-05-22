@@ -102,10 +102,16 @@
 - [x] **Event System Stabilization (Phase 2 OS) — ✅ 100%:** **12+ типов** на шине через `emit_event` (в т.ч. `ai.response.generated`, `ai.dialog.started`, `integration.iiko.failed`, `integration.whatsapp.failed`). `DailyOrgStats` + 13 колонок. **Backfill**: `POST /intelligence/backfill-stats` (+ `dialogs_count` из ChatLog). **websocket_consumer**: `emit_event` → `publish_event`; **audit_consumer** → `audit_log` + WS `os.audit`. Event-first: `/analytics`, `/funnel`, `network/stats`, `/stats`. Детали: [`docs/OS_TRANSITION_PLAN.md`](docs/OS_TRANSITION_PLAN.md), [`docs/AI_OPERATIONS.md`](docs/AI_OPERATIONS.md).
 - [x] **AI Context Snapshot (Phase 3 OS) — ✅ 100%:** frozen `menu_context_text` / `menu_prices_snapshot`; replay с `chat_history_slice`; edge-case — synthetic menu context из `menu_prices_snapshot`, если `menu_context_text` пуст ([`context_engine.py`](app/services/context_engine.py)).
 - [x] **Decision Engine (Phase 4 OS) — ✅ 100%:** [`app/services/decision_engine.py`](app/services/decision_engine.py) — 8 правил: `billing_suspended` (block, 3 источника defense-in-depth), `force_closed` (block), `empty_order` (block), `all_items_hallucinated` (block), `stoplist_quick` (warn), `delivery_no_address` (warn), `order_items_anomaly` (warn), `pricing_policy` (block при `max_discount_pct`). Все block → intent→faq. Интегрирован в [`webhooks.py`](app/api/webhooks.py) с billing_suspended флагом. Порог Фазы 5 **достигнут**. Тесты: [`tests/test_os_sprints.py`](tests/test_os_sprints.py) + [`tests/test_sprint_g.py`](tests/test_sprint_g.py).
-- [ ] **BI по iiko:** продажи по времени суток и автоподстройка upsell. _Wishlist Темира #16._ **MVP ✅:** `sales_by_hour_local` + `sales_insights` + `sales_peak_today` на дашборде (данные Order); полный iiko OLAP ETL — backlog.
-- [ ] **Авто‑рассылка из iiko по клиентам** (Wishlist Темира R1): **MVP ✅** — `POST /marketing/sync-iiko-customers` (телефоны из deliveries iiko Cloud → `User`); полный CRM iiko + PII-legal — backlog.
-- [ ] **VIP‑кейс: отдельный сайт/мини‑приложение для премиум‑заведений** (Wishlist Темира R2): white‑label фронт (отдельный поддомен per‑tenant) с меню, бронированием, личным кабинетом гостя. Архитектурно — отдельный Next.js/Astro фронт поверх существующего API; оценить ROI до начала реализации.
-- [x] **KPI‑центр официантов из iiko** (Wishlist Темира R4): ETL Cloud deliveries + Office waiter report → `waiter_registry`, `waiter_kpi_daily`, `iiko_sync_runs`; cron `waiter_kpi_sync_scheduled_tick`; admin API [`waiter_kpi.py`](app/api/admin/waiter_kpi.py); вкладка «Официанты» в аналитике; spike [`IIKO_WAITER_KPI_SPIKE.md`](docs/IIKO_WAITER_KPI_SPIKE.md).
+## 🟢 P3 Growth & BI Analytics
+
+- [x] **KPI‑центр официантов из iiko** (Wishlist Темира R4):
+  - [x] БД: `waiter_registry`, `waiter_kpi_daily`, `iiko_sync_runs` — миграция [`20260523_p3_waiter_kpi`](alembic/versions/20260523_p3_waiter_kpi.py).
+  - [x] ETL: Cloud deliveries + Office waiter report; cron `waiter_kpi_sync_scheduled_tick` в [`worker.py`](app/worker.py).
+  - [x] Admin API: sync / рейтинг / CSV — [`waiter_kpi.py`](app/api/admin/waiter_kpi.py).
+  - [x] UI: блок **«Официанты»** в подробной аналитике; spike [`IIKO_WAITER_KPI_SPIKE.md`](docs/IIKO_WAITER_KPI_SPIKE.md).
+- [x] **iiko‑маркетинг (MVP):** `POST /api/admin/marketing/sync-iiko-customers` — телефоны гостей из iiko Cloud deliveries → `User` для сегментов рассылок ([`iiko_customer_sync.py`](app/services/iiko_customer_sync.py), вкладка «Маркетинг»).
+- [ ] **BI по iiko (OLAP):** полный ETL продаж по часам/дням недели и автоподстройка upsell. **MVP ✅ на Order:** `sales_by_hour_local`, `sales_insights`, `sales_peak_today` на дашборде; KPI офiciантов — отдельный iiko ETL (см. выше).
+- [ ] **VIP white‑label** (Wishlist Темира R2): отдельный Astro/Next фронт per‑tenant; ROI gate до кода.
 
 
 ## P4: AI Operations / Intelligence
@@ -121,9 +127,9 @@
   - **Auto-recommendations (~95%):** 6 типов + `autopilot_pricing`. `POST /apply-pricing/{rec_id}` и **`POST /apply-pricing/bulk`** (все `new` за org).
   - **Self-healing (~95%):** 4 детектора + **Self-Healing 2.0** — WA-напоминание гостям с `prepayment_status=pending` при spike failed payments ([`healing_actions.py`](app/services/healing_actions.py)). `AuditLog` + `GET /audit-log`. `stock_alerts[]` на `/os-dashboard` (inventory snapshots или прокси из DailyOrgStats).
 
-## 🔵 P5: OS Decision Feed (Visibility — следующий milestone)
+## 🔵 P5: OS Decision Feed (Visibility — выполнен)
 
-> Цель: владелец «чувствует» работу ОС. «Лента решений» превращает RestoMind из «софта» в «цифрового сотрудника».
+> Цель: владелец «чувствует» работу ОС. **Статус: Launch Window** — код P0–P5 закрыт; выкатка и натурные тесты — [`docs/DEPLOY_RUNBOOK.md`](docs/DEPLOY_RUNBOOK.md), sign-off [`docs/FINAL_MILE_OPS_SIGNOFF.md`](docs/FINAL_MILE_OPS_SIGNOFF.md) §A–§B.
 
 ### Focus-Driven OS (Admin Shell) — целевая UI-модель G10.4+
 
@@ -218,7 +224,7 @@
 | 19 | Горячая рассылка по клиентам + бонусы | ✅ | `MarketingBlast` + `LoyaltyBalance` + API + вкладка «Маркетинг» в админке (**P2** выполнено) |
 | 20 | Вне рабочее время + ночной предзаказ + Telegram «на смене» | ✅ | `Order.kind='night_preorder'`, ARQ cron, «🟢 Я на смене» Telegram-кнопка (**P2** выполнено) |
 | 21 | Экстренное закрытие ресторана | ✅ | `force_closed_until/reason` end‑to‑end (P0/P2) |
-| R1 | Авто‑рассылка из iiko по клиентам | ⚠️ | **P3** «Авто‑рассылка из iiko по клиентам» — MVP ✅ (`sync-iiko-customers`); полный CRM + PII-legal — backlog |
-| R2 | VIP сайт/приложение | ❌ | **P3** «VIP‑кейс: отдельный сайт/мини‑приложение» |
+| R1 | Авто‑рассылка из iiko по клиентам | ⚠️ | **P3 Growth** «iiko‑маркетинг (MVP)» ✅; полный CRM + PII-legal — backlog |
+| R2 | VIP сайт/приложение | ❌ | **P3 Growth** «VIP white‑label» |
 | R3 | Авто‑сбор отзывов после заказа | ✅ | `CustomerFeedback` + `send_review_request` ARQ + 👍/👎 кнопки в WhatsApp (**P2** выполнено) |
-| R4 | KPI‑центр официантов из iiko | ✅ | **P3** «KPI‑центр официантов из iiko» |
+| R4 | KPI‑центр официантов из iiko | ✅ | **P3 Growth** «KPI‑центр официантов из iiko» |
