@@ -2332,6 +2332,13 @@ async def analytics(
     hour_buckets: list[dict[str, float | int]] = [
         {"hour": h, "orders": 0, "revenue": 0.0} for h in range(24)
     ]
+    hour_buckets_local: list[dict[str, float | int]] = [
+        {"hour": h, "orders": 0, "revenue": 0.0} for h in range(24)
+    ]
+    from app.services.timezones import zoneinfo_or_default
+
+    org_row = await db.get(Organization, org_id)
+    org_tz = zoneinfo_or_default(org_row.timezone if org_row else None)
     for o in current_orders:
         dt_h = o.created_at
         if dt_h is None:
@@ -2343,6 +2350,23 @@ async def analytics(
         hh = int(dt_u.hour)
         hour_buckets[hh]["orders"] = int(hour_buckets[hh]["orders"]) + 1
         hour_buckets[hh]["revenue"] = float(hour_buckets[hh]["revenue"]) + float(o.total_price or 0)
+        hh_local = int(dt_u.astimezone(org_tz).hour)
+        hour_buckets_local[hh_local]["orders"] = int(hour_buckets_local[hh_local]["orders"]) + 1
+        hour_buckets_local[hh_local]["revenue"] = float(hour_buckets_local[hh_local]["revenue"]) + float(o.total_price or 0)
+
+    peak_hours_local = sorted(
+        [row for row in hour_buckets_local if int(row["orders"]) > 0],
+        key=lambda row: float(row["revenue"]),
+        reverse=True,
+    )[:3]
+    peak_hour_values = [int(row["hour"]) for row in peak_hours_local]
+    upsell_time_hint = None
+    if peak_hour_values:
+        hours_label = ", ".join(f"{h:02d}:00" for h in peak_hour_values)
+        upsell_time_hint = (
+            f"Пики продаж по локальному времени ({org_tz.key}): {hours_label}. "
+            "Настройте UpsellRule с trigger_mode=time_of_day для этих окон."
+        )
 
     heatmap_matrix = [[0 for _ in range(24)] for _ in range(7)]
     for o in current_orders:
@@ -2446,6 +2470,15 @@ async def analytics(
             {"hour": int(x["hour"]), "orders": int(x["orders"]), "revenue": round(float(x["revenue"]), 2)}
             for x in hour_buckets
         ],
+        "sales_by_hour_local": [
+            {"hour": int(x["hour"]), "orders": int(x["orders"]), "revenue": round(float(x["revenue"]), 2)}
+            for x in hour_buckets_local
+        ],
+        "sales_insights": {
+            "timezone": str(org_tz.key),
+            "peak_hours_local": peak_hour_values,
+            "upsell_time_hint": upsell_time_hint,
+        },
     }
 
 

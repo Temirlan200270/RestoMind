@@ -47,7 +47,7 @@ Implemented:
 
 Remaining (still paper / not done):
 
-- admin timeline **UI panel** search/filter by `trace_id` (API ✅, UI — backlog ROADMAP);
+- ~~admin timeline **UI panel** search/filter by `trace_id` (API ✅, UI — backlog ROADMAP)~~ ✅ AI Center OS + chat context shortcut (2026-05-21);
 - Phase 3 replay harness; Phase 4 policy versioning.
 
 ## Phase 3: Replay Harness

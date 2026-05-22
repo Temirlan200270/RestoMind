@@ -19,7 +19,7 @@ This file tracks what is still needed outside the backend MVP that is already im
 | **SupplyMind checklist** | ✅ lifecycle API + CSV + UI «Чеклисты закупки»; tests in `test_ultimate_platform_sprint.py` | Role gates + operator smoke in AI Center |
 | **Voice Realtime** | ✅ `voice_realtime/*`, `twilio_routing`, webhook branch; call log strip UI + `GET /voice/calls`; tests `test_voice_realtime.py`, `test_twilio_routing.py`, `test_voice_staging.py` | **Staging gate:** manual call (`mode=realtime`) on real Twilio + latency/cost notes ([`docs/VOICE_AI_SPIKE.md`](VOICE_AI_SPIKE.md)) |
 | **Superadmin audit** | ✅ `SuperadminAuditLog`, `GET /api/superadmin/audit`, UI journal, migration `20260521_superadmin_audit`; tests `test_superadmin_audit.py` | Run migration on deploy; optional filters/export later |
-| **Control Plane trace_id** | ✅ Phase 2 foundation + tail: iiko/WA/operator logs, causal fields, `GET /trace-timeline`; tests `test_control_plane_trace.py` | Timeline UI panel; Phase 3 replay harness — see [`docs/CONTROL_PLANE.md`](CONTROL_PLANE.md) |
+| **Control Plane trace_id** | ✅ Phase 2 foundation + tail: iiko/WA/operator logs, causal fields, `GET /trace-timeline`; tests `test_control_plane_trace.py` | Timeline UI ✅ in AI Center OS; trace shortcut in chat context panel; Phase 3 replay harness — see [`docs/CONTROL_PLANE.md`](CONTROL_PLANE.md) |
 
 ### iiko Office inventory sync
 
@@ -34,17 +34,17 @@ This file tracks what is still needed outside the backend MVP that is already im
 - **Product decision:** `supply_purchase_drafts` = operator **checklist**, not a purchase order in iiko. Export = **CSV for supplier/kitchen**, not `POST` into iiko Office.
 - **API:** `GET/PATCH /supplymind/drafts/{id}`, `GET /supplymind/drafts/{id}/export?format=csv` — implemented.
 - **UI copy:** «Чеклист закупки», not «Заказ в iiko».
-- **Gap (backlog):** галочки позиций в UI — session-local; для persist нужен `PATCH` с `items[]` (см. ROADMAP).
+- **Gap (backlog):** ~~галочки позиций в UI — session-local~~ ✅ persist через `PATCH items[]` (2026-05-21).
 
 ### StaffMind — tracker metrics
 
 - **UI:** progress bar, темы, Q&A в **Настройки → Команда** ✅.
-- **Gap (backlog):** backend не отдаёт `progress.test_passed`, `questions_asked`, `step_target` — UI использует эвристики.
+- **Gap (backlog):** ~~backend не отдаёт `progress.test_passed`, `questions_asked`, `step_target`~~ ✅ в `onboarding_public()` (2026-05-21).
 
 ### Voice — call log location filter
 
 - **`GET /voice/calls?location_id=`** фильтрует `payload_json.location_id`.
-- **Gap (backlog):** `record_voice_call()` пока не пишет `location_id` в payload; фильтр заработает после доработки webhook/Twilio routing.
+- **Gap (backlog):** ~~`record_voice_call()` пока не пишет `location_id` в payload~~ ✅ Twilio routing + webhook (2026-05-21).
 
 ### Voice — OpenAI Realtime (code ✅; staging gate)
 

@@ -52,5 +52,15 @@
         <p class="text-[11px] text-gray-600 mt-1 italic line-clamp-3" x-show="customerSummary.last_escalation?.reason"
             x-text="customerSummary.last_escalation?.reason"></p>
     </div>
+
+    <div x-show="activeChatTraceId" class="rounded-xl border border-slate-200 bg-slate-50/80 p-3 shadow-sm">
+        <p class="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Control Plane</p>
+        <p class="text-[11px] font-mono text-slate-600 truncate" :title="activeChatTraceId" x-text="activeChatTraceId"></p>
+        <button type="button"
+            @click="openActiveChatTraceTimeline()"
+            class="mt-2 w-full min-h-[40px] rounded-lg text-xs font-bold bg-white border border-slate-300 text-slate-800 hover:bg-slate-100">
+            Цепочка trace →
+        </button>
+    </div>
 </div>
 {%- endmacro %}

@@ -7,7 +7,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.admin.deps import (
@@ -976,8 +976,20 @@ class SupplyDraftBody(BaseModel):
     cover_days: int = Field(default=7, ge=1, le=30)
 
 
-class SupplyDraftStatusBody(BaseModel):
-    status: str = Field(..., pattern="^(draft|approved|completed|cancelled)$")
+class SupplyDraftItemCheckBody(BaseModel):
+    idx: int = Field(..., ge=0)
+    checked: bool = True
+
+
+class SupplyDraftPatchBody(BaseModel):
+    status: str | None = Field(default=None, pattern="^(draft|approved|completed|cancelled)$")
+    items: list[SupplyDraftItemCheckBody] | None = None
+
+    @model_validator(mode="after")
+    def require_status_or_items(self) -> SupplyDraftPatchBody:
+        if self.status is None and not self.items:
+            raise ValueError("status_or_items_required")
+        return self
 
 
 class StaffOnboardingStartBody(BaseModel):
@@ -1258,25 +1270,42 @@ async def get_supplymind_draft(
 @router.patch("/supplymind/drafts/{draft_id}")
 async def patch_supplymind_draft(
     draft_id: int,
-    body: SupplyDraftStatusBody,
+    body: SupplyDraftPatchBody,
     request: Request,
     _perm: None = Depends(require_staff_manager_or_admin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    from app.services.supplymind import supply_draft_public, update_draft_status
+    from app.services.supplymind import supply_draft_public, update_draft_items, update_draft_status
 
     org_id = admin_org_from_session(request)
+    draft = None
     try:
-        draft = await update_draft_status(db, org_id, draft_id, body.status)
+        if body.status is not None:
+            draft = await update_draft_status(db, org_id, draft_id, body.status)
+        if body.items:
+            draft = await update_draft_items(
+                db,
+                org_id,
+                draft_id,
+                [{"idx": it.idx, "checked": it.checked} for it in body.items],
+            )
     except LookupError:
         raise HTTPException(status_code=404, detail="Чеклист закупки не найден") from None
     except ValueError as exc:
         code = str(exc)
+        if code == "status_or_items_required":
+            raise HTTPException(status_code=400, detail="Укажите status или items") from None
         if code.startswith("invalid_status:"):
             raise HTTPException(status_code=400, detail="Недопустимый статус чеклиста") from None
         if code.startswith("invalid_transition:"):
             raise HTTPException(status_code=409, detail="Переход статуса недопустим") from None
-        raise HTTPException(status_code=400, detail="Не удалось обновить статус") from None
+        raise HTTPException(status_code=400, detail="Не удалось обновить чеклист") from None
+    if draft is None:
+        from app.services.supplymind import get_supply_draft
+
+        draft = await get_supply_draft(db, org_id, draft_id)
+        if draft is None:
+            raise HTTPException(status_code=404, detail="Чеклист закупки не найден")
     await db.commit()
     await db.refresh(draft)
     return {"ok": True, "item": supply_draft_public(draft)}

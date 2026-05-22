@@ -136,6 +136,42 @@ async def update_draft_status(
     return draft
 
 
+async def update_draft_items(
+    db: AsyncSession,
+    org_id: int,
+    draft_id: int,
+    item_checks: list[dict[str, Any]],
+) -> SupplyPurchaseDraft:
+    """Persist per-line checked state inside items_json (SupplyMind checklist)."""
+    draft = await get_supply_draft(db, org_id, draft_id)
+    if draft is None:
+        raise LookupError("draft_not_found")
+
+    items = list(draft.items_json or [])
+    if not items:
+        return draft
+
+    for patch in item_checks:
+        if not isinstance(patch, dict):
+            continue
+        idx = patch.get("idx")
+        if idx is None:
+            continue
+        try:
+            i = int(idx)
+        except (TypeError, ValueError):
+            continue
+        if i < 0 or i >= len(items):
+            continue
+        row = dict(items[i]) if isinstance(items[i], dict) else {}
+        row["checked"] = bool(patch.get("checked"))
+        items[i] = row
+
+    draft.items_json = items
+    await db.flush()
+    return draft
+
+
 def export_draft_csv(draft: SupplyPurchaseDraft) -> str:
     buf = io.StringIO()
     writer = csv.writer(buf, lineterminator="\n")
@@ -146,6 +182,7 @@ def export_draft_csv(draft: SupplyPurchaseDraft) -> str:
         "recommended_quantity",
         "days_until_runout",
         "source",
+        "checked",
     ])
     for item in draft.items_json or []:
         if not isinstance(item, dict):
@@ -157,6 +194,7 @@ def export_draft_csv(draft: SupplyPurchaseDraft) -> str:
             item.get("recommended_quantity") or "",
             item.get("days_until_runout") if item.get("days_until_runout") is not None else "",
             item.get("source") or "",
+            "1" if item.get("checked") else "0",
         ])
     return buf.getvalue()
 

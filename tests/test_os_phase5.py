@@ -299,6 +299,18 @@ class TestOsAutopilotUI:
         assert "askStaffMind(s.id)" in html
         assert "/api/admin/intelligence/staffmind/onboarding" in js
 
+    def test_control_plane_trace_timeline_ui_wired(self):
+        """Control Plane trace timeline panel in AI Center OS tab."""
+        import pathlib
+
+        html = pathlib.Path("app/templates/screens/_tab_ai_center.html").read_text(encoding="utf-8")
+        js = pathlib.Path("app/static/js/admin-app.js").read_text(encoding="utf-8")
+
+        assert "Цепочка trace_id" in html
+        assert "loadTraceTimeline()" in html
+        assert "traceTimelineEntryLabel" in js
+        assert "/api/admin/intelligence/trace-timeline" in js
+
     def test_event_bus_badge_in_ui(self):
         """Индикатор event-driven источника в OS Autopilot (язык оператора, не dev-жаргон)."""
         import pathlib

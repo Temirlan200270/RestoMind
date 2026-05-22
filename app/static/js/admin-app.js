@@ -1018,7 +1018,11 @@ function adminMixinState() {
         voiceCallLogsLimit: 15,
         voiceCallLogsHasMore: false,
         supplyMindExpandedDraftId: null,
-        supplyMindItemChecks: {},
+        supplyMindItemPatchLoading: null,
+        /** Control Plane: trace timeline panel (OS tab) */
+        traceTimeline: null,
+        traceTimelineLoading: false,
+        traceTimelineQuery: '',
         /** Phase 5 OS: Audit log feed (OS Decision Feed) */
         auditLog: [],
         auditLogLoading: false,
@@ -1124,6 +1128,7 @@ function adminMixinState() {
         chatTriageMode: 'active',
         chatPhone: '',
         activeChatPhone: '',
+        activeChatTraceId: '',
         chatListLoading: false,
         chatListHasMore: true,
         chatListCursorAt: null,
@@ -7150,6 +7155,7 @@ function adminMixinLiveChat() {
             };
             this.guestContext = { activeOrder: null, activeBooking: null };
             this.guestContextLoading = true;
+            this.activeChatTraceId = '';
 
             const chatIdx = this.chatList.findIndex(c => c.phone === phone);
             if (chatIdx >= 0) {
@@ -7197,6 +7203,7 @@ function adminMixinLiveChat() {
             if (stateRes?.ok) {
                 const d = await stateRes.json();
                 this.activeChatState = d.state;
+                this.activeChatTraceId = String(d.latest_trace_id || '').trim();
                 this.botSlaStatus = {
                     bot_short_mode: !!d.bot_short_mode,
                     slow_chats: Number(d.slow_chats || 0),
@@ -8790,26 +8797,68 @@ function adminMixinDataChartsSettings() {
         },
 
         isSupplyMindItemChecked(draftId, idx) {
-            const draftKey = String(Number(draftId));
-            const checks = (this.supplyMindItemChecks && this.supplyMindItemChecks[draftKey]) || {};
-            return !!checks[String(Number(idx))];
+            const draft = (this.supplyMindDrafts || []).find((d) => Number(d?.id) === Number(draftId));
+            const item = Array.isArray(draft?.items) ? draft.items[Number(idx)] : null;
+            if (item && typeof item === 'object' && typeof item.checked === 'boolean') {
+                return item.checked;
+            }
+            return false;
         },
 
-        toggleSupplyMindItem(draftId, idx) {
+        async toggleSupplyMindItem(draftId, idx) {
             if (!this.canStaffManageSupply()) return;
-            const draftKey = String(Number(draftId));
-            const itemKey = String(Number(idx));
-            const prev = (this.supplyMindItemChecks && this.supplyMindItemChecks[draftKey]) || {};
-            this.supplyMindItemChecks = {
-                ...(this.supplyMindItemChecks || {}),
-                [draftKey]: { ...prev, [itemKey]: !prev[itemKey] },
-            };
+            const id = Number(draftId);
+            const i = Number(idx);
+            if (!Number.isFinite(id) || !Number.isFinite(i) || i < 0) return;
+            const draft = (this.supplyMindDrafts || []).find((d) => Number(d?.id) === id);
+            if (!draft || !Array.isArray(draft.items) || !draft.items[i]) return;
+            if (draft.status === 'completed' || draft.status === 'cancelled') return;
+
+            const nextChecked = !this.isSupplyMindItemChecked(id, i);
+            const patchKey = this.supplyMindItemCheckKey(id, i);
+            if (this.supplyMindItemPatchLoading === patchKey) return;
+            this.supplyMindItemPatchLoading = patchKey;
+
+            const items = draft.items.map((row, rowIdx) => {
+                if (rowIdx !== i) return row;
+                return { ...(row || {}), checked: nextChecked };
+            });
+            this.supplyMindDrafts = (this.supplyMindDrafts || []).map((d) =>
+                Number(d?.id) === id ? { ...d, items } : d,
+            );
+
+            try {
+                const { ok, data } = await this.apiJsonResponse(
+                    `/api/admin/intelligence/supplymind/drafts/${id}`,
+                    {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ items: [{ idx: i, checked: nextChecked }] }),
+                    },
+                );
+                if (ok && data?.item) {
+                    this.supplyMindDrafts = (this.supplyMindDrafts || []).map((d) =>
+                        Number(d?.id) === id ? data.item : d,
+                    );
+                } else {
+                    void this.showUiAlert(
+                        this.formatApiError(data?.detail) || 'Не удалось сохранить отметку',
+                        'SupplyMind',
+                    );
+                    await this.loadSupplyMind();
+                }
+            } catch (e) {
+                adminLogger.error('[admin] supplymind item patch', e);
+                await this.loadSupplyMind();
+            } finally {
+                this.supplyMindItemPatchLoading = null;
+            }
         },
 
         supplyMindCheckedCount(draft) {
             const items = Array.isArray(draft?.items) ? draft.items : [];
             if (!items.length) return 0;
-            return items.reduce((n, _item, idx) => n + (this.isSupplyMindItemChecked(draft?.id, idx) ? 1 : 0), 0);
+            return items.reduce((n, item) => n + (item?.checked ? 1 : 0), 0);
         },
 
         supplyMindDraftProgressPct(draft) {
@@ -9076,6 +9125,73 @@ function adminMixinDataChartsSettings() {
             } catch (_e) { /* noop */ } finally {
                 this.auditLogLoading = false;
             }
+        },
+
+        async loadTraceTimeline(traceId) {
+            const tid = String(traceId ?? this.traceTimelineQuery ?? '').trim();
+            if (tid.length < 8) {
+                void this.showUiAlert('Введите trace_id (минимум 8 символов)', 'Control Plane');
+                return;
+            }
+            if (this.traceTimelineLoading) return;
+            this.traceTimelineLoading = true;
+            this.traceTimelineQuery = tid;
+            try {
+                const { ok, data } = await this.apiJsonResponse(
+                    `/api/admin/intelligence/trace-timeline?trace_id=${encodeURIComponent(tid)}&limit=100`,
+                );
+                if (ok) {
+                    this.traceTimeline = {
+                        trace_id: data.trace_id || tid,
+                        entries: Array.isArray(data.entries) ? data.entries : [],
+                        total: Number(data.total) || 0,
+                    };
+                } else {
+                    this.traceTimeline = { trace_id: tid, entries: [], total: 0 };
+                    void this.showUiAlert(
+                        this.formatApiError(data?.detail) || 'Не удалось загрузить цепочку trace',
+                        'Control Plane',
+                    );
+                }
+            } catch (e) {
+                adminLogger.error('[admin] trace timeline', e);
+                void this.showUiAlert('Ошибка сети. Проверьте соединение.', 'Control Plane');
+            } finally {
+                this.traceTimelineLoading = false;
+            }
+        },
+
+        traceTimelineEntryLabel(entry) {
+            const row = entry && typeof entry === 'object' ? entry : {};
+            if (row.kind === 'chat_log') {
+                const role = row.role === 'user' ? 'Гость' : (row.role === 'assistant' ? 'ИИ' : 'Оператор');
+                const preview = String(row.content || '').slice(0, 80);
+                return `${role}: ${preview || '—'}`;
+            }
+            const typ = row.type || row.action || 'событие';
+            const actor = row.actor ? ` (${row.actor})` : '';
+            return `${typ}${actor}`;
+        },
+
+        traceTimelineEntryBadgeClass(entry) {
+            const row = entry && typeof entry === 'object' ? entry : {};
+            if (row.kind === 'chat_log') return 'ds-status-surface ds-status-ai';
+            const typ = String(row.type || '');
+            if (typ.includes('failed') || typ.includes('error')) return 'ds-status-surface ds-status-danger';
+            if (typ.includes('warn') || typ.includes('slow')) return 'ds-status-surface ds-status-warn';
+            return 'ds-status-surface ds-status-inactive';
+        },
+
+        openTraceTimeline(traceId) {
+            const tid = String(traceId || '').trim();
+            if (!tid) return;
+            this.navigateToTab('ai_center', { aiCenterTab: 'os' });
+            void this.loadOsDashboard().then(() => this.loadTraceTimeline(tid));
+        },
+
+        openActiveChatTraceTimeline() {
+            if (!this.activeChatTraceId) return;
+            this.openTraceTimeline(this.activeChatTraceId);
         },
 
         _osActionLabel(action) {
@@ -9360,12 +9476,18 @@ function adminMixinDataChartsSettings() {
             const s = (session && typeof session === 'object') ? session : {};
             const progress = (s.progress && typeof s.progress === 'object') ? s.progress : {};
             const topics = Array.isArray(progress.completed_topics) ? progress.completed_topics : [];
-            const questionsAsked = Number.isFinite(Number(progress.questions_asked))
-                ? Number(progress.questions_asked)
-                : (s.last_question ? 1 : 0);
-            const testPassed = progress.test_passed === true || String(s.status || '').toLowerCase() === 'completed';
+            const questionsAsked = Number.isFinite(Number(s.questions_asked))
+                ? Number(s.questions_asked)
+                : (Number.isFinite(Number(progress.questions_asked))
+                    ? Number(progress.questions_asked)
+                    : (s.last_question ? 1 : 0));
+            const testPassed = s.test_passed === true
+                || progress.test_passed === true
+                || String(s.status || '').toLowerCase() === 'completed';
             const currentStep = Number(s.current_step) || topics.length || 0;
-            const stepTarget = Number(progress.step_target) || Math.max(5, currentStep, topics.length);
+            const stepTarget = Number.isFinite(Number(s.step_target))
+                ? Number(s.step_target)
+                : (Number(progress.step_target) || Math.max(5, currentStep, topics.length));
             return {
                 currentStep,
                 stepTarget,

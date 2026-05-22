@@ -400,6 +400,59 @@ async def test_staffmind_answers_from_knowledge_base(asgi_memory_client) -> None
     )
     assert msg.status_code == 200
     assert "кассовую смену" in msg.json()["answer"]
+    item = msg.json()["item"]
+    assert item["questions_asked"] >= 1
+    assert item["step_target"] >= 5
+    assert item["progress"]["questions_asked"] >= 1
+    assert "step_target" in item["progress"]
+
+
+@pytest.mark.asyncio
+async def test_supplymind_draft_item_check_persist(asgi_memory_client) -> None:
+    from app.core.passwords import hash_password
+    from app.db.models import StaffUser, SupplyPurchaseDraft
+
+    client, session_factory = asgi_memory_client
+    async with session_factory() as db:
+        org = Organization(name="Supply Items Org", slug="supply-items-org")
+        db.add(org)
+        await db.flush()
+        db.add(StaffUser(
+            organization_id=org.id,
+            email="supply-items@test.kz",
+            password_hash=hash_password("secret123"),
+            role="admin",
+            is_active=True,
+        ))
+        await db.commit()
+
+    await client.post("/api/admin/auth/login", json={"username": "supply-items@test.kz", "password": "secret123"})
+    await client.post(
+        "/api/admin/intelligence/inventory/snapshots/bulk",
+        json={"items": [{
+            "sku": "salt",
+            "ingredient": "Соль",
+            "quantity": 0.5,
+            "unit": "кг",
+            "min_quantity": 2,
+            "daily_usage_estimate": 1,
+        }]},
+    )
+    create_res = await client.post("/api/admin/intelligence/supplymind/drafts", json={"cover_days": 7})
+    assert create_res.status_code == 200
+    draft_id = create_res.json()["item"]["id"]
+
+    patch_res = await client.patch(
+        f"/api/admin/intelligence/supplymind/drafts/{draft_id}",
+        json={"items": [{"idx": 0, "checked": True}]},
+    )
+    assert patch_res.status_code == 200
+    assert patch_res.json()["item"]["items"][0]["checked"] is True
+
+    async with session_factory() as db:
+        row = await db.scalar(select(SupplyPurchaseDraft).where(SupplyPurchaseDraft.id == draft_id))
+        assert row is not None
+        assert row.items_json[0]["checked"] is True
 
 
 @pytest.mark.asyncio

@@ -711,6 +711,13 @@ async def get_chat_state(
         await db.commit()
         if ai_snooze_is_active(u) and u.ai_snoozed_until is not None:
             ai_snoozed_until = u.ai_snoozed_until.isoformat()
+    from app.services.trace_timeline import latest_trace_for_phone
+
+    latest_trace_id, _conversation_id = await latest_trace_for_phone(
+        db,
+        org_id=org_id,
+        phone=phone,
+    )
     return {
         "phone": phone,
         "state": state.value,
@@ -720,4 +727,5 @@ async def get_chat_state(
         "location_id": location_id,
         "sla_status": "red" if chat_slow else ("amber" if bot_short_mode else "green"),
         "chat_slow": chat_slow,
+        "latest_trace_id": latest_trace_id,
     }

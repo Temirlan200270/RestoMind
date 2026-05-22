@@ -123,7 +123,7 @@
 ## Known Follow-Ups
 
 - **Final Mile UI:** `aiCenterTab=final_mile` — SupplyMind drafts/checklist, Voice AI toggle + call log strip (`GET /voice/calls`); StaffMind tracker — в **Настройки → Команда**.
-- **Control Plane:** `GET /trace-timeline?trace_id=` — API only; admin UI panel — backlog (ROADMAP).
+- **Control Plane:** `GET /trace-timeline?trace_id=` + панель «Цепочка trace_id» в AI Center → OS (`loadTraceTimeline()`).
 - **Superadmin:** `/superadmin` — tech fields (`iiko_api_login`, …), журнал `GET /api/superadmin/audit` (миграция `20260521_superadmin_audit` на env).
 - Разбить `admin-app.js` на небольшие доменные модули: dashboard, orders, menu, chats, settings.
 - Постепенно убрать гибриды `rm-*`/raw Tailwind в экранах, когда файл всё равно открыт для правок.

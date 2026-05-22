@@ -137,6 +137,34 @@ async def test_build_trace_timeline_merges_events_and_chat(db_session: AsyncSess
 
 
 @pytest.mark.asyncio
+async def test_latest_trace_for_phone_reads_chat_meta(db_session: AsyncSession) -> None:
+    from app.db.models import ChatLog, Organization, User
+    from app.services.trace_timeline import latest_trace_for_phone
+
+    org = Organization(name="Trace Phone Org", slug="trace-phone-org")
+    db_session.add(org)
+    await db_session.flush()
+    user = User(organization_id=int(org.id), phone="+77005550999")
+    db_session.add(user)
+    await db_session.flush()
+    tid = "trace-from-chat-meta-001"
+    db_session.add(
+        ChatLog(
+            organization_id=int(org.id),
+            user_id=int(user.id),
+            role="user",
+            content="test",
+            meta_json={"trace_id": tid},
+        ),
+    )
+    await db_session.flush()
+
+    found, conv = await latest_trace_for_phone(db_session, org_id=int(org.id), phone="+77005550999")
+    assert found == tid
+    assert conv is not None
+
+
+@pytest.mark.asyncio
 async def test_process_with_retry_forwards_trace_id(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.api import webhooks
     from app.db.models import Base, Organization

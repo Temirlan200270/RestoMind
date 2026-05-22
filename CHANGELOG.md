@@ -6,6 +6,17 @@
 
 ## [Unreleased] — 2026-03-20
 
+### Добавлено (2026-05-21) — Control Plane + BI MVP tails
+
+- **Chat context → trace timeline:** `GET /chats/{phone}/state` отдаёт `latest_trace_id`; правая колонка чата — кнопка «Цепочка trace →» (`openActiveChatTraceTimeline`).
+- **BI MVP (локальные часы):** `GET /analytics` — `sales_by_hour_local`, `sales_insights` (`peak_hours_local`, `upsell_time_hint` для UpsellRule `time_of_day`); UI аналитики показывает локальный TZ филиала.
+
+### Добавлено (2026-05-21) — P5 backlog tails (StaffMind / SupplyMind / Control Plane UI)
+
+- **StaffMind tracker metrics:** `questions_asked`, `step_target`, `test_passed` в `onboarding_public()` и `progress_json`; инкремент вопросов в `answer_staff_question()` — [`staffmind.py`](app/services/staffmind.py).
+- **SupplyMind checklist PATCH:** `PATCH /supplymind/drafts/{id}` принимает `items[]` с `{idx, checked}`; persist в `items_json`; UI чекбоксов пишет на сервер — [`supplymind.py`](app/services/supplymind.py), [`admin-app.js`](app/static/js/admin-app.js).
+- **Control Plane timeline UI:** панель «Цепочка trace_id» в AI Center → OS; `loadTraceTimeline()`, `openTraceTimeline()` — [`_tab_ai_center.html`](app/templates/screens/_tab_ai_center.html).
+
 ### Документация (2026-05-21) — Focus-Driven OS Sprint 1–4 audit
 
 - Gap-audit: все 4 спринта wired end-to-end (mixins в `adminApp()`, шаблоны/CSS, inbox `loadMoneyQueue` на открытии вкладки, voice `location_id`, Command Bar без конфликта Ctrl+K с `handleGlobalKeydown`).
