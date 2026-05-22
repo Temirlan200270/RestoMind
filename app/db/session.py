@@ -13,6 +13,7 @@ from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import settings
+from app.db.pool_settings import resolve_postgres_pool_settings
 from app.db.ssl_context import postgres_connect_args
 
 logger = logging.getLogger(__name__)
@@ -23,10 +24,30 @@ engine_kwargs: dict[str, Any] = {
 }
 
 if settings.db_mode == "postgres":
-    engine_kwargs.update(pool_size=20, max_overflow=10, pool_pre_ping=True)
+    pool_cfg = resolve_postgres_pool_settings(
+        settings.database_url,
+        pool_size=settings.db_pool_size,
+        max_overflow=settings.db_max_overflow,
+        pool_timeout=settings.db_pool_timeout,
+        pool_recycle=settings.db_pool_recycle,
+    )
+    engine_kwargs.update(
+        pool_size=pool_cfg.pool_size,
+        max_overflow=pool_cfg.max_overflow,
+        pool_timeout=pool_cfg.pool_timeout,
+        pool_recycle=pool_cfg.pool_recycle,
+        pool_pre_ping=pool_cfg.pool_pre_ping,
+    )
     # Не полагаемся на `?sslmode=` в DATABASE_URL (SQLAlchemy/asyncpg иногда превращают это в kwargs).
     # TLS включаем явно через connect_args.
     engine_kwargs["connect_args"] = postgres_connect_args(settings.database_url)
+    logger.info(
+        "Postgres pool: size=%s max_overflow=%s timeout=%ss recycle=%ss",
+        pool_cfg.pool_size,
+        pool_cfg.max_overflow,
+        pool_cfg.pool_timeout,
+        pool_cfg.pool_recycle,
+    )
 
 async_engine = create_async_engine(settings.database_url, **engine_kwargs)
 

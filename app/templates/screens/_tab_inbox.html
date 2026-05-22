@@ -45,25 +45,25 @@
                             </div>
                         </div>
 
-                        <div x-show="inboxClientsInitialLoading()" class="p-6">
+                    <div x-show="inboxClientsPaneLoading()" class="p-6">
                             {{ skeleton(kind='table', rows=3, extra_class='!p-2') }}
                         </div>
 
-                        <div x-show="moneyQueueLoading && !inboxClientsInitialLoading() && !(moneyQueue?.items?.length)" class="p-6">
+                        <div x-show="moneyQueueLoading && !inboxClientsPaneLoading() && !(moneyQueue?.items?.length)" class="p-6">
                             {{ skeleton(kind='table', rows=3, extra_class='!p-2') }}
                         </div>
 
-                        <div x-show="!moneyQueueLoading && !(moneyQueue?.items?.length)"
+                        <div x-show="!inboxClientsPaneLoading() && !moneyQueueLoading && !(moneyQueue?.items?.length)"
                             class="p-8 text-center ds-text-muted">
                             <div class="text-4xl mb-2" aria-hidden="true">💚</div>
                             <div class="font-semibold" style="color: var(--color-text);">Сейчас ничего не горит</div>
                             <p class="text-sm mt-1 max-w-md mx-auto">Нет брошенных черновиков, зависших оплат и медленных чатов по текущей точке.</p>
                         </div>
 
-                        <div x-show="!moneyQueueLoading && (moneyQueue?.items?.length > 0)"
+                        <div x-show="!inboxClientsPaneLoading() && !moneyQueueLoading && (moneyQueue?.items?.length > 0)"
                             class="p-3 sm:p-4 grid grid-cols-1 lg:grid-cols-2 gap-3">
                             <template x-for="item in (moneyQueue?.items || [])" :key="item.id">
-                                <article class="ds-status-surface ds-status-ring p-4 flex flex-col gap-3 min-h-[44px]"
+                                <article class="ds-inbox-money-card ds-status-surface ds-status-ring p-4 flex flex-col gap-3 min-h-[44px]"
                                     :class="moneyQueueStatusClass(item.severity)">
                                     <div class="flex items-start gap-3 min-w-0">
                                         <span class="ds-status-dot mt-1.5 shrink-0"

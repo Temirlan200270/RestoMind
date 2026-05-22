@@ -63,13 +63,16 @@
                     <p class="text-xs text-gray-400 mt-1">Оставьте пустым — отправка сразу</p>
                 </div>
             </div>
-            <div class="flex items-center gap-3">
+            <div class="flex flex-col sm:flex-row sm:items-center gap-3">
                 <button type="button" @click="createBlast()"
                     :disabled="saving || !form.name || !form.message_text"
                     class="px-4 py-2 rounded-xl bg-slate-800 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50 transition">
                     <span x-show="!saving">Создать черновик</span>
                     <span x-show="saving">Создаём...</span>
                 </button>
+                <p class="text-xs text-amber-800" x-show="!saving && (!form.name || !form.message_text)">
+                    Укажите название и текст сообщения — тогда можно сохранить черновик.
+                </p>
                 <p class="text-xs text-red-600" x-show="formError" x-text="formError"></p>
             </div>
         </div>

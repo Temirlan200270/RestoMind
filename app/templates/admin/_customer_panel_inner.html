@@ -3,7 +3,7 @@
 
 {{ chat_guest_context_block() }}
 
-<div x-show="customerSummaryLoading" class="text-xs text-gray-400">Загрузка…</div>
+<div x-show="customerSummaryLoading" class="text-xs text-gray-400 sr-only" aria-hidden="true">Загрузка…</div>
 <div x-show="!customerSummaryLoading && customerSummary.is_blocked" class="mt-2 text-xs font-semibold text-red-700 bg-red-50 border border-red-100 rounded-lg px-2 py-1.5">
     В «стоп-листе» (аккаунт деактивирован)
 </div>
@@ -48,7 +48,10 @@
 </div>
 
 <div class="p-4 flex-1 min-h-0 flex flex-col {% if is_mobile %}pb-[max(1rem,env(safe-area-inset-bottom))]{% endif %}">
-    <h3 class="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-2">Заметка для коллег</h3>
+    <div class="flex items-center gap-2 mb-2">
+        <h3 class="text-[11px] font-bold text-gray-400 uppercase tracking-wider">Заметка для коллег</h3>
+        <span x-show="customerNoteSavedFlash" x-cloak class="text-[10px] font-semibold text-emerald-700">Сохранено</span>
+    </div>
     <textarea x-model="customerSummary.operator_note"
         @blur="saveCustomerNote()"
         :disabled="!customerSummary.user_exists"

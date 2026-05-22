@@ -4,6 +4,8 @@ import os
 import ssl
 from urllib.parse import urlparse
 
+from app.db.pool_settings import is_supabase_transaction_pooler
+
 
 def build_postgres_ssl_context() -> ssl.SSLContext:
     """
@@ -49,6 +51,12 @@ def postgres_connect_args(database_url: str) -> dict:
     Важно: не используем `?sslmode=` в URL — asyncpg/SQLAlchemy могут превращать это в kwargs.
     """
     parsed = urlparse(database_url)
-    if parsed.scheme.startswith("postgres"):
-        return {"ssl": build_postgres_ssl_context()}
-    return {}
+    if not parsed.scheme.startswith("postgres"):
+        return {}
+
+    args: dict = {"ssl": build_postgres_ssl_context()}
+    # Supabase transaction pooler (PgBouncer) не поддерживает prepared statements asyncpg.
+    if is_supabase_transaction_pooler(database_url):
+        args["statement_cache_size"] = 0
+        args["prepared_statement_cache_size"] = 0
+    return args

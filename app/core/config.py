@@ -672,6 +672,33 @@ class Settings(BaseSettings):
         description="Максимум WhatsApp-сообщений в минуту при рассылке",
     )
 
+    # --- PostgreSQL pool (SQLAlchemy) ---
+    # 0 / -1 = авто по DATABASE_URL (Supabase session pooler → малый пул).
+    db_pool_size: int = Field(
+        default=0,
+        ge=0,
+        le=50,
+        validation_alias=AliasChoices("DB_POOL_SIZE", "db_pool_size"),
+    )
+    db_max_overflow: int = Field(
+        default=-1,
+        ge=-1,
+        le=50,
+        validation_alias=AliasChoices("DB_MAX_OVERFLOW", "db_max_overflow"),
+    )
+    db_pool_timeout: int = Field(
+        default=30,
+        ge=1,
+        le=300,
+        validation_alias=AliasChoices("DB_POOL_TIMEOUT", "db_pool_timeout"),
+    )
+    db_pool_recycle: int = Field(
+        default=1800,
+        ge=60,
+        le=86_400,
+        validation_alias=AliasChoices("DB_POOL_RECYCLE", "db_pool_recycle"),
+    )
+
     # --- Очередь задач (ARQ + Redis) ---
     arq_enabled: bool = Field(
         default=False,

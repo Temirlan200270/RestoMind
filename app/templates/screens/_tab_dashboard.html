@@ -173,7 +173,10 @@
                 <div class="ds-card p-4" x-show="analyticsDensity === 'normal'" x-cloak>
                     <div class="text-xs font-semibold text-slate-700 mb-2">Живая ОС</div>
                     <template x-if="!(dashLiveFeed || []).length">
-                        <div class="text-xs text-slate-400 py-2">События появятся в реальном времени</div>
+                        <div class="flex items-start gap-2 text-xs text-emerald-800 bg-emerald-50/80 border border-emerald-100 rounded-lg px-3 py-2.5">
+                            <span class="shrink-0 w-2 h-2 rounded-full bg-emerald-500 mt-1" aria-hidden="true"></span>
+                            <span>Автопилот запущен. Система ожидает входящих заказов и сообщений — всё под контролем.</span>
+                        </div>
                     </template>
                     <div class="space-y-1.5 max-h-48 overflow-y-auto">
                         <template x-for="(row, idx) in (dashLiveFeed || [])" :key="row.ts + '-' + idx">

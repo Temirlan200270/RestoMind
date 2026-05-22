@@ -144,7 +144,47 @@ def test_shift_control_no_raw_state_leak():
     assert 'x-text="shiftState.state"' not in html
     assert 'x-text="shiftState.presentation.state_reason"' not in html
     assert "'Режим ' + (shiftState?.state" not in html
-    assert "shiftStateLabel(" in html
+    assert "shiftStatusHeadline()" in html
     assert "shiftStateLabel(" in js
-    assert "shiftStateReasonLabel(" in html
     assert "shiftStateReasonLabel(" in js
+
+
+def test_orders_hint_no_kanban_jargon():
+    html = _read("app", "templates", "screens", "_tab_orders.html")
+    assert "канбан" not in html.lower()
+    assert "По этапам" in html
+
+
+def test_operations_density_toggle_in_header():
+    header = _read("app", "templates", "screens", "_header.html")
+    js = JS.read_text(encoding="utf-8")
+    assert "canToggleOperationsDensity()" in header
+    assert "setOperationsDensity(" in header
+    assert "restomind_density:operations" in js
+    assert "operationsCompactEnabled()" in js
+
+
+def test_header_single_org_no_duplicate_name():
+    header = _read("app", "templates", "screens", "_header.html")
+    assert "available_organizations || []).length <= 1" not in header
+    sidebar = _read("app", "templates", "screens", "_sidebar.html")
+    assert "orgProfile?.name" in sidebar
+
+
+def test_marketing_draft_helper_when_form_incomplete():
+    marketing = _read("app", "templates", "screens", "_tab_marketing.html")
+    assert "Укажите название и текст сообщения" in marketing
+    assert "!form.name || !form.message_text" in marketing
+
+
+def test_search_shortcut_onboarding_hint():
+    header = _read("app", "templates", "screens", "_header.html")
+    assert "searchShortcut" in header
+    assert "dismissUiHint('searchShortcut')" in header
+    assert "Ctrl K" in header
+
+
+def test_bookings_sidebar_collapses_when_empty():
+    bookings = _read("app", "templates", "screens", "_tab_bookings.html")
+    assert "bookingsSidebarOpen()" in bookings
+    assert "Справка по бронированию" in bookings

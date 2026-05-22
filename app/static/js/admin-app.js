@@ -508,6 +508,19 @@ function adminTabsForMode(mode) {
 
 /** Role-first IA (Sprint 5 pivot): sidebar visibility by staff role. */
 const ADMIN_ANALYTICS_DENSITY_STORAGE_KEY = 'restomind_analytics_density';
+const ADMIN_OPERATIONS_DENSITY_STORAGE_KEY = 'restomind_density:operations';
+const ADMIN_UI_HINTS_STORAGE_KEY = 'restomind_ui_hints_v1';
+const ADMIN_OPERATIONS_TABS = Object.freeze(['shift', 'inbox', 'orders', 'chats', 'bookings']);
+
+function adminReadUiHintsDismissed() {
+    try {
+        const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(ADMIN_UI_HINTS_STORAGE_KEY) : null;
+        const parsed = raw ? JSON.parse(raw) : {};
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (_e) {
+        return {};
+    }
+}
 
 const ADMIN_ROLE_TABS = Object.freeze({
     operator: Object.freeze(['shift', 'inbox', 'orders', 'chats', 'bookings']),
@@ -1015,10 +1028,14 @@ function adminMixinState() {
         _ordersViewAutoSet: false,
         kanbanLateStagesOpen: false,
         kanbanDensity: 'normal',
+        operationsDensity: 'normal',
         /** Подсказка режима заказов (канбан / таблица), скрывается через localStorage */
         ordersKanbanHintDismissed:
             typeof localStorage !== 'undefined' &&
             localStorage.getItem('rm_orders_view_hint_v1') === '1',
+        uiHintsDismissed: adminReadUiHintsDismissed(),
+        customerNoteSavedFlash: false,
+        _customerNoteSavedTimer: null,
         menuEmbeddingsReindexLoading: false,
         orderFilter: '',
         /** Поиск и фильтр суммы (список заказов) */
@@ -1540,9 +1557,24 @@ function adminMixinMenuOrdersUi() {
             return this.analyticsDensity === 'advanced' || !this.canToggleAnalyticsDensity();
         },
 
+        get kanbanAllEmpty() {
+            if (this.ordersLoading) return false;
+            return (
+                this.kanbanDraft.length
+                + this.kanbanConfirmed.length
+                + this.kanbanSent.length
+                + this.kanbanInTransit.length
+                + this.kanbanWaitingPickup.length
+                + this.kanbanCompleted.length
+            ) === 0;
+        },
+
+        inboxClientsPaneLoading() {
+            return !!(this.moneyQueueLoading || this.failedTasksLoading);
+        },
+
         inboxClientsInitialLoading() {
-            return !!(this.moneyQueueLoading && this.failedTasksLoading
-                && !(this.moneyQueue?.items?.length) && !(this.failedTasks?.length));
+            return this.inboxClientsPaneLoading();
         },
 
         dashboardNowCards() {
@@ -1780,9 +1812,17 @@ function adminMixinMenuOrdersUi() {
                 this.menuToolbarExpanded = m;
                 // Mobile-first: заказы без горизонтального скролла (канбан — для больших экранов).
                 this.ordersView = m ? (this.ordersView || 'kanban') : 'table';
+                const savedOpsDensity = localStorage.getItem(ADMIN_OPERATIONS_DENSITY_STORAGE_KEY);
                 const savedKanbanDensity = localStorage.getItem('rm_kanban_density_v1');
-                if (savedKanbanDensity === 'compact' || savedKanbanDensity === 'normal') {
-                    this.kanbanDensity = savedKanbanDensity;
+                const density =
+                    savedOpsDensity === 'compact' || savedOpsDensity === 'normal'
+                        ? savedOpsDensity
+                        : savedKanbanDensity === 'compact' || savedKanbanDensity === 'normal'
+                          ? savedKanbanDensity
+                          : null;
+                if (density) {
+                    this.operationsDensity = density;
+                    this.kanbanDensity = density;
                 }
                 const savedAnalyticsDensity = localStorage.getItem(ADMIN_ANALYTICS_DENSITY_STORAGE_KEY);
                 if (savedAnalyticsDensity === 'advanced' || savedAnalyticsDensity === 'normal') {
@@ -2352,22 +2392,46 @@ function adminMixinMenuOrdersUi() {
             return c;
         },
 
-        setKanbanDensity(mode) {
+        setOperationsDensity(mode) {
             const next = mode === 'compact' ? 'compact' : 'normal';
+            this.operationsDensity = next;
             this.kanbanDensity = next;
             try {
+                localStorage.setItem(ADMIN_OPERATIONS_DENSITY_STORAGE_KEY, next);
                 localStorage.setItem('rm_kanban_density_v1', next);
             } catch (_e) {}
         },
 
-        kanbanCompactEnabled() {
+        setKanbanDensity(mode) {
+            this.setOperationsDensity(mode);
+        },
+
+        isOperationsTab() {
+            return ADMIN_OPERATIONS_TABS.includes(this.currentTab);
+        },
+
+        canToggleOperationsDensity() {
+            return this.isOperationsTab();
+        },
+
+        operationsCompactEnabled() {
+            if (this.operationsDensity !== 'compact' || !this.isOperationsTab()) return false;
             try {
-                return this.ordersView === 'kanban' &&
-                    this.kanbanDensity === 'compact' &&
-                    window.matchMedia('(min-width: 768px)').matches;
+                return window.matchMedia('(min-width: 640px)').matches;
             } catch (_e) {
-                return this.ordersView === 'kanban' && this.kanbanDensity === 'compact';
+                return true;
             }
+        },
+
+        kanbanCompactEnabled() {
+            return this.ordersView === 'kanban' && this.operationsCompactEnabled();
+        },
+
+        bookingsSidebarOpen() {
+            if ((this.bookings || []).length > 0) return true;
+            const day = this.bookingSelectedDate || '';
+            if (day && this.bookingCountForDay(day) > 0) return true;
+            return false;
         },
 
         orderPhoneLast4(order) {
@@ -3197,6 +3261,37 @@ function adminMixinSearchBookings() {
                 /* ignore */
             }
             this.ordersKanbanHintDismissed = true;
+        },
+
+        dismissUiHint(key) {
+            const k = String(key || '').trim();
+            if (!k) return;
+            this.uiHintsDismissed = { ...(this.uiHintsDismissed || {}), [k]: true };
+            try {
+                localStorage.setItem(
+                    ADMIN_UI_HINTS_STORAGE_KEY,
+                    JSON.stringify(this.uiHintsDismissed),
+                );
+            } catch {
+                /* ignore */
+            }
+        },
+
+        uiHintDismissed(key) {
+            return !!(this.uiHintsDismissed || {})[String(key || '').trim()];
+        },
+
+        shiftStatusHeadline() {
+            const state = this.shiftState?.state;
+            const human = state ? this.shiftStateLabel(state) : '';
+            const op = String(this.orgProfile?.operational_label || '').trim();
+            if (human && op) {
+                if (state === 'S0' || state === 'S3') {
+                    return `Статус: ${human}. ${op}`;
+                }
+                return `${human}. ${op}`;
+            }
+            return human || op || 'Смена загружается…';
         },
 
         activeOrderFiltersCount() {
@@ -7851,6 +7946,12 @@ function adminMixinLiveChat() {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ note: this.customerSummary.operator_note || '' }),
                 });
+                this.customerNoteSavedFlash = true;
+                if (this._customerNoteSavedTimer) clearTimeout(this._customerNoteSavedTimer);
+                this._customerNoteSavedTimer = setTimeout(() => {
+                    this.customerNoteSavedFlash = false;
+                    this._customerNoteSavedTimer = null;
+                }, 2000);
             } catch (e) {
                 adminLogger.error('saveCustomerNote', e);
             }
