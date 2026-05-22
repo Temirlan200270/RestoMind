@@ -22,9 +22,9 @@
                 </h1>
                 <!-- Статус работы заведения -->
                 <span x-show="orgProfile && (orgProfile.operational_label || orgProfile.force_closed)" x-cloak
-                    class="shrink-0 max-w-[45vw] text-[10px] font-bold px-2 py-1 rounded-full border truncate"
+                    class="shrink-0 text-[10px] font-bold px-2 py-1 rounded-full border whitespace-nowrap"
                     :class="headerOperationalBadgeClass()"
-                    :title="headerOperationalText()"
+                    :title="headerOperationalTitle()"
                     x-text="headerOperationalEmoji() + ' ' + headerOperationalText()">
                 </span>
                 <button type="button" @click="openGlobalSearch()"
@@ -227,9 +227,9 @@
                 </div>
                 <div class="flex items-center gap-1.5 sm:gap-2 overflow-x-auto max-w-full shrink-0 pb-0.5 md:pb-0 md:flex-wrap md:overflow-visible md:justify-end admin-header-actions-scroll">
                     <span x-show="orgProfile && (orgProfile.operational_label || orgProfile.force_closed)" x-cloak
-                        class="hidden md:inline-flex shrink-0 max-w-xs lg:max-w-md items-center text-xs font-bold px-3 py-1.5 rounded-full border truncate"
+                        class="hidden md:inline-flex shrink-0 items-center text-xs font-bold px-3 py-1.5 rounded-full border whitespace-nowrap"
                         :class="headerOperationalBadgeClass()"
-                        :title="headerOperationalText()"
+                        :title="headerOperationalTitle()"
                         x-text="headerOperationalEmoji() + ' ' + headerOperationalText()">
                     </span>
                     <template x-if="(userData.available_locations || []).length > 1">

@@ -4347,7 +4347,18 @@ function adminMixinAuthKnowledge() {
         headerOperationalText() {
             const p = this.orgProfile || {};
             if (p.force_closed) return 'Временно закрыто';
-            return String(p.operational_label || '').trim() || 'Статус неизвестен';
+            if (p.is_kitchen_open) return 'Открыто';
+            if (p.is_business_open) return 'Принимаем';
+            return 'Закрыто';
+        },
+
+        headerOperationalTitle() {
+            const p = this.orgProfile || {};
+            if (p.force_closed) {
+                const reason = String(p.force_closed_reason || '').trim();
+                return reason ? `Временно закрыто: ${reason}` : 'Временно закрыто';
+            }
+            return String(p.operational_label || '').trim() || this.headerOperationalText();
         },
 
         brandingPreviewTitle() {

@@ -31,12 +31,15 @@ def test_dashboard_operator_escalation_labels():
     assert "эскалац" not in dash.lower()
 
 
-def test_header_shows_full_operational_status():
+def test_header_shows_compact_operational_status_with_full_title():
     header = _read("app", "templates", "screens", "_header.html")
     js = JS.read_text(encoding="utf-8")
     assert "headerOperationalText()" in header
+    assert "headerOperationalTitle()" in header
     assert "headerOperationalEmoji()" in header
     assert "headerOperationalBadgeClass()" in js
+    assert "headerOperationalTitle()" in js
+    assert "if (p.is_kitchen_open) return 'Открыто';" in js
 
 
 def test_marketing_loyalty_no_env_var_names():
