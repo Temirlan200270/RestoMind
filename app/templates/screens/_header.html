@@ -1,10 +1,5 @@
         <header class="ds-admin-tenant-stripe-header shrink-0 glass border-b border-gray-200 px-3 sm:px-4 md:px-8 py-2.5 md:py-4 z-10 min-w-0 max-w-full overflow-x-clip"
             :class="currentTab === 'chats' && activeChatPhone ? 'max-md:hidden' : ''">
-            {# Focus-Driven OS — Mode Bar (Sprint 1 shell; sidebar P1.5 остаётся) #}
-            <div x-show="authenticated" x-cloak
-                class="mb-2.5 md:mb-3 flex justify-center sm:justify-start min-w-0 overflow-x-auto">
-                {{ mode_bar('w-full sm:w-auto max-w-full') }}
-            </div>
             <!-- Мобильная шапка: один компактный ряд -->
             <div class="flex items-center gap-2 md:hidden min-w-0">
                 <h1 class="flex-1 min-w-0 text-base font-bold text-gray-900 truncate"
@@ -20,7 +15,7 @@
                         : 'Настройки')
                       : (currentTab === 'menu'
                         ? (menuView === 'stoplist' ? 'Меню: Стоп' : 'Меню')
-                        : (currentTab === 'dashboard' && dashboardTab === 'analytics' ? 'Аналитика'
+                        : (currentTab === 'dashboard' && analyticsDensity === 'advanced' ? 'Аналитика'
                         : currentTab === 'inbox' ? (inboxTab === 'system' ? 'Системные' : 'От клиентов')
                         : currentTab === 'ai_center' ? (aiCenterTab === 'insights' ? 'Инсайты' : aiCenterTab === 'load' ? 'Нагрузка' : aiCenterTab === 'os' ? 'Автопилот' : aiCenterTab === 'guestcare' ? 'Отзывы' : aiCenterTab === 'final_mile' ? 'Final Mile' : 'Вклад ИИ')
                         : (navItems.find(i => i.id === currentTab)?.label || 'RestoMind')))">
@@ -135,7 +130,7 @@
                                     : 'Настройки')
                                   : (currentTab === 'menu'
                                     ? (menuView === 'stoplist' ? 'Меню: Стоп-лист' : 'Меню')
-                                    : (currentTab === 'dashboard' && dashboardTab === 'analytics' ? 'Аналитика'
+                                    : (currentTab === 'dashboard' && analyticsDensity === 'advanced' ? 'Аналитика'
                                     : currentTab === 'inbox' ? (inboxTab === 'system' ? 'Требует внимания · системные' : 'Требует внимания · от клиентов')
                                     : currentTab === 'ai_center' ? (aiCenterTab === 'insights' ? 'ИИ-аналитика · инсайты' : aiCenterTab === 'load' ? 'ИИ-аналитика · нагрузка' : aiCenterTab === 'os' ? 'ИИ-аналитика · автопилот' : aiCenterTab === 'guestcare' ? 'ИИ-аналитика · отзывы' : aiCenterTab === 'final_mile' ? 'ИИ-аналитика · final mile' : 'ИИ-аналитика · вклад ИИ')
                                     : (navItems.find(i => i.id === currentTab)?.label)))"></h1>
@@ -156,7 +151,7 @@
                                 : settingsTab === 'technical' ? (isSuperadmin ? 'Экспорт, ретеншн и опасная зона' : 'Скачать данные заказов и чатов в CSV')
                                 : settingsTab === 'bot_test' ? 'Проверка ответов ИИ без влияния на гостей'
                                 : '')
-                              : (currentTab === 'dashboard' && dashboardTab === 'analytics' ? 'Выручка, средний чек, динамика продаж'
+                              : (currentTab === 'dashboard' && analyticsDensity === 'advanced' ? 'Выручка, средний чек, динамика продаж'
                               : currentTab === 'inbox' ? (inboxTab === 'system' ? 'Инциденты и системное здоровье' : 'Очередь помощи и нерешённые обращения')
                               : currentTab === 'ai_center' ? (aiCenterTab === 'insights' ? 'Выручка, заказы, отмены и авто-инсайты' : aiCenterTab === 'load' ? 'Состояние ресторана и симуляция нагрузки' : aiCenterTab === 'os' ? 'Прогнозы, ценовой сигнал и лента решений' : aiCenterTab === 'guestcare' ? 'Обратная связь гостей и работа с репутацией' : aiCenterTab === 'final_mile' ? 'Digest, SupplyMind и Voice AI в одном рабочем слое' : 'Допродажи, экономия времени и вклад ассистента')
                               : (navItems.find(i => i.id === currentTab)?.desc))"></p>

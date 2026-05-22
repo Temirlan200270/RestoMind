@@ -506,6 +506,48 @@ function adminTabsForMode(mode) {
     return m ? [...ADMIN_MODE_TABS[m]] : [...ADMIN_MODE_TABS.control];
 }
 
+/** Role-first IA (Sprint 5 pivot): sidebar visibility by staff role. */
+const ADMIN_ANALYTICS_DENSITY_STORAGE_KEY = 'restomind_analytics_density';
+
+const ADMIN_ROLE_TABS = Object.freeze({
+    operator: Object.freeze(['shift', 'inbox', 'orders', 'chats', 'bookings']),
+    manager: Object.freeze(['shift', 'inbox', 'orders', 'chats', 'bookings', 'menu', 'dashboard', 'ai_center']),
+    admin: null,
+});
+
+function adminNormalizeStaffRole(role) {
+    const r = String(role || 'admin').trim().toLowerCase();
+    if (r === 'operator' || r === 'manager' || r === 'admin') return r;
+    return 'admin';
+}
+
+function adminTabsForRole(role) {
+    const r = adminNormalizeStaffRole(role);
+    const tabs = ADMIN_ROLE_TABS[r];
+    if (tabs === null) return null;
+    return [...tabs];
+}
+
+function adminTabVisibleForRole(tabId, role) {
+    const tabs = adminTabsForRole(role);
+    if (tabs === null) return true;
+    return tabs.includes(String(tabId || '').trim());
+}
+
+function adminResolveOperatorLandingTab(shiftState) {
+    const ss = shiftState && typeof shiftState === 'object' ? shiftState : {};
+    const risk = Number(ss.metrics?.risk_kzt ?? 0);
+    if (risk > 0) return 'shift';
+    if (ss.focus?.id) return 'shift';
+    return 'inbox';
+}
+
+function adminDefaultTabForRole(role) {
+    const r = adminNormalizeStaffRole(role);
+    if (r === 'operator') return 'inbox';
+    return 'dashboard';
+}
+
 /** Focus-Driven OS — Command Bar prefixes (Sprint 4). */
 const ADMIN_COMMAND_DEFINITIONS = Object.freeze([
     Object.freeze({
@@ -574,6 +616,16 @@ if (typeof window !== 'undefined') {
         tabsForMode: adminTabsForMode,
         defaultTabForMode: adminDefaultTabForMode,
         tabBelongsToMode: adminTabBelongsToMode,
+        normalizeMode: adminNormalizeAdminMode,
+    };
+    window.adminRoleNav = {
+        ROLE_TABS: ADMIN_ROLE_TABS,
+        tabsForRole: adminTabsForRole,
+        tabVisibleForRole: adminTabVisibleForRole,
+        resolveOperatorLandingTab: adminResolveOperatorLandingTab,
+        defaultTabForRole: adminDefaultTabForRole,
+        normalizeStaffRole: adminNormalizeStaffRole,
+        ANALYTICS_DENSITY_STORAGE_KEY: ADMIN_ANALYTICS_DENSITY_STORAGE_KEY,
     };
 }
 
@@ -795,6 +847,8 @@ function adminMixinState() {
         inboxTab: 'clients',
         /** Под-табы дашборда: главная vs аналитика (P1.5.0). */
         dashboardTab: 'overview',
+        /** Role-first IA: normal (hero KPI) vs advanced (full analytics). */
+        analyticsDensity: 'normal',
         /** Под-табы ИИ-центра: вклад / инсайты / нагрузка (P1.5.0). */
         aiCenterTab: 'value',
         /** Вкладка внутри Settings (Stripe-like). */
@@ -1613,6 +1667,11 @@ function adminMixinMenuOrdersUi() {
                 const savedKanbanDensity = localStorage.getItem('rm_kanban_density_v1');
                 if (savedKanbanDensity === 'compact' || savedKanbanDensity === 'normal') {
                     this.kanbanDensity = savedKanbanDensity;
+                }
+                const savedAnalyticsDensity = localStorage.getItem(ADMIN_ANALYTICS_DENSITY_STORAGE_KEY);
+                if (savedAnalyticsDensity === 'advanced' || savedAnalyticsDensity === 'normal') {
+                    this.analyticsDensity = savedAnalyticsDensity;
+                    this.dashboardTab = savedAnalyticsDensity === 'advanced' ? 'analytics' : 'overview';
                 }
             } catch (_e) {
                 this.menuCategoryChipsOpen = true;
@@ -3592,6 +3651,107 @@ function adminMixinAuthKnowledge() {
             return this.canStaffManageSupply();
         },
 
+        /** Role-first sidebar: operator / manager / admin tab matrix. */
+        isTabVisibleForRole(tabId) {
+            return adminTabVisibleForRole(tabId, this.effectiveStaffRole());
+        },
+
+        resolveOperatorLandingTab() {
+            return adminResolveOperatorLandingTab(this.shiftState);
+        },
+
+        resolveDefaultTabForRole() {
+            const role = this.effectiveStaffRole();
+            if (role === 'operator') return this.resolveOperatorLandingTab();
+            return adminDefaultTabForRole(role);
+        },
+
+        canToggleAnalyticsDensity() {
+            return this.canStaffManageSupply();
+        },
+
+        setAnalyticsDensity(next) {
+            const d = next === 'advanced' ? 'advanced' : 'normal';
+            this.analyticsDensity = d;
+            this.dashboardTab = d === 'advanced' ? 'analytics' : 'overview';
+            this._persistAnalyticsDensity();
+            if (this.currentTab === 'dashboard') void this.loadTabData();
+        },
+
+        _persistAnalyticsDensity() {
+            try {
+                window.localStorage?.setItem(ADMIN_ANALYTICS_DENSITY_STORAGE_KEY, this.analyticsDensity);
+            } catch (_e) { /* ignore */ }
+        },
+
+        /** Мобильный tab-bar «Ещё»: подсветка вторичных вкладок по роли. */
+        bottomNavMoreTabActive() {
+            const tabs = ['bookings'];
+            if (this.effectiveStaffRole() !== 'operator') tabs.push('inbox');
+            if (this.isTabVisibleForRole('ai_center')) tabs.push('ai_center');
+            if (this.isTabVisibleForRole('settings')) tabs.push('settings');
+            if (this.isTabVisibleForRole('marketing')) tabs.push('marketing');
+            return tabs.includes(this.currentTab);
+        },
+
+        /** Фоновый poll shift/state для badge риска вне вкладки «Смена». */
+        shouldPollShiftStateBadge() {
+            if (!this.isTabVisibleForRole('shift')) return false;
+            if (this.currentTab === 'shift') return true;
+            const m = this.shiftState?.metrics;
+            const risk = Number(m?.risk_kzt ?? 0);
+            if (risk > 0) return true;
+            if (this.shiftState?.focus?.id) return true;
+            if (Number(m?.at_risk_count ?? 0) > 0) return true;
+            return false;
+        },
+
+        _syncShiftStatePolling() {
+            if (this.currentTab === 'shift') {
+                this._startShiftStateAutoRefresh();
+                return;
+            }
+            this._stopShiftHeartbeat(true);
+            if (this._shiftStateRefreshTimer) {
+                clearInterval(this._shiftStateRefreshTimer);
+                this._shiftStateRefreshTimer = null;
+            }
+            if (!this.shouldPollShiftStateBadge()) return;
+            this._shiftStateRefreshTimer = setInterval(() => {
+                if (document.hidden) return;
+                void this.loadShiftState(false);
+            }, 45000);
+        },
+
+        shiftIsCalmEmpty() {
+            const ss = this.shiftState;
+            if (!ss || ss.focus?.id) return false;
+            const risk = Number(ss.metrics?.risk_kzt ?? 0);
+            if (risk > 0) return false;
+            const st = String(ss.state || '');
+            return st === 'S0' || st === 'S3';
+        },
+
+        async _afterAuthTabBootstrap() {
+            if (this.isTabVisibleForRole('shift') && this.effectiveStaffRole() !== 'operator') {
+                await this.loadShiftState(false);
+            }
+            this._syncShiftStatePolling();
+        },
+
+        /** После auth: умный landing оператора (shift при риске/focus, иначе inbox). */
+        async applyRoleDefaultLanding(fromHashTab) {
+            if (fromHashTab) return;
+            if (this.effectiveStaffRole() === 'operator') {
+                await this.loadShiftState(true);
+                this.currentTab = this.resolveOperatorLandingTab();
+            } else {
+                this.currentTab = adminDefaultTabForRole(this.effectiveStaffRole());
+            }
+            this._bootstrapAdminMode({ tabFromHash: null });
+            this._pushAdminHash();
+        },
+
         /** Подсказка RBAC для UI: '' если доступ есть, иначе текст для operator/manager. */
         staffRbacHint(level) {
             const role = this.effectiveStaffRole();
@@ -3797,9 +3957,7 @@ function adminMixinAuthKnowledge() {
                     this._ensureAdminHashListener();
                     const parsed = adminParseLocationHash();
                     if (!parsed.tab) {
-                        this.currentTab = this.staffRole === 'operator' ? 'shift' : 'dashboard';
-                        this._bootstrapAdminMode({ tabFromHash: null });
-                        this._pushAdminHash();
+                        await this.applyRoleDefaultLanding(null);
                     } else {
                         this._applyParsedHash(parsed);
                         this._bootstrapAdminMode({ tabFromHash: this.currentTab });
@@ -3814,6 +3972,7 @@ function adminMixinAuthKnowledge() {
                         this.loadChatList(),
                     ]);
                     await this._consumePendingHashChatPhone();
+                    await this._afterAuthTabBootstrap();
                     this.$nextTick(() => this.maybeStartP15CoachTour());
                 } else {
                     this.authenticated = false;
@@ -3860,9 +4019,7 @@ function adminMixinAuthKnowledge() {
                 this._ensureAdminHashListener();
                 const parsedLogin = adminParseLocationHash();
                 if (!parsedLogin.tab) {
-                    this.currentTab = this.staffRole === 'operator' ? 'shift' : 'dashboard';
-                    this._bootstrapAdminMode({ tabFromHash: null });
-                    this._pushAdminHash();
+                    await this.applyRoleDefaultLanding(null);
                 } else {
                     this._applyParsedHash(parsedLogin);
                     this._bootstrapAdminMode({ tabFromHash: this.currentTab });
@@ -3877,6 +4034,7 @@ function adminMixinAuthKnowledge() {
                     this.loadChatList(),
                 ]);
                 await this._consumePendingHashChatPhone();
+                await this._afterAuthTabBootstrap();
                 this.$nextTick(() => this.maybeStartP15CoachTour());
             } catch {
                 this.loginError = 'Не удалось связаться с сервером';
@@ -3908,9 +4066,7 @@ function adminMixinAuthKnowledge() {
                 this._ensureAdminHashListener();
                 const parsedLogin = adminParseLocationHash();
                 if (!parsedLogin.tab) {
-                    this.currentTab = 'dashboard';
-                    this._bootstrapAdminMode({ tabFromHash: null });
-                    this._pushAdminHash();
+                    await this.applyRoleDefaultLanding(null);
                 } else {
                     this._applyParsedHash(parsedLogin);
                     this._bootstrapAdminMode({ tabFromHash: this.currentTab });
@@ -3925,6 +4081,8 @@ function adminMixinAuthKnowledge() {
                     this.loadChatList(),
                 ]);
                 await this._consumePendingHashChatPhone();
+                await this._afterAuthTabBootstrap();
+                this.$nextTick(() => this.maybeStartP15CoachTour());
             } catch {
                 this.loginError = 'Не удалось связаться с сервером';
             } finally {
@@ -6265,19 +6423,13 @@ function adminMixinModeEngine() {
         },
 
         /**
-         * After auth: hash tab wins; else restore stored mode; else derive mode from role default tab.
+         * After auth: hash tab wins; sync internal mode from tab (role-first IA).
          * @param {{ tabFromHash?: string | null }} [ctx]
          */
         _bootstrapAdminMode(ctx) {
             const fromHash = ctx?.tabFromHash ?? null;
             if (fromHash) {
                 this._syncModeFromTab(fromHash);
-                return;
-            }
-            const stored = this._readStoredAdminMode();
-            if (stored) {
-                this.currentMode = stored;
-                this.currentTab = adminDefaultTabForMode(stored);
                 return;
             }
             this._syncModeFromTab(this.currentTab);
@@ -6375,15 +6527,13 @@ function adminMixinCommandBar() {
             this.closeCommandBar();
             switch (cmd.id) {
                 case 'leak':
-                    this.setMode('intelligence', { navigate: false });
                     this.navigateToTab('dashboard', { dashboardTab: 'overview' });
                     void this.loadRevenueLeak();
-                    this.flashToast('Упущенная выручка · Intelligence', 'info', 2800);
+                    this.flashToast('Упущенная выручка', 'info', 2800);
                     break;
                 case 'red':
-                    this.setMode('shift', { navigate: false });
                     this.navigateToTab('shift');
-                    this.flashToast('Риск · режим Shift', 'warning', 2800);
+                    this.flashToast('Риск · смена', 'warning', 2800);
                     break;
                 case 'force-close':
                     this.navigateToTab('settings', { settingsTab: 'restaurant' });
@@ -6658,33 +6808,40 @@ function adminMixinLiveChat() {
 
         navigateToTab(tabId, opts) {
             const o = opts && typeof opts === 'object' ? opts : {};
-            this.currentTab = tabId;
+            let tab = String(tabId || '').trim();
+            if (!this.isTabVisibleForRole(tab)) {
+                tab = this.resolveDefaultTabForRole();
+            }
+            this.currentTab = tab;
+            this._syncModeFromTab(tab);
             this.ordersMobileFiltersOpen = false;
-            if (tabId !== 'chats') {
+            if (tab !== 'chats') {
                 this.chatMobileInfoOpen = false;
             }
-            if (tabId === 'settings' && typeof o.settingsTab === 'string' && o.settingsTab.trim()) {
+            if (tab === 'settings' && typeof o.settingsTab === 'string' && o.settingsTab.trim()) {
                 const st = o.settingsTab.trim();
                 if (this._adminSettingsTabIds.has(st)) this.settingsTab = st;
             }
-            if (tabId === 'menu' && (o.menuView === 'stoplist' || o.menuView === 'catalog')) {
+            if (tab === 'menu' && (o.menuView === 'stoplist' || o.menuView === 'catalog')) {
                 this.menuView = o.menuView;
             }
-            if (tabId === 'inbox') {
+            if (tab === 'inbox') {
                 if (typeof o.inboxTab === 'string' && o.inboxTab.trim()) {
                     this.inboxTab = o.inboxTab.trim() === 'system' ? 'system' : 'clients';
                 } else {
                     this.inboxTab = 'clients';
                 }
             }
-            if (tabId === 'dashboard') {
+            if (tab === 'dashboard') {
                 if (typeof o.dashboardTab === 'string' && o.dashboardTab.trim()) {
                     this.dashboardTab = o.dashboardTab.trim() === 'analytics' ? 'analytics' : 'overview';
+                    this.analyticsDensity = this.dashboardTab === 'analytics' ? 'advanced' : 'normal';
                 } else {
-                    this.dashboardTab = 'overview';
+                    this.dashboardTab = this.analyticsDensity === 'advanced' ? 'analytics' : 'overview';
                 }
+                this._persistAnalyticsDensity();
             }
-            if (tabId === 'ai_center') {
+            if (tab === 'ai_center') {
                 if (typeof o.aiCenterTab === 'string' && o.aiCenterTab.trim()) {
                     const a = o.aiCenterTab.trim();
                     if (a === 'insights') this.aiCenterTab = 'insights';
@@ -6697,10 +6854,10 @@ function adminMixinLiveChat() {
                     this.aiCenterTab = 'value';
                 }
             }
-            if (tabId !== 'inbox') this.inboxTab = 'clients';
-            if (tabId !== 'dashboard') this.dashboardTab = 'overview';
-            if (tabId !== 'ai_center') this.aiCenterTab = 'value';
-            if (tabId === 'chats') {
+            if (tab !== 'inbox') this.inboxTab = 'clients';
+            if (tab !== 'dashboard') this.dashboardTab = 'overview';
+            if (tab !== 'ai_center') this.aiCenterTab = 'value';
+            if (tab === 'chats') {
                 if (typeof o.chatPulseFilter === 'string' && o.chatPulseFilter.trim()) {
                     this.chatPulseFilter = o.chatPulseFilter.trim();
                 } else {
@@ -6709,7 +6866,7 @@ function adminMixinLiveChat() {
             } else {
                 this.chatPulseFilter = '';
             }
-            if (tabId === 'orders') {
+            if (tab === 'orders') {
                 if (o.orderSumMin != null && o.orderSumMin !== '') {
                     this.orderSumMin = Number(o.orderSumMin);
                     this.ordersView = 'table';
@@ -7800,7 +7957,7 @@ function adminMixinDataChartsSettings() {
             [150, 400, 800].forEach((ms) => {
                 setTimeout(() => this._resizeVisibleCharts(tab), ms);
             });
-            if (this.currentTab !== 'shift') this._stopShiftStateAutoRefresh();
+            this._syncShiftStatePolling();
         },
 
         _stopShiftHeartbeat(releaseClaim = false) {
@@ -7921,6 +8078,7 @@ function adminMixinDataChartsSettings() {
                 }
             } finally {
                 this.shiftStateLoading = false;
+                this._syncShiftStatePolling();
             }
         },
 

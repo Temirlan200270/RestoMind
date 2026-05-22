@@ -332,25 +332,27 @@ Decision Engine: `max_discount_pct = 15` по policy ресторана → от
 | **CONTROL** 🟡 | Менеджер | `inbox`, `orders`, `chats`, `bookings`, `menu` | Виден (Операции) | Виден |
 | **INTELLIGENCE** 🔵 | Владелец | `dashboard`, `ai_center`, `settings` | Виден (Управление) | Опционально «вся сеть» / без фильтра |
 
-**Текущее состояние кода (Sprint 1–4 ✅):** Mode Bar в `_header.html`; сайдбар фильтруется по `currentMode` (`isTabInCurrentMode`); `_tab_shift_control.html` — split Focus Deck + Context Dock (`_shift_focus_chat.html` / `_shift_focus_order.html`); inbox Action Queue; Command Bar Ctrl+K. Legacy hash/sidebar сохранены (Strangler).
+**Текущее состояние кода (Sprint 1–5 ✅):** **Role-first IA** — сайдбар по роли staff (`isTabVisibleForRole`); Mode Bar убран из UI; smart landing оператора; mobile bottom nav по роли; `analyticsDensity` normal/advanced на дашборде. Internal `currentMode` (`shift|control|intelligence`) — для Command Bar и hash sync. Shift split, inbox Action Queue, Command Bar Ctrl+K сохранены.
 
-### Архитектурные решения (зафиксированы)
-
-1. **Mobile Shift:** Staged Focus Navigation (экран Focus → экран Context, `⬅ Назад к задаче`).
-2. **Starvation / skip:** Redis TTL 600s на `skip` + кнопка **`reset_skips`** при `metrics.shift_empty_focus_while_risk_positive` и ненулевых `excluded_skip|excluded_next` (не ждать только TTL). Реализовано: FM-3, [`_tab_shift_control.html`](../app/templates/screens/_tab_shift_control.html).
-3. **Voice calls:** `GET /api/admin/intelligence/voice/calls?location_id=` при активной точке; без точки — org-wide список (read-only). Фильтр API ✅; запись `location_id` в `voice_call_logs.payload_json` при `record_voice_call` ✅ (Twilio routing + Final Mile strip).
-
-### Engineering plan (4 спринта)
+### Engineering plan (5 спринтов)
 
 ```text
-Sprint 1: Mode Engine + ds-status-* tokens + admin.html shell
+Sprint 1: Mode Engine + ds-status-* tokens (internal modes)
     ↓
 Sprint 2: _shift_focus_chat / _shift_focus_order + mobile staged nav
     ↓
 Sprint 3: Inbox → Action Queue UI + voice strip + location_id payload
     ↓
 Sprint 4: Command Bar (Ctrl+K): /leak, /red, /force-close
+    ↓
+Sprint 5: Role-first pivot — убрать Mode Bar, sidebar/bottom nav по роли, analyticsDensity
 ```
+
+### Архитектурные решения (зафиксированы)
+
+1. **Mobile Shift:** Staged Focus Navigation (экран Focus → экран Context, `⬅ Назад к задаче`).
+2. **Starvation / skip:** Redis TTL 600s на `skip` + кнопка **`reset_skips`** при `metrics.shift_empty_focus_while_risk_positive` и ненулевых `excluded_skip|excluded_next` (не ждать только TTL). Реализовано: FM-3, [`_tab_shift_control.html`](../app/templates/screens/_tab_shift_control.html).
+3. **Voice calls:** `GET /api/admin/intelligence/voice/calls?location_id=` при активной точке; без точки — org-wide список (read-only). Фильтр API ✅; запись `location_id` в `voice_call_logs.payload_json` при `record_voice_call` ✅ (Twilio routing + Final Mile strip).
 
 **Backend Sprint 1:** без изменений — `GET/POST /shift/*`, `money_queue`, `emit_event` уже покрывают модель.
 

@@ -19,10 +19,10 @@
 
         <nav class="admin-sidebar-scroll flex-1 min-h-0 overflow-y-auto px-3 py-4 space-y-4">
             <template x-for="sec in navSections" :key="sec.id">
-                <div x-show="navItems.some(i => i.section === sec.id && isTabInCurrentMode(i.id))">
+                <div x-show="navItems.some(i => i.section === sec.id && isTabVisibleForRole(i.id))">
                     <div class="px-2 mb-1.5 text-[10px] font-bold uppercase tracking-wider text-blue-300/80" x-text="sec.title"></div>
                     <div class="space-y-1">
-                        <template x-for="item in navItems.filter(i => i.section === sec.id && isTabInCurrentMode(i.id))" :key="item.id">
+                        <template x-for="item in navItems.filter(i => i.section === sec.id && isTabVisibleForRole(i.id))" :key="item.id">
                             <button
                                 @click="navigateToTab(item.id)"
                                 :data-p15-tour="item.id === 'inbox' ? 'inbox' : item.id === 'orders' ? 'orders' : null"

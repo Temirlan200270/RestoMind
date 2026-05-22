@@ -6,6 +6,24 @@
 
 ## [Unreleased] — 2026-03-20
 
+### Изменено (2026-05-21) — Role-first tails (Sprint 5 polish)
+
+- **Mobile bottom nav:** `_bottom_nav.html` — `isTabVisibleForRole()`; оператор: Inbox вместо Dashboard; manager/admin: Dashboard + Menu; `bottomNavMoreTabActive()`.
+- **Demo-login:** `applyRoleDefaultLanding()` + `_afterAuthTabBootstrap()` (как обычный login).
+- **`analyticsDensity`:** persist при `navigateToTab('dashboard', { dashboardTab })` через `_persistAnalyticsDensity()`.
+- **Shift badge polling:** `shouldPollShiftStateBadge()` + `_syncShiftStatePolling()` — обновление риска в сайдбаре вне вкладки «Смена».
+- **Доки:** `OS_TRANSITION_PLAN.md` § UI Layer синхронизирован с Sprint 5.
+- **Baseline:** пересняты PNG в `docs/ui/baseline/` (`capture_admin_u0_baseline.py`).
+
+### Изменено (2026-05-21) — Role-first Admin IA (Sprint 5 pivot)
+
+- **Mode Bar убран** из `screens/_header.html`; навигация по роли staff, не по трём режимам.
+- **Сайдбар:** `isTabVisibleForRole()` — operator (5 вкладок), manager (+ menu, dashboard, ai_center), admin (все).
+- **Smart landing оператора:** `applyRoleDefaultLanding()` — shift при `risk_kzt > 0` или `focus.id`, иначе inbox.
+- **Дашборд:** toggle «Обычный / Расширенный» (`analyticsDensity`, `localStorage.restomind_analytics_density`).
+- **Смена calm-empty:** CTA в inbox/chats при S0/S3 без риска (`shiftIsCalmEmpty()`).
+- Тесты: [`tests/test_role_first_nav.py`](tests/test_role_first_nav.py); обновлён sprint1 sidebar test.
+
 ### Добавлено (2026-05-21) — Control Plane + BI MVP tails
 
 - **Chat context → trace timeline:** `GET /chats/{phone}/state` отдаёт `latest_trace_id`; правая колонка чата — кнопка «Цепочка trace →» (`openActiveChatTraceTimeline`).

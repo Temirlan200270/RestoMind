@@ -28,8 +28,8 @@
 
                 <template x-if="shiftState && !shiftStateLoading">
                     <div class="space-y-5">
-                        <!-- Metrics strip (all states) -->
-                        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                        <!-- Metrics strip (hidden in calm empty — operator sees CTA instead) -->
+                        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3" x-show="!shiftIsCalmEmpty()">
                             <div class="rounded-2xl bg-red-50 ring-1 ring-red-200/80 px-4 py-3">
                                 <div class="text-[10px] font-bold uppercase text-red-700">Под риском</div>
                                 <div class="text-2xl font-black tabular-nums text-red-950 mt-1"
@@ -51,6 +51,29 @@
                                     x-text="Math.round(shiftState.priority_score || 0)"></div>
                             </div>
                         </div>
+
+                        <!-- Calm empty: no risk, no focus — guide operator to work queue -->
+                        <template x-if="shiftIsCalmEmpty()">
+                            {% call card(padding_class='p-6 sm:p-8 text-center', extra_class='!border-emerald-200 !bg-emerald-50/70') %}
+                                <div class="text-4xl mb-3" aria-hidden="true">✓</div>
+                                <h3 class="text-lg font-bold text-emerald-950">Сейчас спокойно</h3>
+                                <p class="text-sm text-emerald-900/80 mt-2 max-w-md mx-auto"
+                                    x-text="orgProfile?.operational_label || 'Нет срочных потерь по выбранной точке.'"></p>
+                                <p class="text-sm text-slate-600 mt-3 max-w-md mx-auto">
+                                    Проверьте очередь «Требует внимания» или ответьте в диалогах — смена откроется здесь, когда появится риск.
+                                </p>
+                                <div class="flex flex-wrap items-center justify-center gap-2 mt-5">
+                                    <button type="button" @click="navigateToTab('inbox')"
+                                        class="ds-btn ds-btn-primary ds-btn-md min-h-[44px]">
+                                        Перейти в очередь
+                                    </button>
+                                    <button type="button" @click="navigateToTab('chats')"
+                                        class="ds-btn ds-btn-secondary ds-btn-md min-h-[44px]">
+                                        Открыть диалоги
+                                    </button>
+                                </div>
+                            {% endcall %}
+                        </template>
 
                         <!-- S5 Emergency -->
                         <template x-if="shiftState.state === 'S5'">
@@ -81,15 +104,15 @@
                             {% endcall %}
                         </template>
 
-                        <!-- S3 Calm -->
-                        <template x-if="shiftState.state === 'S3'">
+                        <!-- S3 Calm (detail banner only when not using calm-empty CTA) -->
+                        <template x-if="shiftState.state === 'S3' && !shiftIsCalmEmpty()">
                             {% call card(padding_class='p-5', extra_class='!border-emerald-200 !bg-emerald-50/60') %}
                                 <p class="text-xs font-bold uppercase text-emerald-900">Смена стабильна</p>
                             {% endcall %}
                         </template>
 
-                        <!-- S0 Idle -->
-                        <template x-if="shiftState.state === 'S0'">
+                        <!-- S0 Idle (detail banner only when not using calm-empty CTA) -->
+                        <template x-if="shiftState.state === 'S0' && !shiftIsCalmEmpty()">
                             {% call card(padding_class='p-8 text-center', extra_class='!border-dashed !border-slate-200') %}
                                 <div class="text-4xl mb-2">💚</div>
                                 <p class="font-semibold text-slate-800">Сейчас спокойно</p>

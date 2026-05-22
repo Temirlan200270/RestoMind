@@ -17,17 +17,23 @@
 
 Все экраны подключаются из `app/templates/admin.html` через `{% include "screens/…" %}`. Верхнеуровневые вкладки задаются в `admin-app.js` (`navItems`: `inbox`, `orders`, `chats`, `bookings`, `dashboard`, `ai_center`, `menu`, `settings`). Старые hash-URL (`#operator_queue`, `#incidents`, `#analytics`, …) редиректятся в JS на новые.
 
-### Focus-Driven Admin Shell (G10.4+, ✅ Sprint 1–4)
+### Role-First Admin IA (G10.4+, ✅ Sprint 5)
 
-> **Сейчас:** Mode Bar (`shift` \| `control` \| `intelligence`) + фильтр сайдбара по режиму поверх P1.5.0 shell; Shift split + staged mobile nav; inbox Action Queue; Command Bar Ctrl+K. Контракт: [`docs/UI_DESIGN_SYSTEM.md`](UI_DESIGN_SYSTEM.md) § Focus-Driven OS.
+> **Сейчас:** навигация по **роли staff** (без Mode Bar); smart landing оператора; дашборд «Обычный / Расширенный». Internal `currentMode` остаётся для Command Bar / hash sync. Контракт: [`docs/UI_DESIGN_SYSTEM.md`](UI_DESIGN_SYSTEM.md) § Role-First IA.
 
-| Режим | Экраны (include) | Новые шаблоны (Sprint 2) |
-|-------|------------------|--------------------------|
-| SHIFT 🟢 | `_tab_shift_control.html` (Focus Deck) | `_shift_focus_chat.html`, `_shift_focus_order.html` (Context Dock) |
-| CONTROL 🟡 | `_tab_inbox.html`, `_tab_orders.html`, `_tab_chats.html`, `_tab_bookings.html`, `_tab_menu.html` | Inbox → Action Queue UI (Sprint 3) |
-| INTELLIGENCE 🔵 | `_tab_dashboard.html`, `_tab_ai_center.html`, `_tab_settings_*.html` | — |
+| Роль | Сайдбар | Стартовый экран |
+|------|---------|-----------------|
+| **operator** | `shift`, `inbox`, `orders`, `chats`, `bookings` | shift при `risk_kzt > 0` или `focus.id`, иначе `inbox` |
+| **manager** | операции + `menu`, `dashboard`, `ai_center` | `dashboard` (normal analytics) |
+| **admin** | все `navItems` | `dashboard` |
 
-`_tab_shift_control.html` — стартовая вкладка для роли `operator` (G9); в SHIFT MODE в сайдбаре видна только вкладка «Смена» (`isTabInCurrentMode`).
+| Экран | Шаблон | Примечание |
+|-------|--------|------------|
+| Смена | `_tab_shift_control.html` | Focus Deck + calm-empty CTA → inbox/chats |
+| Операции | `_tab_inbox.html`, orders, chats, bookings, menu | Action Queue в inbox |
+| Аналитика | `_tab_dashboard.html` + `_tab_analytics.html` | `analyticsDensity`: normal \| advanced |
+
+`_tab_shift_control.html` — не default для оператора в спокойной смене; smart routing в `applyRoleDefaultLanding()`.
 
 ### Операции (`section: operations`)
 

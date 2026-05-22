@@ -159,27 +159,50 @@ Operations‑интерфейс должен работать в двух реж
 
 ---
 
-## Focus-Driven OS (Admin Shell) — G10.4+
+## Role-First Admin IA (G10.4+) — Sprint 5 pivot
 
-> **Контекст:** переход от P1.5.0 (сайдбар + вкладки) к **трёхрежимной операционной оболочке**. Backend G10 уже реализован; этот раздел — **UI-контракт**. Engineering plan: ROADMAP P5 «Focus-Driven OS», стратегия Strangler — [`OS_TRANSITION_PLAN.md`](OS_TRANSITION_PLAN.md) § UI Layer.
+> **Контекст:** после Sprint 1–4 (Mode Engine, Shift split, Inbox Action Queue, Command Bar) выяснилось, что **трёхрежимная Mode Bar** добавляет клики без ценности. UI перешёл на **навигацию по роли staff**; internal `currentMode` (`shift|control|intelligence`) остаётся для hash sync и Command Bar, но пользователь режимы не переключает.
 
-### Execution OS — три закона
+### Execution OS — три закона (без изменений)
 
-1. **LAW 1 — Single Focus Principle** — в SHIFT MODE один `shiftState.focus`; Alpine не пересчитывает state/queue (см. [`G10_SEMANTIC_CONTRACT.md`](G10_SEMANTIC_CONTRACT.md) §5).
-2. **LAW 2 — Sequential Mobile Cognition** — на `<lg` не две колонки, а **Staged Focus Navigation**: экран Focus (карточка + CTA) → экран Context (чат/заказ) с фиксированной кнопкой **«⬅ Назад к задаче»**.
-3. **LAW 3 — Locality of Operations** — операционные виджеты (риск, чаты, звонки Voice AI, стоп-листы) фильтруются по **`location_id`** в шапке; сводка по всей org — только в INTELLIGENCE MODE.
+1. **LAW 1 — Single Focus Principle** — один `shiftState.focus`; см. [`G10_SEMANTIC_CONTRACT.md`](G10_SEMANTIC_CONTRACT.md) §5.
+2. **LAW 2 — Sequential Mobile Cognition** — Staged Focus Navigation на `<lg`.
+3. **LAW 3 — Locality of Operations** — фильтр по `location_id` в шапке.
 
-### Режимы интерфейса (целевая матрица)
+### Роли и сайдбар
 
-| Режим | Цвет | Аудитория | Allowed tabs | Сайдбар | Location в шапке |
-|-------|------|-----------|--------------|---------|------------------|
-| **SHIFT MODE** | 🟢 | Оператор | `shift_control` | **Скрыт** | Обязателен (locality) |
-| **CONTROL MODE** | 🟡 | Менеджер | `inbox`, `orders`, `chats`, `bookings`, `menu` | Операции (P1.5) | Обязателен |
-| **INTELLIGENCE MODE** | 🔵 | Владелец | `dashboard`, `ai_center`, `settings` | Управление | Опционально / вся сеть |
+| Роль | Allowed tabs | Landing (без hash) |
+|------|--------------|-------------------|
+| **operator** | `shift`, `inbox`, `orders`, `chats`, `bookings` | `shift` если `risk_kzt > 0` или `focus.id`, иначе `inbox` |
+| **manager** | операции + `menu`, `dashboard`, `ai_center` | `dashboard` |
+| **admin** | все `navItems` | `dashboard` |
 
-**Сейчас в prod-коде (Sprint 1–4 ✅):** Mode Bar + фильтр сайдбара по режиму; `_tab_shift_control.html` — split Focus Deck + Context Dock на `≥lg`, staged nav на `<lg`; inbox Action Queue; Command Bar Ctrl+K. Legacy hash/sidebar сохранены (Strangler).
+Фильтр: `isTabVisibleForRole()` в [`_sidebar.html`](../app/templates/screens/_sidebar.html) и [`_bottom_nav.html`](../app/templates/screens/_bottom_nav.html) (mobile).
 
-**Связь с IA P1.5.0:** Inbox / Dashboard / AI Center **не удаляются** — они **перераспределяются по режимам** (CONTROL vs INTELLIGENCE). Hash-редиректы (`#operator_queue` → `#inbox`) сохраняются.
+### Дашборд: Обычный / Расширенный
+
+- `analyticsDensity`: `normal` \| `advanced` (persist `localStorage.restomind_analytics_density`).
+- **normal** — hero KPI, revenue leak, live feed (без тяжёлых графиков).
+- **advanced** — содержимое `_tab_analytics.html` (BI, OS autopilot и т.д.).
+- Toggle виден только `manager` / `admin` (`canToggleAnalyticsDensity()`).
+
+### Shift calm-empty
+
+При S0/S3 без focus и без риска — компактный CTA «Перейти в очередь» / «Открыть диалоги» вместо четырёх нулевых KPI (`shiftIsCalmEmpty()`).
+
+**Сохранено из Sprint 1–4:** Shift Focus Deck, staged nav, Inbox Action Queue, Command Bar Ctrl+K, `ds-status-*`.
+
+---
+
+## Focus-Driven OS (legacy internal) — Sprint 1–4
+
+> Mode Bar **убран из UI** (Sprint 5). Ниже — internal matrix для `adminModeEngine` / Command Bar.
+
+| Internal mode | Tabs |
+|---------------|------|
+| shift | `shift` |
+| control | `inbox`, `orders`, `chats`, `bookings`, `menu` |
+| intelligence | `dashboard`, `ai_center`, `settings`, `marketing` |
 
 ### Universal Semantics (единая палитра статусов)
 

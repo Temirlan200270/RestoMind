@@ -1,6 +1,6 @@
             {% from "components/_skeleton.html" import skeleton %}
             <!-- ========== АНАЛИТИКА ========== -->
-            <div x-show="dashboardTab === 'analytics'" x-cloak class="fade-in" data-rm-tab-surface="dashboard-analytics">
+            <div x-show="analyticsDensity === 'advanced'" x-cloak class="fade-in" data-rm-tab-surface="dashboard-analytics">
                 {% set analytics_header_actions %}
                 <button type="button" @click="analyticsHelpOpen = true"
                     class="ds-btn ds-btn-secondary ds-btn-sm min-h-9 min-w-9 p-0"

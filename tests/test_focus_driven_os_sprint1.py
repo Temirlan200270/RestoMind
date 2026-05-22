@@ -1,4 +1,4 @@
-"""Focus-Driven OS Sprint 1 — shell markers (Mode Engine, Mode Bar, sidebar filter)."""
+"""Focus-Driven OS Sprint 1 — internal mode engine + Role-first sidebar (Sprint 5 pivot)."""
 
 from pathlib import Path
 
@@ -14,17 +14,15 @@ def test_admin_mode_engine_wired_in_js():
     assert "adminMixinModeEngine()," in js
 
 
-def test_sidebar_filters_by_current_mode():
+def test_sidebar_filters_by_role_not_mode():
     sidebar = (REPO / "app" / "templates" / "screens" / "_sidebar.html").read_text(encoding="utf-8")
-    assert "isTabInCurrentMode(i.id)" in sidebar
+    assert "isTabVisibleForRole(i.id)" in sidebar
+    assert "isTabInCurrentMode" not in sidebar
 
 
 def test_mode_bar_css_tokens_present():
     css = (REPO / "src" / "css" / "admin-input.css").read_text(encoding="utf-8")
     assert ".ds-mode-bar" in css
     assert ".ds-mode-bar-btn" in css
-    assert ".ds-mode-bar-indicator" in css
     assert ".ds-status-shift" in css
-    assert ".ds-status-control" in css
-    assert ".ds-status-intelligence" in css
     assert "--color-mode-shift" in css

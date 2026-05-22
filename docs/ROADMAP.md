@@ -127,7 +127,7 @@
 
 ### Focus-Driven OS (Admin Shell) — целевая UI-модель G10.4+
 
-> **Статус:** Sprint 1–4 ✅ (Mode Engine + Mode Bar, Shift split + staged nav, Action Queue inbox + voice `location_id`, Command Bar Ctrl+K). Strangler: legacy sidebar/hash сохранены. Детали: [`docs/UI_DESIGN_SYSTEM.md`](UI_DESIGN_SYSTEM.md) § Focus-Driven OS, [`docs/OS_TRANSITION_PLAN.md`](OS_TRANSITION_PLAN.md) § UI Layer.
+> **Статус:** Sprint 1–5 ✅ (Mode Engine internal; **Role-first IA** в UI; Shift split + staged nav; Action Queue inbox; Command Bar Ctrl+K). Детали: [`docs/UI_DESIGN_SYSTEM.md`](UI_DESIGN_SYSTEM.md) § Role-First IA.
 
 **Принятые решения (2026-05-21):**
 
@@ -140,13 +140,14 @@
 **Спринты (Strangler — без остановки прода):**
 
 - [x] **Sprint 1 — Mode Engine + Universal Semantics** (Strangler; backend без изменений, `GET /shift/state` ✅):
-  - [x] Mode Engine — `currentMode`, `setMode()`, `_bootstrapAdminMode`, matrix mode↔tab в `admin-app.js`
-  - [x] Mode Bar — `components/_mode_bar.html` + include в `screens/_header.html`
+  - [x] Mode Engine — `currentMode`, `setMode()`, `_bootstrapAdminMode`, matrix mode↔tab в `admin-app.js` *(internal после Sprint 5)*
+  - [x] Mode Bar — `components/_mode_bar.html` *(компонент остаётся; из header убран в Sprint 5)*
   - [x] Universal Semantics — `ds-status-ok|warn|danger|ai|inactive` + `--color-mode-*` в `src/css/admin-input.css` → `npm run build:admin-css`
-  - [x] Условный сайдбар — фильтр `navItems` по `isTabInCurrentMode()` в `screens/_sidebar.html` (скрытие, не удаление)
+  - [x] Условный сайдбар — фильтр `navItems` *(Sprint 1: `isTabInCurrentMode`; Sprint 5: `isTabVisibleForRole`)*
 - [x] **Sprint 2 — Shift split + mobile staged nav:** `_shift_focus_chat.html`, `_shift_focus_order.html`; правая панель Context Dock по `shiftState.focus.kind`; mobile `mobileActiveScreen` focus/context.
 - [x] **Sprint 3 — Action Queue inbox + voice tail:** эволюция `_tab_inbox.html` (карточки `money_queue.py`, не дублировать G7 backend); Final Mile call strip с `locationQueryParams()`; закрыть backlog `location_id` в `record_voice_call`.
 - [x] **Sprint 4 — Command Bar (Ctrl+K):** префиксы `/leak`, `/red`, `/force-close` поверх существующего глобального поиска.
+- [x] **Sprint 5 — Role-first IA pivot:** убран Mode Bar; сайдбар по роли (`operator` / `manager` / `admin`); smart landing оператора (shift при риске/focus, иначе inbox); дашборд «Обычный / Расширенный» (`analyticsDensity`); mobile bottom nav по роли; shift badge polling вне вкладки «Смена»; demo-login → `applyRoleDefaultLanding`.
 
 **Не дублировать (уже сделано):** G7 money queue, G9/G10 shift engine, FM-3 `reset_skips`, Voice `GET /voice/calls` (пагинация + RBAC) — см. чекбоксы ниже в P5.
 
