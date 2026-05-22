@@ -107,6 +107,13 @@ async def test_dashboard_stats_week_forecast_and_bot_metrics(db_session):
     assert data["top_actions"][0]["impact_kzt"] == 12000
     assert data["top_actions"][0].get("target", {}).get("tab")
 
+    peak = data.get("sales_peak_today")
+    assert isinstance(peak, dict)
+    assert "hours_local" in peak
+    assert "label" in peak
+    assert "hint" in peak
+    assert isinstance(peak["hours_local"], list)
+
 
 @pytest.mark.asyncio
 async def test_admin_funnel_counts(db_session):

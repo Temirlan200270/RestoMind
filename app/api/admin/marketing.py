@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.admin.deps import admin_org_from_session, require_admin_session_active
+from app.api.admin.deps import admin_org_from_session, require_admin_session_active, require_staff_manager_or_admin
 from app.db.session import get_db
 
 router = APIRouter(
@@ -176,6 +176,23 @@ async def delete_blast(
     )
     await db.commit()
     return {"ok": True}
+
+
+@router.post("/sync-iiko-customers")
+async def sync_iiko_customers(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _staff=Depends(require_staff_manager_or_admin),
+    days: int = Query(90, ge=7, le=365),
+) -> dict:
+    """Импорт телефонов гостей из истории доставок iiko Cloud (для сегментов рассылок)."""
+    from app.services.iiko_customer_sync import sync_iiko_customers_for_org
+
+    org_id = admin_org_from_session(request)
+    result = await sync_iiko_customers_for_org(db, org_id, days=days)
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("detail") or result.get("error"))
+    return result
 
 
 @router.get("/segment-preview/{segment_type}")

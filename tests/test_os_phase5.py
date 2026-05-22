@@ -245,10 +245,10 @@ class TestOsAutopilotUI:
 
         assert "aiCenterTab === 'final_mile'" in html
         assert "loadFinalMileUi()" in html
-        assert "Daily OS Digest" in html
-        assert "SupplyMind" in html
-        assert "Voice AI" in html
-        assert "премиальный режим" in html
+        assert "Сводка дня" in html
+        assert "Закупки" in html
+        assert "Голосовой бот" in html
+        assert "премиальный" in html.lower()
         assert "aiCenterTab === 'final_mile'" in header
 
         assert "loadFinalMileUi" in js
@@ -293,7 +293,7 @@ class TestOsAutopilotUI:
         html = pathlib.Path("app/templates/screens/_tab_settings_team.html").read_text(encoding="utf-8")
         js = pathlib.Path("app/static/js/admin-app.js").read_text(encoding="utf-8")
 
-        assert "StaffMind onboarding" in html
+        assert "Обучение сотрудников" in html
         assert "loadStaffMindOnboarding()" in html
         assert "startStaffMindOnboarding()" in html
         assert "askStaffMind(s.id)" in html

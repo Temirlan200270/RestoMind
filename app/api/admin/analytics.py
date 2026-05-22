@@ -1177,6 +1177,38 @@ async def dashboard_stats(
         )
     ).scalars().all()
 
+    org_row = await db.get(Organization, org_id)
+    from app.services.sales_insights import (
+        build_hour_buckets_local,
+        operator_upsell_time_hint,
+        peak_hours_from_buckets,
+        peak_hours_label,
+    )
+    from app.services.timezones import zoneinfo_or_default
+
+    org_tz_norm = zoneinfo_or_default(org_row.timezone if org_row else None)
+    today_hour_rows = (
+        await db.execute(
+            select(Order.created_at, Order.total_price).where(
+                not_cancelled,
+                org_orders,
+                order_location_scope,
+                Order.created_at >= ts_lo,
+                Order.created_at <= ts_hi,
+            ),
+        )
+    ).all()
+    today_hour_buckets = build_hour_buckets_local(
+        [(r[0], r[1]) for r in today_hour_rows],
+        tz=org_tz_norm.zone,
+    )
+    peak_today_hours = peak_hours_from_buckets(today_hour_buckets)
+    sales_peak_today = {
+        "hours_local": peak_today_hours,
+        "label": peak_hours_label(peak_today_hours),
+        "hint": operator_upsell_time_hint(peak_today_hours, org_tz_norm.name),
+    }
+
     result: dict[str, Any] = {
         "total_orders": total_orders,
         "today_orders": today_orders,
@@ -1209,6 +1241,7 @@ async def dashboard_stats(
         "escalations_today": escalations_today,
         "escalation_rate_pct": escalation_rate_pct,
         "dialogs_today": dialogs_today,
+        "sales_peak_today": sales_peak_today,
         "top_actions": [
             {
                 "id": r.id,
@@ -2361,13 +2394,9 @@ async def analytics(
         reverse=True,
     )[:3]
     peak_hour_values = [int(row["hour"]) for row in peak_hours_local]
-    upsell_time_hint = None
-    if peak_hour_values:
-        hours_label = ", ".join(f"{h:02d}:00" for h in peak_hour_values)
-        upsell_time_hint = (
-            f"Пики продаж по локальному времени ({org_tz_norm.name}): {hours_label}. "
-            "Настройте UpsellRule с trigger_mode=time_of_day для этих окон."
-        )
+    from app.services.sales_insights import operator_upsell_time_hint
+
+    upsell_time_hint = operator_upsell_time_hint(peak_hour_values, org_tz_norm.name)
 
     heatmap_matrix = [[0 for _ in range(24)] for _ in range(7)]
     for o in current_orders:

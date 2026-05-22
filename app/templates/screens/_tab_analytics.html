@@ -122,11 +122,11 @@
                             <canvas id="sparkAvg" class="w-full h-full" x-ignore></canvas>
                         </div>
                     {% endcall %}
-                    <!-- AI Profit -->
+                    <!-- Выручка от ИИ -->
                     {% call card(padding_class='p-5') %}
                         <div class="flex items-start justify-between gap-3">
                             <div class="min-w-0">
-                                <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">AI Profit</div>
+                                <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Выручка от ИИ</div>
                                 <div class="mt-1 text-3xl font-extrabold tracking-tighter text-slate-900"
                                     x-show="!analyticsLoading" x-text="fmt.money(analyticsData.ai?.profit || 0)"></div>
                                 <div class="mt-2 max-w-[11rem]" x-show="analyticsLoading">{{ skeleton(kind='line', rows=1, extra_class='!p-0 !gap-2') }}</div>
@@ -186,7 +186,7 @@
                     {% endcall %}
                 </div>
 
-                {% call card(title='Заказы по часу суток', subtitle='Локальное время филиала — для пиков кухни и upsell по time_of_day.', padding_class='p-5', extra_class='mb-6 overflow-x-auto') %}
+                {% call card(title='Заказы по часу суток', subtitle='Локальное время филиала — пики кухни и когда усилить допродажи.', padding_class='p-5', extra_class='mb-6 overflow-x-auto') %}
                     <p x-show="analyticsData.sales_insights?.upsell_time_hint"
                         class="text-xs text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2 mb-3"
                         x-text="analyticsData.sales_insights?.upsell_time_hint"></p>
@@ -216,8 +216,8 @@
 
                 <div class="grid grid-cols-1 xl:grid-cols-2 gap-5 mb-6">
                     <div class="bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 p-5 overflow-x-auto">
-                        <h3 class="font-semibold text-gray-900 mb-1">Menu Engineering (ИИ)</h3>
-                        <p class="text-xs text-gray-500 mb-4">Что бот предлагал чаще всего (<code class="text-[10px]">recommendation_trace</code>) и конверсия в добавление в заказ.</p>
+                        <h3 class="font-semibold text-gray-900 mb-1">Меню и допродажи (ИИ)</h3>
+                        <p class="text-xs text-gray-500 mb-4">Что бот предлагал чаще всего и как часто гость соглашался добавить позицию.</p>
                         <table class="w-full text-sm min-w-[420px]">
                             <thead>
                                 <tr class="text-left text-gray-500 border-b border-gray-100">
@@ -443,9 +443,9 @@
                                     </p>
                                 </div>
                                 <div class="rounded-2xl bg-indigo-50/60 ring-1 ring-indigo-200/50 p-4">
-                                    <div class="font-semibold text-slate-900 mb-1">AI Profit</div>
+                                    <div class="font-semibold text-slate-900 mb-1">Выручка от ИИ</div>
                                     <p class="text-slate-600 text-sm leading-relaxed">
-                                        Это сумма допродаж, которые принёс бот (по <code class="text-[11px]">accepted_revenue_kzt</code> из <code class="text-[11px]">recommendation_trace</code>).
+                                        Это сумма допродаж, которые принёс бот: учитываются принятые рекомендации и выручка от них.
                                         На графике подсказка показывает вклад ИИ в выручку дня.
                                     </p>
                                 </div>

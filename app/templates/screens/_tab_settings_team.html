@@ -29,7 +29,7 @@
                                 class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
                         </div>
                         <div>
-                            <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Должность (StaffMind)</label>
+                            <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Должность</label>
                             <input type="text" x-model="teamNewMetaTitle" autocomplete="off" placeholder="Кассир, официант…"
                                 class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
                         </div>
@@ -79,7 +79,7 @@
                 <div class="rm-card-surface p-6">
                     <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-5">
                         <div>
-                            <h4 class="font-semibold text-gray-900">StaffMind onboarding</h4>
+                            <h4 class="font-semibold text-gray-900">Обучение сотрудников</h4>
                             <p class="text-sm text-gray-500 mt-1">Запускайте короткие сессии обучения и проверяйте ответы из базы знаний.</p>
                         </div>
                         <button type="button" @click="loadStaffMindOnboarding()" :disabled="staffMindLoading"
@@ -92,7 +92,7 @@
                         <input type="tel" x-model="staffMindPhone" autocomplete="off" placeholder="+77001234567"
                             :disabled="!canStaffStartStaffMind()"
                             class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:opacity-60">
-                        <input type="text" x-model="staffMindRole" autocomplete="off" placeholder="cashier"
+                        <input type="text" x-model="staffMindRole" autocomplete="off" placeholder="Кассир, официант…"
                             :disabled="!canStaffStartStaffMind()"
                             class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:opacity-60">
                         <button type="button" @click="startStaffMindOnboarding()"
@@ -163,8 +163,8 @@
                     </div>
 
                     <div x-show="!staffMindLoading && !(staffMindSessions || []).length" x-cloak class="rm-empty-panel py-8">
-                        <p class="text-sm font-semibold text-gray-800 mb-1">Сессий StaffMind пока нет</p>
-                        <p class="text-xs text-gray-500 max-w-sm">Добавьте телефон сотрудника и роль, чтобы стартовать onboarding.</p>
+                        <p class="text-sm font-semibold text-gray-800 mb-1">Сессий обучения пока нет</p>
+                        <p class="text-xs text-gray-500 max-w-sm">Добавьте телефон сотрудника и должность, чтобы запустить обучение.</p>
                     </div>
                 </div>
 

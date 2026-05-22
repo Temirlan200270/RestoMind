@@ -330,3 +330,43 @@ class IikoClient:
         data = await self._request("POST", "/api/1/deliveries/order_types", json={"organizationIds": organization_ids})
         logger.info("iiko: запрошены типы заказов deliveries для %d организаций", len(organization_ids))
         return data
+
+    async def fetch_deliveries_by_date_and_status(
+        self,
+        organization_ids: list[str],
+        *,
+        date_from: str,
+        date_to: str,
+        statuses: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """
+        История доставок за период (для импорта телефонов гостей / маркетинг).
+        Эндпоинт: POST /api/1/deliveries/by_delivery_date_and_status
+        """
+        body: dict[str, Any] = {
+            "organizationIds": organization_ids,
+            "deliveryDateFrom": date_from,
+            "deliveryDateTo": date_to,
+        }
+        if statuses:
+            body["statuses"] = statuses
+        data = await self._request(
+            "POST",
+            "/api/1/deliveries/by_delivery_date_and_status",
+            json=body,
+            timeout=60.0,
+        )
+        blocks = data.get("ordersByOrganizations") or []
+        order_count = 0
+        if isinstance(blocks, list):
+            for block in blocks:
+                if isinstance(block, dict):
+                    order_count += len(block.get("orders") or [])
+        logger.info(
+            "iiko: deliveries by date %s..%s orgs=%d orders=%d",
+            date_from,
+            date_to,
+            len(organization_ids),
+            order_count,
+        )
+        return data

@@ -131,6 +131,15 @@
                             x-text="(dashStats.ai_revenue_share_pct ?? '—') + (dashStats.ai_revenue_share_pct != null ? '%' : '')"></div>
                         <div class="mt-1 text-[11px] text-slate-500">в выручке</div>
                     </button>
+                    <button type="button" class="text-left rounded-2xl bg-orange-50 ring-1 ring-orange-200/80 shadow-sm px-4 py-3 min-h-[96px]"
+                        x-show="dashStats.sales_peak_today?.label"
+                        @click="navigateToTab('dashboard', { dashboardTab: 'analytics' })">
+                        <div class="text-[11px] font-bold uppercase text-orange-900/75">Пик продаж сегодня</div>
+                        <div class="mt-2 text-lg font-black text-orange-950 tabular-nums leading-tight"
+                            x-text="dashStats.sales_peak_today?.label || '—'"></div>
+                        <div class="mt-1 text-[11px] text-orange-800 line-clamp-2"
+                            x-text="dashStats.sales_peak_today?.hint || 'Откройте подробную аналитику'"></div>
+                    </button>
                     <div class="text-left rounded-2xl bg-sky-50 ring-1 ring-sky-200/80 shadow-sm px-4 py-3 min-h-[96px]"
                         x-show="dashStats.week_forecast" x-cloak>
                         <div class="text-[11px] font-bold uppercase text-sky-900/75">Прогноз до конца недели</div>

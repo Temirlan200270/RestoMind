@@ -74,6 +74,27 @@
             </div>
         </div>
 
+        <!-- Импорт базы из iiko -->
+        <div class="rounded-2xl border border-gray-200 bg-white p-4 space-y-3">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                    <h3 class="font-semibold text-sm text-gray-800">База гостей из iiko</h3>
+                    <p class="text-xs text-gray-500 mt-1 max-w-xl">
+                        Подтянем телефоны из истории доставок iiko за последние 90 дней — для сегментов «Не заказывали» и «Частые гости».
+                        Уважаем отказ от рассылок; новые контакты не перезаписывают существующих.
+                    </p>
+                </div>
+                <button type="button" @click="syncIikoCustomers()"
+                    :disabled="iikoSyncLoading"
+                    class="px-4 py-2 rounded-xl bg-slate-800 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50 transition shrink-0">
+                    <span x-text="iikoSyncLoading ? 'Импорт…' : 'Обновить из iiko'"></span>
+                </button>
+            </div>
+            <p class="text-xs text-emerald-700" x-show="iikoSyncResult?.ok" x-cloak
+                x-text="iikoSyncResult ? `Найдено ${iikoSyncResult.phones_found} телефонов · новых ${iikoSyncResult.users_created} · уже были ${iikoSyncResult.users_existing}` : ''"></p>
+            <p class="text-xs text-red-600" x-show="iikoSyncError" x-text="iikoSyncError"></p>
+        </div>
+
         <!-- Список рассылок -->
         <div x-show="loading" class="text-center text-sm text-gray-400 py-8">Загрузка...</div>
         <div x-show="!loading && blasts.length === 0" class="text-center text-sm text-gray-400 py-8">

@@ -46,10 +46,7 @@ async def test_final_mile_http_smoke_endpoints(asgi_memory_client) -> None:
         ("GET", "/api/admin/organization/iiko-office"),
     ]
     for method, path in endpoints:
-        if method == "GET":
-            res = await client.get(path)
-        else:
-            res = await client.request(method, path)
+        res = await client.get(path)
         assert res.status_code in (200, 404), f"{method} {path} -> {res.status_code}"
 
 
@@ -83,3 +80,43 @@ async def test_final_mile_operator_iiko_office_patch_forbidden(asgi_memory_clien
         json={"host": "https://x", "login": "u", "password": "p", "store_id": "s"},
     )
     assert patch_res.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_sync_iiko_customers_route_smoke(asgi_memory_client, monkeypatch) -> None:
+    """POST /marketing/sync-iiko-customers is wired (stubbed — no live iiko in CI)."""
+    client, session_factory = asgi_memory_client
+
+    async with session_factory() as db:
+        org = Organization(name="Iiko Sync Smoke", slug="iiko-sync-smoke", integration_config_json={})
+        db.add(org)
+        await db.flush()
+        db.add(
+            StaffUser(
+                organization_id=org.id,
+                email="iiko-sync@test.kz",
+                password_hash=hash_password("secret123"),
+                role="admin",
+                is_active=True,
+            ),
+        )
+        await db.commit()
+
+    login = await client.post(
+        "/api/admin/auth/login",
+        json={"username": "iiko-sync@test.kz", "password": "secret123"},
+    )
+    assert login.status_code == 200
+
+    async def fake_sync(_db, _org_id, days=90):
+        return {"ok": True, "users_created": 0, "users_updated": 0, "phones_seen": 0, "days": days}
+
+    monkeypatch.setattr(
+        "app.services.iiko_customer_sync.sync_iiko_customers_for_org",
+        fake_sync,
+    )
+
+    res = await client.post("/api/admin/marketing/sync-iiko-customers?days=90")
+    assert res.status_code == 200
+    body = res.json()
+    assert body.get("ok") is True

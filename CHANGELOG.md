@@ -6,13 +6,15 @@
 
 ## [Unreleased] — 2026-03-20
 
-### Изменено (2026-05-22) — Rule 8: язык оператора в UI
+### Изменено (2026-05-22) — Rule 8 tails + BI/Marketing MVP
 
-- **Дашборд:** убран блок «Очередь задач» (остался в «Интеграции»); «DRAFT × AOV» → «корзина > 1 ч × средний чек»; «эскалация» → «передано оператору» / «доля диалогов с оператором».
-- **Шапка:** полный `operational_label` с emoji и цветом на desktop и mobile; дублирующий бейдж на дашборде убран.
-- **По админке:** единая терминология «запрос оператору» (аналитика, AI Center, чаты, модалки, event labels в `admin-app.js`).
-- **Маркетинг / лояльность:** без `LOYALTY_*` env-имён; статус и курс из `GET /settings/environment`.
-- Тесты: [`tests/test_ui_operator_language.py`](tests/test_ui_operator_language.py).
+- **Inbox / Финал:** «Action Queue» → «Очередь помощи»; «Final Mile» → «Финал»; вкладка **Финал** — русские подписи (сводка ОС, голосовой ИИ, закупки); analytics без dev-жаргона (`UpsellRule`, `Menu Engineering`, JSON-поля в подсказках).
+- **Настройки → Команда:** «StaffMind onboarding» → «Обучение сотрудников»; без англ. placeholder/empty state.
+- **Дашборд:** карточка «Пик продаж сегодня» открывает под-таб аналитики (`dashboardTab: 'analytics'`).
+- **BI MVP:** `sales_peak_today` в `GET /stats` + карточка на дашборде; подсказки допродаж — язык оператора ([`sales_insights.py`](app/services/sales_insights.py)).
+- **iiko → маркетинг (MVP):** `POST /api/admin/marketing/sync-iiko-customers` — импорт телефонов из истории доставок iiko Cloud; UI «Обновить из iiko» в «Маркетинг».
+- **Rule 8 (ранее в этот день):** убран блок «Очередь задач» с дашборда; «DRAFT × AOV» → операторский язык; «эскалация» → «передано оператору»; шапка operational status; маркетинг без `LOYALTY_*` env-имён.
+- Тесты: [`tests/test_ui_operator_language.py`](tests/test_ui_operator_language.py), [`tests/test_sales_insights.py`](tests/test_sales_insights.py), [`tests/test_iiko_customer_sync.py`](tests/test_iiko_customer_sync.py), [`tests/test_owner_dashboard.py`](tests/test_owner_dashboard.py).
 
 ### Изменено (2026-05-22) — Sprint A/B performance
 

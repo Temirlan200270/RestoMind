@@ -30,7 +30,7 @@
 | Экран | Шаблон | Примечание |
 |-------|--------|------------|
 | Смена | `_tab_shift_control.html` | Focus Deck + calm-empty CTA → inbox/chats |
-| Операции | `_tab_inbox.html`, orders, chats, bookings, menu | Action Queue в inbox |
+| Операции | `_tab_inbox.html`, orders, chats, bookings, menu | Очередь помощи в inbox |
 | Аналитика | `_tab_dashboard.html` + `_tab_analytics.html` | `analyticsDensity`: normal \| advanced |
 
 `_tab_shift_control.html` — не default для оператора в спокойной смене; smart routing в `applyRoleDefaultLanding()`.
@@ -51,7 +51,7 @@
   - `load` — Digital Twin / нагрузка;
   - `os` — **Автопилот** (`GET /intelligence/os-dashboard`, лента решений `loadAuditLog()`, bulk pricing);
   - `guestcare` — **Отзывы** (внешние 2GIS/Google: `GET/POST /reviews/external*`).
-  - `final_mile` — **Final Mile:** Daily OS Digest preview, SupplyMind (stock alerts, drafts, checklist UX), Voice AI toggle + **журнал звонков** (`loadVoiceCallLogs` → `GET /voice/calls`).
+  - `final_mile` — **Финал:** предпросмотр ежедневной сводки ОС, Закупки (предупреждения по запасам, черновики, чеклисты), голосовой ИИ + **журнал звонков** (`loadVoiceCallLogs` → `GET /voice/calls`).
   Legacy-файлы `_tab_ai_value.html`, `_tab_intelligence.html`, `_tab_digital_twin.html` остаются для редиректов hash.
 - `_tab_menu.html` — меню и стоп-лист.
 
@@ -128,7 +128,7 @@
 
 ## Known Follow-Ups
 
-- **Final Mile UI:** `aiCenterTab=final_mile` — SupplyMind drafts/checklist, Voice AI toggle + call log strip (`GET /voice/calls`); StaffMind tracker — в **Настройки → Команда**.
+- **Финал UI:** `aiCenterTab=final_mile` — чеклисты закупок, голосовой ИИ + журнал звонков (`GET /voice/calls`); обучение сотрудников — в **Настройки → Команда**.
 - **Control Plane:** `GET /trace-timeline?trace_id=` + панель «Цепочка trace_id» в AI Center → OS (`loadTraceTimeline()`).
 - **Superadmin:** `/superadmin` — tech fields (`iiko_api_login`, …), журнал `GET /api/superadmin/audit` (миграция `20260521_superadmin_audit` на env).
 - Разбить `admin-app.js` на небольшие доменные модули: dashboard, orders, menu, chats, settings.

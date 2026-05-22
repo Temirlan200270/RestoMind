@@ -1,4 +1,4 @@
-# Remaining Updates After Final Mile
+# Remaining Updates After Финал (Final Mile backend)
 
 This file tracks what is still needed outside the backend MVP that is already implemented.
 
@@ -6,7 +6,7 @@ This file tracks what is still needed outside the backend MVP that is already im
 
 - **Database:** run `alembic upgrade head`; expected head is `20260521_superadmin_audit` (chain: … → `20260522_iiko_office_inventory` → `20260521_superadmin_audit`).
 - **Workers:** restart ARQ workers so `daily_os_digest_scheduled_tick`, `iiko_inventory_sync`, and `external_reviews_sync_scheduled_tick` are registered.
-- **Frontend (wired):** `aiCenterTab=final_mile` — Daily OS Digest preview, SupplyMind stock alerts/drafts/checklist UX, Voice AI enable/mode + call log strip (`GET /voice/calls` ✅). `_tab_settings_team.html` — StaffMind onboarding + step tracker (метрики частично на эвристиках UI). `/superadmin` — tech fields + audit journal ✅ (нужен `alembic upgrade head` на env).
+- **Frontend (wired):** `aiCenterTab=final_mile` (вкладка **Финал**) — предпросмотр ежедневной сводки ОС, предупреждения по запасам/чеклисты закупок, голосовой ИИ + журнал звонков (`GET /voice/calls` ✅). `_tab_settings_team.html` — обучение сотрудников + step tracker (метрики частично на эвристиках UI). `/superadmin` — tech fields + audit journal ✅ (нужен `alembic upgrade head` на env).
 - **Permissions:** decide which staff roles can create supply drafts and change checklist status; StaffMind POST onboarding — `require_staff_manager_or_admin`; Voice toggle — `require_staff_admin` on `POST /voice/config`.
 - **Operations:** confirm every organization has a valid `timezone`, especially for the 09:00 Daily OS Digest.
 - **Staging checks (ops gate):** consolidated sign-off [`docs/FINAL_MILE_OPS_SIGNOFF.md`](FINAL_MILE_OPS_SIGNOFF.md) — iiko Office live smoke, Voice Realtime call, browser smoke [`docs/FINAL_MILE_BROWSER_SMOKE.md`](FINAL_MILE_BROWSER_SMOKE.md); Telegram [`docs/TELEGRAM_DIGEST_STAGING.md`](TELEGRAM_DIGEST_STAGING.md).
@@ -15,7 +15,7 @@ This file tracks what is still needed outside the backend MVP that is already im
 
 | Epic | Code in repo | Production gate |
 |------|--------------|-----------------|
-| **iiko Office inventory sync** | ✅ `iiko_office_client`, `iiko_inventory_sync`, `inventory_sync` router, ARQ cron, Final Mile status/manual sync UI, [`tests/test_iiko_inventory_sync.py`](tests/test_iiko_inventory_sync.py) | Per-org `integration_config_json.iiko_office` + smoke against **live** iiko Office |
+| **iiko Office inventory sync** | ✅ `iiko_office_client`, `iiko_inventory_sync`, `inventory_sync` router, ARQ cron, UI синхронизации на вкладке **Финал**, [`tests/test_iiko_inventory_sync.py`](tests/test_iiko_inventory_sync.py) | Per-org `integration_config_json.iiko_office` + smoke against **live** iiko Office |
 | **SupplyMind checklist** | ✅ lifecycle API + CSV + UI «Чеклисты закупки»; tests in `test_ultimate_platform_sprint.py` | Role gates + operator smoke in AI Center |
 | **Voice Realtime** | ✅ `voice_realtime/*`, `twilio_routing`, webhook branch; call log strip UI + `GET /voice/calls`; tests `test_voice_realtime.py`, `test_twilio_routing.py`, `test_voice_staging.py` | **Staging gate:** manual call (`mode=realtime`) on real Twilio + latency/cost notes ([`docs/VOICE_AI_SPIKE.md`](VOICE_AI_SPIKE.md)) |
 | **Superadmin audit** | ✅ `SuperadminAuditLog`, `GET /api/superadmin/audit`, UI journal, migration `20260521_superadmin_audit`; tests `test_superadmin_audit.py` | Run migration on deploy; optional filters/export later |

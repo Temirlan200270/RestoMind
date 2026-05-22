@@ -8969,8 +8969,8 @@ function adminMixinDataChartsSettings() {
             if (!st) return this.inventorySyncLoading ? 'Проверяем…' : 'Статус неизвестен';
             if (!st.iiko_office_configured) return 'iiko Office не настроен';
             const last = st.last_inventory_sync || {};
-            if (!last.at) return 'Готов к первому sync';
-            return last.ok ? `Последний sync: ${this.fmt.date(last.at)}` : `Ошибка sync: ${last.error || 'см. логи'}`;
+            if (!last.at) return 'Готов к первой синхронизации';
+            return last.ok ? `Последняя синхронизация: ${this.fmt.date(last.at)}` : `Ошибка синхронизации: ${last.error || 'см. логи'}`;
         },
 
         async createSupplyMindDraft() {
@@ -9172,7 +9172,7 @@ function adminMixinDataChartsSettings() {
 
         async saveVoiceAiConfig() {
             if (!this.canStaffAdminOnly()) {
-                void this.showUiAlert(this.staffRbacHint('admin') || 'Недостаточно прав', 'Voice AI');
+                void this.showUiAlert(this.staffRbacHint('admin') || 'Недостаточно прав', 'Голосовой бот');
                 return;
             }
             if (this.voiceAiSaving) return;
@@ -9190,14 +9190,14 @@ function adminMixinDataChartsSettings() {
                     this.voiceAiStatus = data.item;
                     this.voiceAiEnabledDraft = !!data.item.enabled;
                     this.voiceAiModeDraft = data.item.mode === 'realtime' ? 'realtime' : 'stt_fallback';
-                    this.setToast('Voice AI настройки сохранены');
+                    this.setToast('Настройки голосового бота сохранены');
                 } else if (status === 403) {
                     void this.showUiAlert(
-                        this.formatApiError(data?.detail) || 'Только администратор может менять Voice AI',
-                        'Voice AI',
+                        this.formatApiError(data?.detail) || 'Только администратор может менять голосовой бот',
+                        'Голосовой бот',
                     );
                 } else {
-                    void this.showUiAlert(this.formatApiError(data?.detail) || 'Не удалось сохранить Voice AI', 'Voice AI');
+                    void this.showUiAlert(this.formatApiError(data?.detail) || 'Не удалось сохранить настройки голосового бота', 'Голосовой бот');
                 }
             } finally {
                 this.voiceAiSaving = false;
@@ -9731,12 +9731,12 @@ function adminMixinDataChartsSettings() {
 
         async startStaffMindOnboarding() {
             if (!this.canStaffStartStaffMind()) {
-                void this.showUiAlert(this.staffRbacHint('manager') || 'Недостаточно прав', 'StaffMind');
+                void this.showUiAlert(this.staffRbacHint('manager') || 'Недостаточно прав', 'Обучение сотрудников');
                 return;
             }
             const phone = String(this.staffMindPhone || '').trim();
             if (!phone) {
-                this.teamError = 'Введите телефон сотрудника для онбординга';
+                this.teamError = 'Введите телефон сотрудника для обучения';
                 return;
             }
             if (this.staffMindStartLoading) return;
@@ -9754,9 +9754,9 @@ function adminMixinDataChartsSettings() {
                     this.staffMindSessions = [data.item, ...(this.staffMindSessions || [])];
                     this.staffMindPhone = '';
                     this.staffMindRole = 'staff';
-                    this.setToast('Онбординг сотрудника запущен');
+                    this.setToast('Обучение сотрудника запущено');
                 } else {
-                    this.teamError = this.formatApiError(data?.detail) || 'Не удалось запустить StaffMind';
+                    this.teamError = this.formatApiError(data?.detail) || 'Не удалось запустить обучение';
                 }
             } finally {
                 this.staffMindStartLoading = false;
@@ -9765,7 +9765,7 @@ function adminMixinDataChartsSettings() {
 
         async askStaffMind(sessionId) {
             if (!this.canStaffStartStaffMind()) {
-                void this.showUiAlert(this.staffRbacHint('manager') || 'Недостаточно прав', 'StaffMind');
+                void this.showUiAlert(this.staffRbacHint('manager') || 'Недостаточно прав', 'Обучение сотрудников');
                 return;
             }
             const id = Number(sessionId);
@@ -9783,7 +9783,7 @@ function adminMixinDataChartsSettings() {
                     this.staffMindSessions = (this.staffMindSessions || []).map((s) => Number(s.id) === id ? data.item : s);
                     this.staffMindQuestionById = { ...(this.staffMindQuestionById || {}), [id]: '' };
                 } else {
-                    this.teamError = this.formatApiError(data?.detail) || 'StaffMind не смог ответить';
+                    this.teamError = this.formatApiError(data?.detail) || 'Не удалось получить ответ';
                 }
             } finally {
                 this.staffMindAskLoadingId = null;
@@ -11293,6 +11293,15 @@ function adminMixinInboxActionQueue() {
             return labels[raw] || raw || '—';
         },
 
+        voiceCallModeLabel(mode) {
+            const raw = String(mode || '').toLowerCase();
+            const labels = {
+                stt_fallback: 'Распознавание речи',
+                realtime: 'Потоковый диалог',
+            };
+            return labels[raw] || mode || '';
+        },
+
         voiceCallStatusSurfaceClass(status) {
             const raw = String(status || '').toLowerCase();
             if (raw === 'completed') return 'ds-status-ok ds-status-ring';
@@ -11347,6 +11356,9 @@ function marketingTab() {
         formError: '',
         segmentCount: null,
         form: { name: '', segment_type: 'inactive_30d', message_text: '', template_name: '', scheduled_for: '' },
+        iikoSyncLoading: false,
+        iikoSyncResult: null,
+        iikoSyncError: '',
         loyaltyEnabled: false,
         loyaltyPointsPerKzt: 0,
         loyaltyHistory: [],
@@ -11387,6 +11399,26 @@ function marketingTab() {
                 const r = await fetch(`/api/admin/marketing/segment-preview/${this.form.segment_type}`);
                 if (r.ok) { const d = await r.json(); this.segmentCount = d.count; }
             } catch(_e) {}
+        },
+
+        async syncIikoCustomers() {
+            this.iikoSyncLoading = true;
+            this.iikoSyncError = '';
+            this.iikoSyncResult = null;
+            try {
+                const r = await fetch('/api/admin/marketing/sync-iiko-customers?days=90', { method: 'POST' });
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok) {
+                    this.iikoSyncError = (typeof d.detail === 'string' ? d.detail : d.detail?.msg) || 'Не удалось импортировать базу';
+                    return;
+                }
+                this.iikoSyncResult = d;
+                await this.previewSegment();
+            } catch (_e) {
+                this.iikoSyncError = 'Сетевая ошибка';
+            } finally {
+                this.iikoSyncLoading = false;
+            }
         },
 
         async createBlast() {
