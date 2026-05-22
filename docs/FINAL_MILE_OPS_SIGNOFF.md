@@ -3,6 +3,7 @@
 Инженерный код и UI **готовы** (587+ pytest). Закрытие ROADMAP `Voice [ ]` и `iiko Office live smoke` — только после заполнения таблиц ниже на **production/staging**.
 
 Связанные чеклисты:
+- Deploy (env + smoke): [`docs/DEPLOY_RUNBOOK.md`](DEPLOY_RUNBOOK.md)
 - Voice: [`docs/VOICE_STAGING_CHECKLIST.md`](VOICE_STAGING_CHECKLIST.md)
 - Telegram digest: [`docs/TELEGRAM_DIGEST_STAGING.md`](TELEGRAM_DIGEST_STAGING.md)
 - Browser UI: [`docs/FINAL_MILE_BROWSER_SMOKE.md`](FINAL_MILE_BROWSER_SMOKE.md)

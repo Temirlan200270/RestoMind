@@ -8108,6 +8108,36 @@ function adminMixinDataChartsSettings() {
             return `${m}м ${String(s).padStart(2, '0')}с`;
         },
 
+        shiftStateLabel(state) {
+            return ({
+                S0: 'Спокойно',
+                S1: 'Критично — высокий риск',
+                S2: 'Под нагрузкой',
+                S3: 'Стабильно',
+                S4: 'Ждём оплаты / есть черновики',
+                S5: 'Перегруз',
+            })[state] || 'Состояние уточняется';
+        },
+
+        shiftStateReasonLabel(reason) {
+            return ({
+                queue_spike: 'резкий рост очереди',
+                extreme_risk_kzt: 'очень высокий риск потерь',
+                red_chat_exists: 'есть гость без ответа в красной зоне',
+                high_draft_value: 'брошенные заказы на крупную сумму',
+                high_risk_kzt: 'высокий риск потери выручки',
+                critical_risk: 'критичный риск',
+                s1_hysteresis_latched: 'удерживаем тревогу, пока ситуация не стабилизируется',
+                drafts_and_pending: 'брошенные заказы и ожидающие оплаты',
+                pending_prepay_exists: 'гости ждут оплату',
+                abandoned_drafts_exist: 'брошенные черновики',
+                slow_chats_yellow: 'медленные ответы гостям',
+                queue_busy: 'очередь под нагрузкой',
+                calm_low_risk: 'спокойно, риск низкий',
+                idle_fallback: 'спокойно',
+            })[reason] || '';
+        },
+
         async loadShiftState(force = false) {
             const ttlMs = 30000;
             const now = Date.now();

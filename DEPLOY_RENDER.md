@@ -1,5 +1,7 @@
 # Деплой RestoMind на Render
 
+> **Launch Window:** операционный чеклист (env-матрица, worker, smoke) — [`docs/DEPLOY_RUNBOOK.md`](docs/DEPLOY_RUNBOOK.md).
+
 Полноценный бэкенд (FastAPI + Jinja-админка + WebSocket) размещается **на Render** как **Web Service**; база данных — **внешний PostgreSQL** (рекомендуется [Supabase](https://supabase.com), см. [docs/SUPABASE_MIGRATION.md](docs/SUPABASE_MIGRATION.md)) или любой другой хост с `DATABASE_URL`.  
 **Vercel** этот репозиторий напрямую не подходит: нет долгоживущего процесса и нормальных WebSocket для текущей архитектуры (см. [docs/VERCEL.md](docs/VERCEL.md)).
 

@@ -4,7 +4,7 @@
                 {% set op_q_open %}
                     <div class="flex items-center gap-4">
                         <div class="text-4xl font-black tabular-nums shrink-0" style="color: var(--color-text);" x-text="dashStats.failed_tasks_open ?? 0"></div>
-                        <p class="text-sm ds-text-muted mt-0">Считаем неразрешённые задачи «нужен человек». Идеально — <span class="font-semibold text-emerald-700">0</span>.</p>
+                        <p class="text-sm ds-text-muted mt-0">Считаем открытые задачи «нужен человек». Идеально — <span class="font-semibold text-emerald-700">0</span>.</p>
                     </div>
                 {% endset %}
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
@@ -27,8 +27,8 @@
                         <label class="block text-xs font-medium text-gray-500 mb-1">Статус</label>
                         <select x-model="failedTasksFilter" @change="loadFailedTasks()"
                             class="ds-input text-sm min-w-[11rem] min-h-[44px]">
-                            <option value="open">Неразрешённые</option>
-                            <option value="resolved">Разрешённые</option>
+                            <option value="open">В работе</option>
+                            <option value="resolved">Закрытые</option>
                             <option value="all">Все</option>
                         </select>
                     </div>

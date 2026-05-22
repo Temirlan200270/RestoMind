@@ -120,3 +120,22 @@ def test_dashboard_sales_peak_opens_analytics_subtab():
     assert "Пик продаж сегодня" in dash
     assert "navigateToTab('dashboard', { dashboardTab: 'analytics' })" in dash
     assert "setAnalyticsDensity('advanced'); navigateToTab('dashboard')" not in dash
+
+
+def test_operator_queue_no_dev_resolved_labels():
+    html = _read("app", "templates", "screens", "_tab_operator_queue.html")
+    assert "Неразрешённые" not in html
+    assert "Разрешённые" not in html
+    assert "В работе" in html
+    assert "Закрытые" in html
+
+
+def test_shift_control_no_raw_state_leak():
+    html = _read("app", "templates", "screens", "_tab_shift_control.html")
+    js = JS.read_text(encoding="utf-8")
+    assert 'x-text="shiftState.state"' not in html
+    assert 'x-text="shiftState.presentation.state_reason"' not in html
+    assert "shiftStateLabel(" in html
+    assert "shiftStateLabel(" in js
+    assert "shiftStateReasonLabel(" in html
+    assert "shiftStateReasonLabel(" in js

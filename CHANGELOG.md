@@ -6,6 +6,16 @@
 
 ## [Unreleased] — 2026-03-20
 
+### Изменено (2026-05-22) — Launch runbook
+
+- **Ops:** [`docs/DEPLOY_RUNBOOK.md`](docs/DEPLOY_RUNBOOK.md) — единый чеклист выкатки на Render (Web + ARQ worker), env-матрица Supabase/Upstash, post-deploy smoke, troubleshooting; ссылки на FINAL_MILE sign-off.
+
+### Изменено (2026-05-22) — Rule 8 tail #2 (shift + operator queue)
+
+- **Operator queue:** фильтр «Неразрешённые / Разрешённые» → «В работе / Закрытые»; KPI-подпись без «неразрешённые» ([`_tab_operator_queue.html`](app/templates/screens/_tab_operator_queue.html)).
+- **Экран смены:** `shiftStateLabel()` / `shiftStateReasonLabel()` в [`admin-app.js`](app/static/js/admin-app.js) — оператор видит «Стабильно» и «есть гость без ответа в красной зоне» вместо `S3` и `red_chat_exists` ([`_tab_shift_control.html`](app/templates/screens/_tab_shift_control.html)).
+- Тесты: [`tests/test_ui_operator_language.py`](tests/test_ui_operator_language.py) (`test_operator_queue_no_dev_resolved_labels`, `test_shift_control_no_raw_state_leak`).
+
 ### Изменено (2026-05-22) — Rule 8 tails + BI/Marketing MVP
 
 - **Inbox / Финал:** «Action Queue» → «Очередь помощи»; «Final Mile» → «Финал»; вкладка **Финал** — русские подписи (сводка ОС, голосовой ИИ, закупки); analytics без dev-жаргона (`UpsellRule`, `Menu Engineering`, JSON-поля в подсказках).

@@ -1,4 +1,4 @@
-"""Focus-Driven OS Sprint 3 — Action Queue inbox + voice tail smoke."""
+"""Focus-Driven OS Sprint 3 — Очередь помощи (inbox) + voice tail smoke."""
 
 from pathlib import Path
 
@@ -7,7 +7,7 @@ REPO = Path(__file__).resolve().parents[1]
 
 def test_inbox_action_queue_template_markers():
     inbox = (REPO / "app" / "templates" / "screens" / "_tab_inbox.html").read_text(encoding="utf-8")
-    assert "Action Queue" in inbox
+    assert "Очередь помощи" in inbox
     assert "moneyQueueStatusClass(item.severity)" in inbox
     assert "loadInboxActionQueue()" in inbox
     assert "ds-status-surface" in inbox
