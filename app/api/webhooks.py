@@ -42,7 +42,7 @@ from app.services.ai_brain import (
     voice_supported,
 )
 from app.services.chat_delivery import apply_whatsapp_status_webhook
-from app.services.context_engine import fetch_ai_read_context, save_ai_context_snapshot
+from app.services.context_engine import fetch_ai_read_context, schedule_save_ai_context_snapshot
 from app.services.restaurant_context_cache import cached_format_org_current_time_block
 from app.services.customer_reply import (
     reset_twilio_call_context,
@@ -342,6 +342,46 @@ def _is_plain_greeting(text: str) -> bool:
 
 def _greeting_reply() -> str:
     return "Здравствуйте! Чем могу помочь?"
+
+
+async def _delayed_processing_feedback(
+    phone: str,
+    whatsapp_message_id: str,
+    *,
+    delay_sec: float,
+) -> None:
+    """Typing indicator (wamid) или короткий ack после задержки — не блокирует LLM."""
+    try:
+        await asyncio.sleep(max(0.5, delay_sec))
+        wmid = (whatsapp_message_id or "").strip()
+        if wmid:
+            from app.integrations.whatsapp import send_typing_indicator
+
+            await send_typing_indicator(phone, wmid)
+            return
+        ack = (settings.bot_slow_ack_message or "").strip()
+        if ack:
+            await send_customer_text(phone, ack)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.debug("slow processing feedback failed phone=%s", phone[-4:], exc_info=True)
+
+
+def _start_slow_processing_feedback(
+    phone: str,
+    whatsapp_message_id: str,
+) -> asyncio.Task[None] | None:
+    if not settings.bot_slow_ack_enabled:
+        return None
+    delay = float(settings.bot_slow_ack_delay_sec or 2.0)
+    try:
+        return asyncio.create_task(
+            _delayed_processing_feedback(phone, whatsapp_message_id, delay_sec=delay),
+            name=f"bot_slow_ack_{phone[-4:]}",
+        )
+    except RuntimeError:
+        return None
 
 
 _POLITE_ACK_RE = re.compile(
@@ -1814,18 +1854,14 @@ async def _process_message_inner(
 
         # Phase 3 OS: сохранить снимок контекста до LLM (fire-and-forget, не блокирует)
         # menu_context уже вычислен выше — передаём для точного replay
-        ai_snapshot_id: str | None = None
-        try:
-            ai_snapshot_id = await save_ai_context_snapshot(
-                phone,
-                organization_id,
-                read_ctx,
-                menu_context_text=menu_context,
-                trace_id=trace_id,
-                conversation_id=conversation_id,
-            )
-        except Exception:
-            pass  # snapshot — аудит; потеря не критична
+        ai_snapshot_id = schedule_save_ai_context_snapshot(
+            phone,
+            organization_id,
+            read_ctx,
+            menu_context_text=menu_context,
+            trace_id=trace_id,
+            conversation_id=conversation_id,
+        )
 
         # G4 Money MVP: трекинг медленных чатов + краткий режим при перегрузе
         active_location_id = getattr(draft_row, "location_id", None)
@@ -1848,40 +1884,50 @@ async def _process_message_inner(
             menu_context = "[КРАТКИЙ РЕЖИМ] Очередь загружена — отвечай коротко и по делу, без апсейла.\n" + menu_context
 
         # 2) OpenAI: без DB-сессии
-        if had_voice:
-            if voice_bytes is None:
-                return
-            ai_response = await call_ai_with_audio(
-                history,
-                voice_bytes,
-                voice_mime,
-                menu_context,
-                kb_context,
-                draft_order_context=draft_ctx,
-                sales_strategy_context=strategy_ctx,
-                customer_context=customer_ctx,
-                current_time_context=current_time_ctx,
-            )
-            user_log_text = (ai_response.recognized_speech or "").strip() or "🎤 голосовое сообщение"
-            await append_to_history(
-                redis_client, phone, "user", user_log_text, organization_id=organization_id,
-            )
-        else:
-            user_log_text = message_text
-            ai_response = await call_openai(
-                history,
-                message_text,
-                menu_context,
-                kb_context,
-                draft_order_context=draft_ctx,
-                sales_strategy_context=strategy_ctx,
-                customer_context=customer_ctx,
-                current_time_context=current_time_ctx,
-                # Временный сбой провайдера → тот же путь, что и «позвать человека»:
-                # escalate + HUMAN_MODE + Telegram + human_needed (без 3× retry на исключении).
-                raise_on_transient=False,
-                trace_id=trace_id,
-            )
+        slow_feedback_task = _start_slow_processing_feedback(phone, wmid)
+        try:
+            if had_voice:
+                if voice_bytes is None:
+                    return
+                ai_response = await call_ai_with_audio(
+                    history,
+                    voice_bytes,
+                    voice_mime,
+                    menu_context,
+                    kb_context,
+                    draft_order_context=draft_ctx,
+                    sales_strategy_context=strategy_ctx,
+                    customer_context=customer_ctx,
+                    current_time_context=current_time_ctx,
+                )
+                user_log_text = (ai_response.recognized_speech or "").strip() or "🎤 голосовое сообщение"
+                await append_to_history(
+                    redis_client, phone, "user", user_log_text, organization_id=organization_id,
+                )
+            else:
+                user_log_text = message_text
+                ai_response = await call_openai(
+                    history,
+                    message_text,
+                    menu_context,
+                    kb_context,
+                    draft_order_context=draft_ctx,
+                    sales_strategy_context=strategy_ctx,
+                    customer_context=customer_ctx,
+                    current_time_context=current_time_ctx,
+                    # Временный сбой провайдера → тот же путь, что и «позвать человека»:
+                    # escalate + HUMAN_MODE + Telegram + human_needed (без 3× retry на исключении).
+                    raise_on_transient=False,
+                    trace_id=trace_id,
+                    has_draft=draft_row is not None,
+                )
+        finally:
+            if slow_feedback_task is not None:
+                slow_feedback_task.cancel()
+                try:
+                    await slow_feedback_task
+                except asyncio.CancelledError:
+                    pass
 
         if settings.pipeline_timing_enabled:
             pipe_sw.split("llm")

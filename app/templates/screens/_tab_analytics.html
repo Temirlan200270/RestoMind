@@ -175,7 +175,7 @@
                             <div class="flex justify-between gap-2"><span class="text-gray-500">Клиенты с активностью в чате</span><span class="font-bold tabular-nums" x-text="analyticsData.funnel?.dialogs ?? 0"></span></div>
                             <div class="flex justify-between gap-2"><span class="text-gray-500">Новые черновики заказов</span><span class="font-bold tabular-nums" x-text="analyticsData.funnel?.draft_orders ?? 0"></span></div>
                             <div class="flex justify-between gap-2"><span class="text-gray-500">Завершено в iiko / выполнено</span><span class="font-bold tabular-nums" x-text="analyticsData.funnel?.finished_orders ?? 0"></span></div>
-                            <div class="flex justify-between gap-2"><span class="text-gray-500">Эскалации (бот звал оператора)</span><span class="font-bold tabular-nums text-amber-700" x-text="analyticsData.escalations?.count ?? 0"></span></div>
+                            <div class="flex justify-between gap-2"><span class="text-gray-500">Диалоги с оператором (бот позвал человека)</span><span class="font-bold tabular-nums text-amber-700" x-text="analyticsData.escalations?.count ?? 0"></span></div>
                             <p class="text-[11px] text-gray-400 mt-1" x-show="analyticsData.escalations?.previous_count != null">
                                 Пред. период: <span class="tabular-nums" x-text="analyticsData.escalations?.previous_count"></span>
                                 <span x-show="analyticsData.escalations?.change_pct != null" class="ml-1"

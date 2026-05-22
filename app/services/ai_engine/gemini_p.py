@@ -11,7 +11,7 @@ from pydantic import ValidationError
 from app.core.ai_constants import AI_PRESETS
 from app.core.config import settings
 from app.schemas.ai_schemas import AIBrainResponse
-from app.services.ai_engine.base import BaseAIProvider
+from app.services.ai_engine.base import BaseAIProvider, ModelTier
 from app.services.ai_engine.errors import TransientAiError
 from app.services.ai_engine.prompting import build_system_prompt, format_untrusted_user_text_for_model
 
@@ -212,6 +212,7 @@ class GeminiProvider(BaseAIProvider):
         sales_strategy_context: str = "",
         customer_context: str = "",
         current_time_context: str = "",
+        model_tier: ModelTier = "strong",
     ) -> AIBrainResponse:
         if not self._ensure_configured():
             logger.error("[AI] provider=gemini status=NO_KEY")
@@ -221,6 +222,11 @@ class GeminiProvider(BaseAIProvider):
             )
 
         preset = AI_PRESETS["gemini"]
+        if model_tier == "fast" and settings.ai_model_routing_enabled:
+            fast = (settings.ai_fast_model_gemini or "").strip()
+            model_names: tuple[str, ...] = (fast,) if fast else (preset.models[-1],)
+        else:
+            model_names = preset.models
         system_prompt = build_system_prompt(
             menu_context=menu_context,
             kb_context=kb_context,
@@ -244,7 +250,7 @@ class GeminiProvider(BaseAIProvider):
         # Храним сырой ответ модели между try-блоками, чтобы при ValidationError
         # логировать первые N символов — это главный инсайт для отладки схемы.
         raw_text_for_log: str = ""
-        for idx, model_name in enumerate(preset.models, start=1):
+        for idx, model_name in enumerate(model_names, start=1):
             t0 = time.perf_counter()
             raw_text_for_log = ""
             try:
@@ -279,7 +285,7 @@ class GeminiProvider(BaseAIProvider):
                     "[AI] provider=gemini model=%s attempt=%d/%d status=SUCCESS latency_ms=%d intent=%s",
                     model_name,
                     idx,
-                    len(preset.models),
+                    len(model_names),
                     int((time.perf_counter() - t0) * 1000),
                     parsed.intent,
                 )
@@ -296,17 +302,17 @@ class GeminiProvider(BaseAIProvider):
                     "latency_ms=%d err=%s fields=%s raw=%r",
                     model_name,
                     idx,
-                    len(preset.models),
+                    len(model_names),
                     int((time.perf_counter() - t0) * 1000),
                     type(exc).__name__,
                     _format_validation_error(exc),
                     raw_preview,
                 )
-                if idx < len(preset.models):
+                if idx < len(model_names):
                     logger.warning(
                         "[FAILOVER] Model %s failed (Reason: JSON_ERROR), trying %s",
                         model_name,
-                        preset.models[idx],
+                        model_names[idx],
                     )
                 continue
 
@@ -317,7 +323,7 @@ class GeminiProvider(BaseAIProvider):
                     "[AI] provider=gemini model=%s attempt=%d/%d status=%s latency_ms=%d err=%s",
                     model_name,
                     idx,
-                    len(preset.models),
+                    len(model_names),
                     "QUOTA_EXHAUSTED" if is_provider_level else "ERROR",
                     int((time.perf_counter() - t0) * 1000),
                     type(exc).__name__,
@@ -328,11 +334,11 @@ class GeminiProvider(BaseAIProvider):
                 if is_provider_level:
                     # Прерываем каскад: другая модель того же провайдера упадёт так же.
                     break
-                if idx < len(preset.models):
+                if idx < len(model_names):
                     logger.warning(
                         "[FAILOVER] Model %s failed (Reason: API_ERROR), trying %s",
                         model_name,
-                        preset.models[idx],
+                        model_names[idx],
                     )
                 continue
 

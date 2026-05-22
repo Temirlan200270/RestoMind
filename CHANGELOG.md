@@ -6,6 +6,20 @@
 
 ## [Unreleased] — 2026-03-20
 
+### Изменено (2026-05-22) — Rule 8: язык оператора в UI
+
+- **Дашборд:** убран блок «Очередь задач» (остался в «Интеграции»); «DRAFT × AOV» → «корзина > 1 ч × средний чек»; «эскалация» → «передано оператору» / «доля диалогов с оператором».
+- **Шапка:** полный `operational_label` с emoji и цветом на desktop и mobile; дублирующий бейдж на дашборде убран.
+- **По админке:** единая терминология «запрос оператору» (аналитика, AI Center, чаты, модалки, event labels в `admin-app.js`).
+- **Маркетинг / лояльность:** без `LOYALTY_*` env-имён; статус и курс из `GET /settings/environment`.
+- Тесты: [`tests/test_ui_operator_language.py`](tests/test_ui_operator_language.py).
+
+### Изменено (2026-05-22) — Sprint A/B performance
+
+- **Bot (Sprint A):** `schedule_save_ai_context_snapshot` — снимок AI-контекста fire-and-forget до LLM; typing indicator Meta Cloud API (`send_typing_indicator`) или fast ack «Секунду, смотрю меню…» после `BOT_SLOW_ACK_DELAY_SEC`; heuristic model routing (`resolve_model_tier`, `AI_FAST_MODEL_*`) с fast→strong rerun на order/book.
+- **Admin (Sprint B):** lazy init — `loadChatList` только на chats/inbox; `loadRevenueLeak`/`loadShiftState` только dashboard/shift; после login — `loadTabData` текущей вкладки + `deferIdleWork` для profile/integrations; ETag/`If-None-Match` → 304 на `GET /organization/profile` и `GET /integrations/status`.
+- Тесты: [`tests/test_perf_sprint_ab.py`](tests/test_perf_sprint_ab.py).
+
 ### Изменено (2026-05-21) — Role-first tails (Sprint 5 polish)
 
 - **Mobile bottom nav:** `_bottom_nav.html` — `isTabVisibleForRole()`; оператор: Inbox вместо Dashboard; manager/admin: Dashboard + Menu; `bottomNavMoreTabActive()`.
@@ -20,7 +34,7 @@
 - **Mode Bar убран** из `screens/_header.html`; навигация по роли staff, не по трём режимам.
 - **Сайдбар:** `isTabVisibleForRole()` — operator (5 вкладок), manager (+ menu, dashboard, ai_center), admin (все).
 - **Smart landing оператора:** `applyRoleDefaultLanding()` — shift при `risk_kzt > 0` или `focus.id`, иначе inbox.
-- **Дашборд:** toggle «Обычный / Расширенный» (`analyticsDensity`, `localStorage.restomind_analytics_density`).
+- **Дашборд:** один переключатель «Обзор / Подробная аналитика»; дублирующая кнопка справа убрана.
 - **Смена calm-empty:** CTA в inbox/chats при S0/S3 без риска (`shiftIsCalmEmpty()`).
 - Тесты: [`tests/test_role_first_nav.py`](tests/test_role_first_nav.py); обновлён sprint1 sidebar test.
 

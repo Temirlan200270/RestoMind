@@ -181,7 +181,7 @@ Operations‑интерфейс должен работать в двух реж
 
 ### Дашборд: Обычный / Расширенный
 
-- `analyticsDensity`: `normal` \| `advanced` (persist `localStorage.restomind_analytics_density`).
+- `analyticsDensity`: `normal` \| `advanced` (persist `localStorage.restomind_analytics_density`). UI: переключатель **«Обзор» / «Подробная аналитика»** (одна точка входа, без дублирующей кнопки).
 - **normal** — hero KPI, revenue leak, live feed (без тяжёлых графиков).
 - **advanced** — содержимое `_tab_analytics.html` (BI, OS autopilot и т.д.).
 - Toggle виден только `manager` / `admin` (`canToggleAnalyticsDensity()`).

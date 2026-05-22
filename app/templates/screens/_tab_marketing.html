@@ -137,11 +137,17 @@
                 <h3 class="font-semibold text-sm text-gray-800">Бонусная программа</h3>
                 <span class="text-xs px-2 py-1 rounded-full"
                     :class="loyaltyEnabled ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'"
-                    x-text="loyaltyEnabled ? 'Включена' : 'Выключена (LOYALTY_ENABLED=false)'"></span>
+                    x-text="loyaltyEnabled ? 'Включена' : 'Выключена'"></span>
             </div>
-            <p class="text-xs text-gray-500">Включается через переменную <code class="bg-gray-100 px-1 rounded">LOYALTY_ENABLED=true</code>.
-                Курс начисления задаётся <code class="bg-gray-100 px-1 rounded">LOYALTY_POINTS_PER_KZT</code>
-                (по умолчанию 100 KZT = 1 балл). Бот автоматически сообщает клиенту его баланс.</p>
+            <p class="text-xs text-gray-500" x-show="loyaltyEnabled" x-cloak>
+                Гости получают баллы за заказы. Бот автоматически сообщает клиенту баланс в чате.
+                <span x-show="loyaltyPointsPerKzt > 0" x-cloak>
+                    Курс: <span class="font-semibold tabular-nums" x-text="loyaltyPointsPerKzt"></span> ₸ = 1 балл.
+                </span>
+            </p>
+            <p class="text-xs text-gray-500" x-show="!loyaltyEnabled" x-cloak>
+                Программа настраивается администратором RestoMind. Чтобы подключить бонусную программу, обратитесь в поддержку.
+            </p>
         </div>
 
         <!-- Ручная корректировка баланса -->

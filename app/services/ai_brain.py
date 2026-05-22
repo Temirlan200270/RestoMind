@@ -16,7 +16,7 @@ from openai import AsyncOpenAI
 
 from app.core.config import settings
 from app.schemas.ai_schemas import AIBrainResponse
-from app.services.ai_engine.base import BaseAIProvider
+from app.services.ai_engine.base import BaseAIProvider, ModelTier
 from app.services.ai_engine.errors import TransientAiError
 from app.services.ai_engine.gemini_p import GeminiProvider
 from app.services.ai_engine.openai_p import OpenAIProvider
@@ -54,6 +54,39 @@ def _ensure_openai_client() -> AsyncOpenAI | None:
 
 
 MAX_RETRIES = 2
+
+_STRONG_INTENTS = frozenset({
+    "order",
+    "book",
+    "booking",
+    "confirm",
+    "confirm_order",
+    "confirm_booking",
+    "escalate",
+    "human",
+    "payment",
+    "cancel",
+})
+
+_STRONG_KEYWORDS = (
+    "заказ",
+    "заказать",
+    "оформ",
+    "достав",
+    "самовывоз",
+    "брон",
+    "стол",
+    "столик",
+    "оплат",
+    "счёт",
+    "счет",
+    "корзин",
+    "order",
+    "book",
+    "delivery",
+    "pickup",
+    "pay",
+)
 
 _FALLBACK_RESPONSE = AIBrainResponse(
     intent="escalate",
@@ -211,6 +244,45 @@ def _reset_provider_choice_log() -> None:
     _provider_choice_log_state = None
 
 
+def resolve_model_tier(
+    user_text: str,
+    *,
+    has_draft: bool = False,
+    draft_order_context: str = "",
+    sales_strategy_context: str = "",
+) -> ModelTier:
+    """Heuristic pre-routing до первого LLM-вызова (intent ещё неизвестен)."""
+    if not settings.ai_model_routing_enabled:
+        return "strong"
+    if has_draft or (draft_order_context or "").strip():
+        return "strong"
+    if (sales_strategy_context or "").strip():
+        return "strong"
+    text = (user_text or "").strip()
+    if not text:
+        return "strong"
+    if len(text) > 120:
+        return "strong"
+    lower = text.lower()
+    if any(kw in lower for kw in _STRONG_KEYWORDS):
+        return "strong"
+    return "fast"
+
+
+def _needs_strong_model_rerun(response: AIBrainResponse) -> bool:
+    """Fast model → retry на strong при order/book/complex intents."""
+    intent = (response.intent or "").strip().lower()
+    if intent in _STRONG_INTENTS:
+        return True
+    if response.items:
+        return True
+    if response.booking_details is not None:
+        return True
+    if response.order_actions:
+        return True
+    return False
+
+
 async def call_ai(
     history: list[dict[str, str]],
     user_text: str,
@@ -223,6 +295,8 @@ async def call_ai(
     *,
     raise_on_transient: bool = True,
     trace_id: str | None = None,
+    has_draft: bool = False,
+    model_tier: ModelTier | None = None,
 ) -> AIBrainResponse:
     """AI-агностичный вызов: провайдер выбирается по AI_PROVIDER."""
     from app.services.trace_context import get_trace_id, trace_log_prefix
@@ -230,6 +304,12 @@ async def call_ai(
     effective_trace = trace_id or get_trace_id()
     prefix = f"[trace_id={effective_trace}] " if effective_trace else trace_log_prefix()
     provider = get_ai_client()
+    tier: ModelTier = model_tier or resolve_model_tier(
+        user_text,
+        has_draft=has_draft,
+        draft_order_context=draft_order_context,
+        sales_strategy_context=sales_strategy_context,
+    )
     t0 = time.perf_counter()
     try:
         result = await provider.generate_response(
@@ -241,13 +321,33 @@ async def call_ai(
             sales_strategy_context=sales_strategy_context,
             customer_context=customer_context,
             current_time_context=current_time_context,
+            model_tier=tier,
         )
+        if tier == "fast" and settings.ai_model_routing_enabled and _needs_strong_model_rerun(result):
+            logger.info(
+                "%s[AI] fast→strong rerun intent=%s items=%d",
+                prefix,
+                result.intent,
+                len(result.items or []),
+            )
+            result = await provider.generate_response(
+                history=history,
+                user_text=user_text,
+                menu_context=menu_context,
+                kb_context=kb_context,
+                draft_order_context=draft_order_context,
+                sales_strategy_context=sales_strategy_context,
+                customer_context=customer_context,
+                current_time_context=current_time_context,
+                model_tier="strong",
+            )
         logger.info(
-            "%s[AI] dispatch provider=%s status=SUCCESS latency_ms=%d intent=%s",
+            "%s[AI] dispatch provider=%s status=SUCCESS latency_ms=%d intent=%s tier=%s",
             prefix,
             type(provider).__name__,
             int((time.perf_counter() - t0) * 1000),
             result.intent,
+            tier,
         )
         return result
     except TransientAiError:
@@ -274,6 +374,8 @@ async def call_openai(
     *,
     raise_on_transient: bool = True,
     trace_id: str | None = None,
+    has_draft: bool = False,
+    model_tier: ModelTier | None = None,
 ) -> AIBrainResponse:
     """Backward-compat alias (AI-Engine v2.0)."""
     return await call_ai(
@@ -287,6 +389,8 @@ async def call_openai(
         current_time_context=current_time_context,
         raise_on_transient=raise_on_transient,
         trace_id=trace_id,
+        has_draft=has_draft,
+        model_tier=model_tier,
     )
 
 

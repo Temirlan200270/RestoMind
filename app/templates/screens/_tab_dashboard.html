@@ -3,13 +3,16 @@
             <div x-show="currentTab === 'dashboard'" x-cloak class="fade-in space-y-6">
                 <div class="flex flex-wrap items-center justify-between gap-3">
                     {% call segmented(extra_class='border border-gray-200 bg-white shrink-0') %}
-                    <div class="contents" role="tablist" aria-label="Плотность аналитики" x-show="canToggleAnalyticsDensity()" x-cloak>
+                    <div class="contents" role="tablist" aria-label="Режим дашборда: обзор или подробная аналитика"
+                        x-show="canToggleAnalyticsDensity()" x-cloak>
                         <button type="button" class="min-h-[44px] px-3 py-2 rounded-lg text-sm font-semibold transition"
                             :class="analyticsDensity === 'normal' ? 'ds-segmented-active' : ''"
-                            @click="setAnalyticsDensity('normal')">Обычный</button>
+                            @click="setAnalyticsDensity('normal')"
+                            :aria-selected="analyticsDensity === 'normal'">Обзор</button>
                         <button type="button" class="min-h-[44px] px-3 py-2 rounded-lg text-sm font-semibold transition"
                             :class="analyticsDensity === 'advanced' ? 'ds-segmented-active' : ''"
-                            @click="setAnalyticsDensity('advanced')">Расширенный</button>
+                            @click="setAnalyticsDensity('advanced')"
+                            :aria-selected="analyticsDensity === 'advanced'">Подробная аналитика</button>
                     </div>
                     {% endcall %}
                 </div>
@@ -24,31 +27,7 @@
                                 title="Нажмите чтобы снять экстренное закрытие">
                                 ⛔ Временно закрыто
                             </span>
-                            <span x-show="orgProfile && orgProfile.operational_label && !orgProfile.force_closed" x-cloak
-                                class="inline-flex text-[11px] font-semibold px-2 py-1 rounded-full border"
-                                :class="(orgProfile.is_kitchen_open ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : (orgProfile.is_business_open ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-slate-50 border-slate-200 text-slate-700'))"
-                                x-text="(orgProfile.is_kitchen_open ? '🟢 ' : (orgProfile.is_business_open ? '🟡 ' : '⚫️ ')) + (orgProfile.operational_label || '')"></span>
                         </div>
-                        <!-- E5: здоровье очереди (fetch в loadTabData для дашборда); бэкенд может отсутствовать — без ошибок в консоли. -->
-                        <div class="flex flex-wrap items-center gap-2 mt-2" x-show="analyticsDensity === 'normal'" x-cloak role="status" aria-live="polite">
-                            <span class="text-[11px] text-slate-500 shrink-0">Очередь задач</span>
-                            <span x-show="!taskQueueHealthChecked" class="text-[11px] text-slate-400">…</span>
-                            <span x-show="taskQueueHealthChecked && !taskQueueHealth" x-cloak class="ds-badge ds-badge-neutral text-[11px]">недоступно</span>
-                            <template x-if="taskQueueHealth">
-                                <span class="flex flex-wrap items-center gap-1.5">
-                                    <span class="ds-badge text-[11px]" :class="taskQueueStatusClass(taskQueueHealth.redis)"
-                                        x-text="'Хранилище: ' + ({ok:'ок',degraded:'проблема',down:'недоступно'}[taskQueueHealth.redis] || taskQueueHealth.redis || '—')"></span>
-                                    <span class="ds-badge text-[11px]" :class="taskQueueStatusClass(taskQueueHealth.arq)"
-                                        x-text="'Очередь: ' + ({ok:'ок',degraded:'проблема',down:'отключена'}[taskQueueHealth.arq] || taskQueueHealth.arq || '—')"></span>
-                                    <span class="ds-badge text-[11px]" :class="taskQueueStatusClass(taskQueueHealth.worker)"
-                                        x-text="'Воркер: ' + ({ok:'работает',degraded:'проблема',down:'недоступен',unknown:'неизвестно'}[taskQueueHealth.worker] || taskQueueHealth.worker || '—')"></span>
-                                </span>
-                            </template>
-                        </div>
-                    </div>
-                    <div class="hidden sm:flex flex-wrap items-center gap-2">
-                        <button type="button" class="ds-btn ds-btn-secondary ds-btn-md"
-                            @click="navigateToTab('dashboard', { dashboardTab: 'analytics' })">Подробная аналитика</button>
                     </div>
                 </div>
 
@@ -107,7 +86,7 @@
                                 <div class="text-[10px] text-red-700 font-semibold">Брошенные корзины</div>
                                 <div class="text-base font-black text-red-900 tabular-nums mt-0.5"
                                     x-text="fmt.money(revenueLeak.breakdown?.abandoned_drafts_kzt ?? 0)"></div>
-                                <div class="text-[9px] text-red-500 mt-0.5">DRAFT > 1 часа × AOV</div>
+                                <div class="text-[9px] text-red-500 mt-0.5">корзина &gt; 1 ч × средний чек</div>
                             </div>
                             <div class="rounded-xl bg-white/70 px-3 py-2 text-center">
                                 <div class="text-[10px] text-red-700 font-semibold">Медленные ответы</div>
@@ -205,20 +184,20 @@
                     </div>
                     <div class="hidden sm:block w-px h-4 bg-slate-200" aria-hidden="true"></div>
                     <div class="flex items-center gap-1.5">
-                        <span class="text-slate-500">Эскалаций сегодня</span>
+                        <span class="text-slate-500">Передано оператору сегодня</span>
                         <span class="font-bold tabular-nums"
                             :class="(dashStats.escalations_today ?? 0) > 3 ? 'text-amber-600' : 'text-slate-900'"
                             x-text="dashStats.escalations_today ?? 0"></span>
                     </div>
                     <div class="hidden sm:block w-px h-4 bg-slate-200" aria-hidden="true"></div>
                     <div class="flex items-center gap-1.5" x-show="dashStats.escalation_rate_pct != null">
-                        <span class="text-slate-500">Доля эскалаций</span>
+                        <span class="text-slate-500">Доля диалогов с оператором</span>
                         <span class="font-bold tabular-nums text-slate-900" x-text="(dashStats.escalation_rate_pct ?? 0) + '%'"></span>
                     </div>
                     <!-- Phase 2.3: индикатор event-driven источника данных -->
                     <template x-if="dashStats.event_driven_stats?.source === 'event_driven'">
                         <div class="flex items-center gap-1 text-[10px] font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100 ml-auto shrink-0"
-                            :title="'Эскалации (данные ОС): ' + (dashStats.event_driven_stats?.escalations ?? 0)">
+                            :title="'Запросы оператору (данные ОС): ' + (dashStats.event_driven_stats?.escalations ?? 0)">
                             <svg class="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd"/></svg>
                             <span>данные ОС</span>
                             <span class="tabular-nums text-indigo-800"
@@ -515,7 +494,7 @@
                             </template>
                         </ul>
                         <div x-show="!dashActivityLoading && (!dashActivity || !dashActivity.length)" x-cloak class="py-8 px-4 text-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/60">
-                            <p class="text-sm text-slate-600 font-medium">Здесь появятся заказы, эскалации и доставки.</p>
+                            <p class="text-sm text-slate-600 font-medium">Здесь появятся заказы, запросы оператору и доставки.</p>
                             <p class="text-xs text-slate-500 mt-2 max-w-md mx-auto">Напишите боту в WhatsApp от имени гостя — и события начнут приходить в ленту.</p>
                             <button type="button" class="mt-4 min-h-[44px] px-4 py-2 rounded-xl text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700 shadow-sm shadow-brand-600/20"
                                 @click="navigateToTab('chats')">Открыть диалоги</button>

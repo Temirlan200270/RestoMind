@@ -11,7 +11,7 @@ from pydantic import ValidationError
 from app.core.ai_constants import AI_PRESETS
 from app.core.config import settings
 from app.schemas.ai_schemas import AIBrainResponse
-from app.services.ai_engine.base import BaseAIProvider
+from app.services.ai_engine.base import BaseAIProvider, ModelTier
 from app.services.ai_engine.errors import TransientAiError
 from app.services.ai_engine.prompting import build_system_prompt, format_untrusted_user_text_for_model
 
@@ -104,9 +104,15 @@ class OpenAIProvider(BaseAIProvider):
             return self._client
 
     @property
-    def _model(self) -> str:
-        # Model selection is preset-driven (env model names are intentionally ignored).
+    def _strong_model(self) -> str:
         return AI_PRESETS["openai"].models[0]
+
+    def _resolve_model(self, model_tier: ModelTier) -> str:
+        if model_tier == "fast" and settings.ai_model_routing_enabled:
+            fast = (settings.ai_fast_model_openai or "").strip()
+            if fast:
+                return fast
+        return self._strong_model
 
     async def generate_response(
         self,
@@ -119,6 +125,7 @@ class OpenAIProvider(BaseAIProvider):
         sales_strategy_context: str = "",
         customer_context: str = "",
         current_time_context: str = "",
+        model_tier: ModelTier = "strong",
     ) -> AIBrainResponse:
         client = self._ensure_client()
         if client is None:
@@ -142,7 +149,7 @@ class OpenAIProvider(BaseAIProvider):
 
         max_retries = 2
         last_error: Exception | None = None
-        model = self._model
+        model = self._resolve_model(model_tier)
         prompt_chars = sum(len(str(m.get("content", ""))) for m in messages)
         max_out = int(settings.ai_openai_max_completion_tokens)
 

@@ -283,6 +283,55 @@ async def _post_whatsapp_messages(
     return WhatsAppSendResult(ok=False, error=last_err or {"code": "unknown"})
 
 
+async def send_typing_indicator(phone: str, whatsapp_message_id: str) -> WhatsAppSendResult:
+    """
+    Mark inbound message as read and show typing indicator (Meta Cloud API).
+
+    Requires the inbound `messages.id` (wamid). Indicator auto-dismisses on reply or after ~25s.
+    """
+    wmid = (whatsapp_message_id or "").strip()
+    if not wmid:
+        return WhatsAppSendResult(ok=False, error={"code": "missing_message_id"})
+
+    if not settings.whatsapp_api_token:
+        logger.info("WhatsApp (dev) typing -> %s mid=%s", phone, wmid[:24])
+        return WhatsAppSendResult(ok=True, message_id=None)
+
+    headers = {
+        "Authorization": f"Bearer {settings.whatsapp_api_token}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "messaging_product": "whatsapp",
+        "status": "read",
+        "message_id": wmid,
+        "typing_indicator": {"type": "text"},
+    }
+    client = await _ensure_http_client()
+    try:
+        response = await client.post(
+            _messages_url(),
+            headers=headers,
+            json=payload,
+            timeout=SEND_TIMEOUT,
+        )
+    except httpx.HTTPError as exc:
+        logger.warning("WhatsApp typing: network error mid=%s: %s", wmid[:24], exc)
+        return WhatsAppSendResult(ok=False, error={"code": "network", "detail": str(exc)[:200]})
+
+    if response.status_code == 200:
+        return WhatsAppSendResult(ok=True, message_id=None)
+
+    err = _parse_send_error_payload(response)
+    logger.warning(
+        "WhatsApp typing failed mid=%s status=%s err=%s",
+        wmid[:24],
+        response.status_code,
+        err,
+    )
+    return WhatsAppSendResult(ok=False, error=err)
+
+
 async def send_message(phone: str, text: str) -> WhatsAppSendResult:
     """
     Отправить текстовое сообщение клиенту в WhatsApp.

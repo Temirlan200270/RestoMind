@@ -534,6 +534,22 @@ function adminTabVisibleForRole(tabId, role) {
     return tabs.includes(String(tabId || '').trim());
 }
 
+/** Sprint B: чаты грузим только на вкладках, где список реально нужен. */
+function adminTabNeedsChatList(tabId) {
+    const t = String(tabId || '').trim();
+    return t === 'chats' || t === 'inbox';
+}
+
+function adminTabNeedsRevenueLeak(tabId) {
+    const t = String(tabId || '').trim();
+    return t === 'dashboard' || t === 'shift';
+}
+
+function adminTabNeedsShiftState(tabId) {
+    const t = String(tabId || '').trim();
+    return t === 'dashboard' || t === 'shift';
+}
+
 function adminResolveOperatorLandingTab(shiftState) {
     const ss = shiftState && typeof shiftState === 'object' ? shiftState : {};
     const risk = Number(ss.metrics?.risk_kzt ?? 0);
@@ -965,6 +981,7 @@ function adminMixinState() {
         /** True после 404 на PATCH — показываем подсказку до появления API. */
         brandingApiUnavailable: false,
         orgProfileLoading: false,
+        _apiEtagCache: {},
         /** Гасим хром при смене филиала, пока не подтянутся профиль и данные вкладок. */
         orgSwitchChromeDimmed: false,
         orgProfileSaving: false,
@@ -3552,8 +3569,21 @@ function adminMixinAuthKnowledge() {
          * Убирает дублирование res.json().catch(() => ({})) по админке.
          */
         async apiJsonResponse(url, fetchOpts = {}) {
-            const res = await this.apiFetch(url, fetchOpts);
+            const method = String(fetchOpts.method || 'GET').toUpperCase();
+            const headers = { ...(fetchOpts.headers || {}) };
+            if (method === 'GET' && this._apiEtagCache) {
+                const cachedEtag = this._apiEtagCache[String(url)];
+                if (cachedEtag) headers['If-None-Match'] = cachedEtag;
+            }
+            const res = await this.apiFetch(url, { ...fetchOpts, headers });
+            if (res.status === 304) {
+                return { ok: true, status: 304, data: null, res, notModified: true };
+            }
             const data = await res.json().catch(() => ({}));
+            if (method === 'GET' && res.ok) {
+                const etag = res.headers.get('ETag');
+                if (etag && this._apiEtagCache) this._apiEtagCache[String(url)] = etag;
+            }
             // Диагностика "вкладка пустая": если API вернул не-2xx, логируем URL+статус.
             // Уровень warn виден по умолчанию.
             if (!res.ok) {
@@ -3562,6 +3592,22 @@ function adminMixinAuthKnowledge() {
                 } catch (_e) { /* ignore */ }
             }
             return { ok: res.ok, status: res.status, data, res };
+        },
+
+        _invalidateApiEtag(url) {
+            if (this._apiEtagCache) delete this._apiEtagCache[String(url)];
+        },
+
+        async _afterAuthBootstrapLoads() {
+            await this.refreshDemoStatus();
+            await this.loadTabData();
+            if (adminTabNeedsChatList(this.currentTab)) {
+                await this.loadChatList();
+            }
+            this.deferIdleWork(() => {
+                void this.loadOrgProfile();
+                void this.loadIntegrationStatus();
+            }, 900);
         },
 
         /** Сброс чувствительных данных в памяти при 401 — до любых alert и пока форма входа перекрывает UI. */
@@ -3880,7 +3926,7 @@ function adminMixinAuthKnowledge() {
                     this.loadOrgProfile(),
                     this.loadTabData(),
                     this.loadIntegrationStatus(),
-                    this.loadChatList(),
+                    adminTabNeedsChatList(this.currentTab) ? this.loadChatList() : Promise.resolve(),
                 ]);
                 this.setToast('Филиал переключен');
             } catch (e) {
@@ -3964,13 +4010,7 @@ function adminMixinAuthKnowledge() {
                     }
                     this._installAdminHashWatch();
                     this.connectWebSocket();
-                    await Promise.all([
-                        this.refreshDemoStatus(),
-                        this.loadOrgProfile(),
-                        this.loadTabData(),
-                        this.loadIntegrationStatus(),
-                        this.loadChatList(),
-                    ]);
+                    await this._afterAuthBootstrapLoads();
                     await this._consumePendingHashChatPhone();
                     await this._afterAuthTabBootstrap();
                     this.$nextTick(() => this.maybeStartP15CoachTour());
@@ -4026,13 +4066,7 @@ function adminMixinAuthKnowledge() {
                 }
                 this._installAdminHashWatch();
                 this.connectWebSocket();
-                await Promise.all([
-                    this.refreshDemoStatus(),
-                    this.loadOrgProfile(),
-                    this.loadTabData(),
-                    this.loadIntegrationStatus(),
-                    this.loadChatList(),
-                ]);
+                await this._afterAuthBootstrapLoads();
                 await this._consumePendingHashChatPhone();
                 await this._afterAuthTabBootstrap();
                 this.$nextTick(() => this.maybeStartP15CoachTour());
@@ -4073,13 +4107,7 @@ function adminMixinAuthKnowledge() {
                 }
                 this._installAdminHashWatch();
                 this.connectWebSocket();
-                await Promise.all([
-                    this.refreshDemoStatus(),
-                    this.loadOrgProfile(),
-                    this.loadTabData(),
-                    this.loadIntegrationStatus(),
-                    this.loadChatList(),
-                ]);
+                await this._afterAuthBootstrapLoads();
                 await this._consumePendingHashChatPhone();
                 await this._afterAuthTabBootstrap();
                 this.$nextTick(() => this.maybeStartP15CoachTour());
@@ -4093,7 +4121,8 @@ function adminMixinAuthKnowledge() {
         async loadOrgProfile() {
             this.orgProfileLoading = true;
             try {
-                const { ok, status, data } = await this.apiJsonResponse('/api/admin/organization/profile');
+                const { ok, status, data, notModified } = await this.apiJsonResponse('/api/admin/organization/profile');
+                if (notModified) return;
                 if (!ok) {
                     adminLogger.warn('GET /api/admin/organization/profile', status, data);
                     return;
@@ -4158,6 +4187,7 @@ function adminMixinAuthKnowledge() {
                     void this.showUiAlert(msg, 'Ошибка');
                     return;
                 }
+                this._invalidateApiEtag('/api/admin/organization/profile');
                 this.orgProfile = {
                     id: data?.id ?? this.orgProfile?.id ?? null,
                     organization_id: data?.organization_id ?? this.orgProfile?.organization_id ?? null,
@@ -4296,6 +4326,28 @@ function adminMixinAuthKnowledge() {
             const s = bn || on;
             const ch = s.slice(0, 1).toUpperCase();
             return ch || 'R';
+        },
+
+        headerOperationalEmoji() {
+            const p = this.orgProfile || {};
+            if (p.force_closed) return '⛔';
+            if (p.is_kitchen_open) return '🟢';
+            if (p.is_business_open) return '🟡';
+            return '⚫️';
+        },
+
+        headerOperationalBadgeClass() {
+            const p = this.orgProfile || {};
+            if (p.force_closed) return 'bg-red-50 border-red-200 text-red-800';
+            if (p.is_kitchen_open) return 'bg-emerald-50 border-emerald-200 text-emerald-800';
+            if (p.is_business_open) return 'bg-amber-50 border-amber-200 text-amber-800';
+            return 'bg-slate-50 border-slate-200 text-slate-700';
+        },
+
+        headerOperationalText() {
+            const p = this.orgProfile || {};
+            if (p.force_closed) return 'Временно закрыто';
+            return String(p.operational_label || '').trim() || 'Статус неизвестен';
         },
 
         brandingPreviewTitle() {
@@ -4766,7 +4818,7 @@ function adminMixinAuthKnowledge() {
                 await navigator.clipboard.writeText(url);
                 void this.showUiAlert('URL скопирован', '');
             } catch {
-                void this.showUiAlert(url, 'Webhook URL');
+                void this.showUiAlert(url, 'Ссылка для уведомлений об оплате');
             }
         },
 
@@ -5128,7 +5180,7 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                     this.apiJsonResponse('/api/admin/integrations/events?limit=40'),
                     this.loadSetupStatus(),
                 ]);
-                if (st.ok) this.mergeIntegrationStatus(st.data);
+                if (st.ok && !st.notModified) this.mergeIntegrationStatus(st.data);
                 if (ev.ok) this.integrationEvents = ev.data.events || [];
             } catch { /* ignore */ }
         },
@@ -7836,8 +7888,12 @@ function adminMixinDataChartsSettings() {
             await this.$nextTick();
             this.tabDataLoading = true;
             try {
-                void this.loadRevenueLeak();
-                void this.loadShiftState();
+                if (adminTabNeedsRevenueLeak(this.currentTab)) {
+                    void this.loadRevenueLeak();
+                }
+                if (adminTabNeedsShiftState(this.currentTab)) {
+                    void this.loadShiftState();
+                }
                 if (this.currentTab === 'dashboard') {
                     void this.refreshTaskQueueHealth();
                     if (this.dashboardTab === 'analytics') {
@@ -9363,16 +9419,16 @@ function adminMixinDataChartsSettings() {
                 'payment.completed': 'Оплата получена',
                 'payment.failed': 'Ошибка оплаты',
                 'payment.expired': 'Оплата истекла',
-                'ai.escalated': 'Эскалация к оператору',
+                'ai.escalated': 'Бот позвал оператора',
                 'ai.dialog.started': 'Новый диалог с гостем',
                 'operator.took_over': 'Оператор подключился',
-                'system.sla_violated': 'Нарушен SLA',
+                'system.sla_violated': 'Просрочен ответ',
                 'system.pricing_adjusted': 'Цены скорректированы',
                 'system.healing_wa_sent': 'Напоминание об оплате в WhatsApp',
                 'integration.iiko.failed': 'Ошибка отправки в iiko',
                 'integration.whatsapp.failed': 'Сбой доставки WhatsApp',
                 'cancellation_surge': 'Рост отмен',
-                'escalation_spike': 'Всплеск эскалаций',
+                'escalation_spike': 'Много запросов оператору',
                 'payment_spike': 'Всплеск ошибок оплаты',
                 'ai_message_drop': 'Падение ответов ИИ',
             };
@@ -11219,8 +11275,8 @@ function adminMixinInboxActionQueue() {
                 started: 'Начат',
                 transcribed: 'Расшифрован',
                 completed: 'Завершён',
-                escalated_whatsapp: 'Эскалация в WhatsApp',
-                escalated: 'Эскалация в WhatsApp',
+                escalated_whatsapp: 'Передано оператору в WhatsApp',
+                escalated: 'Передано оператору в WhatsApp',
                 error: 'Ошибка',
             };
             return labels[raw] || raw || '—';
@@ -11281,6 +11337,7 @@ function marketingTab() {
         segmentCount: null,
         form: { name: '', segment_type: 'inactive_30d', message_text: '', template_name: '', scheduled_for: '' },
         loyaltyEnabled: false,
+        loyaltyPointsPerKzt: 0,
         loyaltyHistory: [],
         loyaltyBalance: 0,
         adjustPhone: '',
@@ -11390,9 +11447,14 @@ function marketingTab() {
 
         async loadLoyalty() {
             try {
-                await fetch('/api/admin/system/task-queue-health');
-                this.loyaltyEnabled = document.cookie.includes('LOYALTY') || false;
-            } catch(_e) {}
+                const r = await fetch('/api/admin/settings/environment');
+                if (r.ok) {
+                    const d = await r.json();
+                    const lo = d.loyalty && typeof d.loyalty === 'object' ? d.loyalty : {};
+                    this.loyaltyEnabled = !!lo.enabled;
+                    this.loyaltyPointsPerKzt = Number(lo.points_per_kzt) || 0;
+                }
+            } catch (_e) {}
         },
 
         async loadLoyaltyHistory() {

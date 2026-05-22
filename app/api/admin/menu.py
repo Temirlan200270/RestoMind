@@ -23,6 +23,7 @@ from app.services.integration_health import (
 from app.services.iiko_onboarding import setup_organization_iiko, verify_iiko_api_login
 from app.services.iiko_sync_tasks import run_full_iiko_sync_for_org
 from app.services.menu_embeddings import reindex_organization_menu_embeddings
+from .cache_utils import json_with_etag, weak_etag_from_parts
 from app.services.menu_sync import sync_menu_from_iiko, sync_stop_lists
 from app.services.integration_config import iiko_effective_configured, whatsapp_effective_configured
 from app.services.order_logic import invalidate_menu_context_cache
@@ -170,9 +171,9 @@ async def global_search(
 async def integrations_status(
     request: Request,
     db: AsyncSession = Depends(get_db),
-) -> dict:
+):
     """Состояние интеграций для админки: индикаторы iiko / WhatsApp."""
-    from app.db.models import Organization
+    from app.db.models import Organization, OrganizationIntegrationSync
 
     org_id = admin_org_from_session(request)
     iiko_ok = await iiko_effective_configured(db, org_id)
@@ -220,7 +221,24 @@ async def integrations_status(
         str(getattr(org_row, "telegram_ops_chat_id", "") or "").strip(),
     ) if org_row is not None else False
     base["telegram_configured"] = tg_token_ok and (tg_global_chat_ok or tg_org_chat_ok)
-    return base
+
+    sync_row = await db.get(OrganizationIntegrationSync, int(org_id))
+    etag = weak_etag_from_parts(
+        org_id,
+        iiko_ok,
+        wa_ok,
+        base.get("last_stoplist"),
+        base.get("last_menu_sync"),
+        base.get("last_inventory_sync"),
+        base.get("prepayment_enforced"),
+        base.get("auto_send_to_iiko_after_payment"),
+        base.get("payment_providers"),
+        base.get("telegram_configured"),
+        getattr(sync_row, "last_stoplist_at", None),
+        getattr(sync_row, "last_menu_sync_at", None),
+        getattr(sync_row, "last_inventory_sync_at", None),
+    )
+    return json_with_etag(request, base, etag)
 
 
 # ─── Integration events ───────────────────────────────────

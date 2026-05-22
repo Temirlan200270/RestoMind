@@ -415,6 +415,10 @@ async def settings_environment(request: Request, db: AsyncSession = Depends(get_
             "interval_seconds": settings.chat_log_retention_interval_seconds,
             "eligible_for_purge_count": elig,
         },
+        "loyalty": {
+            "enabled": settings.loyalty_enabled,
+            "points_per_kzt": settings.loyalty_points_per_kzt,
+        },
     }
 
 @router.post("/settings/redis-purge-phone")

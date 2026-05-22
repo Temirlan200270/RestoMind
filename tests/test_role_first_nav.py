@@ -36,6 +36,9 @@ def test_dashboard_analytics_density_toggle():
     dash = (REPO / "app" / "templates" / "screens" / "_tab_dashboard.html").read_text(encoding="utf-8")
     assert "setAnalyticsDensity('normal')" in dash
     assert "setAnalyticsDensity('advanced')" in dash
+    assert "Подробная аналитика" in dash
+    assert "Обзор" in dash
+    assert dash.count("Подробная аналитика") == 1
     assert "analyticsDensity === 'normal'" in dash
     analytics = (REPO / "app" / "templates" / "screens" / "_tab_analytics.html").read_text(encoding="utf-8")
     assert "analyticsDensity === 'advanced'" in analytics

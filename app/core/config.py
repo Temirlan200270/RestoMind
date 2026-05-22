@@ -150,6 +150,34 @@ class Settings(BaseSettings):
         default="",
         validation_alias=AliasChoices("GEMINI_API_KEY", "gemini_api_key"),
     )
+    # Heuristic routing: FAQ/greeting → fast model; draft/order → strong (Decision Engine unchanged).
+    ai_model_routing_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("AI_MODEL_ROUTING_ENABLED", "ai_model_routing_enabled"),
+    )
+    ai_fast_model_openai: str = Field(
+        default="gpt-4o-mini",
+        validation_alias=AliasChoices("AI_FAST_MODEL_OPENAI", "ai_fast_model_openai"),
+    )
+    ai_fast_model_gemini: str = Field(
+        default="gemini-2.5-flash",
+        validation_alias=AliasChoices("AI_FAST_MODEL_GEMINI", "ai_fast_model_gemini"),
+    )
+    # WhatsApp UX: typing indicator / fast ack after N секунд обработки (не блокирует LLM).
+    bot_slow_ack_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("BOT_SLOW_ACK_ENABLED", "bot_slow_ack_enabled"),
+    )
+    bot_slow_ack_delay_sec: float = Field(
+        default=2.0,
+        ge=0.5,
+        le=10.0,
+        validation_alias=AliasChoices("BOT_SLOW_ACK_DELAY_SEC", "bot_slow_ack_delay_sec"),
+    )
+    bot_slow_ack_message: str = Field(
+        default="Секунду, смотрю меню…",
+        validation_alias=AliasChoices("BOT_SLOW_ACK_MESSAGE", "bot_slow_ack_message"),
+    )
 
     # --- WhatsApp (Meta API) ---
     whatsapp_api_token: str = ""

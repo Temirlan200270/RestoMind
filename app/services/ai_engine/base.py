@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import Literal
 
 from app.schemas.ai_schemas import AIBrainResponse
+
+ModelTier = Literal["fast", "strong"]
 
 
 class BaseAIProvider(ABC):
@@ -25,6 +28,7 @@ class BaseAIProvider(ABC):
         sales_strategy_context: str = "",
         customer_context: str = "",
         current_time_context: str = "",
+        model_tier: ModelTier = "strong",
     ) -> AIBrainResponse:
         raise NotImplementedError
 

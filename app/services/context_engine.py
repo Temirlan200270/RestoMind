@@ -121,7 +121,7 @@ async def fetch_ai_read_context(phone: str, organization_id: int) -> AIReadConte
     )
 
 
-async def save_ai_context_snapshot(
+def schedule_save_ai_context_snapshot(
     phone: str,
     organization_id: int,
     context: AIReadContext,
@@ -130,12 +130,43 @@ async def save_ai_context_snapshot(
     trace_id: str | None = None,
     conversation_id: str | None = None,
 ) -> str:
+    """Fire-and-forget: сохраняет снимок в фоне. Возвращает snapshot_id сразу (не ждёт БД)."""
+    snapshot_id = str(uuid.uuid4())
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(
+            save_ai_context_snapshot(
+                phone,
+                organization_id,
+                context,
+                menu_context_text=menu_context_text,
+                trace_id=trace_id,
+                conversation_id=conversation_id,
+                snapshot_id=snapshot_id,
+            ),
+            name=f"ai_ctx_snapshot_{organization_id}",
+        )
+    except RuntimeError:
+        pass
+    return snapshot_id
+
+
+async def save_ai_context_snapshot(
+    phone: str,
+    organization_id: int,
+    context: AIReadContext,
+    *,
+    menu_context_text: str | None = None,
+    trace_id: str | None = None,
+    conversation_id: str | None = None,
+    snapshot_id: str | None = None,
+) -> str:
     """Сохраняет снимок AI-контекста перед LLM-вызовом. Возвращает snapshot_id (UUID).
 
     Открывает собственную сессию и коммитит — не зависит от открытых транзакций.
-    Ошибки не пробрасывает: snapshot — аудит, не критичный путь.
+    Ошибки не пробрасывает: snapshot — аудит, не критичный path.
     """
-    snapshot_id = str(uuid.uuid4())
+    snapshot_id = snapshot_id or str(uuid.uuid4())
     from app.services.trace_context import get_conversation_id, get_trace_id
 
     effective_trace_id = trace_id or get_trace_id()

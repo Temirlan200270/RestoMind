@@ -28,6 +28,7 @@ from app.services.org_iiko_office import (
     iiko_office_config_public,
 )
 from app.services.secrets_crypto import fernet_or_none
+from .cache_utils import json_with_etag, weak_etag_from_parts
 
 logger = logging.getLogger(__name__)
 
@@ -303,7 +304,7 @@ async def patch_organization_prefs(
 
 
 @router.get("/organization/profile")
-async def get_organization_profile(request: Request, db: AsyncSession = Depends(get_db)) -> dict:
+async def get_organization_profile(request: Request, db: AsyncSession = Depends(get_db)):
     """Данные «Мой ресторан» для текущей админ-сессии."""
     org_id = admin_org_from_session(request)
     org = await db.get(Organization, org_id)
@@ -317,7 +318,7 @@ async def get_organization_profile(request: Request, db: AsyncSession = Depends(
         force_closed_until=fc_until,
         force_closed_reason=fc_reason,
     )
-    return {
+    payload = {
         "id": int(org.id),
         "organization_id": int(org.id),
         "name": org.name,
@@ -336,6 +337,23 @@ async def get_organization_profile(request: Request, db: AsyncSession = Depends(
         "force_closed_until": fc_until.isoformat() if fc_until else None,
         "force_closed_reason": fc_reason,
     }
+    etag = weak_etag_from_parts(
+        org_id,
+        org.name,
+        org.timezone,
+        org.currency,
+        payload["whatsapp_phone_number_id"],
+        payload["telegram_ops_chat_id"],
+        payload["prepayment_legal_text"],
+        payload["review_url_2gis"],
+        payload["review_url_google"],
+        payload["schedule_json"],
+        payload["force_closed_until"],
+        fc_reason,
+        op.is_business_open,
+        op.is_kitchen_open,
+    )
+    return json_with_etag(request, payload, etag)
 
 
 @router.get("/organization/iiko-office")
