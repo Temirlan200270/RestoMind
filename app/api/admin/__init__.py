@@ -1,6 +1,6 @@
 """
 Пакет админ-API. E0.1 завершён: маршруты вынесены в подмодули;
-_monolith.py теперь compatibility shim; legacy protected REST живёт в legacy_ops.py.
+_monolith.py — compatibility shim; protected REST — demo / settings_ops / export + core.router.
 """
 
 from ._monolith import (

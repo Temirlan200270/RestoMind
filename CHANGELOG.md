@@ -6,6 +6,20 @@
 
 ## [Unreleased] — 2026-03-20
 
+### Добавлено (2026-05-23) — P3 Growth: KPI офiciантов из iiko
+
+- **ETL:** [`iiko_waiter_kpi_sync.py`](app/services/iiko_waiter_kpi_sync.py) — iiko Cloud deliveries + iiko Office waiter report → `waiter_registry`, `waiter_kpi_daily`, audit `iiko_sync_runs`; миграция [`20260523_p3_waiter_kpi.py`](alembic/versions/20260523_p3_waiter_kpi.py).
+- **Cron:** `waiter_kpi_sync_scheduled_tick` (ежедневно 22:30 UTC) в [`worker.py`](app/worker.py).
+- **Admin API:** `POST/GET /api/admin/analytics/waiter-kpi/*` — sync, рейтинг, CSV, sync-status ([`waiter_kpi.py`](app/api/admin/waiter_kpi.py)).
+- **UI:** блок «Офiciанты» на вкладке расширенной аналитики ([`_tab_analytics.html`](app/templates/screens/_tab_analytics.html), [`admin-app.js`](app/static/js/admin-app.js)).
+- **Spike:** [`docs/IIKO_WAITER_KPI_SPIKE.md`](docs/IIKO_WAITER_KPI_SPIKE.md) + fixtures Cloud/Office.
+- **Тесты:** [`test_iiko_waiter_kpi_sync.py`](tests/test_iiko_waiter_kpi_sync.py), [`test_waiter_kpi_api.py`](tests/test_waiter_kpi_api.py).
+
+### Изменено (2026-05-22) — E0.1 tail (admin API split)
+
+- **`legacy_ops.py` удалён:** домены [`demo.py`](app/api/admin/demo.py), [`settings_ops.py`](app/api/admin/settings_ops.py), [`export.py`](app/api/admin/export.py); composite router — [`core.py`](app/api/admin/core.py).
+- Fix: `GET /api/admin/settings/environment` (был без декоратора); `RedisPurgePhoneBody.confirm` + `phone`.
+
 ### Изменено (2026-05-22) — Launch runbook
 
 - **Ops:** [`docs/DEPLOY_RUNBOOK.md`](docs/DEPLOY_RUNBOOK.md) — единый чеклист выкатки на Render (Web + ARQ worker), env-матрица Supabase/Upstash, post-deploy smoke, troubleshooting; ссылки на FINAL_MILE sign-off.

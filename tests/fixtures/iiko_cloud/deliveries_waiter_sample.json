@@ -1,0 +1,47 @@
+{
+  "ordersByOrganizations": [
+    {
+      "organizationId": "org-uuid",
+      "orders": [
+        {
+          "order": {
+            "id": "del-1",
+            "status": "Delivered",
+            "sum": 12500,
+            "numberOfPersons": 2,
+            "whenCreated": "2026-05-21T10:15:00.000",
+            "completeBefore": "2026-05-21T11:00:00.000",
+            "operator": {
+              "id": "op-77",
+              "name": "Мадина"
+            }
+          }
+        },
+        {
+          "order": {
+            "id": "del-2",
+            "status": "Cancelled",
+            "sum": 8000,
+            "operator": {
+              "id": "op-77",
+              "name": "Мадина"
+            }
+          }
+        },
+        {
+          "order": {
+            "id": "del-3",
+            "status": "Closed",
+            "sum": 9800,
+            "courierInfo": {
+              "courier": {
+                "id": "courier-5",
+                "name": "Ерлан"
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

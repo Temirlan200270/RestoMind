@@ -1048,6 +1048,11 @@ function adminMixinState() {
         revenueLeak: adminDefaultRevenueLeak(),
         revenueLeakLoading: false,
         revenueLeakActionLoading: '',
+        /** KPI офiciантов из iiko (P3 Growth) */
+        waiterKpi: { items: [], hall_connected: false, delivery_connected: false, last_sync: null },
+        waiterKpiDays: 7,
+        waiterKpiLoading: false,
+        waiterKpiSyncLoading: false,
         shiftState: adminDefaultShiftState(),
         shiftStateLoading: false,
         shiftStateFetchedAt: 0,
@@ -7908,7 +7913,7 @@ function adminMixinDataChartsSettings() {
                 if (this.currentTab === 'dashboard') {
                     void this.refreshTaskQueueHealth();
                     if (this.dashboardTab === 'analytics') {
-                        await this.loadAnalytics();
+                        await Promise.all([this.loadAnalytics(), this.loadWaiterKpi()]);
                     } else {
                         await Promise.all([
                             this.loadDashStats(),
@@ -8364,6 +8369,83 @@ function adminMixinDataChartsSettings() {
                 if (ok && data?.ok) this.revenueLeak = data;
             } catch (_e) { /* noop */ } finally {
                 this.revenueLeakLoading = false;
+            }
+        },
+
+        waiterKpiQueryParams() {
+            const to = new Date();
+            const from = new Date(to);
+            from.setDate(from.getDate() - (Number(this.waiterKpiDays || 7) - 1));
+            const params = new URLSearchParams({
+                date_from: from.toISOString().slice(0, 10),
+                date_to: to.toISOString().slice(0, 10),
+            });
+            const loc = this.locationQueryParams();
+            if (loc.get('location_id')) params.set('location_id', loc.get('location_id'));
+            return params;
+        },
+
+        waiterKpiExportHref() {
+            const q = this.waiterKpiQueryParams().toString();
+            return `/api/admin/analytics/waiter-kpi/export.csv${q ? `?${q}` : ''}`;
+        },
+
+        async loadWaiterKpi() {
+            if (this.waiterKpiLoading) return;
+            this.waiterKpiLoading = true;
+            try {
+                const q = this.waiterKpiQueryParams().toString();
+                const [listRes, statusRes] = await Promise.all([
+                    this.apiJsonResponse(`/api/admin/analytics/waiter-kpi?${q}`),
+                    this.apiJsonResponse('/api/admin/analytics/waiter-kpi/sync-status'),
+                ]);
+                if (listRes.ok && listRes.data?.ok) {
+                    this.waiterKpi = {
+                        ...this.waiterKpi,
+                        items: listRes.data.items || [],
+                        hall_connected: !!listRes.data.hall_connected,
+                        delivery_connected: !!listRes.data.delivery_connected,
+                        date_from: listRes.data.date_from,
+                        date_to: listRes.data.date_to,
+                    };
+                }
+                if (statusRes.ok && statusRes.data?.ok) {
+                    this.waiterKpi.last_sync = statusRes.data.last_sync || null;
+                    if (listRes.data?.hall_connected == null) {
+                        this.waiterKpi.hall_connected = !!statusRes.data.hall_connected;
+                    }
+                    if (listRes.data?.delivery_connected == null) {
+                        this.waiterKpi.delivery_connected = !!statusRes.data.delivery_connected;
+                    }
+                }
+            } catch (_e) { /* noop */ } finally {
+                this.waiterKpiLoading = false;
+            }
+        },
+
+        async syncWaiterKpi() {
+            if (!this.canStaffManageSupply() || this.waiterKpiSyncLoading) return;
+            this.waiterKpiSyncLoading = true;
+            try {
+                const { ok, data } = await this.apiJsonResponse(
+                    '/api/admin/analytics/waiter-kpi/sync?days=1',
+                    { method: 'POST' },
+                );
+                if (ok && data?.ok) {
+                    void this.flashToast(
+                        `KPI обновлены: ${Number(data.rows_upserted || 0)} записей`,
+                        'success',
+                        4500,
+                    );
+                    await this.loadWaiterKpi();
+                } else {
+                    void this.flashToast(this.formatApiError(data?.detail) || 'Не удалось синхронизировать KPI', 'error');
+                }
+            } catch (e) {
+                adminLogger.error('[admin] syncWaiterKpi', e);
+                void this.flashToast('Ошибка сети', 'error');
+            } finally {
+                this.waiterKpiSyncLoading = false;
             }
         },
 
@@ -10788,7 +10870,7 @@ function adminMixinDataChartsSettings() {
 
         /** Смена периода на вкладке «Аналитика»: данные + один отложенный рендер графика. */
         async reloadAnalyticsForUi() {
-            await this.loadAnalytics();
+            await Promise.all([this.loadAnalytics(), this.loadWaiterKpi()]);
             await this.$nextTick();
             setTimeout(() => {
                 if (this.currentTab !== 'dashboard' || this.dashboardTab !== 'analytics') return;

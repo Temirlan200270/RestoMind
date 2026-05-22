@@ -49,6 +49,19 @@ logger = logging.getLogger(__name__)
 REQUEST_TIMEOUT = 30.0
 AUTH_PATH = "/resto/api/auth"
 BALANCE_PATH = "/resto/api/v2/reports/balance/stores"
+WAITER_SALES_PATH = "/resto/api/v2/reports/sales/waiters"
+
+
+@dataclass(frozen=True)
+class IikoOfficeWaiterSalesRow:
+    waiter_id: str
+    waiter_name: str
+    orders_count: int
+    total_revenue: float
+    guests_count: int
+    cancelled_orders: int
+    avg_service_time_min: float | None
+    raw: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -122,6 +135,59 @@ def parse_stock_balances_payload(data: dict[str, Any] | list[Any]) -> list[IikoO
     return rows
 
 
+def parse_waiter_sales_payload(data: dict[str, Any] | list[Any]) -> list[IikoOfficeWaiterSalesRow]:
+    """Разбор отчёта продаж по офiciантам iiko Office / fixture."""
+    items: list[Any]
+    if isinstance(data, list):
+        items = data
+    elif isinstance(data, dict):
+        raw_items = data.get("items") or data.get("waiters") or data.get("rows")
+        items = raw_items if isinstance(raw_items, list) else []
+    else:
+        items = []
+
+    rows: list[IikoOfficeWaiterSalesRow] = []
+    for entry in items:
+        if not isinstance(entry, dict):
+            continue
+        waiter_id = str(
+            entry.get("waiterId")
+            or entry.get("employeeId")
+            or entry.get("waiter_id")
+            or entry.get("id")
+            or "",
+        ).strip()
+        if not waiter_id:
+            continue
+        waiter_name = str(
+            entry.get("waiterName")
+            or entry.get("employeeName")
+            or entry.get("name")
+            or waiter_id,
+        ).strip()
+        orders_count = int(_coerce_float(entry.get("ordersCount") or entry.get("orders") or 0))
+        total_revenue = _coerce_float(entry.get("sum") or entry.get("revenue") or entry.get("total"))
+        guests_count = int(_coerce_float(entry.get("guests") or entry.get("guestCount") or 0))
+        cancelled_orders = int(
+            _coerce_float(entry.get("cancellations") or entry.get("cancelledOrders") or 0),
+        )
+        avg_raw = entry.get("avgServiceTimeMin") or entry.get("avg_service_time_min")
+        avg_service_time_min = _coerce_float(avg_raw) if avg_raw is not None else None
+        rows.append(
+            IikoOfficeWaiterSalesRow(
+                waiter_id=waiter_id,
+                waiter_name=waiter_name,
+                orders_count=orders_count,
+                total_revenue=total_revenue,
+                guests_count=guests_count,
+                cancelled_orders=cancelled_orders,
+                avg_service_time_min=avg_service_time_min,
+                raw=entry,
+            ),
+        )
+    return rows
+
+
 def _session_key_from_auth_response(response: httpx.Response) -> str:
     content_type = response.headers.get("content-type", "").lower()
     if "json" in content_type:
@@ -154,10 +220,12 @@ class IikoOfficeClient:
         *,
         fixture_path: str | Path | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
+        authenticate_on_enter: bool = True,
     ) -> None:
         self._creds = creds
         self._fixture_path = Path(fixture_path) if fixture_path else None
         self._transport = transport
+        self._authenticate_on_enter = authenticate_on_enter
         self._session_key: str | None = None
         self._http: httpx.AsyncClient | None = None
 
@@ -168,7 +236,7 @@ class IikoOfficeClient:
             follow_redirects=True,
             transport=self._transport,
         )
-        if self._fixture_path is None:
+        if self._fixture_path is None and self._authenticate_on_enter:
             await self._authenticate()
         return self
 
@@ -226,3 +294,36 @@ class IikoOfficeClient:
         if not isinstance(data, dict):
             raise ValueError("iiko Office balance: ожидался JSON object")
         return parse_stock_balances_payload(data)
+
+    async def fetch_waiter_sales_report(
+        self,
+        *,
+        date_from: str,
+        date_to: str,
+        waiter_fixture_path: str | Path | None = None,
+    ) -> list[IikoOfficeWaiterSalesRow]:
+        """
+        Отчёт продаж по офiciантам за период (обычно один день).
+        ``waiter_fixture_path`` — отдельный fixture для KPI (тесты).
+        """
+        if waiter_fixture_path is not None:
+            raw = json.loads(Path(waiter_fixture_path).read_text(encoding="utf-8"))
+            return parse_waiter_sales_payload(raw)
+
+        if not self._http:
+            raise RuntimeError("HTTP client not initialized")
+        params: dict[str, str] = {
+            **self._auth_params(),
+            "dateFrom": date_from,
+            "dateTo": date_to,
+        }
+        if self._creds.department_id:
+            params["department"] = self._creds.department_id
+        response = await self._http.get(WAITER_SALES_PATH, params=params)
+        response.raise_for_status()
+        data = response.json()
+        if isinstance(data, dict):
+            return parse_waiter_sales_payload(data)
+        if isinstance(data, list):
+            return parse_waiter_sales_payload(data)
+        raise ValueError("iiko Office waiter sales: ожидался JSON object или array")

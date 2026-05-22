@@ -1,0 +1,22 @@
+{
+  "items": [
+    {
+      "waiterId": "waiter-001",
+      "waiterName": "Айгуль",
+      "ordersCount": 12,
+      "sum": 185000,
+      "guests": 28,
+      "cancellations": 1,
+      "avgServiceTimeMin": 42.5
+    },
+    {
+      "waiterId": "waiter-002",
+      "waiterName": "Данияр",
+      "ordersCount": 9,
+      "sum": 142500,
+      "guests": 22,
+      "cancellations": 0,
+      "avgServiceTimeMin": 38.0
+    }
+  ]
+}

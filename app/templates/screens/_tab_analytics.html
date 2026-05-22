@@ -412,6 +412,86 @@
                     </div>
                 </div>
 
+                {% call card(title='Официанты', subtitle='KPI из iiko Cloud (доставки) и iiko Office (зал). Рейтинг за выбранный период.', padding_class='p-5', extra_class='mb-6 overflow-x-auto') %}
+                    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <button type="button"
+                                @click="waiterKpiDays = 7; loadWaiterKpi()"
+                                :class="waiterKpiDays === 7 ? 'ds-segmented-active' : ''"
+                                class="px-3 py-2 rounded-xl text-sm font-semibold transition min-h-[44px] touch-manipulation">
+                                7 дней
+                            </button>
+                            <button type="button"
+                                @click="waiterKpiDays = 30; loadWaiterKpi()"
+                                :class="waiterKpiDays === 30 ? 'ds-segmented-active' : ''"
+                                class="px-3 py-2 rounded-xl text-sm font-semibold transition min-h-[44px] touch-manipulation">
+                                30 дней
+                            </button>
+                        </div>
+                        <div class="flex flex-wrap items-center gap-2">
+                            <span x-show="waiterKpi.hall_connected === false && waiterKpi.delivery_connected"
+                                class="text-xs font-semibold text-amber-700 bg-amber-50 ring-1 ring-amber-200/70 px-2.5 py-1 rounded-full">
+                                KPI зала: подключите iiko Office
+                            </span>
+                            <button type="button"
+                                x-show="canStaffManageSupply()"
+                                @click="syncWaiterKpi()"
+                                :disabled="waiterKpiSyncLoading"
+                                class="ds-btn ds-btn-secondary ds-btn-sm min-h-9">
+                                <span x-show="!waiterKpiSyncLoading">Обновить из iiko</span>
+                                <span x-show="waiterKpiSyncLoading">Синхронизация…</span>
+                            </button>
+                            <a x-show="canStaffManageSupply() && (waiterKpi.items || []).length"
+                                :href="waiterKpiExportHref()"
+                                class="ds-btn ds-btn-secondary ds-btn-sm min-h-9 inline-flex items-center"
+                                download>
+                                CSV
+                            </a>
+                        </div>
+                    </div>
+                    <div x-show="waiterKpiLoading" class="py-6">{{ skeleton(kind='table', rows=4) }}</div>
+                    <div x-show="!waiterKpiLoading && !(waiterKpi.items || []).length" x-cloak class="py-8 text-center text-sm text-slate-500">
+                        <span x-show="!waiterKpi.delivery_connected && !waiterKpi.hall_connected">
+                            Подключите iiko Cloud или iiko Office для KPI офiciантов.
+                        </span>
+                        <span x-show="waiterKpi.delivery_connected || waiterKpi.hall_connected">
+                            Нет данных за период. Нажмите «Обновить из iiko».
+                        </span>
+                    </div>
+                    <table x-show="!waiterKpiLoading && (waiterKpi.items || []).length" x-cloak class="w-full text-sm min-w-[640px]">
+                        <thead>
+                            <tr class="text-left text-gray-500 border-b border-gray-100">
+                                <th class="pb-2 font-medium">#</th>
+                                <th class="pb-2 font-medium">Официант</th>
+                                <th class="pb-2 font-medium text-right tabular-nums">Заказов</th>
+                                <th class="pb-2 font-medium text-right tabular-nums">Выручка</th>
+                                <th class="pb-2 font-medium text-right tabular-nums">Средний чек</th>
+                                <th class="pb-2 font-medium text-right tabular-nums">Гостей</th>
+                                <th class="pb-2 font-medium text-right tabular-nums">Отмен</th>
+                                <th class="pb-2 font-medium text-right tabular-nums">Ср. время</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="row in (waiterKpi.items || [])" :key="'wk-' + row.rank + '-' + row.waiter_name">
+                                <tr class="border-b border-gray-50">
+                                    <td class="py-2 tabular-nums text-slate-500" x-text="row.rank"></td>
+                                    <td class="py-2 font-medium text-gray-900" x-text="row.waiter_name"></td>
+                                    <td class="py-2 text-right tabular-nums" x-text="row.orders_served"></td>
+                                    <td class="py-2 text-right tabular-nums font-medium" x-text="fmt.money(row.total_revenue_kzt)"></td>
+                                    <td class="py-2 text-right tabular-nums" x-text="fmt.money(row.avg_check_kzt)"></td>
+                                    <td class="py-2 text-right tabular-nums" x-text="row.guests_count"></td>
+                                    <td class="py-2 text-right tabular-nums" x-text="row.cancelled_orders"></td>
+                                    <td class="py-2 text-right tabular-nums"
+                                        x-text="row.avg_service_time_min != null ? (row.avg_service_time_min + ' мин') : '—'"></td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                    <p x-show="waiterKpi.last_sync?.finished_at && !waiterKpiLoading"
+                        class="text-[11px] text-slate-400 mt-3"
+                        x-text="'Последняя синхронизация: ' + fmt.datetime(waiterKpi.last_sync.finished_at)"></p>
+                {% endcall %}
+
                 <!-- Help slide-over (replaces heavy details blocks) -->
                 <div x-show="analyticsHelpOpen" x-cloak class="fixed inset-0 z-50">
                     <div class="absolute inset-0 bg-slate-900/30" @click="analyticsHelpOpen = false"></div>

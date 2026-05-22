@@ -50,7 +50,7 @@
 
 ## 🟡 P1: Ближайший спринт (Core SaaS)
 
-- [x] **E0.1.x: ликвидация `_monolith.py`.** `_monolith.py` теперь тонкий compatibility shim (~19 строк); `auth_router`/`ws_router` идут из [`auth.py`](app/api/admin/auth.py) и [`ws.py`](app/api/admin/ws.py), test-bot подключён из [`test_bot.py`](app/api/admin/test_bot.py), оставшийся legacy protected REST перенесён в [`legacy_ops.py`](app/api/admin/legacy_ops.py). Следующий cleanup — переименовать `legacy_ops.py` по доменам settings/export/demo.
+- [x] **E0.1.x: ликвидация `_monolith.py`.** `_monolith.py` — compatibility shim; protected REST разбит по доменам: [`demo.py`](app/api/admin/demo.py), [`settings_ops.py`](app/api/admin/settings_ops.py), [`export.py`](app/api/admin/export.py), сборка в [`core.py`](app/api/admin/core.py). `auth_router`/`ws_router` — [`auth.py`](app/api/admin/auth.py) / [`ws.py`](app/api/admin/ws.py); test-bot — [`test_bot.py`](app/api/admin/test_bot.py). Исправлен отсутствующий `@router.get("/settings/environment")` + поля `RedisPurgePhoneBody`.
 - [x] **E2.2 Branding (backend):** [`Tenant.brand_name`/`brand_color_hex`/`brand_logo_url`](app/db/models.py) + миграция [`20260511_e22_tenant_branding`](alembic/versions/20260511_e22_tenant_branding.py); модуль [`app/api/admin/branding.py`](app/api/admin/branding.py) — `GET /api/admin/branding`, `PATCH /api/admin/branding` (HEX-валидация, тримминг имени), `POST /api/admin/branding/logo` (PNG/JPEG ≤ 1 МБ, сохранение в `app/static/uploads/branding/tenant-<id>.<ext>`, cache-buster в URL). `GET /api/admin/auth/me → branding` читает данные из `Tenant` (контракт совместим с UI). Регресс: [`tests/test_admin_branding.py`](tests/test_admin_branding.py).
 - [x] **E2.3 Billing (минимум):** `Tenant.plan_status`, таблица `billing_usage_daily`, ежедневный rollup (ARQ cron в [`app/worker.py`](app/worker.py)); блокировка login/`auth`/select-org и ранний выход WhatsApp webhook при `plan_status=suspended`; опциональное поле `billing_blocked` в `GET /auth/me`. Миграция [`20260512_e23_billing_minimal`](alembic/versions/20260512_e23_billing_minimal.py). Полноценный Stripe/лимиты по тарифу — вне scope.
 - [x] **Superadmin password UX hardening:** одноразовые `generated_password`/`new_password` больше не уходят в toast; показываются в modal с copy button и обязательным подтверждением сохранения.
@@ -105,7 +105,7 @@
 - [ ] **BI по iiko:** продажи по времени суток и автоподстройка upsell. _Wishlist Темира #16._ **MVP ✅:** `sales_by_hour_local` + `sales_insights` + `sales_peak_today` на дашборде (данные Order); полный iiko OLAP ETL — backlog.
 - [ ] **Авто‑рассылка из iiko по клиентам** (Wishlist Темира R1): **MVP ✅** — `POST /marketing/sync-iiko-customers` (телефоны из deliveries iiko Cloud → `User`); полный CRM iiko + PII-legal — backlog.
 - [ ] **VIP‑кейс: отдельный сайт/мини‑приложение для премиум‑заведений** (Wishlist Темира R2): white‑label фронт (отдельный поддомен per‑tenant) с меню, бронированием, личным кабинетом гостя. Архитектурно — отдельный Next.js/Astro фронт поверх существующего API; оценить ROI до начала реализации.
-- [ ] **KPI‑центр официантов из iiko** (Wishlist Темира R4): забирать из iiko персональные данные по заказам (`waiter_id`, средний чек, кол‑во гостей, отмены, время обслуживания, продажи по позициям) → агрегировать в `waiter_kpi_daily` → экран в админке с рейтингом, фильтром по дате/смене, экспорт. Совместим с пунктом «BI по iiko» — общий ETL.
+- [x] **KPI‑центр официантов из iiko** (Wishlist Темира R4): ETL Cloud deliveries + Office waiter report → `waiter_registry`, `waiter_kpi_daily`, `iiko_sync_runs`; cron `waiter_kpi_sync_scheduled_tick`; admin API [`waiter_kpi.py`](app/api/admin/waiter_kpi.py); вкладка «Официанты» в аналитике; spike [`IIKO_WAITER_KPI_SPIKE.md`](docs/IIKO_WAITER_KPI_SPIKE.md).
 
 
 ## P4: AI Operations / Intelligence
@@ -221,4 +221,4 @@
 | R1 | Авто‑рассылка из iiko по клиентам | ⚠️ | **P3** «Авто‑рассылка из iiko по клиентам» — MVP ✅ (`sync-iiko-customers`); полный CRM + PII-legal — backlog |
 | R2 | VIP сайт/приложение | ❌ | **P3** «VIP‑кейс: отдельный сайт/мини‑приложение» |
 | R3 | Авто‑сбор отзывов после заказа | ✅ | `CustomerFeedback` + `send_review_request` ARQ + 👍/👎 кнопки в WhatsApp (**P2** выполнено) |
-| R4 | KPI‑центр официантов из iiko | ❌ | **P3** «KPI‑центр официантов из iiko» |
+| R4 | KPI‑центр официантов из iiko | ✅ | **P3** «KPI‑центр официантов из iiko» |

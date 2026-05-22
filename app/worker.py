@@ -240,6 +240,39 @@ async def iiko_inventory_sync_scheduled_tick(ctx: dict[str, Any]) -> None:
     logger.info("iiko_inventory_sync_scheduled_tick: %d orgs processed", len(orgs))
 
 
+async def waiter_kpi_sync_scheduled_tick(ctx: dict[str, Any]) -> None:
+    """Cron: KPI офiciантов из iiko для всех филиалов с Cloud и/или Office."""
+    import logging
+    from app.db.session import async_session_factory
+    from app.services.iiko_waiter_kpi_sync import (
+        list_organizations_for_waiter_kpi_sync,
+        record_waiter_kpi_sync_run,
+        sync_waiter_kpi_for_org,
+    )
+
+    logger = logging.getLogger(__name__)
+    async with async_session_factory() as db:
+        orgs = await list_organizations_for_waiter_kpi_sync(db)
+    for org in orgs:
+        try:
+            async with async_session_factory() as db:
+                await sync_waiter_kpi_for_org(db, int(org.id), days=1)
+        except Exception as exc:
+            logger.exception("waiter_kpi_sync_scheduled_tick: org_id=%s", org.id)
+            try:
+                async with async_session_factory() as db:
+                    await record_waiter_kpi_sync_run(
+                        db,
+                        int(org.id),
+                        ok=False,
+                        error_text=str(exc),
+                    )
+                    await db.commit()
+            except Exception:
+                logger.exception("waiter_kpi_sync_scheduled_tick: audit failed org_id=%s", org.id)
+    logger.info("waiter_kpi_sync_scheduled_tick: %d orgs processed", len(orgs))
+
+
 class WorkerSettings:
     # Это имена задач, которые мы enqueue_job("name", **kwargs) будем вызывать.
     # Важно: web-процесс ставит задачи в эту же очередь через task_queue._queue_name().
@@ -257,6 +290,7 @@ class WorkerSettings:
         iiko_menu_sync,
         iiko_inventory_sync,
         iiko_inventory_sync_scheduled_tick,
+        waiter_kpi_sync_scheduled_tick,
         external_reviews_sync,
         external_reviews_sync_scheduled_tick,
         ai_incidents_hourly_tick,
@@ -275,6 +309,7 @@ class WorkerSettings:
             cron(scheduled_blasts_tick, minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55}),
             cron(ai_incidents_hourly_tick, minute=5),
             cron(iiko_inventory_sync_scheduled_tick, hour={0, 6, 12, 18}, minute=20),
+            cron(waiter_kpi_sync_scheduled_tick, hour=22, minute=30),
             cron(external_reviews_sync_scheduled_tick, hour={2, 14}, minute=10),
         ]
         if cron is not None

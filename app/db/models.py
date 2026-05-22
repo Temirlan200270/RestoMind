@@ -1835,3 +1835,83 @@ class SuperadminAuditLog(Base):
 
     def __repr__(self) -> str:
         return f"<SuperadminAuditLog id={self.id} action={self.action} target={self.target_type}:{self.target_id}>"
+
+
+class WaiterRegistry(Base):
+    """Справочник офiciантов/операторов из iiko (Cloud или Office)."""
+
+    __tablename__ = "waiter_registry"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "waiter_iiko_id", name="uq_waiter_registry_org_waiter"),
+        Index("ix_waiter_registry_org_seen", "organization_id", "last_seen_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    waiter_iiko_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    waiter_name: Mapped[str] = mapped_column(String(240), nullable=False, default="", server_default="")
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="cloud_delivery", server_default="cloud_delivery")
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    def __repr__(self) -> str:
+        return f"<WaiterRegistry org={self.organization_id} waiter={self.waiter_iiko_id}>"
+
+
+class WaiterKpiDaily(Base):
+    """Суточные KPI офiciанта по данным iiko."""
+
+    __tablename__ = "waiter_kpi_daily"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "kpi_date",
+            "waiter_iiko_id",
+            name="uq_waiter_kpi_org_date_waiter",
+        ),
+        Index("ix_waiter_kpi_org_date", "organization_id", "kpi_date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    location_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("locations.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    kpi_date: Mapped[date] = mapped_column("kpi_date", Date, nullable=False)
+    waiter_iiko_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    orders_served: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    total_revenue_kzt: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0, server_default="0")
+    avg_check_kzt: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0, server_default="0")
+    guests_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    cancelled_orders: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    avg_service_time_min: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    items_sold_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    def __repr__(self) -> str:
+        return f"<WaiterKpiDaily org={self.organization_id} date={self.kpi_date} waiter={self.waiter_iiko_id}>"
+
+
+class IikoSyncRun(Base):
+    """Audit последних ETL-прогонов iiko (waiter KPI, и др.)."""
+
+    __tablename__ = "iiko_sync_runs"
+    __table_args__ = (
+        Index("ix_iiko_sync_runs_org_kind_finished", "organization_id", "sync_kind", "finished_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    sync_kind: Mapped[str] = mapped_column(String(40), nullable=False, default="waiter_kpi", server_default="waiter_kpi")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="ok", server_default="ok")
+    rows_upserted: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    error_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    finished_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    def __repr__(self) -> str:
+        return f"<IikoSyncRun org={self.organization_id} kind={self.sync_kind} status={self.status}>"
