@@ -234,8 +234,8 @@ def _minutes_since_opening(org: Any) -> int | None:
     if not schedule:
         return None
 
-    tz = zoneinfo_or_default(org.timezone)
-    now_local = datetime.now(tz)
+    tz_norm = zoneinfo_or_default(org.timezone)
+    now_local = datetime.now(tz_norm.zone)
     weekday_key = _WEEKDAY_KEYS[now_local.weekday()]
     day_sched = schedule.get(weekday_key) or {}
     open_str = day_sched.get("open") or ""

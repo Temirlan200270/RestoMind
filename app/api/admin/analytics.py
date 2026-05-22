@@ -2338,7 +2338,8 @@ async def analytics(
     from app.services.timezones import zoneinfo_or_default
 
     org_row = await db.get(Organization, org_id)
-    org_tz = zoneinfo_or_default(org_row.timezone if org_row else None)
+    org_tz_norm = zoneinfo_or_default(org_row.timezone if org_row else None)
+    org_tz = org_tz_norm.zone
     for o in current_orders:
         dt_h = o.created_at
         if dt_h is None:
@@ -2364,7 +2365,7 @@ async def analytics(
     if peak_hour_values:
         hours_label = ", ".join(f"{h:02d}:00" for h in peak_hour_values)
         upsell_time_hint = (
-            f"Пики продаж по локальному времени ({org_tz.key}): {hours_label}. "
+            f"Пики продаж по локальному времени ({org_tz_norm.name}): {hours_label}. "
             "Настройте UpsellRule с trigger_mode=time_of_day для этих окон."
         )
 
@@ -2475,7 +2476,7 @@ async def analytics(
             for x in hour_buckets_local
         ],
         "sales_insights": {
-            "timezone": str(org_tz.key),
+            "timezone": str(org_tz_norm.name),
             "peak_hours_local": peak_hour_values,
             "upsell_time_hint": upsell_time_hint,
         },

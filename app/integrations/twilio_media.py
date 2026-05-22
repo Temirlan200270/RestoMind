@@ -7,10 +7,13 @@ import io
 import sys
 import wave
 
-try:
-    import audioop
-except ImportError:
-    audioop = None  # type: ignore[misc, assignment]
+if sys.version_info >= (3, 13):
+    try:
+        import audioop_lts as audioop  # type: ignore[import-untyped, no-redef]
+    except ImportError:
+        audioop = None  # type: ignore[misc, assignment]
+else:
+    import audioop  # type: ignore[deprecated]
 
 
 def mulaw_to_linear_pcm16(mulaw_data: bytes) -> bytes:
