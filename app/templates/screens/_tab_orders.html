@@ -277,8 +277,15 @@
                         </div>
                     </div>
 
+                    <div x-show="kanbanLateStagesCollapsed" x-cloak class="lg:col-span-3 flex items-center justify-center">
+                        <button type="button" @click="kanbanLateStagesOpen = true"
+                            class="w-full min-h-[44px] rounded-2xl border-2 border-dashed border-slate-200 bg-white text-sm font-semibold text-slate-600 hover:border-brand-300 hover:text-brand-700 px-4 py-6">
+                            Показать поздние этапы (в пути · выдача · завершён)
+                        </button>
+                    </div>
+
                     <!-- IN_TRANSIT -->
-                    <div data-kanban-col tabindex="0" role="region" aria-label="Колонка: в пути" class="bg-sky-50/50 rounded-2xl p-4 shrink-0 w-[min(85vw,22rem)] lg:w-auto snap-center outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2">
+                    <div x-show="!kanbanLateStagesCollapsed" data-kanban-col tabindex="0" role="region" aria-label="Колонка: в пути" class="bg-sky-50/50 rounded-2xl p-4 shrink-0 w-[min(85vw,22rem)] lg:w-auto snap-center outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2">
                         <div class="flex items-center gap-2 mb-4">
                             <div class="w-3 h-3 rounded-full bg-sky-500"></div>
                             <h3 class="font-semibold text-sky-700 text-sm">В пути</h3>
@@ -302,7 +309,7 @@
                     </div>
 
                     <!-- WAITING_PICKUP -->
-                    <div data-kanban-col tabindex="0" role="region" aria-label="Колонка: ожидает выдачи" class="bg-amber-50/50 rounded-2xl p-4 shrink-0 w-[min(85vw,22rem)] lg:w-auto snap-center outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2">
+                    <div x-show="!kanbanLateStagesCollapsed" data-kanban-col tabindex="0" role="region" aria-label="Колонка: ожидает выдачи" class="bg-amber-50/50 rounded-2xl p-4 shrink-0 w-[min(85vw,22rem)] lg:w-auto snap-center outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2">
                         <div class="flex items-center gap-2 mb-4">
                             <div class="w-3 h-3 rounded-full bg-amber-500"></div>
                             <h3 class="font-semibold text-amber-700 text-sm">Ожидает выдачи</h3>
@@ -326,7 +333,7 @@
                     </div>
 
                     <!-- COMPLETED -->
-                    <div data-kanban-col tabindex="0" role="region" aria-label="Колонка: завершённые заказы" class="bg-emerald-50/40 rounded-2xl p-4 shrink-0 w-[min(85vw,22rem)] lg:w-auto snap-center outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2">
+                    <div x-show="!kanbanLateStagesCollapsed" data-kanban-col tabindex="0" role="region" aria-label="Колонка: завершённые заказы" class="bg-emerald-50/40 rounded-2xl p-4 shrink-0 w-[min(85vw,22rem)] lg:w-auto snap-center outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2">
                         <div class="flex items-center gap-2 mb-4">
                             <div class="w-3 h-3 rounded-full bg-emerald-700"></div>
                             <h3 class="font-semibold text-emerald-800 text-sm">Завершён</h3>

@@ -45,7 +45,11 @@
                             </div>
                         </div>
 
-                        <div x-show="moneyQueueLoading && !(moneyQueue?.items?.length)" class="p-6">
+                        <div x-show="inboxClientsInitialLoading()" class="p-6">
+                            {{ skeleton(kind='table', rows=3, extra_class='!p-2') }}
+                        </div>
+
+                        <div x-show="moneyQueueLoading && !inboxClientsInitialLoading() && !(moneyQueue?.items?.length)" class="p-6">
                             {{ skeleton(kind='table', rows=3, extra_class='!p-2') }}
                         </div>
 

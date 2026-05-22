@@ -133,9 +133,11 @@
                                         <div class="rm-chat-actions flex items-center gap-1 shrink-0">
                                             <button type="button" @click="toggleTakeover()"
                                                 class="px-3 py-2 text-xs font-semibold rounded-lg border transition touch-manipulation min-h-[40px] whitespace-nowrap"
-                                                :class="chatIsBotActive()
-                                                    ? 'border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100'
-                                                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'"
+                                                :class="chatHasRecentFallback() && activeChatState !== 'human_mode'
+                                                    ? 'border-red-400 bg-red-600 text-white hover:bg-red-700 shadow-sm shadow-red-600/25'
+                                                    : (chatIsBotActive()
+                                                        ? 'border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100'
+                                                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50')"
                                                 x-text="chatIsBotActive() ? 'Ответить самому' : 'Вернуть боту'"></button>
                                             <details class="relative">
                                                 <summary class="list-none min-h-[40px] min-w-[40px] inline-flex items-center justify-center rounded-lg border border-slate-200 text-slate-600 bg-white hover:bg-slate-50 cursor-pointer select-none text-lg leading-none"
@@ -183,22 +185,37 @@
                                             Загрузить выше
                                         </button>
                                     </div>
-                                    <template x-for="(msg, idx) in chatMessages" :key="msg.id != null ? 'm-' + msg.id : 'i-' + idx">
+                                    <template x-for="(msg, idx) in chatMessagesDisplay" :key="msg.id != null ? 'm-' + msg.id : 'i-' + idx">
                                         <div class="flex w-full msg-new"
-                                            :class="msg.role === 'user' ? 'justify-start' : 'justify-end'">
+                                            :class="msg.role === 'user' ? 'justify-start' : (chatIsSystemMessage(msg) ? 'justify-center' : 'justify-end')">
                                             <div x-show="msg.role === 'user'"
                                                 class="bg-white border border-gray-100 text-gray-800 px-4 py-3 rounded-2xl rounded-tl-md max-w-[85%] sm:max-w-[70%] shadow-sm">
                                                 <p class="text-sm whitespace-pre-line" x-text="msg.content"></p>
                                                 <span class="text-[10px] text-gray-400 mt-1 block tabular-nums" x-text="fmt.time(msg.created_at)"></span>
                                             </div>
                                             <div x-show="msg.role !== 'user'"
-                                                class="px-4 py-3 rounded-2xl rounded-tr-md max-w-[85%] sm:max-w-[70%] shadow-md"
-                                                :class="msg.role === 'operator' ? 'bg-amber-500 text-white shadow-amber-500/25' : 'bg-brand-600 text-white shadow-brand-600/25'">
+                                                class="px-4 py-3 max-w-[85%] sm:max-w-[70%]"
+                                                :class="[
+                                                    chatBubbleClass(msg),
+                                                    msg.role === 'operator' ? 'rounded-2xl rounded-tr-md shadow-md' : '',
+                                                    chatIsSystemMessage(msg) ? 'rounded-xl max-w-[92%] sm:max-w-[80%]' : 'rounded-2xl rounded-tr-md shadow-md',
+                                                ].join(' ')">
                                                 <div class="flex items-center gap-1.5 mb-1" x-show="msg.role === 'operator'">
                                                     <span class="text-[10px] font-bold uppercase tracking-wide opacity-90">Менеджер</span>
                                                 </div>
+                                                <div class="flex items-center gap-1.5 mb-1" x-show="msg.role === 'assistant' && !chatIsSystemMessage(msg)">
+                                                    <span class="text-[10px] font-bold uppercase tracking-wide opacity-90">ИИ</span>
+                                                </div>
+                                                <div class="flex items-center gap-1.5 mb-1" x-show="chatIsSystemMessage(msg)">
+                                                    <span class="text-[10px] font-bold uppercase tracking-wide text-slate-500">Система</span>
+                                                </div>
                                                 <p class="text-sm whitespace-pre-line" x-text="formatChatDisplayContent(msg)"></p>
                                                 <div class="flex justify-end items-center gap-2 mt-1 flex-wrap">
+                                                    <button type="button" x-show="chatIsSystemMessage(msg) && chatHasRecentFallback() && activeChatState !== 'human_mode'"
+                                                        @click="toggleTakeover()"
+                                                        class="text-[10px] font-semibold uppercase tracking-wide px-2 py-1 rounded-md bg-white border border-slate-300 text-slate-800 hover:bg-slate-50">
+                                                        Взять диалог
+                                                    </button>
                                                     <button type="button"
                                                         x-show="String(msg.delivery_status || '').toLowerCase() === 'failed' && (msg.role === 'operator' || msg.role === 'assistant' || msg.role === 'system')"
                                                         @click="resendFailedChatMessage(msg)"
@@ -235,12 +252,12 @@
                                     <div class="relative">
                                         <textarea x-model="operatorInput"
                                             @keydown.enter="handleOperatorEnter($event)"
-                                            :disabled="chatIsBotActive()"
+                                            :disabled="chatOperatorInputDisabled()"
                                             :placeholder="chatOperatorPlaceholder()"
                                             class="w-full bg-gray-50 border border-gray-200 rounded-xl pl-4 pr-14 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 resize-none min-h-[4.5rem] max-h-36 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
                                             rows="2"></textarea>
                                         <button type="button" @click="sendOperatorMessage()"
-                                            :disabled="chatIsBotActive() || !operatorInput.trim()"
+                                            :disabled="chatOperatorInputDisabled() || !operatorInput.trim()"
                                             class="absolute right-3 bottom-3 min-h-[44px] min-w-[44px] inline-flex items-center justify-center p-2.5 bg-brand-600 text-white rounded-xl hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-sm shadow-brand-600/20 touch-manipulation active:opacity-90"
                                             aria-label="Отправить сообщение клиенту">
                                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">

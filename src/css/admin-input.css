@@ -783,3 +783,11 @@ aside.bg-brand-900 nav.admin-sidebar-scroll::-webkit-scrollbar-thumb:hover {
     background: var(--color-surface-muted);
     color: var(--color-text-muted);
 }
+
+.admin-root .ds-chat-bubble--system {
+    @apply text-center;
+}
+
+.admin-root .ds-chat-bubble--ai {
+    /* AI assistant bubble — violet per UI_DESIGN_SYSTEM */
+}

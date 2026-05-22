@@ -2,7 +2,7 @@
             <div x-show="currentTab === 'ai_center' && aiCenterTab === 'value'" x-cloak class="fade-in">
                 <div class="flex flex-col gap-4 mb-6">
                     {{ section_header('Вклад ИИ', subtitle='Допродажи, экономия времени и качество подсказок за выбранный период.', extra_class='!mb-0') }}
-                    <p class="text-sm font-semibold text-brand-700 -mt-2">AI Value</p>
+                    <p class="text-sm text-brand-700 -mt-2">Подробнее о вкладе ИИ</p>
                     <div class="flex flex-wrap items-center gap-3">
                         {% call segmented(extra_class='border border-slate-200 bg-white shrink-0') %}
                         <div class="contents" role="tablist" aria-label="Период вклад ИИ">
@@ -110,7 +110,7 @@
                             </div>
                         </div>
                     {% endcall %}
-                    {% call card(title='Прибыль от ИИ', padding_class='p-5') %}
+                    {% call card(title='Динамика вклада ИИ', padding_class='p-5') %}
                         <div class="space-y-2">
                             <template x-for="d in (aiValueData?.daily_series || [])" :key="d.date">
                                 <div class="flex items-center gap-3">

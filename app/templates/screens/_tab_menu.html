@@ -77,12 +77,29 @@
                                         Сбросить фильтры
                                     </button>
                                 </template>
-                                <button type="button" x-show="menuCategories.length > 0" x-cloak
+                                <div x-show="menuCategories.length > 0" x-cloak class="flex flex-wrap items-center gap-2 min-w-[12rem] flex-1">
+                                    <label class="sr-only" for="menu-category-select">Раздел меню</label>
+                                    <select id="menu-category-select" x-model="menuCategoryFilter"
+                                        class="ds-input text-xs min-h-[34px] max-w-xs flex-1">
+                                        <option value="">Все разделы</option>
+                                        <template x-for="cat in menuCategories" :key="'sel-' + cat">
+                                            <option :value="cat" x-text="cat + ' (' + getMenuCategoryCount(cat) + ')'"></option>
+                                        </template>
+                                    </select>
+                                    <template x-for="cat in menuTopCategories" :key="'top-' + cat">
+                                        <button type="button" @click="menuCategoryFilter = cat"
+                                            :class="menuCategoryFilter === cat ? 'bg-brand-600 text-white shadow-md border-brand-600' : 'bg-white text-gray-600 border-gray-200 hover:border-brand-300'"
+                                            class="hidden md:inline-flex min-h-[34px] items-center px-3 py-1.5 rounded-full border text-xs font-semibold transition shrink-0">
+                                            <span x-text="cat"></span>
+                                        </button>
+                                    </template>
+                                </div>
+                                <button type="button" x-show="menuCategories.length > 6" x-cloak
                                     @click="menuCategoryChipsOpen = !menuCategoryChipsOpen"
                                     class="inline-flex min-h-[34px] items-center rounded-full border border-gray-200 bg-white px-3 font-semibold text-slate-700 hover:border-brand-200 hover:bg-slate-50">
-                                    <span x-text="menuCategoryChipsOpen ? 'Скрыть разделы' : 'Показать разделы'"></span>
+                                    <span x-text="menuCategoryChipsOpen ? 'Скрыть все разделы' : 'Все разделы'"></span>
                                 </button>
-                                <span x-show="!menuCategoryChipsOpen && menuCategoryFilter" x-cloak
+                                <span x-show="menuCategoryFilter" x-cloak
                                     class="inline-flex min-h-[34px] items-center rounded-full border border-brand-200 bg-brand-50 px-3 font-semibold text-brand-800">
                                     <span>Раздел: </span><span class="ml-1" x-text="menuCategoryFilter"></span>
                                 </span>

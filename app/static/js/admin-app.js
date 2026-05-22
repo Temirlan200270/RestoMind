@@ -1012,6 +1012,8 @@ function adminMixinState() {
 
         // Заказы
         ordersView: 'kanban',
+        _ordersViewAutoSet: false,
+        kanbanLateStagesOpen: false,
         kanbanDensity: 'normal',
         /** Подсказка режима заказов (канбан / таблица), скрывается через localStorage */
         ordersKanbanHintDismissed:
@@ -1226,6 +1228,7 @@ function adminMixinState() {
         upsellFeedbackLoading: false,
         /** Кабина оператора: сводка по клиенту */
         customerSummaryLoading: false,
+        customerSummaryError: null,
         customerSummary: {
             user_exists: false,
             phone: '',
@@ -1485,6 +1488,97 @@ function adminMixinMenuOrdersUi() {
             );
         },
 
+        get navSectionsForDisplay() {
+            const role = this.effectiveStaffRole();
+            const sections = this.navSections || [];
+            if (role === 'admin') return [...sections].reverse();
+            return sections;
+        },
+
+        get kanbanLateStagesCollapsed() {
+            if (this.kanbanLateStagesOpen) return false;
+            const late = this.kanbanInTransit.length + this.kanbanWaitingPickup.length + this.kanbanCompleted.length;
+            const early = this.kanbanDraft.length + this.kanbanConfirmed.length + this.kanbanSent.length;
+            return late === 0 && early === 0;
+        },
+
+        get menuTopCategories() {
+            this._refreshMenuView();
+            const counts = new Map();
+            for (const item of this.menuItems || []) {
+                const cat = String(item?.category || '').trim();
+                if (!cat) continue;
+                counts.set(cat, (counts.get(cat) || 0) + 1);
+            }
+            return [...counts.entries()]
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 5)
+                .map(([name]) => name);
+        },
+
+        get chatMessagesDisplay() {
+            const src = Array.isArray(this.chatMessages) ? this.chatMessages : [];
+            const out = [];
+            let run = 0;
+            for (let i = 0; i < src.length; i += 1) {
+                const msg = src[i];
+                if (!this.chatIsSystemMessage(msg)) {
+                    run = 0;
+                    out.push(msg);
+                    continue;
+                }
+                run += 1;
+                const next = src[i + 1];
+                if (next && this.chatIsSystemMessage(next)) continue;
+                out.push({ ...msg, _collapsed_system: true, _collapsed_count: run });
+                run = 0;
+            }
+            return out;
+        },
+
+        get aiCenterShowExtendedTabs() {
+            return this.analyticsDensity === 'advanced' || !this.canToggleAnalyticsDensity();
+        },
+
+        inboxClientsInitialLoading() {
+            return !!(this.moneyQueueLoading && this.failedTasksLoading
+                && !(this.moneyQueue?.items?.length) && !(this.failedTasks?.length));
+        },
+
+        dashboardNowCards() {
+            const draftCount = (this.kanbanDraft?.length ?? 0) || Number(this.moneyQueue?.summary?.abandoned_drafts ?? 0);
+            return [
+                {
+                    id: 'inbox',
+                    label: 'Требует внимания',
+                    count: this.inboxTotalOpen(),
+                    tab: 'inbox',
+                    hint: 'Открытые задачи',
+                },
+                {
+                    id: 'chats',
+                    label: 'Диалоги',
+                    count: Number(this.unreadChats || 0),
+                    tab: 'chats',
+                    hint: 'Непрочитанные',
+                },
+                {
+                    id: 'drafts',
+                    label: 'Черновики',
+                    count: draftCount,
+                    tab: 'orders',
+                    hint: 'Заказы в работе',
+                },
+                {
+                    id: 'bookings',
+                    label: 'Брони сегодня',
+                    count: Number(this.dashStats?.bookings_today ?? this.dashStats?.bookings ?? 0),
+                    tab: 'bookings',
+                    hint: 'На сегодня',
+                },
+            ];
+        },
+
         get menuCategoriesKitchenList() {
             this._refreshMenuView();
             return this._menuKitchenListCache;
@@ -1682,7 +1776,7 @@ function adminMixinMenuOrdersUi() {
 
             try {
                 const m = window.matchMedia('(min-width: 768px)').matches;
-                this.menuCategoryChipsOpen = m;
+                this.menuCategoryChipsOpen = false;
                 this.menuToolbarExpanded = m;
                 // Mobile-first: заказы без горизонтального скролла (канбан — для больших экранов).
                 this.ordersView = m ? (this.ordersView || 'kanban') : 'table';
@@ -6023,19 +6117,56 @@ function adminMixinWebSocketEvents() {
         },
 
         /** Текст в ленте чата: служебные [OPERATOR_ONLY] не показываем сырыми. */
+        chatIsSystemMessage(msg) {
+            if (!msg) return false;
+            const raw = String(msg?.content || '');
+            if (msg?.meta?.operator_only || /^\[OPERATOR_ONLY/i.test(raw)) return true;
+            if (msg?.role === 'assistant' && msg?.meta?.technical_fallback) return true;
+            return false;
+        },
+
+        chatBubbleClass(msg) {
+            if (msg?.role === 'operator') {
+                return 'bg-amber-500 text-white shadow-amber-500/25';
+            }
+            if (this.chatIsSystemMessage(msg)) {
+                return 'ds-chat-bubble ds-chat-bubble--system bg-slate-100 border border-slate-200 text-slate-800 shadow-sm';
+            }
+            if (msg?.role === 'assistant') {
+                return 'ds-chat-bubble ds-chat-bubble--ai bg-violet-600 text-white shadow-violet-600/20';
+            }
+            return 'bg-brand-600 text-white shadow-brand-600/25';
+        },
+
+        chatHasRecentFallback() {
+            const msgs = Array.isArray(this.chatMessages) ? this.chatMessages : [];
+            return msgs.slice(-8).some((m) => this.chatIsSystemMessage(m));
+        },
+
         formatChatDisplayContent(msg) {
+            if (msg?._collapsed_system && Number(msg._collapsed_count || 0) > 1) {
+                const n = Number(msg._collapsed_count);
+                const word = n === 2 ? 'дважды' : n === 3 ? 'трижды' : `${n} раз`;
+                return `ИИ ${word} не смог ответить · передано оператору`;
+            }
             const raw = String(msg?.content || '');
             if (msg?.meta?.operator_only || /^\[OPERATOR_ONLY/i.test(raw)) {
                 return 'ИИ не отвечает (ожидает оператора)';
+            }
+            if (msg?.role === 'assistant' && msg?.meta?.technical_fallback) {
+                return 'ИИ не смог ответить · передано оператору';
             }
             return raw;
         },
 
         chatTechnicalFallbackBadge(msg) {
-            if (msg?.role !== 'assistant' || !msg?.meta?.technical_fallback) return null;
+            if (!this.chatIsSystemMessage(msg)) return null;
+            if (msg?.role !== 'assistant' && !(msg?.meta?.operator_only || /^\[OPERATOR_ONLY/i.test(String(msg?.content || '')))) {
+                return null;
+            }
             return {
-                label: 'Сбой ИИ',
-                cls: 'bg-rose-500/25 text-white border-rose-200/40',
+                label: msg?._collapsed_system && Number(msg._collapsed_count || 0) > 1 ? 'Сбой ИИ ×' + msg._collapsed_count : 'Сбой ИИ',
+                cls: 'bg-rose-100 text-rose-800 border-rose-200',
             };
         },
 
@@ -6079,10 +6210,18 @@ function adminMixinWebSocketEvents() {
         },
 
         chatOperatorPlaceholder() {
-            if (this.chatIsBotActive()) {
+            if (this.chatOperatorInputDisabled()) {
                 return 'Чтобы написать гостю, нажмите «Ответить самому»…';
             }
             return 'Сообщение гостю (Enter — отправить, Shift+Enter — новая строка)…';
+        },
+
+        chatOperatorInputDisabled() {
+            if (this.activeChatState === 'human_mode') return false;
+            if (this.customerSummary?.user_exists && this.customerSummary.ai_paused) return false;
+            if (this.customerSummary?.user_exists && this.customerAiSnoozeActive()) return false;
+            if (this.chatHasRecentFallback()) return false;
+            return true;
         },
 
         chatListStateLabel(state) {
@@ -7550,15 +7689,24 @@ function adminMixinLiveChat() {
         async loadCustomerSummary(phone) {
             if (!phone?.trim()) {
                 this.customerSummaryLoading = false;
+                this.customerSummaryError = null;
                 this.guestContextLoading = false;
                 return;
             }
             const key = phone.trim();
             const enc = encodeURIComponent(key);
             this.customerSummaryLoading = true;
+            this.customerSummaryError = null;
+            const timeoutMs = 12000;
+            let timedOut = false;
+            const timer = setTimeout(() => { timedOut = true; }, timeoutMs);
             try {
                 const res = await this.apiFetch(`/api/admin/customers/${enc}/summary`);
                 if (this.activeChatPhone?.trim() !== key) return;
+                if (timedOut) {
+                    this.customerSummaryError = 'timeout';
+                    return;
+                }
                 if (res.ok) {
                     const data = await res.json();
                     this.customerSummary = {
@@ -7577,15 +7725,25 @@ function adminMixinLiveChat() {
                             ? data.last_escalation
                             : null,
                     };
+                    this.customerSummaryError = null;
+                } else {
+                    this.customerSummaryError = res.status === 404 ? 'empty' : 'error';
                 }
             } catch (e) {
+                if (this.activeChatPhone?.trim() !== key) return;
                 adminLogger.error('loadCustomerSummary', e);
+                this.customerSummaryError = timedOut ? 'timeout' : 'error';
             } finally {
+                clearTimeout(timer);
                 if (this.activeChatPhone?.trim() === key) {
                     this.customerSummaryLoading = false;
                 }
             }
-            await this.loadGuestContextOrdersBookings(key);
+            if (this.activeChatPhone?.trim() === key && !this.customerSummaryError) {
+                await this.loadGuestContextOrdersBookings(key);
+            } else if (this.activeChatPhone?.trim() === key) {
+                this.guestContextLoading = false;
+            }
         },
 
         // p15:context
@@ -7699,7 +7857,7 @@ function adminMixinLiveChat() {
         },
 
         applyCannedResponse(text) {
-            if (!text || this.chatIsBotActive()) return;
+            if (!text || this.chatOperatorInputDisabled()) return;
             const cur = this.operatorInput || '';
             this.operatorInput = cur.trim() ? `${cur.trim()}\n${text}` : text;
         },
@@ -7841,7 +7999,7 @@ function adminMixinLiveChat() {
 
         async sendOperatorMessage() {
             const text = this.operatorInput.trim();
-            if (!text || !this.activeChatPhone || this.chatIsBotActive()) return;
+            if (!text || !this.activeChatPhone || this.chatOperatorInputDisabled()) return;
             this.operatorInput = '';
 
             try {
@@ -9733,6 +9891,10 @@ function adminMixinDataChartsSettings() {
                     }
                 }
                 this.orders = Array.from(merged.values());
+                if (!this._ordersViewAutoSet && this.ordersView === 'kanban' && this.ordersTotal === 0 && incoming.length === 0) {
+                    this.ordersView = 'table';
+                    this._ordersViewAutoSet = true;
+                }
             } catch (e) {
                 if (reqId !== this._ordersLoadSeq) return;
                 adminLogger.error('[admin] loadOrders', e);

@@ -9,7 +9,9 @@
                         {{ section_header('Смена', subtitle='Один экран — одно следующее действие.', extra_class='!mb-0') }}
                         <div class="flex flex-wrap items-center gap-2 mt-2 text-sm text-slate-600">
                             <span class="ds-badge ds-badge-neutral text-[11px]" x-show="shiftState?.state"
-                                x-text="'Режим ' + (shiftState?.state || '—')"></span>
+                                x-text="shiftStateLabel(shiftState?.state)"></span>
+                            <span class="ds-badge ds-badge-neutral text-[11px]" x-show="shiftState?.presentation?.state_reason && shiftStateReasonLabel(shiftState.presentation.state_reason)"
+                                x-text="shiftStateReasonLabel(shiftState.presentation.state_reason)"></span>
                             <span x-show="orgProfile?.operational_label" x-text="orgProfile?.operational_label"></span>
                         </div>
                     </div>

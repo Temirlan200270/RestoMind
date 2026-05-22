@@ -130,11 +130,20 @@ def test_operator_queue_no_dev_resolved_labels():
     assert "Закрытые" in html
 
 
+def test_settings_restaurant_human_integration_labels():
+    html = _read("app", "templates", "screens", "_tab_settings_restaurant.html")
+    assert "WhatsApp для гостей" in html
+    assert "Чат команды в Telegram" in html
+    assert "Для техспециалиста" in html
+    assert "WhatsApp Phone ID" not in html.split("Для техспециалиста")[0]
+
+
 def test_shift_control_no_raw_state_leak():
     html = _read("app", "templates", "screens", "_tab_shift_control.html")
     js = JS.read_text(encoding="utf-8")
     assert 'x-text="shiftState.state"' not in html
     assert 'x-text="shiftState.presentation.state_reason"' not in html
+    assert "'Режим ' + (shiftState?.state" not in html
     assert "shiftStateLabel(" in html
     assert "shiftStateLabel(" in js
     assert "shiftStateReasonLabel(" in html

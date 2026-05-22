@@ -110,6 +110,10 @@
                     </div>
                 </template>
                 <div x-show="revenueLeakLoading && !revenueLeak" class="h-24 rounded-2xl bg-red-50/60 animate-pulse"></div>
+                <div x-show="!revenueLeakLoading && revenueLeak && (revenueLeak.total_leak_kzt ?? 0) === 0 && !(revenueLeak.surfaces || []).length"
+                    x-cloak class="rounded-2xl border border-emerald-200 bg-emerald-50/50 px-5 py-4 text-sm text-emerald-900">
+                    Потерь за сегодня не зафиксировано — гости не бросают корзины и не ждут ответа слишком долго.
+                </div>
 
                 <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
                     <button type="button" class="text-left rounded-2xl bg-white ring-1 ring-slate-200/80 shadow-sm px-4 py-3 min-h-[96px]"
@@ -117,6 +121,9 @@
                         <div class="text-[11px] font-bold uppercase text-slate-500">Выручка сегодня</div>
                         <div class="mt-2 text-xl font-black text-slate-950 tabular-nums" x-text="fmt.money(dashStats.today_revenue || 0)"></div>
                         <div class="mt-1 text-[11px] text-slate-500"><span x-text="dashStats.today_orders || 0"></span> заказов</div>
+                        <p class="mt-1 text-[10px] text-slate-400 leading-snug"
+                            x-show="(dashStats.today_orders || 0) === 0 && !dashStatsLoading"
+                            x-cloak>Пока тихо — проверьте WhatsApp и диалоги или дождитесь первого заказа.</p>
                     </button>
                     <button type="button" class="text-left rounded-2xl bg-violet-50 ring-1 ring-violet-200/80 shadow-sm px-4 py-3 min-h-[96px]"
                         @click="navigateToTab('ai_center', { aiCenterTab: 'value' })">
@@ -219,6 +226,9 @@
                 <div class="ds-card p-4" x-show="dashFunnel || dashFunnelLoading" x-cloak>
                     <div class="text-sm font-semibold text-slate-700 mb-3">Где теряем клиентов (7 дней)</div>
                     <div x-show="dashFunnelLoading && !dashFunnel" class="text-sm text-slate-400">Загрузка…</div>
+                    <div x-show="!dashFunnelLoading && !dashFunnel?.funnel" x-cloak class="text-sm text-slate-500 py-2">
+                        Пока мало данных за 7 дней — воронка появится после первых диалогов и заказов.
+                    </div>
                     <template x-if="dashFunnel?.funnel">
                         <div class="space-y-2">
                             <div class="flex items-center gap-2 text-sm">
@@ -272,6 +282,16 @@
                 <!-- Блок «Сейчас»: быстрые переходы по инцидентам — скрыт на мобиле (баннер сверху делает то же самое) -->
                 <div class="hidden sm:block">
                 {% call card(title='Сейчас', subtitle='Быстрые переходы по мониторингу.', padding_class='p-4 sm:p-5') %}
+                    <div class="grid grid-cols-2 lg:grid-cols-4 gap-2 mb-4">
+                        <template x-for="card in dashboardNowCards()" :key="'now-' + card.id">
+                            <button type="button" @click="navigateToTab(card.tab)"
+                                class="text-left rounded-xl border border-slate-200 bg-slate-50/80 hover:bg-white px-3 py-3 min-h-[72px] transition">
+                                <div class="text-[10px] font-bold uppercase tracking-wide text-slate-500" x-text="card.label"></div>
+                                <div class="text-2xl font-black tabular-nums text-slate-900 mt-1" x-text="card.count"></div>
+                                <div class="text-[10px] text-slate-500 mt-0.5" x-text="card.hint"></div>
+                            </button>
+                        </template>
+                    </div>
                     <div class="flex flex-wrap items-center justify-end gap-2 text-xs -mt-2 mb-2">
                             <span x-show="attentionSummaryLoading" class="text-slate-400">Обновляем…</span>
                             <span x-show="!attentionSummaryLoading && attentionSummary" x-cloak class="font-semibold tabular-nums text-slate-700">

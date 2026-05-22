@@ -3,7 +3,7 @@
             <div x-show="currentTab === 'inbox' && inboxTab === 'clients'" x-cloak class="fade-in">
                 {% set op_q_open %}
                     <div class="flex items-center gap-4">
-                        <div class="text-4xl font-black tabular-nums shrink-0" style="color: var(--color-text);" x-text="dashStats.failed_tasks_open ?? 0"></div>
+                        <div class="text-4xl font-black tabular-nums shrink-0" style="color: var(--color-text);" x-text="failedTasksLoading ? '—' : (dashStats.failed_tasks_open ?? 0)"></div>
                         <p class="text-sm ds-text-muted mt-0">Считаем открытые задачи «нужен человек». Идеально — <span class="font-semibold text-emerald-700">0</span>.</p>
                     </div>
                 {% endset %}
@@ -42,7 +42,8 @@
                         class="ds-btn ds-btn-primary ds-btn-md">Обновить</button>
                 </div>
                 {% call card(padding_class='p-0', extra_class='overflow-hidden') %}
-                    <div x-show="failedTasksLoading" class="p-6">{{ skeleton(kind='table', rows=8, extra_class='!p-2') }}</div>
+                    <div x-show="inboxClientsInitialLoading()" class="p-6">{{ skeleton(kind='table', rows=4, extra_class='!p-2') }}</div>
+                    <div x-show="failedTasksLoading && !inboxClientsInitialLoading() && failedTasks.length === 0" class="p-6">{{ skeleton(kind='table', rows=4, extra_class='!p-2') }}</div>
                     <div x-show="!failedTasksLoading && failedTasks.length === 0" class="p-12 text-center text-gray-500">
                         <div class="text-5xl mb-3" aria-hidden="true">✅</div>
                         <div class="text-lg font-semibold text-gray-800">Очередь чистая</div>

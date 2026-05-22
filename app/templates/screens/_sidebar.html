@@ -18,7 +18,7 @@
         </div>
 
         <nav class="admin-sidebar-scroll flex-1 min-h-0 overflow-y-auto px-3 py-4 space-y-4">
-            <template x-for="sec in navSections" :key="sec.id">
+            <template x-for="sec in navSectionsForDisplay" :key="sec.id">
                 <div x-show="navItems.some(i => i.section === sec.id && isTabVisibleForRole(i.id))">
                     <div class="px-2 mb-1.5 text-[10px] font-bold uppercase tracking-wider text-blue-300/80" x-text="sec.title"></div>
                     <div class="space-y-1">
