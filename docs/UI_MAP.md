@@ -5,9 +5,9 @@
 ## Layout Skeleton
 
 - `app/templates/admin.html` — входная точка админки: macro imports, `DOCTYPE`, `head`, общий authenticated shell и include всех экранов.
-- `app/templates/screens/_login.html` — экран входа, demo-login и заявка на подключение.
+- `app/templates/screens/_login.html` — экран входа: **«Посмотреть демо»** (demo-login + autoplay pitch), staff login, заявка на подключение.
 - `app/templates/screens/_sidebar.html` — desktop-навигация слева.
-- `app/templates/screens/_header.html` — глобальная шапка: брендинг, филиал, селектор точки (`available_locations` → `selectedLocationId`), название активной вкладки, readiness, глобальный поиск.
+- `app/templates/screens/_header.html` — глобальная шапка: брендинг, филиал, селектор точки, readiness (скрыт в `isDemoSession`), поиск.
 - `app/templates/screens/_system_banner.html` — системные статусы/готовность.
 - `app/templates/screens/_alert_banner.html` — верхний баннер внимания.
 - `app/templates/screens/_bottom_nav.html` — мобильный tab-bar.
@@ -29,7 +29,7 @@
 
 | Экран | Шаблон | Примечание |
 |-------|--------|------------|
-| Смена | `_tab_shift_control.html` | **Focus Deck** (1 задача из `GET /shift/state`) + **Context Dock** (`_shift_focus_chat.html` / `_shift_focus_order.html`); mobile staged nav `focus` ↔ `context`; calm-empty → inbox/chats |
+| Смена | `_tab_shift_control.html` | **Focus Deck** + **Context Dock**; **G10.8 Demo Pitch** (`rm-demo-scene`, counterfactual banner, resolve card) — см. [`docs/DEMO_PITCH.md`](DEMO_PITCH.md) |
 | Операции | `_tab_inbox.html`, orders, chats, bookings, menu | Inbox: «Очередь помощи», фильтры «В работе / Закрытые» |
 | Аналитика | `_tab_dashboard.html` + `_tab_analytics.html` | `analyticsDensity`: normal (Обзор) \| advanced (Подробно + **«Официанты»** KPI iiko) |
 

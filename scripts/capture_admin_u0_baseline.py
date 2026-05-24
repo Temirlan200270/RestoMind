@@ -8,7 +8,7 @@
 
 По умолчанию пытается снять скрины с актуального URL (U0_BASELINE_BASE_URL),
 а если это не удалось — поднимает временный uvicorn на U0_BASELINE_PORT (по умолчанию 9877)
-с отдельным SQLite-файлом, входит через «Попробовать демо», обходит hash-навигацию
+с отдельным SQLite-файлом, входит через «Посмотреть демо», обходит hash-навигацию
 и сохраняет скрины в docs/ui/baseline/.
 """
 
@@ -132,7 +132,7 @@ def _capture(base: str, *, allow_demo_login: bool) -> None:
                         "Нет ADMIN_PASSWORD для логина, а demo-login запрещён для текущей базы. "
                         "Задайте ADMIN_PASSWORD (и при желании ADMIN_USERNAME) в env или .env.",
                     )
-                page.get_by_role("button", name="Попробовать демо").click(timeout=60_000)
+                page.get_by_role("button", name="Посмотреть демо").click(timeout=60_000)
 
         page.wait_for_timeout(3500)
         sidebar.wait_for(state="visible", timeout=120_000)

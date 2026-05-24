@@ -1062,8 +1062,11 @@ aside.bg-brand-900 nav.admin-sidebar-scroll::-webkit-scrollbar-thumb:hover {
 
 /* G10.8.1 — counterfactual pitch layer */
 .ds-demo-counterfactual-banner {
-    @apply animate-pulse;
-    animation-duration: 2.4s;
+    animation: ds-demo-counterfactual-pulse 2.4s ease-in-out infinite;
+}
+@keyframes ds-demo-counterfactual-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.92; }
 }
 .ds-demo-action-confirm {
     @apply shadow-lg shadow-emerald-200/60;

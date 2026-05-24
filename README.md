@@ -32,6 +32,7 @@
 - **Human Override** — перехват диалога оператором; в режиме оператора AI не отвечает
 - **Стоп-листы** — фоновая синхронизация из iiko (~15 мин)
 - **Админ-панель** — вход по логину/паролю (cookie-сессия), дашборд, канбан, live-чаты, WebSocket, аналитика, редактирование меню, демо-данные
+- **Demo Pitch (G10.8)** — кнопка **«Посмотреть демо»**: 30-сек counterfactual pitch → read-only осмотр; см. [`docs/DEMO_PITCH.md`](docs/DEMO_PITCH.md)
 - **Надёжность** — rate limiting по телефону, логи в файлы, опционально Sentry
 - **Мультитенантность (фундамент)** — модель `Organization`, поле `organization_id` у сущностей (см. CHANGELOG)
 
@@ -94,7 +95,9 @@ python seed.py
 
 **Меню:** встроенный демо-каталог при старте **не** подставляется — номенклатура только из **iiko Cloud** (`python scripts/sync_menu_from_iiko.py` или кнопка в админке). Правки — во вкладке **«Меню»** админки.
 
-В админке кнопка **«Демо-данные»** добавляет пользователей с префиксом `demo7700…` и **не стирает** остальное; меню из демо не создаётся.
+В админке кнопка **«Демо-данные»** (Настройки → Техническое) добавляет пользователей с префиксом `demo7700…` и **не стирает** остальное; меню из демо не создаётся. Demo-org **seed'ится при старте приложения** (см. `app/main.py`); кнопка «Демо-данные» — ручной re-seed для staff-сессии.
+
+**Sales demo:** на экране входа — **«Посмотреть демо»** (не путать с «Демо-данные» в настройках). Полный сценарий — [`docs/DEMO_PITCH.md`](docs/DEMO_PITCH.md).
 
 Синхронизация номенклатуры из **iiko Cloud** в таблицу `menu_items` (нужны `IIKO_API_LOGIN` и `IIKO_ORGANIZATION_ID` в `.env`): из корня проекта выполните `python scripts/sync_menu_from_iiko.py` (то же действие, что кнопка синхронизации в админке).
 
@@ -182,6 +185,7 @@ RestoMind/
 | [docs/EVENT_ARCHITECTURE.md](docs/EVENT_ARCHITECTURE.md) | Durable-события и аналитический пайплайн |
 | [docs/ui/mobile-review/README.md](docs/ui/mobile-review/README.md) | Mobile review (Playwright-скриншоты) |
 | [docs/ui/lighthouse/README.md](docs/ui/lighthouse/README.md) | Lighthouse для админки (`npm run lh:admin`) |
+| [docs/DEMO_PITCH.md](docs/DEMO_PITCH.md) | 30-сек sales demo: pitch / explore, API, smoke |
 | [docs/SUPERADMIN_GUIDE.md](docs/SUPERADMIN_GUIDE.md) | Панель superadmin |
 | [docs/SUPABASE_MIGRATION.md](docs/SUPABASE_MIGRATION.md) | Миграция БД на Supabase |
 | [docs/WHATSAPP_PHASE13_TEMPLATES.md](docs/WHATSAPP_PHASE13_TEMPLATES.md) | Шаблоны WhatsApp (Meta) |
@@ -195,7 +199,9 @@ RestoMind/
 | Метод | Путь | Описание |
 |-------|------|----------|
 | POST | `/api/admin/auth/login` | вход, сессия + `ws_token` |
-| POST | `/api/admin/auth/demo-login` | гостевой вход в демо-организацию (read-only) |
+| POST | `/api/admin/auth/demo-login` | гостевой вход в демо-организацию (read-only) → autoplay pitch |
+| GET | `/api/admin/demo/shift-scenes` | каталог 30-сек demo-сцен |
+| GET | `/api/admin/demo/shift-scene/{id}/state?phase=` | canned shift/state для pitch (без мутаций БД) |
 | POST | `/api/admin/auth/request-access` | заявка на подключение ресторана (pending moderation) |
 | POST | `/api/admin/auth/signup` | отключён (`410`, регистрация только по заявке) |
 | POST | `/api/admin/auth/logout` | выход |

@@ -5,7 +5,7 @@
 | Дата | 2026-05-21 (после Role-first IA Sprint 5 — переснимите baseline) |
 | Коммит | working tree P5 Role-first pivot |
 | Viewport | 1440×900 (Playwright Chromium, headless) |
-| Вход | «Попробовать демо» на `/admin` |
+| Вход | **«Посмотреть демо»** на `/admin` (demo-login; для baseline вкладок — после Esc из pitch или сразу explore) |
 | Автоматизация | [`scripts/capture_admin_u0_baseline.py`](../../scripts/capture_admin_u0_baseline.py) — Playwright Chromium headless; тот же маршрут и hash, что в Phase U0 для MCP (Chrome DevTools / Playwright MCP можно использовать вручную для пересъёмки). После запуска скрипта в той же оболочке задайте `APP_DEBUG=true` перед `pytest`, если в окружении было `APP_DEBUG=false` (иначе `SessionMiddleware` с `https_only` ломает cookie в тестах по `http://test`). |
 
 ## Файлы и deep-link (`location.hash`)

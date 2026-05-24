@@ -2,7 +2,7 @@
  * Lighthouse (mobile) по экранам админки с сессией cookie.
  *
  * Требуется запущенный сервер (по умолчанию http://127.0.0.1:8000).
- * Авторизация: ADMIN_USERNAME + ADMIN_PASSWORD в env, иначе кнопка «Попробовать демо».
+ * Авторизация: ADMIN_USERNAME + ADMIN_PASSWORD в env, иначе кнопка «Посмотреть демо».
  *
  * Запуск: npm run lh:admin
  * Env: LH_BASE_URL, ADMIN_USERNAME, ADMIN_PASSWORD
@@ -136,7 +136,7 @@ async function run() {
             '[lh:admin] Не удалось войти в админку.\n' +
                 '  1) Запустите: python -m uvicorn app.main:app --reload\n' +
                 '  2) Укажите в `.env` или в shell: ADMIN_USERNAME, ADMIN_PASSWORD (как для входа в админку).\n' +
-                '     Кнопка «Попробовать демо» используется только если пароль не задан — на пустой БД demo-login может быть недоступен.\n',
+                '     Кнопка «Посмотреть демо» используется только если пароль не задан — на пустой БД demo-login может быть недоступен.\n',
             e,
         );
         process.exit(1);
@@ -221,7 +221,7 @@ function writeReadme(summary) {
         'npm run lh:admin',
         '```',
         '',
-        'Переменные: `LH_BASE_URL` (по умолчанию `http://127.0.0.1:8000`), `ADMIN_USERNAME`, `ADMIN_PASSWORD` (если пароль пуст — **Попробовать демо**).',
+        'Переменные: `LH_BASE_URL` (по умолчанию `http://127.0.0.1:8000`), `ADMIN_USERNAME`, `ADMIN_PASSWORD` (если пароль пуст — **«Посмотреть демо»**).',
         '',
         'Артефакты: **`summary.json`**, таблица ниже, полные отчёты в **`reports/`** (в `.gitignore`).',
         '',

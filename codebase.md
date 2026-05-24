@@ -39,6 +39,7 @@ RestoMind/
 │   │   ├── admin/                 # админка API (пакет)
 │   │   │   ├── __init__.py        # агрегирует роутеры (совместимый импорт `from app.api.admin import …`)
 │   │   │   ├── auth.py            # /api/admin/auth/* (cookie-сессия, demo-login, request-access, select-org)
+│   │   │   ├── demo.py            # demo seed/clear + G10.8 shift-scene pitch API
 │   │   │   ├── ws.py              # /api/admin/ws?token=... (live-события)
 │   │   │   ├── test_bot.py        # /api/admin/test-bot (ручное тестирование диалога)
 │   │   │   ├── intelligence.py    # OS dashboard, snapshots/replay, apply-pricing, reviews, digest, supply/staff/voice
@@ -94,6 +95,9 @@ RestoMind/
 │   │   ├── analytics_backfill.py  # DailyOrgStats + dialogs_count
 │   │   ├── owner_dashboard.py     # os-dashboard, stock_alerts, revenue history (location-aware)
 │   │   ├── revenue_leak.py        # Money MVP: abandoned drafts, slow response, cancellations
+│   │   ├── demo_data.py             # seed/clear demo org; pitch risks + recovered_kzt для explore
+│   │   ├── demo_shift_scene.py      # G10.8: 30s counterfactual pitch (GET-only phases)
+│   │   ├── demo_shift_presentation.py # смягчение shift/state в demo explore (cap risk, S2)
 │   │   ├── supplymind.py          # inventory snapshots, purchase draft builder
 │   │   ├── staffmind.py           # staff onboarding sessions, KB Q&A
 │   │   ├── voice_ai.py            # per-org voice flag, list_voice_call_logs, record_voice_call

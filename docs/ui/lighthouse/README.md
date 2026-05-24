@@ -11,7 +11,7 @@ python -m uvicorn app.main:app --reload   # отдельный терминал
 npm run lh:admin
 ```
 
-Переменные: `LH_BASE_URL` (по умолчанию `http://127.0.0.1:8000`), `ADMIN_USERNAME`, `ADMIN_PASSWORD` (если пароль пуст — **Попробовать демо**).
+Переменные: `LH_BASE_URL` (по умолчанию `http://127.0.0.1:8000`), `ADMIN_USERNAME`, `ADMIN_PASSWORD` (если пароль пуст — **«Посмотреть демо»** / demo-login).
 
 Артефакты: **`summary.json`**, таблица ниже, полные отчёты в **`reports/`** (в `.gitignore`).
 

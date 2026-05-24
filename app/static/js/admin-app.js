@@ -1223,6 +1223,7 @@ function adminMixinState() {
         _demoSceneUrgencyRemaining: 0,
         _demoSceneUrgencyTimer: null,
         demoSceneActionLine: '',
+        _demoShiftLoadSeq: 0,
         _shiftLiveImpactTimer: null,
         /** G10.6 choreography: idle | exiting | impact | entering */
         shiftChoreoPhase: 'idle',
@@ -5587,6 +5588,7 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
         },
 
         async loadSetupStatus() {
+            if (this.isDemoSession) return;
             try {
                 const r = await this.apiJsonResponse('/api/admin/setup-status');
                 if (r.ok && r.data) {
@@ -7645,6 +7647,7 @@ function adminMixinLiveChat() {
         },
 
         openSetupChecklist() {
+            if (this.isDemoSession) return;
             this.setupChecklistOpen = true;
         },
 
@@ -8896,12 +8899,13 @@ function adminMixinDataChartsSettings() {
                 clearInterval(this._shiftHeartbeatTimer);
                 this._shiftHeartbeatTimer = null;
             }
-            if (releaseClaim) {
+            if (releaseClaim && !this.demoSceneActive) {
                 this.releaseShiftFocusClaim();
             }
         },
 
         async sendShiftHeartbeat() {
+            if (this.demoSceneActive || this.isDemoSession) return;
             const focusId = this.shiftState?.focus?.id;
             const ownership = this.shiftState?.presentation?.focus_ownership
                 || this.shiftState?.focus?.ownership;
@@ -8925,6 +8929,7 @@ function adminMixinDataChartsSettings() {
         },
 
         releaseShiftFocusClaim() {
+            if (this.demoSceneActive || this.isDemoSession) return;
             const focusId = this.shiftState?.focus?.id;
             if (!focusId) return;
             const locQuery = this.locationQueryParams().toString();
@@ -8939,6 +8944,7 @@ function adminMixinDataChartsSettings() {
         },
 
         _startShiftHeartbeat() {
+            if (this.demoSceneActive || this.isDemoSession) return;
             this._stopShiftHeartbeat();
             void this.sendShiftHeartbeat();
             this._shiftHeartbeatTimer = setInterval(() => {
@@ -9003,9 +9009,10 @@ function adminMixinDataChartsSettings() {
         },
 
         async loadShiftState(force = false) {
-            if (this.demoSceneActive && !this._demoSceneInternalLoad) {
+            if (this.demoSceneActive) {
                 return;
             }
+            const loadSeq = this._demoShiftLoadSeq;
             const ttlMs = 30000;
             const now = Date.now();
             if (
@@ -9022,11 +9029,14 @@ function adminMixinDataChartsSettings() {
                     `/api/admin/shift/state${this.locationQueryString('?')}`,
                 );
                 if (ok && data?.ok) {
+                    if (loadSeq !== this._demoShiftLoadSeq || this.demoSceneActive) {
+                        return;
+                    }
                     this.shiftState = data;
                     this.shiftStateFetchedAt = Date.now();
                     this.shiftStateDegraded = false;
                     this.shiftStateLoadError = '';
-                    if (this.currentTab === 'shift' && data.focus?.id) {
+                    if (this.currentTab === 'shift' && data.focus?.id && !this.isDemoSession) {
                         this._startShiftHeartbeat();
                     }
                     this._syncShiftPreAttention();
@@ -9043,7 +9053,9 @@ function adminMixinDataChartsSettings() {
                 }
             } finally {
                 this.shiftStateLoading = false;
-                this._syncShiftStatePolling();
+                if (!this.demoSceneActive) {
+                    this._syncShiftStatePolling();
+                }
             }
         },
 
@@ -9336,14 +9348,15 @@ function adminMixinDataChartsSettings() {
 
         async startDemoShiftScene(sceneId = DEMO_SHIFT_SCENE_DEFAULT) {
             const sid = String(sceneId || DEMO_SHIFT_SCENE_DEFAULT).trim();
-            this.stopDemoShiftScene({ silent: true });
+            this.stopDemoShiftScene({ silent: true, skipShiftReload: true });
+            this._demoShiftLoadSeq += 1;
+            this._stopShiftHeartbeat(true);
+            this._stopShiftStateAutoRefresh();
             this.demoSceneActive = true;
             this.demoSceneId = sid;
             this.demoScenePhase = 'hook';
             this.currentTab = 'shift';
             this.sidebarOpen = false;
-            this._stopShiftHeartbeat(true);
-            this._stopShiftStateAutoRefresh();
             if (typeof this._pushAdminHash === 'function') this._pushAdminHash();
             this.shiftStateLoading = true;
             try {
@@ -9360,21 +9373,26 @@ function adminMixinDataChartsSettings() {
             }
         },
 
-        stopDemoShiftScene({ silent = false, replay = false } = {}) {
+        stopDemoShiftScene({ silent = false, replay = false, skipShiftReload = false } = {}) {
             this._clearDemoSceneTimers();
             this._stopDemoSceneLiveTimers();
             this._abortShiftChoreo();
             this.demoSceneActionLine = '';
+            this._demoShiftLoadSeq += 1;
+            this._stopShiftHeartbeat(true);
+            this._stopShiftStateAutoRefresh();
             const wasActive = this.demoSceneActive;
             this.demoSceneActive = false;
             this.demoSceneId = '';
             this.demoScenePhase = '';
             if (!wasActive) return;
-            this._demoSceneInternalLoad = true;
-            void this.loadShiftState(true).finally(() => {
-                this._demoSceneInternalLoad = false;
-                this._syncShiftStatePolling();
-            });
+            if (!skipShiftReload) {
+                const loadSeq = this._demoShiftLoadSeq;
+                void this.loadShiftState(true).finally(() => {
+                    if (loadSeq !== this._demoShiftLoadSeq || this.demoSceneActive) return;
+                    this._syncShiftStatePolling();
+                });
+            }
             if (!silent) {
                 void this.flashToast(
                     replay ? 'Показ начинается…' : 'Можно осмотреть демо · ↻ — повторить показ',

@@ -6,11 +6,17 @@
 
 ## [Unreleased] — 2026-03-20
 
+### Изменено (2026-05-22) — документация demo pitch
+
+- **Канон sales demo:** [`docs/DEMO_PITCH.md`](docs/DEMO_PITCH.md) — pitch/explore, API, smoke, честные gaps vs G10.8.2.
+- **Синхронизация:** `README.md`, `codebase.md`, `docs/UI_MAP.md`, `CODEX.md`, baseline/lighthouse README и capture-скрипты — кнопка **«Посмотреть демо»** (не «Попробовать демо»); уточнён seed demo-org при startup.
+
 ### Добавлено (2026-05-22) — G10.8.1 Counterfactual Pitch
 
 - **Counterfactual layer:** фазы `hook→tension→action→impact→next→resolve`; dual-state «без системы → потеря / с системой → спасено» в `demo_scene.counterfactual` и live impact.
 - **Pitch immersive:** скрыты кнопки focus card, S2-баннеры, demo-баннер; auto-action «✔ Ответ отправлен автоматически»; urgency countdown; live wait timer; micro-flash `−1200 ₸`; success tick.
 - **Closing frame (25–30s):** «Система автоматически спасает…» + stat + CTA «Осмотреть демо».
+- **Demo explore UX:** без heartbeat/spam 401 при replay; cap риска ~12k на `GET /shift/state`; без «Готовность N%» в шапке.
 
 ### Добавлено (2026-05-22) — G10.8 demo pitch seed (осмотр после Esc)
 

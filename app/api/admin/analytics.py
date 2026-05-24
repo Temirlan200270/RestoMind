@@ -2624,6 +2624,10 @@ async def shift_state(
         allowed_location_ids=allowed_location_ids,
         operator_id=operator_id,
     )
+    if bool(request.session.get("is_demo")):
+        from app.services.demo_shift_presentation import soften_demo_explore_shift_state
+
+        payload = soften_demo_explore_shift_state(payload)
     return {"ok": True, "organization_id": org_id, **payload}
 
 

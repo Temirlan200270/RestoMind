@@ -23,6 +23,7 @@ def test_admin_app_demo_pitch_unified() -> None:
     assert "demoSceneCounterfactualLine" in js
     assert "playDemoSuccessTick" in js
     assert "shiftLiveImpactLossFlashLine" in js
+    assert "skipShiftReload" in js
 
 
 def test_shift_tab_counterfactual_pitch_ui() -> None:
@@ -31,6 +32,12 @@ def test_shift_tab_counterfactual_pitch_ui() -> None:
     assert "ds-demo-resolve-card" in shift
     assert "ds-demo-action-confirm" in shift
     assert "demoSceneResolveVisible()" in shift
+
+
+def test_header_hides_readiness_in_demo() -> None:
+    header = (REPO / "app" / "templates" / "screens" / "_header.html").read_text(encoding="utf-8")
+    assert "!isDemoSession" in header
+    assert "Готовность" in header
 
 
 def test_focus_card_hides_actions_in_pitch() -> None:

@@ -9,7 +9,7 @@
                                 <h3 class="text-lg font-bold text-slate-900">Лаборатория Бот / ИИ</h3>
                                 <p class="text-sm text-slate-600 mt-1">Знания, правила допродаж, промпт и тестовый чат собраны в один рабочий контур.</p>
                             </div>
-                            <div class="min-w-[9rem]">
+                            <div class="min-w-[9rem]" x-show="!isDemoSession" x-cloak>
                                 <div class="flex items-center justify-between text-xs font-semibold text-slate-500">
                                     <span>Готовность</span>
                                     <span class="tabular-nums" x-text="(setupStatus.score ?? 0) + '%'"></span>

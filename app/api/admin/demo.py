@@ -26,7 +26,7 @@ def _require_demo_scene_access(request: Request) -> None:
         return
     raise HTTPException(
         status_code=403,
-        detail="Сценарий демо доступен после «Попробовать демо» или при APP_DEBUG=true",
+        detail="Сценарий демо доступен после «Посмотреть демо» или при APP_DEBUG=true",
     )
 
 

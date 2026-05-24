@@ -200,7 +200,16 @@
 - [x] **Backend** — `demo_shift_scene.py`: фазы `hook|tension|action|impact|next|resolve`, fixed narrative; `GET /demo/shift-scenes`, `GET /demo/shift-scene/{id}/state?phase=`.
 - [x] **G10.8.1 Counterfactual layer** — `loss_would_be_kzt`, `counterfactual_line`, `urgency_sec`, auto-action copy; live impact flash `−1200 → +1200 спасено`; closing frame 25–30s.
 - [x] **Autoplay UI** — единая кнопка «Посмотреть демо» → pitch; immersive shift (`pitch_immersive`, без кнопок/баннеров S2); live wait timer + urgency countdown; success tick на impact.
-- [x] **Tests** — `test_demo_shift_scene.py`, `test_demo_shift_scene_ui.py`, `test_demo_pitch_seed.py`.
+- [x] **Tests** — `test_demo_shift_scene.py`, `test_demo_shift_scene_ui.py`, `test_demo_pitch_seed.py`, `test_demo_shift_presentation.py`.
+- [x] **Docs** — [`docs/DEMO_PITCH.md`](DEMO_PITCH.md) (канон pitch/explore, smoke, gaps).
+
+### G10.8.2 — Demo zero-friction (не начато)
+
+> Landing autoplay, публичная self-demo ссылка, optional booking pitch variant.
+
+- [ ] **`/demo` или `?demo=1`** — autoplay pitch без формы логина
+- [ ] **Публичная ссылка** для cold outreach / embed
+- [ ] **Сценка `booking_rescue_30s`** (альтернатива slow_chat)
 
 - [x] **OS Decision Feed UI:** «Лента решений ОС» в `aiCenterTab=os` ([`_tab_ai_center.html`](app/templates/screens/_tab_ai_center.html)), `loadAuditLog()`, WS `os.audit`, блок «Живая ОС» (`dashLiveFeed`) на дашборде, refresh по `order.*` / `payment.*` / `booking.*` в `handleWsEvent`. UI-тексты — язык оператора («данные ОС», не dev-жаргон).
 - [x] **Websocket audit push:** [`audit_consumer.py`](app/services/audit_consumer.py) публикует `os.audit` с `org_id` после записи в `audit_log`.
