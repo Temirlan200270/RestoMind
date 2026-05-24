@@ -1,6 +1,7 @@
             {% from "components/_skeleton.html" import skeleton %}
             {% from "components/_card.html" import card %}
             {% from "components/_section_header.html" import section_header %}
+            {% from "components/_focus_card.html" import focus_card %}
             <!-- ========== G10 SHIFT STATE MACHINE (Focus-Driven OS Sprint 2 split) ========== -->
             <div x-show="currentTab === 'shift'" x-cloak class="fade-in space-y-5 max-w-7xl"
                 x-effect="shiftState?.focus?.id; mobileActiveScreen = 'focus'">
@@ -28,16 +29,21 @@
                 <template x-if="shiftState && !shiftStateLoading">
                     <div class="space-y-5">
                         <!-- Metrics strip (hidden in calm empty — operator sees CTA instead) -->
-                        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3" x-show="!shiftIsCalmEmpty()">
+                        <div class="grid grid-cols-2 lg:grid-cols-5 gap-3" x-show="!shiftIsCalmEmpty()">
                             <div class="rounded-2xl bg-red-50 ring-1 ring-red-200/80 px-4 py-3">
                                 <div class="text-[10px] font-bold uppercase text-red-700">Под риском</div>
                                 <div class="text-2xl font-black tabular-nums text-red-950 mt-1"
                                     x-text="fmt.money(shiftState.metrics?.risk_kzt ?? 0)"></div>
                             </div>
                             <div class="rounded-2xl bg-emerald-50 ring-1 ring-emerald-200/80 px-4 py-3">
-                                <div class="text-[10px] font-bold uppercase text-emerald-800">Сохранено сегодня</div>
+                                <div class="text-[10px] font-bold uppercase text-emerald-800">Спасено действиями</div>
                                 <div class="text-2xl font-black tabular-nums text-emerald-950 mt-1"
-                                    x-text="fmt.money(shiftState.metrics?.saved_today_kzt ?? 0)"></div>
+                                    x-text="fmt.money(shiftState.metrics?.recovered_today_kzt ?? 0)"></div>
+                            </div>
+                            <div class="rounded-2xl bg-sky-50 ring-1 ring-sky-200/80 px-4 py-3">
+                                <div class="text-[10px] font-bold uppercase text-sky-800">Выручка подтверждена</div>
+                                <div class="text-2xl font-black tabular-nums text-sky-950 mt-1"
+                                    x-text="fmt.money(shiftState.metrics?.confirmed_revenue_today_kzt ?? shiftState.metrics?.saved_today_kzt ?? 0)"></div>
                             </div>
                             <div class="rounded-2xl bg-amber-50 ring-1 ring-amber-200/80 px-4 py-3">
                                 <div class="text-[10px] font-bold uppercase text-amber-800">В очереди</div>
@@ -172,49 +178,7 @@
                                     <!-- Left: Focus Deck -->
                                     <div class="ds-shift-focus-pane"
                                         :class="shiftMobileShowsFocus() ? '' : 'ds-shift-pane--hidden-mobile'">
-                                        {% call card(padding_class='p-0', extra_class='overflow-hidden !border-2 !border-violet-300') %}
-                                            <div class="px-5 py-4 bg-violet-600 text-white">
-                                                <div class="text-xs font-bold uppercase tracking-wide opacity-90">Следующее действие</div>
-                                                <p class="text-[11px] mt-1 opacity-80" x-show="shiftState.presentation?.focus_ownership === 'other'">
-                                                    Другой оператор уже взял эту задачу — дождитесь или выберите «Другое дело».
-                                                </p>
-                                            </div>
-                                            <div class="px-5 py-5">
-                                                <div class="flex flex-wrap items-center gap-2 mb-2">
-                                                    <span class="text-xs font-bold uppercase text-violet-700"
-                                                        x-text="moneyQueueKindLabel(shiftState.focus?.kind)"></span>
-                                                    <span x-show="shiftState.focus?.wait_minutes > 0"
-                                                        class="text-xs tabular-nums text-slate-500"
-                                                        x-text="shiftState.focus.wait_minutes + ' мин'"></span>
-                                                    <span x-show="shiftState.focus?.value_kzt > 0"
-                                                        class="text-lg font-black tabular-nums text-red-700"
-                                                        x-text="fmt.money(shiftState.focus.value_kzt)"></span>
-                                                </div>
-                                                <div class="text-lg font-bold text-slate-900" x-text="shiftState.focus?.title"></div>
-                                                <p class="text-sm text-slate-600 mt-1" x-text="shiftState.focus?.subtitle"></p>
-                                                <div class="flex flex-wrap gap-2 mt-5">
-                                                    <template x-for="(act, idx) in (shiftState.focus?.actions || []).slice(0, 1)" :key="'fa-' + idx">
-                                                        <button type="button" @click="runShiftFocusAction(act)"
-                                                            class="ds-btn ds-btn-primary ds-btn-md min-h-[44px]"
-                                                            x-text="act.label"></button>
-                                                    </template>
-                                                    <button type="button"
-                                                        x-show="shiftHasContextDock()"
-                                                        @click="openShiftContext()"
-                                                        class="ds-btn ds-btn-secondary ds-btn-md min-h-[44px] lg:hidden">
-                                                        Контекст
-                                                    </button>
-                                                    <template x-for="act in (shiftState.actions || [])" :key="'sa-' + act.id">
-                                                        <button type="button"
-                                                            @click="runShiftStateAction(act.subtype, shiftState.focus?.id)"
-                                                            :disabled="shiftActionLoading === act.id"
-                                                            class="ds-btn ds-btn-secondary ds-btn-md min-h-[44px] disabled:opacity-50"
-                                                            :title="act.hint || ''"
-                                                            x-text="shiftActionLoading === act.id ? '…' : act.label"></button>
-                                                    </template>
-                                                </div>
-                                            </div>
-                                        {% endcall %}
+                                        {{ focus_card() }}
 
                                         <!-- Queue preview: S2 = actionable; S4 = context only -->
                                         <template x-if="shiftState.state === 'S2' && (shiftState.queue || []).length > 0">

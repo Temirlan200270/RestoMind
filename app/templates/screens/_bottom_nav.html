@@ -12,7 +12,7 @@
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/>
                     </svg>
-                    <span class="text-[9px] font-semibold leading-none">Смена</span>
+                    <span class="text-[9px] font-semibold leading-none">Действие</span>
                     <span x-show="shiftState && ((shiftState.metrics?.risk_kzt ?? 0) > 0 || (shiftState.metrics?.at_risk_count ?? 0) > 0)"
                         class="absolute top-1 right-3 min-w-[14px] h-3.5 px-0.5 bg-red-500 rounded-full text-[8px] font-bold flex items-center justify-center text-white tabular-nums"
                         x-text="shiftState.metrics?.at_risk_count ?? 0"></span>
@@ -26,7 +26,7 @@
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
                     </svg>
-                    <span class="text-[9px] font-semibold leading-none">Внимание</span>
+                    <span class="text-[9px] font-semibold leading-none">Риски</span>
                     <span x-show="inboxTotalOpen() > 0"
                         class="absolute top-1 right-3 min-w-[14px] h-3.5 px-0.5 bg-amber-500 rounded-full text-[8px] font-bold flex items-center justify-center text-white"
                         x-text="inboxTotalOpen()"></span>

@@ -6,9 +6,25 @@
 
 ## [Unreleased] — 2026-03-20
 
+### Добавлено (2026-05-22) — Money Layer v2
+
+- **Recovered $:** колонки `recovered_kzt`, `focus_completed_count` в `daily_org_stats`; агрегация по `shift.focus_completed` и `order.draft_recovered` ([`money_recovery.py`](app/services/money_recovery.py), [`analytics_consumer.py`](app/services/analytics_consumer.py)).
+- **Shift metrics:** `recovered_today_kzt`, `confirmed_revenue_today_kzt` в `GET /shift/state` и на экране смены («Спасено действиями» / «Выручка подтверждена»).
+- **Money queue:** `menu_confusion`, `booking_at_risk`; slow_chat с оценкой AOV×0.5; surfaces на дашборде.
+- **iiko hourly ETL:** `sales_hourly_daily`, [`iiko_sales_hourly_sync.py`](app/services/iiko_sales_hourly_sync.py), cron worker 23:15 UTC, `GET /api/admin/analytics/sales-heatmap`, heatmap в расширенной аналитике.
+- **Daily digest:** строка «Спасено действиями» для владельца.
+- **Тесты:** [`tests/test_money_layer.py`](tests/test_money_layer.py).
+
+### Исправлено (2026-05-22) — Shell v2 Role-First (G10.5 / Focus Card)
+
+- **Focus Card Spec:** [`docs/FOCUS_CARD_SPEC.md`](docs/FOCUS_CARD_SPEC.md); mapper `adminFocusCardFromShiftState()` + макрос [`_focus_card.html`](app/templates/components/_focus_card.html).
+- **Смена:** focus deck через единый Focus Card (поведение 1:1, staged nav сохранён).
+- **Operator scene:** sidebar «Следующее действие» / «Все риски»; inbox hero «Открыть в смене»; `openMoneyQueueItemViaShift` для operator.
+- **Smoke operator:** login → landing shift при risk → focus card → mobile context → inbox «Открыть в смене» → карточка риска → shift context.
+
 ### Исправлено (2026-05-22) — Postgres pool (Supabase EMAXCONNSESSION)
 
-- **Пул SQLAlchemy:** вместо `pool_size=20` / `max_overflow=10` — авто по DSN: Supabase session pooler (`:5432`) → `4+1` на процесс; env `DB_POOL_SIZE`, `DB_MAX_OVERFLOW`, `DB_POOL_TIMEOUT`, `DB_POOL_RECYCLE`.
+- **Пул SQLAlchemy:** вместо `pool_size=20` / `max_overflow=10` — авто по DSN: Supabase session pooler (`:5432`) → **`2+0`** на процесс (было 4+1); env `DB_POOL_SIZE`, `DB_MAX_OVERFLOW`; дефолты в `render.yaml`.
 - **Transaction pooler (:6543):** `statement_cache_size=0` для asyncpg.
 - Док: [docs/SUPABASE_MIGRATION.md](docs/SUPABASE_MIGRATION.md), [.env.example](.env.example).
 

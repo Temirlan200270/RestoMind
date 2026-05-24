@@ -44,6 +44,8 @@ KIND_TO_TYPE = {
     "slow_chat": "chat",
     "pending_prepay": "payment",
     "high_value_stuck": "high_value",
+    "menu_confusion": "chat",
+    "booking_at_risk": "booking",
 }
 
 WEIGHTS = {
@@ -51,6 +53,8 @@ WEIGHTS = {
     "pending_prepay": 0.7,
     "slow_chat": 0.5,
     "high_value_stuck": 1.0,
+    "menu_confusion": 0.45,
+    "booking_at_risk": 0.65,
 }
 
 WAIT_MIN_CAP = 30
@@ -237,6 +241,7 @@ def _focus_payload(item: dict[str, Any], *, reason: str) -> dict[str, Any]:
         "reason": reason,
         "phone": item.get("phone"),
         "order_id": item.get("order_id"),
+        "booking_id": item.get("booking_id"),
         "pulse": item.get("pulse"),
         "actions": actions,
     }
@@ -678,6 +683,10 @@ async def build_shift_state(
         location_id=location_id,
         allowed_location_ids=allowed_location_ids,
     )
+    from app.services.money_recovery import get_recovered_today_kzt
+
+    recovered_stats = await get_recovered_today_kzt(db, org_id)
+    recovered_today = float(recovered_stats.get("recovered_kzt") or 0)
     priority = float(focus_item.get("priority_score") or 0) if focus_item else 0.0
     empty_reason = _empty_focus_reason(
         state=state,
@@ -726,6 +735,9 @@ async def build_shift_state(
             "risk_kzt": risk_kzt,
             "active_risk_kzt": active_shift_input.risk_kzt,
             "saved_today_kzt": saved_today,
+            "confirmed_revenue_today_kzt": saved_today,
+            "recovered_today_kzt": recovered_today,
+            "focus_completed_today": int(recovered_stats.get("focus_completed_count") or 0),
             "at_risk_count": int(summary.get("total") or shift_input.queue_size),
             "queue_size": shift_input.queue_size,
             "queue_size_active": len(active_items),
@@ -826,6 +838,9 @@ async def apply_shift_action(
 
     await redis_client.sadd(_done_set_key(int(org_id)), fid)
     await _clear_active_focus(org_id, op)
+    from app.services.money_recovery import resolve_focus_recovery_with_aov
+
+    amount_kzt, focus_kind = await resolve_focus_recovery_with_aov(db, org_id, fid)
     await emit_event(
         db,
         BusinessEvent(
@@ -835,7 +850,13 @@ async def apply_shift_action(
             entity_type="shift_focus",
             entity_id=fid,
             location_id=location_id,
-            payload={"focus_id": fid, "intent": intent, "operator_id": op},
+            payload={
+                "focus_id": fid,
+                "intent": intent,
+                "operator_id": op,
+                "amount_kzt": amount_kzt,
+                "kind": focus_kind,
+            },
         ),
     )
     await db.commit()

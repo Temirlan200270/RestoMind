@@ -26,13 +26,21 @@
                             <button
                                 @click="navigateToTab(item.id)"
                                 :data-p15-tour="item.id === 'inbox' ? 'inbox' : item.id === 'orders' ? 'orders' : null"
-                                :class="currentTab === item.id
-                                    ? 'bg-white/15 text-white shadow-lg'
-                                    : 'text-blue-200 hover:bg-white/10 hover:text-white'"
+                                :class="[
+                                    currentTab === item.id
+                                        ? 'bg-white/15 text-white shadow-lg'
+                                        : 'text-blue-200 hover:bg-white/10 hover:text-white',
+                                    isNavExecutionPrimary(item.id) ? 'ds-nav-item--execution-primary ring-1 ring-inset ring-white/25' : ''
+                                ]"
                                 class="w-full flex items-center gap-3 px-4 min-h-[44px] py-3 rounded-xl transition-all duration-200 text-left relative"
                             >
                                 <span x-html="item.icon" class="w-6 flex items-center justify-center flex-shrink-0 opacity-95"></span>
-                                <span x-text="item.label" class="font-medium text-sm"></span>
+                                <span class="min-w-0 flex-1">
+                                    <span x-text="navItemDisplayLabel(item)" class="font-medium text-sm block truncate"></span>
+                                    <span x-show="isNavExecutionPrimary(item.id) || (effectiveStaffRole() === 'operator' && item.id === 'inbox')"
+                                        class="text-[10px] opacity-75 block truncate"
+                                        x-text="navItemDisplayDesc(item)"></span>
+                                </span>
                                 <span x-show="item.id === 'shift' && shiftState && (shiftState.metrics?.risk_kzt ?? 0) > 0"
                                     class="ml-auto max-w-[5.75rem] truncate rounded-full bg-red-500/95 px-2 py-0.5 text-[10px] font-black tabular-nums text-white"
                                     :title="'Под риском: ' + fmt.money(shiftState?.metrics?.risk_kzt ?? 0)"

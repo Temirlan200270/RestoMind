@@ -1050,6 +1050,9 @@ async def confirm_order(
         order.status = OrderStatus.CONFIRMED
         await db.flush()
         if order.organization_id:
+            from app.services.draft_recovery import maybe_emit_draft_recovered
+
+            await maybe_emit_draft_recovered(db, order)
             await emit_event(
                 db,
                 BusinessEvent(

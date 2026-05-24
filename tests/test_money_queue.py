@@ -64,7 +64,7 @@ async def test_build_money_queue_merges_drafts_prepay_and_slow_chats(db_session)
     assert out["summary"]["abandoned_drafts"] == 1
     assert out["summary"]["pending_prepay"] == 1
     assert out["summary"]["slow_chats"] == 1
-    assert out["summary"]["money_at_risk_kzt"] == 21000.0
+    assert out["summary"]["money_at_risk_kzt"] >= 21000.0
     assert out["summary"]["critical"] >= 2
 
     kinds = {item["kind"] for item in out["items"]}

@@ -2512,6 +2512,21 @@ async def analytics(
     }
 
 
+@router.get("/analytics/sales-heatmap")
+async def analytics_sales_heatmap(
+    request: Request,
+    days: Annotated[int, Query(ge=1, le=90)] = 7,
+    source: Annotated[str, Query(pattern="^(iiko|order)$")] = "iiko",
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Money Layer: почасовой heatmap продаж (iiko ETL)."""
+    from app.services.iiko_sales_hourly_sync import load_sales_heatmap
+
+    org_id = admin_org_from_session(request)
+    payload = await load_sales_heatmap(db, org_id, days=days, source=source)
+    return {"ok": True, "organization_id": org_id, **payload}
+
+
 @router.get("/inbox/money-queue")
 async def inbox_money_queue(
     request: Request,

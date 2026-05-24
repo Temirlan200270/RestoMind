@@ -188,3 +188,15 @@ def test_bookings_sidebar_collapses_when_empty():
     bookings = _read("app", "templates", "screens", "_tab_bookings.html")
     assert "bookingsSidebarOpen()" in bookings
     assert "Справка по бронированию" in bookings
+
+
+def test_shell_v2_focus_card_in_shift_tab():
+    shift = _read("app", "templates", "screens", "_tab_shift_control.html")
+    assert "focus_card()" in shift
+    assert "focusCardView()" not in shift or "_focus_card.html" in shift
+
+
+def test_inbox_operator_secondary_copy():
+    inbox = _read("app", "templates", "screens", "_tab_inbox.html")
+    assert "Расширенный список рисков" in inbox
+    assert "openInboxShiftHero" in inbox

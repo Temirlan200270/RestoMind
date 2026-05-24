@@ -17,6 +17,7 @@ from sqlalchemy import (
     LargeBinary,
     Numeric,
     Index,
+    SmallInteger,
     String,
     Text,
     Time,
@@ -1764,12 +1765,42 @@ class DailyOrgStats(Base):
     operator_takeovers: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     ai_messages_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     dialogs_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    recovered_kzt: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0, server_default="0")
+    focus_completed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(),
     )
 
     def __repr__(self) -> str:
         return f"<DailyOrgStats org={self.organization_id} day={self.day}>"
+
+
+class SalesHourlyDaily(Base):
+    """Почасовые продажи по дням (Order MVP + iiko ETL)."""
+
+    __tablename__ = "sales_hourly_daily"
+    __table_args__ = (
+        Index("ix_sales_hourly_daily_org_day", "organization_id", "day"),
+    )
+
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False, primary_key=True,
+    )
+    day: Mapped[date] = mapped_column(Date, nullable=False, primary_key=True)
+    hour: Mapped[int] = mapped_column(SmallInteger, nullable=False, primary_key=True)
+    source: Mapped[str] = mapped_column(String(16), nullable=False, primary_key=True, server_default="order")
+    location_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("locations.id", ondelete="SET NULL"), nullable=True,
+    )
+    orders_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    revenue_kzt: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0, server_default="0")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(),
+    )
+
+    def __repr__(self) -> str:
+        return f"<SalesHourlyDaily org={self.organization_id} day={self.day} h={self.hour} src={self.source}>"
 
 
 class AuditLog(Base):

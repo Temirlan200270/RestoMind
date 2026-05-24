@@ -27,6 +27,9 @@
 - [x] **G10 Simplification Map:** lock+queue, `active_focus` lease, `heal:mute` — [`docs/G10_SIMPLIFICATION.md`](docs/G10_SIMPLIFICATION.md), контракт §12 [`G10_SEMANTIC_CONTRACT.md`](docs/G10_SEMANTIC_CONTRACT.md). **Freeze новых consistency-слоёв.** Доки синхронизированы 2026-05-20.
 - [x] **FM-3 metric + recovery:** `GET /shift/state` exposes `metrics.shift_empty_focus_while_risk_positive` and logs `shift_empty_focus_while_risk_positive` when risk is positive but focus is empty; UI offers `reset_skips` CTA to show skipped/next items again while completed items stay closed.
 - [x] **G10.3 — Legacy `/shift-control` removal:** удалён `GET /api/admin/shift-control`; `shift_control.py` — только `_saved_today_kzt`; heartbeat без `owner_token` (JS + API).
+- [x] **Money Layer v2 — Recovered $:** `recovered_kzt` / `focus_completed_count` в `daily_org_stats`; события `shift.focus_completed`, `order.draft_recovered`; метрики `recovered_today_kzt` + `confirmed_revenue_today_kzt` в shift/state и UI.
+- [x] **Money Layer v2 — Queue gaps:** `menu_confusion`, `booking_at_risk` в `money_queue.py`; slow_chat с AOV×0.5; action surfaces на дашборде.
+- [x] **Money Layer v2 — iiko hourly ETL (lite):** таблица `sales_hourly_daily`, cron `sales_hourly_iiko_scheduled_tick`, `GET /analytics/sales-heatmap`, heatmap в расширенной аналитике.
 
 ## 🔴 P0: Критический техдолг и баги (делать сейчас)
 
@@ -110,7 +113,7 @@
   - [x] Admin API: sync / рейтинг / CSV — [`waiter_kpi.py`](app/api/admin/waiter_kpi.py).
   - [x] UI: блок **«Официанты»** в подробной аналитике; spike [`IIKO_WAITER_KPI_SPIKE.md`](docs/IIKO_WAITER_KPI_SPIKE.md).
 - [x] **iiko‑маркетинг (MVP):** `POST /api/admin/marketing/sync-iiko-customers` — телефоны гостей из iiko Cloud deliveries → `User` для сегментов рассылок ([`iiko_customer_sync.py`](app/services/iiko_customer_sync.py), вкладка «Маркетинг»).
-- [ ] **BI по iiko (OLAP):** полный ETL продаж по часам/дням недели и автоподстройка upsell. **MVP ✅ на Order:** `sales_by_hour_local`, `sales_insights`, `sales_peak_today` на дашборде; KPI офiciантов — отдельный iiko ETL (см. выше).
+- [x] **BI по iiko (OLAP):** lite ETL почасовых продаж (`sales_hourly_daily`, cron 23:15 UTC, heatmap API/UI). Полный warehouse + автоподстройка upsell — отдельный epic.
 - [ ] **VIP white‑label** (Wishlist Темира R2): отдельный Astro/Next фронт per‑tenant; ROI gate до кода.
 
 
@@ -156,6 +159,18 @@
 - [x] **Sprint 5 — Role-first IA pivot:** убран Mode Bar; сайдбар по роли (`operator` / `manager` / `admin`); smart landing оператора (shift при риске/focus, иначе inbox); дашборд «Обычный / Расширенный» (`analyticsDensity`); mobile bottom nav по роли; shift badge polling вне вкладки «Смена»; demo-login → `applyRoleDefaultLanding`.
 
 **Не дублировать (уже сделано):** G7 money queue, G9/G10 shift engine, FM-3 `reset_skips`, Voice `GET /voice/calls` (пагинация + RBAC) — см. чекбоксы ниже в P5.
+
+### G10.5 — Shell v2 Role-First (Execution Kernel)
+
+> **Статус:** ✅ Focus Card spec + макрос + operator scene consolidation. Детали: [`docs/FOCUS_CARD_SPEC.md`](docs/FOCUS_CARD_SPEC.md).
+
+- [x] **Focus Card Spec** — `docs/FOCUS_CARD_SPEC.md`; ссылка в UI_DESIGN_SYSTEM § Execution Kernel UI.
+- [x] **Focus Card macro + mapper** — `_focus_card.html`, `focusCardFromShiftState()` / `adminFocusCardFromShiftState()` в `admin-app.js`.
+- [x] **Shift tab refactor** — `_tab_shift_control.html` использует макрос (поведение 1:1, staged nav сохранён).
+- [x] **Operator scene** — sidebar primary «Смена», inbox «Все риски»; `openMoneyQueueItemViaShift` для operator.
+- [x] **Tests** — `test_focus_driven_os_sprint2.py`, `test_ui_operator_language.py`; smoke checklist в CHANGELOG.
+
+**Не в scope G10.5:** возврат Mode Bar, `POST /shell/mode`, big-bang rewrite `admin.html` (Phase D — отдельно).
 
 - [x] **OS Decision Feed UI:** «Лента решений ОС» в `aiCenterTab=os` ([`_tab_ai_center.html`](app/templates/screens/_tab_ai_center.html)), `loadAuditLog()`, WS `os.audit`, блок «Живая ОС» (`dashLiveFeed`) на дашборде, refresh по `order.*` / `payment.*` / `booking.*` в `handleWsEvent`. UI-тексты — язык оператора («данные ОС», не dev-жаргон).
 - [x] **Websocket audit push:** [`audit_consumer.py`](app/services/audit_consumer.py) публикует `os.audit` с `org_id` после записи в `audit_log`.

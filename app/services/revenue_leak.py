@@ -23,6 +23,14 @@ from app.services.tenant_scope import chat_logs_location_filter, orders_location
 
 logger = logging.getLogger(__name__)
 
+MENU_CONFUSION_MARKERS = (
+    "не нашёл в меню",
+    "не найдено в меню",
+    "временно недоступно",
+    "в стопе",
+    "not found",
+)
+
 _COMPLETED = (
     OrderStatus.CONFIRMED.value,
     OrderStatus.SENT_TO_IIKO.value,
@@ -199,13 +207,7 @@ async def _menu_confusion_kzt(
             ChatLog.user_id.isnot(None),
         )
     )).all()
-    markers = (
-        "не нашёл в меню",
-        "не найдено в меню",
-        "временно недоступно",
-        "в стопе",
-        "not found",
-    )
+    markers = MENU_CONFUSION_MARKERS
     confused_users = {
         int(user_id)
         for user_id, content in rows
@@ -345,6 +347,50 @@ async def build_leak_action_surfaces(
                     "type": "navigate",
                     "tab": "orders",
                     "orderSumMin": 5000,
+                },
+            ],
+        ),
+        _action_surface(
+            surface_id="menu_confusion",
+            severity="warning",
+            title="Путаница в меню",
+            count=int(counts.get("menu_confusion") or 0),
+            risk_kzt=float(counts.get("menu_confusion_kzt") or 0),
+            actions=[
+                {
+                    "id": "open_menu_confusion",
+                    "label": "Открыть диалоги",
+                    "type": "navigate",
+                    "tab": "inbox",
+                    "inboxTab": "clients",
+                },
+                {
+                    "id": "open_menu",
+                    "label": "Проверить меню",
+                    "type": "navigate",
+                    "tab": "menu",
+                },
+            ],
+        ),
+        _action_surface(
+            surface_id="booking_at_risk",
+            severity="warning",
+            title="Брони под риском",
+            count=int(counts.get("booking_at_risk") or 0),
+            risk_kzt=float(counts.get("booking_at_risk_kzt") or 0),
+            actions=[
+                {
+                    "id": "open_bookings",
+                    "label": "Открыть брони",
+                    "type": "navigate",
+                    "tab": "bookings",
+                },
+                {
+                    "id": "open_booking_queue",
+                    "label": "Очередь рисков",
+                    "type": "navigate",
+                    "tab": "inbox",
+                    "inboxTab": "clients",
                 },
             ],
         ),

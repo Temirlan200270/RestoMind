@@ -214,6 +214,44 @@
                     <p x-show="!(analyticsData.sales_by_hour_local || analyticsData.sales_by_hour_utc || []).some(x => x.orders > 0)" class="text-center py-6 text-gray-400 text-sm">Нет заказов с ненулевой меткой часа в выбранном периоде</p>
                 {% endcall %}
 
+                <div x-show="analyticsDensity === 'advanced' || !canToggleAnalyticsDensity()" x-cloak>
+                {% call card(title='Продажи iiko (почасово)', subtitle='ETL из iiko Cloud — heatmap выручки по дням недели и часам (расширенная аналитика).', padding_class='p-5', extra_class='mb-6 overflow-x-auto') %}
+                    <p x-show="analyticsData.sales_heatmap_iiko?.peak_hours_local?.length"
+                        class="text-xs text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2 mb-3"
+                        x-text="'Пики iiko: ' + (analyticsData.sales_heatmap_iiko?.peak_hours_local || []).map(h => String(h).padStart(2,'0') + ':00').join(', ')"></p>
+                    <p x-show="analyticsData.sales_heatmap_iiko?.has_data"
+                        class="text-xs text-gray-500 mb-3"
+                        x-text="'За ' + (analyticsData.sales_heatmap_iiko?.days || 7) + ' дн.: ' + fmt.money(analyticsData.sales_heatmap_iiko?.total_revenue_kzt ?? 0) + ' · заказов ' + (analyticsData.sales_heatmap_iiko?.total_orders ?? 0)"></p>
+                    <div class="overflow-x-auto">
+                        <table class="text-[10px] min-w-[640px] w-full border-collapse">
+                            <thead>
+                                <tr>
+                                    <th class="p-1 text-left text-gray-400 font-medium"></th>
+                                    <template x-for="h in Array.from({length:24}, (_,i)=>i)" :key="'ih-'+h">
+                                        <th class="p-0.5 text-center text-gray-400 font-normal tabular-nums" x-text="String(h).padStart(2,'0')"></th>
+                                    </template>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="(wd, wi) in (analyticsData.sales_heatmap_iiko?.weekday_labels || [])" :key="'iwd-'+wi">
+                                    <tr>
+                                        <td class="p-1 font-semibold text-gray-600" x-text="wd"></td>
+                                        <template x-for="h in Array.from({length:24}, (_,i)=>i)" :key="'ic-'+wi+'-'+h">
+                                            <td class="p-0.5">
+                                                <div class="h-4 rounded-sm"
+                                                    :class="(analyticsData.sales_heatmap_iiko?.matrix?.[wi]?.[h] ?? 0) > 0 ? 'bg-indigo-400/70' : 'bg-gray-100'"
+                                                    :title="fmt.money(analyticsData.sales_heatmap_iiko?.matrix?.[wi]?.[h] ?? 0)"></div>
+                                            </td>
+                                        </template>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                    <p x-show="!analyticsData.sales_heatmap_iiko?.has_data" class="text-center py-6 text-gray-400 text-sm">Нет данных iiko ETL — подключите iiko и дождитесь ночного sync (23:15 UTC) или запустите worker.</p>
+                {% endcall %}
+                </div>
+
                 <div class="grid grid-cols-1 xl:grid-cols-2 gap-5 mb-6">
                     <div class="bg-white rounded-2xl shadow-sm ring-1 ring-slate-900/5 p-5 overflow-x-auto">
                         <h3 class="font-semibold text-gray-900 mb-1">Меню и допродажи (ИИ)</h3>

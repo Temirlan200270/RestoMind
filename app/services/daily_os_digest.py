@@ -65,10 +65,27 @@ async def build_daily_os_digest_payload(
             OperationalInsight.created_at < end,
         )
     ) or 0
+    recovered_kzt = 0.0
+    try:
+        from sqlalchemy import text as sql_text
+
+        row = (
+            await db.execute(
+                sql_text(
+                    "SELECT recovered_kzt FROM daily_org_stats WHERE organization_id = :org_id AND day = :day"
+                ),
+                {"org_id": int(org.id), "day": day},
+            )
+        ).mappings().first()
+        if row:
+            recovered_kzt = round(float(row["recovered_kzt"] or 0), 2)
+    except Exception:
+        recovered_kzt = 0.0
     hours_saved = round(float(audit_count) * 0.08 + float(escalations) * 0.25, 1)
     text = (
         f"Daily OS Digest за {day.isoformat()}\n"
         f"OS-действий: {int(audit_count)}\n"
+        f"Спасено действиями: {recovered_kzt:,.0f} ₸\n".replace(",", " ")
         f"Эскалаций/перехватов: {int(escalations)}\n"
         f"Сбоев интеграций: {int(integration_failures)}\n"
         f"Новых рекомендаций: {int(recommendations)}\n"
@@ -82,6 +99,7 @@ async def build_daily_os_digest_payload(
         "integration_failures": int(integration_failures),
         "recommendations": int(recommendations),
         "incidents": int(incidents),
+        "recovered_kzt": recovered_kzt,
         "hours_saved": hours_saved,
         "text": text,
     }

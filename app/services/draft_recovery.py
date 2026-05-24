@@ -148,6 +148,37 @@ async def send_draft_recovery_nudge(
     return True
 
 
+async def maybe_emit_draft_recovered(db: AsyncSession, order: Order) -> None:
+    """G6: если заказ подтверждён после nudge — учитываем recovered $ (dedupe по order id)."""
+    if order is None or not order.organization_id:
+        return
+    try:
+        sent = await redis_client.get(_dedupe_key(int(order.id)))
+        if not sent:
+            return
+    except Exception:
+        return
+    amount = round(float(order.total_price or 0), 2)
+    if amount <= 0:
+        return
+    await emit_event(
+        db,
+        BusinessEvent(
+            id=f"order.draft_recovered:{order.id}",
+            org_id=int(order.organization_id),
+            type="order.draft_recovered",
+            actor="customer",
+            entity_type="order",
+            entity_id=int(order.id),
+            payload={
+                "order_id": int(order.id),
+                "amount_kzt": amount,
+                "total_price": amount,
+            },
+        ),
+    )
+
+
 async def run_draft_recovery_for_org(db: AsyncSession, org_id: int) -> int:
     if not getattr(settings, "draft_recovery_enabled", True):
         return 0

@@ -41,6 +41,15 @@ if settings.db_mode == "postgres":
     # Не полагаемся на `?sslmode=` в DATABASE_URL (SQLAlchemy/asyncpg иногда превращают это в kwargs).
     # TLS включаем явно через connect_args.
     engine_kwargs["connect_args"] = postgres_connect_args(settings.database_url)
+    from app.db.pool_settings import is_supabase_session_pooler
+
+    if is_supabase_session_pooler(settings.database_url):
+        logger.warning(
+            "Supabase session pooler detected — pool capped at %s+%s per process "
+            "(project limit ~15). Prefer transaction pooler :6543 or set DB_POOL_SIZE.",
+            pool_cfg.pool_size,
+            pool_cfg.max_overflow,
+        )
     logger.info(
         "Postgres pool: size=%s max_overflow=%s timeout=%ss recycle=%ss",
         pool_cfg.pool_size,

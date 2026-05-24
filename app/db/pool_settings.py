@@ -50,8 +50,8 @@ def resolve_postgres_pool_settings(
     if pool_size > 0:
         resolved_size = pool_size
     elif is_supabase_session_pooler(database_url):
-        # Web + ARQ worker + запас под preDeploy: укладываемся в лимит ~15 session clients.
-        resolved_size = 4
+        # Web + ARQ worker + overlap при деплое: жёсткий потолок 2 conn/проц.
+        resolved_size = 2
     elif is_supabase_transaction_pooler(database_url):
         resolved_size = 8
     else:
@@ -60,7 +60,7 @@ def resolve_postgres_pool_settings(
     if max_overflow >= 0:
         resolved_overflow = max_overflow
     elif is_supabase_session_pooler(database_url):
-        resolved_overflow = 1
+        resolved_overflow = 0
     elif is_supabase_transaction_pooler(database_url):
         resolved_overflow = 4
     else:

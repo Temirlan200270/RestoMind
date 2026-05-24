@@ -37,6 +37,8 @@ def _zero_event_summary() -> dict:
         "operator_takeovers": 0,
         "ai_messages_count": 0,
         "dialogs_count": 0,
+        "recovered_kzt": 0.0,
+        "focus_completed_count": 0,
         "source": "event_driven",
     }
 
@@ -65,6 +67,8 @@ HANDLED_EVENT_TYPES = frozenset({
     "ai.response.generated",
     "ai.dialog.started",
     "operator.took_over",
+    "shift.focus_completed",
+    "order.draft_recovered",
 })
 
 _EVENT_COLUMN: dict[str, str] = {
@@ -100,6 +104,16 @@ async def on_business_event(event: "BusinessEvent", db: "AsyncSession") -> None:
         event.org_id, event.type, today,
     )
 
+    if event.type == "shift.focus_completed":
+        amount = float(event.payload.get("amount_kzt") or 0)
+        await _upsert_recovered(db, event.org_id, today, amount, increment_focus_count=True)
+        return
+
+    if event.type == "order.draft_recovered":
+        amount = float(event.payload.get("amount_kzt") or event.payload.get("total_price") or 0)
+        await _upsert_recovered(db, event.org_id, today, amount, increment_focus_count=False)
+        return
+
     column = _EVENT_COLUMN.get(event.type)
     if column is not None:
         if event.type == "payment.completed":
@@ -128,6 +142,36 @@ async def _upsert_payment_completed(
             updated_at = CURRENT_TIMESTAMP
     """)
     await db.execute(sql, {"org_id": org_id, "day": day, "amount": amount})
+
+
+async def _upsert_recovered(
+    db: "AsyncSession",
+    org_id: int,
+    day: object,
+    amount_kzt: float,
+    *,
+    increment_focus_count: bool,
+) -> None:
+    """Money Layer: increment recovered_kzt (+ optional focus_completed_count)."""
+    amount = round(max(0.0, float(amount_kzt or 0)), 2)
+    fc_inc = 1 if increment_focus_count else 0
+    if amount <= 0 and fc_inc <= 0:
+        return
+    sql = text("""
+        INSERT INTO daily_org_stats
+            (organization_id, day, recovered_kzt, focus_completed_count)
+        VALUES
+            (:org_id, :day, :amount, :fc_inc)
+        ON CONFLICT (organization_id, day)
+        DO UPDATE SET
+            recovered_kzt = daily_org_stats.recovered_kzt + :amount,
+            focus_completed_count = daily_org_stats.focus_completed_count + :fc_inc,
+            updated_at = CURRENT_TIMESTAMP
+    """)
+    try:
+        await db.execute(sql, {"org_id": org_id, "day": day, "amount": amount, "fc_inc": fc_inc})
+    except SQLAlchemyError as exc:
+        logger.warning("daily_org_stats recovered upsert failed org=%s: %s", org_id, exc)
 
 
 async def _upsert_daily_stat(

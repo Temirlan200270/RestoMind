@@ -431,6 +431,14 @@
         gap: 0.5rem;
     }
 }
+
+.ds-focus-card.ds-status-ring {
+    border-color: color-mix(in srgb, var(--color-status-warn) 35%, transparent);
+}
+
+.ds-nav-item--execution-primary {
+    background: color-mix(in srgb, var(--color-brand-500, #6366f1) 18%, transparent);
+}
 .alert-banner {
     animation: pulseAlert 2s infinite;
 }

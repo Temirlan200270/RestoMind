@@ -3896,6 +3896,29 @@ function adminMixinAuthKnowledge() {
             return adminTabVisibleForRole(tabId, this.effectiveStaffRole());
         },
 
+        /** Shell v2: operator sees shift as execution kernel; inbox as secondary list. */
+        navItemDisplayLabel(item) {
+            if (!item) return '';
+            if (this.effectiveStaffRole() === 'operator') {
+                if (item.id === 'shift') return 'Следующее действие';
+                if (item.id === 'inbox') return 'Все риски';
+            }
+            return item.label || '';
+        },
+
+        navItemDisplayDesc(item) {
+            if (!item) return '';
+            if (this.effectiveStaffRole() === 'operator') {
+                if (item.id === 'shift') return 'Один фокус — одно действие по смене';
+                if (item.id === 'inbox') return 'Полный список рисков и сигналов';
+            }
+            return item.desc || '';
+        },
+
+        isNavExecutionPrimary(tabId) {
+            return this.effectiveStaffRole() === 'operator' && tabId === 'shift';
+        },
+
         resolveOperatorLandingTab() {
             return adminResolveOperatorLandingTab(this.shiftState);
         },
@@ -6858,6 +6881,59 @@ function adminMixinCommandBar() {
     };
 }
 
+/** Shell v2 G10.5 — Focus Card mapper (single source for focus → UI view model). */
+function adminFocusCardSemantics(focus) {
+    if (!focus || typeof focus !== 'object') return 'ds-status-inactive';
+    const pulse = String(focus.pulse || '');
+    if (pulse === 'red') return 'ds-status-danger';
+    if (pulse === 'amber') return 'ds-status-warn';
+    const kind = String(focus.kind || '');
+    const wait = Number(focus.wait_minutes ?? 0);
+    if (kind === 'slow_chat' && wait >= 5) return 'ds-status-danger';
+    if (Number(focus.value_kzt ?? 0) > 0) return 'ds-status-warn';
+    return 'ds-status-ok';
+}
+
+function adminFocusCardContextRoute(focus) {
+    if (!focus || typeof focus !== 'object') return null;
+    const kind = String(focus.kind || '');
+    const pulse = String(focus.pulse || '');
+    if (kind === 'slow_chat' || kind === 'menu_confusion' || pulse === 'red' || pulse === 'amber') {
+        const id = focus.phone || focus.id;
+        if (id) return { type: 'chat', id: String(id) };
+    }
+    if (kind === 'booking_at_risk' && focus.booking_id != null) {
+        return { type: 'booking', id: focus.booking_id };
+    }
+    if (kind === 'abandoned_draft' || kind === 'pending_prepay' || kind === 'high_value_stuck' || focus.order_id != null) {
+        return { type: 'order', id: focus.order_id };
+    }
+    return null;
+}
+
+function adminFocusCardFromShiftState(shiftState) {
+    const ss = shiftState && typeof shiftState === 'object' ? shiftState : {};
+    const focus = ss.focus;
+    if (!focus || !focus.id) return null;
+    return {
+        id: focus.id,
+        kind: focus.kind,
+        title: focus.title || '',
+        subtitle: focus.subtitle || '',
+        risk_kzt: Number(focus.value_kzt ?? 0),
+        wait_minutes: Number(focus.wait_minutes ?? 0),
+        pulse: focus.pulse || '',
+        semantics: adminFocusCardSemantics(focus),
+        actions: Array.isArray(focus.actions) ? focus.actions.slice(0, 3) : [],
+        state_actions: Array.isArray(ss.actions) ? ss.actions : [],
+        context_route: adminFocusCardContextRoute(focus),
+        ownership: ss.presentation?.focus_ownership || focus.ownership || 'mine',
+        phone: focus.phone || '',
+        order_id: focus.order_id != null ? focus.order_id : null,
+        booking_id: focus.booking_id != null ? focus.booking_id : null,
+    };
+}
+
 /** Focus-Driven OS Sprint 2 — Shift split + mobile staged nav (focus ↔ context). */
 function adminMixinShiftStagedNav() {
     return {
@@ -6867,18 +6943,23 @@ function adminMixinShiftStagedNav() {
         shiftFocusShowsChatDock() {
             const f = this.shiftState?.focus;
             if (!f) return false;
-            if (String(f.kind || '') === 'slow_chat') return true;
+            const kind = String(f.kind || '');
+            if (kind === 'slow_chat' || kind === 'menu_confusion') return true;
             const pulse = String(f.pulse || '');
             return pulse === 'red' || pulse === 'amber';
         },
 
         shiftFocusShowsOrderDock() {
             const k = String(this.shiftState?.focus?.kind || '');
-            return k === 'abandoned_draft' || k === 'pending_prepay';
+            return k === 'abandoned_draft' || k === 'pending_prepay' || k === 'high_value_stuck';
+        },
+
+        shiftFocusShowsBookingDock() {
+            return String(this.shiftState?.focus?.kind || '') === 'booking_at_risk';
         },
 
         shiftHasContextDock() {
-            return this.shiftFocusShowsChatDock() || this.shiftFocusShowsOrderDock();
+            return this.shiftFocusShowsChatDock() || this.shiftFocusShowsOrderDock() || this.shiftFocusShowsBookingDock();
         },
 
         _shiftStagedNavIsDesktop() {
@@ -6940,6 +7021,28 @@ function adminMixinShiftStagedNav() {
 
         shiftDockHasOrderLines() {
             return this.shiftDockOrderLines().length > 0;
+        },
+
+        focusCardFromShiftState() {
+            return adminFocusCardFromShiftState(this.shiftState);
+        },
+
+        focusCardView() {
+            const card = this.focusCardFromShiftState();
+            if (!card) return null;
+            return {
+                ...card,
+                kind_label: this.moneyQueueKindLabel(card.kind),
+            };
+        },
+
+        focusCardSemanticsClass() {
+            const card = this.focusCardView();
+            return card?.semantics || 'ds-status-inactive';
+        },
+
+        focusCardHasOwnershipConflict() {
+            return String(this.focusCardView()?.ownership || '') === 'other';
         },
     };
 }
@@ -8203,6 +8306,9 @@ function adminMixinDataChartsSettings() {
                     await this.loadShiftState(true);
                     this._startShiftStateAutoRefresh();
                 } else if (this.currentTab === 'inbox') {
+                    if (this.effectiveStaffRole() === 'operator') {
+                        void this.loadShiftState(false);
+                    }
                     if (this.inboxTab === 'system') {
                         await this.loadIncidents();
                     } else {
@@ -11133,12 +11239,24 @@ function adminMixinDataChartsSettings() {
 
         /** Смена периода на вкладке «Аналитика»: данные + один отложенный рендер графика. */
         async reloadAnalyticsForUi() {
-            await Promise.all([this.loadAnalytics(), this.loadWaiterKpi()]);
+            await Promise.all([this.loadAnalytics(), this.loadWaiterKpi(), this.loadSalesHeatmapIiko()]);
             await this.$nextTick();
             setTimeout(() => {
                 if (this.currentTab !== 'dashboard' || this.dashboardTab !== 'analytics') return;
                 this._paintAnalyticsChartAfterLayout();
             }, 100);
+        },
+
+        async loadSalesHeatmapIiko() {
+            if (this.analyticsDensity !== 'advanced' && this.canToggleAnalyticsDensity()) return;
+            try {
+                const { ok, data } = await this.apiJsonResponse('/api/admin/analytics/sales-heatmap?days=7&source=iiko');
+                if (ok && data) {
+                    this.analyticsData = { ...(this.analyticsData || {}), sales_heatmap_iiko: data };
+                }
+            } catch (_e) {
+                /* optional iiko block */
+            }
         },
 
         async renderChart() {
@@ -11564,6 +11682,8 @@ function adminMixinInboxActionQueue() {
             if (k === 'pending_prepay') return 'Ожидает оплату';
             if (k === 'slow_chat') return 'Ждёт ответ';
             if (k === 'high_value_stuck') return 'Крупный заказ';
+            if (k === 'menu_confusion') return 'Путаница в меню';
+            if (k === 'booking_at_risk') return 'Бронь под риском';
             return 'Внимание';
         },
 
@@ -11587,8 +11707,12 @@ function adminMixinInboxActionQueue() {
             return this.loadMoneyQueue();
         },
 
-        runMoneyQueueAction(action) {
+        runMoneyQueueAction(action, item) {
             if (!action) return;
+            if (this.shouldRouteMoneyQueueViaShift(action)) {
+                void this.openMoneyQueueItemViaShift(action, item);
+                return;
+            }
             const tab = String(action.tab || '').trim();
             if (tab === 'orders' && action.order_id != null) {
                 this.openGuestContextOrder({ id: Number(action.order_id) });
@@ -11609,6 +11733,61 @@ function adminMixinInboxActionQueue() {
                 if (action.orderSumMin != null) opts.orderSumMin = action.orderSumMin;
                 this.navigateToTab(tab, opts);
             }
+        },
+
+        shouldRouteMoneyQueueViaShift(action) {
+            if (this.effectiveStaffRole() !== 'operator') return false;
+            const tab = String(action?.tab || '').trim();
+            return tab === 'chats' || tab === 'orders';
+        },
+
+        async openMoneyQueueItemViaShift(action, item) {
+            if (!action) return;
+            this.navigateToTab('shift');
+            try {
+                await this.loadShiftState(true);
+            } catch (_e) {
+                /* loadShiftState handles toast */
+            }
+            this.mobileActiveScreen = 'focus';
+            const f = this.shiftState?.focus;
+            const phoneMatch =
+                action.tab === 'chats'
+                && action.phone
+                && f
+                && String(f.phone || '') === String(action.phone);
+            const orderMatch =
+                action.tab === 'orders'
+                && action.order_id != null
+                && f
+                && Number(f.order_id) === Number(action.order_id);
+            if ((phoneMatch || orderMatch) && this.shiftHasContextDock()) {
+                this.openShiftContext();
+                return;
+            }
+            if (action.tab === 'chats' && action.phone) {
+                void this.openHelpChat(String(action.phone));
+                return;
+            }
+            if (action.tab === 'orders' && action.order_id != null) {
+                this.openGuestContextOrder({ id: Number(action.order_id) });
+                return;
+            }
+            const primary = (item?.actions || action.actions || [])[0];
+            if (primary) this.runShiftFocusAction(primary);
+        },
+
+        inboxShowsShiftHero() {
+            return this.effectiveStaffRole() === 'operator'
+                && !!this.focusCardView()
+                && this.inboxTab === 'clients';
+        },
+
+        openInboxShiftHero() {
+            this.navigateToTab('shift');
+            void this.loadShiftState(true).then(() => {
+                if (this.shiftHasContextDock()) this.openShiftContext();
+            });
         },
 
         refreshVoiceCallStrip() {

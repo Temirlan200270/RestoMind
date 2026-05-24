@@ -191,6 +191,15 @@ Operations‑интерфейс должен работать в двух реж
 
 При S0/S3 без focus и без риска — компактный CTA «Перейти в очередь» / «Открыть диалоги» вместо четырёх нулевых KPI (`shiftIsCalmEmpty()`).
 
+### Execution Kernel UI (Shell v2 / G10.5)
+
+> **Role-first без Mode Bar.** Оператор живёт на вкладке **Смена**; inbox — вторичный «полный список рисков».
+
+- **Focus Card** — единый макрос [`_focus_card.html`](../app/templates/components/_focus_card.html); mapper `focusCardFromShiftState()` в `admin-app.js`.
+- **Контракт полей и semantics** — [`docs/FOCUS_CARD_SPEC.md`](FOCUS_CARD_SPEC.md).
+- **Operator routing:** карточки inbox для `operator` → `openMoneyQueueItemViaShift` (shift context, не дублировать chat dock).
+- **Sidebar:** `shift` — `ds-nav-item--execution-primary`; inbox label «Все риски» для operator.
+
 **Сохранено из Sprint 1–4:** Shift Focus Deck, staged nav, Inbox Action Queue, Command Bar Ctrl+K, `ds-status-*`.
 
 ---
