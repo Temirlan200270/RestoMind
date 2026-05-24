@@ -27,8 +27,14 @@
 |-----------|--------|-------------|
 | `audit_consumer` для `conversation.state_changed` / `ai.response.generated` | Намеренно пропущен | Высокочастотные события — шум без бизнес-пользы |
 | Auto-price без подтверждения | Не реализован | Изменение цен требует явного `POST /apply-pricing` от владельца |
-| `websocket_consumer` полный (org-scoped channel) | ~85% | `os.audit` и business events org-scoped; полный channel-per-org — hardening |
-| `audit_consumer` для admin-действий (вне emit_event) | Не реализован | Ручные PATCH меню/настроек — вне `emit_event` |
+| `websocket_consumer` полный (org-scoped channel) | **✅ ~95%** | `publish_org_event` → `admin_events:org:{id}` + legacy global |
+| `audit_consumer` для admin-действий (вне emit_event) | **✅ middleware** | `admin_action_audit_middleware` → `audit_log` + `os.audit` |
+| Admin order lifecycle events (канбан cancel/confirm) | **✅** | `order_admin_events.py`, `bulk-cancel` → `order.cancelled`; confirm → `actor=operator` |
+| Ops/integration events в DailyOrgStats | **✅** | `pricing_adjustments`, `sla_violations`, `healing_wa_sent`, `draft_recovery_sent`, `whatsapp_delivery_failed` |
+| All-time KPI из events (без SQL к Order) | **✅ org-level** | `get_cumulative_event_totals()` в `/stats`; location-scoped — SQL fallback |
+| Legacy NULL org/location backfill | **✅ API** | `tenant_backfill.py`, `GET/POST /intelligence/tenant-scope-*` |
+| Per-org admin rate limit | **✅** | `admin_org_rate_limit_middleware`, `ADMIN_RATE_LIMIT_PER_MINUTE` |
+| Postgres RLS | Не реализован | Enterprise hardening — отдельный эпик |
 | Admin UI i18n kk | Не реализован | Админка — русский inline; kk — отдельный эпик |
 | Event-first per-location aggregate | ✅ Phase 1.2 | Rollup из `SystemEvent._location_id` в `owner_dashboard.py`; org-level `DailyOrgStats` без изменений |
 
@@ -231,9 +237,9 @@ operator.took_over
 
 **Почему это третье:** сейчас контекст для LLM пересобирается каждый раз заново и нигде не сохраняется. Невозможно воспроизвести или объяснить решение AI.
 
-### Что сейчас
+### Что сейчас (актуально)
 
-`fetch_ai_read_context` в [`app/services/context_engine.py`](app/services/context_engine.py) уже строит `AIReadContext`. Но он не персистируется.
+`fetch_ai_read_context` в [`app/services/context_engine.py`](app/services/context_engine.py) строит `AIReadContext` и **персистируется** в `AIContextSnapshot` перед LLM (WhatsApp, test_bot, telephony stub). Replay: `GET/POST /api/admin/intelligence/snapshots*`.
 
 ### Что добавить
 

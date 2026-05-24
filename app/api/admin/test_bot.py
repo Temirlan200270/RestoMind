@@ -7,12 +7,14 @@ from __future__ import annotations
 import secrets
 
 from fastapi import APIRouter, Depends, Request
-from sqlalchemy import select
 
-from app.db.models import Organization, User
 from app.db.session import async_session_factory, redis_client
 from app.services.ai_brain import call_openai
-from app.services.customer_context import build_customer_context
+from app.services.context_engine import (
+    build_llm_prompt_bundle,
+    fetch_ai_read_context,
+    schedule_save_ai_context_snapshot,
+)
 from app.services.dialog_mgr import (
     UserState,
     append_to_history,
@@ -24,15 +26,7 @@ from app.services.dialog_mgr import (
     update_user_session_fields_in_db,
 )
 from app.services.events import publish_event
-from app.services.intent_router import get_open_draft_order, route_intent
-from app.services.knowledge_context import load_knowledge_context_block
-from app.services.order_logic import (
-    build_menu_context_for_ai,
-    format_draft_order_context_for_prompt,
-    load_available_menu,
-)
-from app.services.sales_strategy import build_sales_strategy, format_strategy_for_prompt
-from app.services.time_context import format_org_current_time_block
+from app.services.intent_router import route_intent
 
 from .deps import admin_org_from_session, require_admin_session_active
 from .schemas import TextRequest
@@ -89,72 +83,45 @@ async def test_bot(request: Request, body: TextRequest) -> dict:
     history = await get_chat_history(redis_client, phone, organization_id=org_id)
     await append_to_history(redis_client, phone, "user", message_text, organization_id=org_id)
 
-    # ФАЗА 1: Чтение контекста — короткая сессия, закрывается до LLM
-    async with async_session_factory() as db:
-        org_ent = await db.get(Organization, org_id)
-        current_time_ctx = format_org_current_time_block(
-            getattr(org_ent, "timezone", None) if org_ent is not None else "Etc/GMT-5",
-            getattr(org_ent, "schedule_json", None) if org_ent is not None else None,
-        )
-        menu_items = await load_available_menu(db, organization_id=org_id)
-        menu_context = await build_menu_context_for_ai(menu_items, message_text)
-        u_row = await db.scalar(
-            select(User).where(User.phone == phone, User.organization_id == org_id),
-        )
-        customer_ctx = await build_customer_context(db, u_row)
-        kb_context = await load_knowledge_context_block(db, org_id)
-        draft_row = await get_open_draft_order(db, phone, org_id)
-        draft_ctx = format_draft_order_context_for_prompt(
-            draft_row.items_json if draft_row else None,
-        )
-        strategy_ctx = ""
-        sales_gastro_hint = ""
-        sales_target_iiko_ids: list[str] = []
-        if draft_row and isinstance(draft_row.items_json, dict):
-            cart = [
-                x for x in (draft_row.items_json.get("items") or [])
-                if isinstance(x, dict)
-            ]
-            om = draft_row.items_json.get("order_meta")
-            meta_d = om if isinstance(om, dict) else {}
-            total = float(draft_row.total_price or 0)
-            decision = build_sales_strategy(
-                cart, total, meta_d, menu_items,
-                u_row.meta_json if u_row is not None else None,
-            )
-            strategy_ctx = format_strategy_for_prompt(decision)
-            sales_gastro_hint = (decision.gastro_hint or "").strip()
-            sales_target_iiko_ids = list(decision.target_iiko_ids or [])
-    # DB-сессия закрыта — все данные в памяти
+    read_ctx = await fetch_ai_read_context(phone, org_id)
+    bundle = await build_llm_prompt_bundle(
+        read_ctx,
+        organization_id=org_id,
+        message_text=message_text,
+    )
+    schedule_save_ai_context_snapshot(
+        phone,
+        org_id,
+        read_ctx,
+        menu_context_text=bundle.menu_context,
+    )
 
-    # ФАЗА 2: LLM-вызов вне DB-сессии (не держим соединение в пуле)
     from app.services.ai_usage import schedule_log_ai_usage
     ai_response = await call_openai(
         history,
         message_text,
-        menu_context,
-        kb_context,
-        draft_order_context=draft_ctx,
-        sales_strategy_context=strategy_ctx,
-        customer_context=customer_ctx,
-        current_time_context=current_time_ctx,
+        bundle.menu_context,
+        bundle.kb_context,
+        draft_order_context=bundle.draft_ctx,
+        sales_strategy_context=bundle.strategy_ctx,
+        customer_context=bundle.customer_ctx,
+        current_time_context=bundle.current_time_ctx,
         raise_on_transient=False,
     )
 
     schedule_log_ai_usage(org_id, getattr(ai_response, "_usage", None))
 
-    # ФАЗА 3: Запись результатов — новая короткая сессия
     inbound_mid = f"admin-test-bot:{secrets.token_hex(8)}"
     async with async_session_factory() as db:
         result = await route_intent(
             db,
             phone,
             ai_response,
-            menu_items=menu_items,
+            menu_items=bundle.menu_items,
             organization_id=org_id,
             inbound_message_id=inbound_mid,
-            sales_gastro_hint=sales_gastro_hint,
-            sales_target_iiko_ids=sales_target_iiko_ids,
+            sales_gastro_hint=bundle.sales_gastro_hint,
+            sales_target_iiko_ids=bundle.sales_target_iiko_ids,
         )
         await update_user_session_fields_in_db(
             db,

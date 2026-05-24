@@ -118,10 +118,34 @@ async def subscribe_events(org_id: int | None = None) -> AsyncGenerator[str, Non
 async def publish_org_event(org_id: int, event_type: str, data: dict) -> None:
     """Публикует событие в org-scoped канал (Phase 2a).
 
-    Вызывается из emit_event для real-time push только нужному org.
     Также публикует в глобальный канал для обратной совместимости.
     """
-    await publish_event(event_type, data)
+    enriched = {**data, "organization_id": int(org_id), "org_id": int(org_id)}
+    payload = json.dumps(
+        {"type": event_type, "data": enriched, "ts": datetime.now().isoformat()},
+        ensure_ascii=False,
+    )
+
+    if redis_pubsub_available():
+        try:
+            pub_client = await _get_pub_client()
+            if pub_client is None:
+                raise RuntimeError("Redis URL not configured")
+            await pub_client.publish(_org_channel(int(org_id)), payload)
+            await pub_client.publish(CHANNEL_NAME, payload)
+        except Exception as exc:
+            logger.error("Redis org publish error: %s", exc)
+            _broadcast_in_memory(payload)
+    else:
+        _broadcast_in_memory(payload)
+
+    logger.debug("Org event published: org=%s type=%s", org_id, event_type)
+    try:
+        from app.services.notification_router import notify_staff_from_event
+
+        asyncio.create_task(notify_staff_from_event(event_type, enriched))
+    except Exception:
+        logger.exception("Staff notification task creation failed for %s", event_type)
 
 
 async def _subscribe_redis(channel: str = CHANNEL_NAME) -> AsyncGenerator[str, None]:

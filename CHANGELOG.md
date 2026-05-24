@@ -6,6 +6,15 @@
 
 ## [Unreleased] — 2026-03-20
 
+### Добавлено (2026-05-24) — G10.8.2 zero-friction demo + OS gap closure
+
+- **Public demo:** `GET /demo`, `/demo/money`, `/demo/booking` → demo session + redirect autoplay; `DEMO_PUBLIC_ENABLED`, `DEMO_RATE_LIMIT_PER_HOUR`.
+- **Booking pitch:** сценка `booking_rescue_30s` (booking_at_risk, ~8500 ₸).
+- **Admin autoplay:** `?demo=1&demo_scene=` на `/admin` без кнопки login.
+- **WS hardening:** `publish_org_event` пишет в org-scoped Redis channel + legacy global.
+- **Admin audit:** middleware для PATCH/POST admin (вне `emit_event`) + `os.audit` push.
+- **Control Plane:** `apply_conversation_state_in_txn`, `GET /replay/scenarios`, `replay_harness.py`.
+
 ### Изменено (2026-05-22) — документация demo pitch
 
 - **Канон sales demo:** [`docs/DEMO_PITCH.md`](docs/DEMO_PITCH.md) — pitch/explore, API, smoke, честные gaps vs G10.8.2.
@@ -60,8 +69,15 @@
 - **Operator scene:** sidebar «Следующее действие» / «Все риски»; inbox hero «Открыть в смене»; `openMoneyQueueItemViaShift` для operator.
 - **Smoke operator:** login → landing shift при risk → focus card → mobile context → inbox «Открыть в смене» → карточка риска → shift context.
 
+### Исправлено (2026-05-25)
+
+- **AI Context:** `test_bot` + `telephony` stub → `fetch_ai_read_context` + `build_llm_prompt_bundle` + snapshot; OS_TRANSITION_PLAN Phase 3 актуализирован.
+- **Tenant Isolation (~95%):** `legacy_null_org_visible()` — NULL org только default org; `tenant_backfill.py` + `GET/POST /intelligence/tenant-scope-*`; per-org admin rate limit; global KB только default org; тесты `test_tenant_hardening.py`; CI `scripts/check_tenant_scope.py`; SECURITY_AUDIT обновлён.
+
 ### Исправлено (2026-05-24)
 
+- **Event-Driven Core (~98%):** admin `bulk-cancel` → `order.cancelled`; confirm из канбана с `actor=operator`; ops-события в `DailyOrgStats`; all-time `/stats` из SUM агрегатов; funnel/ai-value event-first; backfill ops из `system_events`; миграция `20260525_daily_stats_ops_events`; тесты `tests/test_event_driven_tails.py`.
+- **`/api/admin/stats` 500 на prod:** после ошибки чтения `daily_org_stats` (migration lag) сессия оставалась в aborted transaction — `await db.rollback()` в `_safe_daily_stats_mappings`, `get_recovered_today_kzt` и `with_location_scope_fallback`; тест [`tests/test_analytics_consumer_safe_read.py`](tests/test_analytics_consumer_safe_read.py).
 - **daily_os_digest.py:** SyntaxError при сборке строки digest (`.replace()` ломал конкатенацию f-strings) — CI pytest collection.
 - **Postgres pool:** auto default Supabase session pooler `1+0` (было `2+0`); `render.yaml` `DB_POOL_SIZE=1` — снижение `EMAXCONNSESSION` при деплое.
 - **Supabase EMAXCONNSESSION (Render):** `SUPABASE_PREFER_TRANSACTION_POOLER=true` в `render.yaml` — авто `:5432`→`:6543`; demo-login fast path (кэш `DEMO_ORGANIZATION_ID` / startup cache) без SELECT; 503 вместо 500 при перегрузке pooler.

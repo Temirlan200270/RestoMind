@@ -20,6 +20,10 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from sqlalchemy import select, text
 from starlette.middleware.sessions import SessionMiddleware
 
+from app.middleware.admin_action_audit import admin_action_audit_middleware
+from app.middleware.admin_org_rate_limit import admin_org_rate_limit_middleware
+
+from app.api.demo_public import demo_public_router
 from app.api.admin import auth_router as admin_auth_router
 from app.api.admin import router as admin_router
 from app.api.admin import ws_router as admin_ws_router
@@ -436,6 +440,11 @@ async def _apply_sqlite_startup_schema_patches() -> None:
         "ALTER TABLE daily_org_stats ADD COLUMN payments_completed INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE daily_org_stats ADD COLUMN payments_failed INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE daily_org_stats ADD COLUMN revenue_kzt NUMERIC(14,2) NOT NULL DEFAULT 0",
+        "ALTER TABLE daily_org_stats ADD COLUMN pricing_adjustments INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE daily_org_stats ADD COLUMN sla_violations INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE daily_org_stats ADD COLUMN healing_wa_sent INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE daily_org_stats ADD COLUMN draft_recovery_sent INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE daily_org_stats ADD COLUMN whatsapp_delivery_failed INTEGER NOT NULL DEFAULT 0",
         "CREATE TABLE IF NOT EXISTS locations (id INTEGER PRIMARY KEY AUTOINCREMENT, organization_id INTEGER NOT NULL, name VARCHAR(120) NOT NULL, slug VARCHAR(80) NOT NULL DEFAULT 'main', is_active INTEGER NOT NULL DEFAULT 1, meta_json TEXT, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(organization_id) REFERENCES organizations(id) ON DELETE CASCADE, UNIQUE(organization_id, slug))",
         "ALTER TABLE orders ADD COLUMN location_id INTEGER",
         "ALTER TABLE chat_logs ADD COLUMN location_id INTEGER",
@@ -704,44 +713,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Phase 2b OS: Audit-лог admin-мутаций (PATCH/POST/PUT/DELETE на /api/admin/)
-# Добавляем ДО SessionMiddleware → сессия доступна в request.state после разворачивания стека
-@app.middleware("http")
-async def admin_mutation_audit(request: Request, call_next):
-    response = await call_next(request)
-    try:
-        if (
-            request.method in ("POST", "PUT", "PATCH", "DELETE")
-            and "/api/admin/" in str(request.url.path)
-            and response.status_code < 400
-        ):
-            org_id = None
-            staff_id = None
-            try:
-                org_id = request.session.get("organization_id")
-                staff_id = request.session.get("staff_id")
-            except Exception:
-                pass
-            if org_id:
-                async def _write_audit(oid: int, sid: int | None, path: str, method: str) -> None:
-                    try:
-                        from app.db.session import async_session_factory
-                        from app.db.models import AuditLog
-                        async with async_session_factory() as db:
-                            db.add(AuditLog(
-                                organization_id=int(oid),
-                                actor=f"staff:{sid}" if sid else "session",
-                                action=f"admin.{method.lower()}.{path.split('/')[-1]}",
-                                entity_type="admin_action",
-                                entity_id=str(path),
-                            ))
-                            await db.commit()
-                    except Exception:
-                        pass
-                asyncio.create_task(_write_audit(org_id, staff_id, str(request.url.path), request.method))
-    except Exception:
-        pass
-    return response
+# Phase 2b OS: per-org rate limit + audit admin mutations
+app.middleware("http")(admin_org_rate_limit_middleware)
+app.middleware("http")(admin_action_audit_middleware)
 
 # Сессия для формы входа в админку (cookie)
 app.add_middleware(
@@ -754,6 +728,7 @@ app.add_middleware(
 )
 
 # --- Подключение роутеров ---
+app.include_router(demo_public_router)
 app.include_router(webhooks_router, prefix="/api")
 app.include_router(payment_webhook_router, prefix="/api")
 app.include_router(admin_auth_router, prefix="/api")

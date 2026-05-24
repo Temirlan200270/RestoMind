@@ -345,40 +345,65 @@ async def _menu_item_in_org(db: AsyncSession, item_id: int, org_id: int) -> Menu
 
 
 def _menu_tenant_clause(org_id: int):
-    """Позиции меню арендатора + legacy без organization_id."""
-    return or_(MenuItem.organization_id == org_id, MenuItem.organization_id.is_(None))
+    """Позиции меню арендатора; legacy NULL — только default org."""
+    from app.services.tenant_scope import legacy_null_org_visible
+
+    parts = [MenuItem.organization_id == org_id]
+    if legacy_null_org_visible(org_id):
+        parts.append(MenuItem.organization_id.is_(None))
+    return or_(*parts)
 
 
 def _packaging_tenant_clause(org_id: int):
-    return or_(PackagingRule.organization_id == org_id, PackagingRule.organization_id.is_(None))
+    from app.services.tenant_scope import legacy_null_org_visible
+
+    parts = [PackagingRule.organization_id == org_id]
+    if legacy_null_org_visible(org_id):
+        parts.append(PackagingRule.organization_id.is_(None))
+    return or_(*parts)
 
 
 def _knowledge_tenant_clause(org_id: int):
-    return or_(KnowledgeItem.organization_id == org_id, KnowledgeItem.organization_id.is_(None))
+    from app.services.tenant_scope import legacy_null_org_visible
+
+    parts = [KnowledgeItem.organization_id == org_id]
+    if legacy_null_org_visible(org_id):
+        parts.append(KnowledgeItem.organization_id.is_(None))
+    return or_(*parts)
 
 
 def _bookings_tenant_clause(org_id: int):
-    return or_(
-        Booking.organization_id == org_id,
-        and_(
-            Booking.organization_id.is_(None),
-            Booking.user_id.in_(select(User.id).where(User.organization_id == org_id)),
-        ),
-    )
+    from app.services.tenant_scope import legacy_null_org_visible
+
+    parts = [Booking.organization_id == org_id]
+    if legacy_null_org_visible(org_id):
+        parts.append(
+            and_(
+                Booking.organization_id.is_(None),
+                Booking.user_id.in_(select(User.id).where(User.organization_id == org_id)),
+            ),
+        )
+    return or_(*parts) if len(parts) > 1 else parts[0]
 
 
 def _escalation_tenant_clause(org_id: int):
-    return or_(
-        EscalationEvent.organization_id == org_id,
-        and_(
-            EscalationEvent.organization_id.is_(None),
-            EscalationEvent.phone.in_(_phones_subquery_for_org(org_id)),
-        ),
-    )
+    from app.services.tenant_scope import legacy_null_org_visible
+
+    parts = [EscalationEvent.organization_id == org_id]
+    if legacy_null_org_visible(org_id):
+        parts.append(
+            and_(
+                EscalationEvent.organization_id.is_(None),
+                EscalationEvent.phone.in_(_phones_subquery_for_org(org_id)),
+            ),
+        )
+    return or_(*parts) if len(parts) > 1 else parts[0]
 
 
 def _integration_events_tenant_clause(org_id: int):
     """События синхронизации: только филиал; NULL — legacy у дефолтной организации."""
-    if int(org_id) == int(settings.default_organization_id):
+    from app.services.tenant_scope import legacy_null_org_visible
+
+    if legacy_null_org_visible(org_id):
         return or_(IntegrationEvent.organization_id == org_id, IntegrationEvent.organization_id.is_(None))
     return IntegrationEvent.organization_id == org_id

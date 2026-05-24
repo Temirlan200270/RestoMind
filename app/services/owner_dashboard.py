@@ -165,6 +165,11 @@ async def rollup_location_event_stats(
         "ai.response.generated": "ai_messages_count",
         "ai.dialog.started": "dialogs_count",
         "operator.took_over": "operator_takeovers",
+        "system.pricing_adjusted": "pricing_adjustments",
+        "system.sla_violated": "sla_violations",
+        "system.healing_wa_sent": "healing_wa_sent",
+        "order.draft_recovery_sent": "draft_recovery_sent",
+        "integration.whatsapp.failed": "whatsapp_delivery_failed",
     }
 
     buckets: dict[str, dict[str, float | int]] = defaultdict(

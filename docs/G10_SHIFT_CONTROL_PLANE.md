@@ -396,7 +396,7 @@ sequenceDiagram
 
 ### Security & tenancy
 
-- [ ] Все запросы scoped `organization_id` + location RBAC
+- [x] Все запросы scoped `organization_id` + location RBAC (`GET/POST /shift/*` — [`analytics.py`](../app/api/admin/analytics.py))
 - [ ] `focus_id` не принимает чужой org prefix
 - [ ] Rate limit POST `/shift/action` (опционально)
 

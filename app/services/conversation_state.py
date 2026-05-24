@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Any
 
 
 class ConversationState(StrEnum):
@@ -93,4 +94,46 @@ def check_conversation_transition(
         to_state=nxt,
         reason=f"transition {prev.value} -> {nxt.value} is not allowed",
     )
+
+
+async def apply_conversation_state_in_txn(
+    db: Any,
+    *,
+    phone: str,
+    organization_id: int,
+    to_state: object,
+    transition_source: str = "session_update",
+    transition_reason: str | None = None,
+    transition_context: dict[str, Any] | None = None,
+) -> TransitionCheck:
+    """Unified durable transition entrypoint (Control Plane Phase 1).
+
+    Validates FSM, updates User.current_state, emits conversation.state_changed.
+    Must run inside caller's DB transaction (no commit here).
+    """
+    from sqlalchemy import select as sa_select
+
+    from app.db.models import User
+    from app.services.dialog_mgr import _effective_org, update_user_session_fields_in_db
+
+    org = _effective_org(organization_id)
+    row = await db.execute(
+        sa_select(User.current_state)
+        .where(User.phone == phone, User.organization_id == org)
+        .limit(1),
+    )
+    prev_raw = row.scalar_one_or_none()
+    check = check_conversation_transition(prev_raw, to_state)
+    if not check.allowed:
+        raise ValueError(check.reason)
+    await update_user_session_fields_in_db(
+        db,
+        phone=phone,
+        organization_id=organization_id,
+        current_state=check.to_state.value,
+        transition_source=transition_source,
+        transition_reason=transition_reason,
+        transition_context=transition_context,
+    )
+    return check
 

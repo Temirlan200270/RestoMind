@@ -32,15 +32,15 @@ async def load_knowledge_context_block(
             .order_by(KnowledgeItem.sort_order, KnowledgeItem.id)
         )
     else:
+        from app.services.tenant_scope import legacy_null_org_visible
+
+        org_filters = [KnowledgeItem.organization_id == organization_id]
+        if legacy_null_org_visible(organization_id):
+            org_filters.append(KnowledgeItem.organization_id.is_(None))
         stmt = (
             select(KnowledgeItem)
             .where(KnowledgeItem.is_active.is_(True))
-            .where(
-                or_(
-                    KnowledgeItem.organization_id.is_(None),
-                    KnowledgeItem.organization_id == organization_id,
-                ),
-            )
+            .where(or_(*org_filters))
             .order_by(KnowledgeItem.sort_order, KnowledgeItem.id)
         )
 

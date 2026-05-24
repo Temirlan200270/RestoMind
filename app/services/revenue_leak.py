@@ -477,6 +477,7 @@ async def build_revenue_leak(
     allowed_location_ids: set[int] | None = None,
 ) -> dict:
     return await with_location_scope_fallback(
+        db=db,
         location_id=location_id,
         allowed_location_ids=allowed_location_ids,
         run=lambda loc_id, allowed: _build_revenue_leak_impl(

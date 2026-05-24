@@ -11,7 +11,16 @@ from typing import Any
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.db.models import Booking, ChatLog, FailedTask, Location, Order, Organization, StaffRole, StaffUser, Tenant, User
+
+
+def legacy_null_org_visible(org_id: int) -> bool:
+    """Legacy rows with organization_id IS NULL visible only to default tenant org."""
+    try:
+        return int(org_id) == int(settings.default_organization_id)
+    except (TypeError, ValueError):
+        return False
 
 
 def phones_subquery_for_org(org_id: int):
@@ -19,24 +28,28 @@ def phones_subquery_for_org(org_id: int):
 
 
 def orders_tenant_clause(org_id: int):
-    """Заказы филиала: явный organization_id или legacy через user."""
-    return or_(
-        Order.organization_id == org_id,
-        and_(
-            Order.organization_id.is_(None),
-            Order.user_id.in_(select(User.id).where(User.organization_id == org_id)),
-        ),
-    )
+    """Заказы филиала: явный organization_id; legacy NULL — только default org."""
+    clauses = [Order.organization_id == org_id]
+    if legacy_null_org_visible(org_id):
+        clauses.append(
+            and_(
+                Order.organization_id.is_(None),
+                Order.user_id.in_(select(User.id).where(User.organization_id == org_id)),
+            ),
+        )
+    return or_(*clauses) if len(clauses) > 1 else clauses[0]
 
 
 def failed_tasks_tenant_clause(org_id: int):
-    return or_(
-        FailedTask.organization_id == org_id,
-        and_(
-            FailedTask.organization_id.is_(None),
-            FailedTask.phone.in_(phones_subquery_for_org(org_id)),
-        ),
-    )
+    clauses = [FailedTask.organization_id == org_id]
+    if legacy_null_org_visible(org_id):
+        clauses.append(
+            and_(
+                FailedTask.organization_id.is_(None),
+                FailedTask.phone.in_(phones_subquery_for_org(org_id)),
+            ),
+        )
+    return or_(*clauses) if len(clauses) > 1 else clauses[0]
 
 
 def branding_empty_payload() -> dict[str, Any | None]:

@@ -558,6 +558,15 @@ const DEMO_SHIFT_SCENE_PHASES = Object.freeze({
         { id: 'hook', delay_ms: 0 },
         { id: 'tension', delay_ms: 5000 },
         { id: 'action', delay_ms: 10000, auto_complete: true },
+        { id: 'impact', delay_ms: 15000 },
+        { id: 'next', delay_ms: 20000 },
+        { id: 'resolve', delay_ms: 25000 },
+    ]),
+    booking_rescue_30s: Object.freeze([
+        { id: 'hook', delay_ms: 0 },
+        { id: 'tension', delay_ms: 5000 },
+        { id: 'action', delay_ms: 10000, auto_complete: true },
+        { id: 'impact', delay_ms: 15000 },
         { id: 'next', delay_ms: 20000 },
         { id: 'resolve', delay_ms: 25000 },
     ]),
@@ -1994,13 +2003,23 @@ function adminMixinMenuOrdersUi() {
             await this.checkSession();
 
             try {
-                const sceneFromUrl = new URLSearchParams(window.location.search).get('demo_scene');
-                if (sceneFromUrl && this.authenticated && this.isDemoSession) {
+                const params = new URLSearchParams(window.location.search);
+                const demoBoot = params.get('demo') === '1';
+                const sceneFromUrl = params.get('demo_scene');
+                if (demoBoot && !this.authenticated) {
+                    this._pendingDemoSceneId = sceneFromUrl || DEMO_SHIFT_SCENE_DEFAULT;
+                    await this.submitDemoLogin();
+                    this._stripDemoBootQueryParams();
+                } else if (sceneFromUrl && this.authenticated && this.isDemoSession) {
                     await this.startDemoShiftScene(sceneFromUrl);
+                    this._stripDemoBootQueryParams();
                 } else if (this._pendingDemoSceneId && this.authenticated) {
                     const pending = this._pendingDemoSceneId;
                     this._pendingDemoSceneId = '';
                     await this.startDemoShiftScene(pending);
+                } else if (demoBoot && this.authenticated && this.isDemoSession && !this.demoSceneActive) {
+                    await this.startDemoShiftScene(sceneFromUrl || DEMO_SHIFT_SCENE_DEFAULT);
+                    this._stripDemoBootQueryParams();
                 }
             } catch (_demoInitErr) {
                 adminLogger.warn('[admin] demo scene init', _demoInitErr);
@@ -4542,6 +4561,18 @@ function adminMixinAuthKnowledge() {
         replayDemoPitchScene() {
             if (!this.isDemoSession) return;
             void this.startDemoShiftScene(this.demoSceneId || DEMO_SHIFT_SCENE_DEFAULT);
+        },
+
+        _stripDemoBootQueryParams() {
+            try {
+                const url = new URL(window.location.href);
+                if (!url.searchParams.has('demo') && !url.searchParams.has('demo_scene')) return;
+                url.searchParams.delete('demo');
+                url.searchParams.delete('demo_scene');
+                const qs = url.searchParams.toString();
+                const next = url.pathname + (qs ? `?${qs}` : '') + url.hash;
+                window.history.replaceState({}, '', next);
+            } catch (_e) { /* ignore */ }
         },
 
         async loadOrgProfile() {

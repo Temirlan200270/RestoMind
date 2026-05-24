@@ -260,31 +260,8 @@ async def admin_signup_disabled(request: Request, body: SignupBody) -> dict:
 @auth_router.post("/demo-login")
 async def admin_demo_login(request: Request, db: AsyncSession = Depends(get_db)) -> dict:
     """Гостевой вход в демо-организацию (read-only)."""
-    request.session.clear()
-
-    cached_org_id = resolve_demo_org_id_from_settings()
-    if cached_org_id is not None:
-        return _demo_login_session_response(request, cached_org_id)
-
     try:
-        demo_org = await db.scalar(
-            select(Organization).where(
-                Organization.is_demo.is_(True),
-            ),
-        )
-        if demo_org is None:
-            demo_org = await db.scalar(select(Organization).where(Organization.slug == "demo"))
-        if demo_org is None:
-            raise HTTPException(status_code=503, detail="Демо временно недоступно")
-        if not bool(demo_org.is_active):
-            raise HTTPException(status_code=503, detail="Демо временно отключено")
-
-        tenant_st = await load_tenant_for_organization(db, int(demo_org.id))
-        if tenant_is_billing_suspended(tenant_st):
-            raise HTTPException(status_code=503, detail="Демо временно недоступно")
-
-        set_cached_demo_org_id(int(demo_org.id))
-        return _demo_login_session_response(request, int(demo_org.id))
+        return await establish_demo_session(request, db)
     except HTTPException:
         raise
     except Exception as exc:
@@ -292,6 +269,34 @@ async def admin_demo_login(request: Request, db: AsyncSession = Depends(get_db))
             logger.warning("demo-login pool exhausted: %s", exc)
             raise HTTPException(status_code=503, detail=POOL_EXHAUSTED_USER_MESSAGE) from exc
         raise
+
+
+async def establish_demo_session(request: Request, db: AsyncSession) -> dict:
+    """Create read-only demo admin session (POST demo-login + GET /demo)."""
+    request.session.clear()
+
+    cached_org_id = resolve_demo_org_id_from_settings()
+    if cached_org_id is not None:
+        return _demo_login_session_response(request, cached_org_id)
+
+    demo_org = await db.scalar(
+        select(Organization).where(
+            Organization.is_demo.is_(True),
+        ),
+    )
+    if demo_org is None:
+        demo_org = await db.scalar(select(Organization).where(Organization.slug == "demo"))
+    if demo_org is None:
+        raise HTTPException(status_code=503, detail="Демо временно недоступно")
+    if not bool(demo_org.is_active):
+        raise HTTPException(status_code=503, detail="Демо временно отключено")
+
+    tenant_st = await load_tenant_for_organization(db, int(demo_org.id))
+    if tenant_is_billing_suspended(tenant_st):
+        raise HTTPException(status_code=503, detail="Демо временно недоступно")
+
+    set_cached_demo_org_id(int(demo_org.id))
+    return _demo_login_session_response(request, int(demo_org.id))
 
 
 def _demo_login_session_response(request: Request, organization_id: int) -> dict:

@@ -12,11 +12,9 @@ import logging
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import desc, select
 
 from datetime import timedelta, timezone
-
-from sqlalchemy import select
 
 from app.db.models import AIContextSnapshot, MenuItem, Order, Organization, SystemEvent, Tenant, User
 from app.db.session import async_session_factory
@@ -346,3 +344,104 @@ async def _load_recent_event_slice(
     except Exception as exc:
         logger.exception("_load_recent_event_slice failed org=%d: %s", organization_id, exc)
         return {"window_minutes": minutes, "events_count": 0, "events": [], "error": str(exc)}
+
+
+@dataclass(frozen=True, slots=True)
+class LLMPromptBundle:
+    """Собранный промпт-контекст для call_openai из AIReadContext."""
+
+    menu_items: list[MenuItem]
+    menu_context: str
+    kb_context: str
+    draft_ctx: str
+    strategy_ctx: str
+    customer_ctx: str
+    current_time_ctx: str
+    sales_gastro_hint: str
+    sales_target_iiko_ids: list[str]
+
+
+async def build_llm_prompt_bundle(
+    read_ctx: AIReadContext,
+    *,
+    organization_id: int,
+    message_text: str,
+    fresh_stopped: list[str] | None = None,
+) -> LLMPromptBundle:
+    """Единая сборка LLM-контекста (WhatsApp, test_bot, telephony stub)."""
+    from app.services.order_logic import (
+        build_menu_context_for_ai,
+        format_draft_order_context_for_prompt,
+    )
+    from app.services.stoplist_session import format_stoplist_change_for_menu_context
+    from app.services.restaurant_context_cache import cached_format_org_current_time_block
+    from app.services.sales_strategy import build_sales_strategy, format_strategy_for_prompt
+
+    menu_items = read_ctx.menu_items
+    menu_context = await build_menu_context_for_ai(menu_items, message_text)
+    org_ent = read_ctx.org
+    current_time_ctx = cached_format_org_current_time_block(
+        organization_id,
+        getattr(org_ent, "timezone", None) if org_ent is not None else "Etc/GMT-5",
+        getattr(org_ent, "schedule_json", None) if org_ent is not None else None,
+    )
+    draft_row = read_ctx.draft_row
+    draft_ctx = format_draft_order_context_for_prompt(
+        draft_row.items_json if draft_row else None,
+    )
+    stopped = fresh_stopped or []
+    draft_overlap: list[str] = []
+    if stopped and draft_row and isinstance(draft_row.items_json, dict):
+        draft_norm = {
+            str(x.get("name", "")).lower().strip()
+            for x in (draft_row.items_json.get("items") or [])
+            if isinstance(x, dict) and x.get("name")
+        }
+        draft_overlap = [n for n in stopped if n.lower().strip() in draft_norm]
+    stoplist_change_ctx = format_stoplist_change_for_menu_context(
+        stopped, draft_overlap=draft_overlap,
+    )
+    if stoplist_change_ctx:
+        menu_context = f"{menu_context}\n\n{stoplist_change_ctx}"
+
+    prefs = read_ctx.user_preferences or {}
+    top = prefs.get("top_items") or []
+    disliked = prefs.get("disliked") or []
+    if top:
+        guest_line = f"Профиль гостя: обычно берёт {', '.join(top[:2])}"
+        if disliked:
+            guest_line += f"; не берёт {disliked[0]}"
+        menu_context = f"{guest_line}\n{menu_context}"
+
+    u_row = read_ctx.user
+    strategy_ctx = ""
+    sales_gastro_hint = ""
+    sales_target_iiko_ids: list[str] = []
+    if draft_row and isinstance(draft_row.items_json, dict):
+        cart = [x for x in (draft_row.items_json.get("items") or []) if isinstance(x, dict)]
+        om = draft_row.items_json.get("order_meta")
+        meta_d = om if isinstance(om, dict) else {}
+        total = float(draft_row.total_price or 0)
+        decision = build_sales_strategy(
+            cart,
+            total,
+            meta_d,
+            menu_items,
+            u_row.meta_json if u_row is not None else None,
+            user_preferences=read_ctx.user_preferences,
+        )
+        strategy_ctx = format_strategy_for_prompt(decision)
+        sales_gastro_hint = (decision.gastro_hint or "").strip()
+        sales_target_iiko_ids = list(decision.target_iiko_ids or [])
+
+    return LLMPromptBundle(
+        menu_items=menu_items,
+        menu_context=menu_context,
+        kb_context=read_ctx.kb_context,
+        draft_ctx=draft_ctx,
+        strategy_ctx=strategy_ctx,
+        customer_ctx=read_ctx.customer_ctx,
+        current_time_ctx=current_time_ctx,
+        sales_gastro_hint=sales_gastro_hint,
+        sales_target_iiko_ids=sales_target_iiko_ids,
+    )

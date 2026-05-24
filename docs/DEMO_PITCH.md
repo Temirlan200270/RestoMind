@@ -4,8 +4,8 @@
 
 ## Короткий ответ: «идеальное демо»?
 
-**Для продажи через counterfactual pitch — да, production-ready v1.**  
-**Для «0 слов, 0 логина, landing autoplay» — ещё нет** (см. [Что не идеально](#что-не-идеально-следующий-уровень)).
+**Для продажи через counterfactual pitch — да, production-ready.**  
+**Zero-friction:** `GET /demo` / `/demo/booking` — без экрана логина (G10.8.2).
 
 | Критерий | Статус |
 |----------|--------|
@@ -15,8 +15,8 @@
 | Live Impact + micro-flash −1200 → +1200 ₸ | ✅ |
 | Read-only demo session + explore после Esc | ✅ |
 | Seed с «живой» очередью после pitch (не 90k «всё горит») | ✅ |
-| Вход без формы логина / autoplay с landing | ❌ G10.8.2 |
-| Self-demo для cold outreach (публичная ссылка) | ❌ G10.8.2 |
+| Вход без формы логина / autoplay с landing | ✅ G10.8.2 (`GET /demo`) |
+| Self-demo для cold outreach (публичная ссылка) | ✅ `/demo`, `/demo/booking` |
 
 ---
 
@@ -33,13 +33,21 @@ Pitch **не пишет в БД**. Explore — read-only walkthrough по seed d
 
 ## User flow
 
+**Zero-friction (prod outreach):**
 ```
-Login → «Посмотреть демо»
-  → POST /api/admin/auth/demo-login (read-only session)
-  → autoplay money_rescue_30s (~30 сек)
-  → Esc или «Осмотреть демо» на resolve-карточке
-  → explore: смена, inbox, дашборд (cap риска ~12k ₸)
-  → ↻ «Повторить» — restart pitch без reload explore-state
+GET /demo  или  /demo/booking
+  → demo session cookie
+  → redirect /admin?demo=1&demo_scene=…#shift
+  → autoplay pitch (~30 сек) без кликов
+  → Esc → explore (read-only)
+```
+
+**Fallback (login screen):**
+```
+/admin → «Посмотреть демо»
+  → POST /api/admin/auth/demo-login
+  → autoplay money_rescue_30s
+  → Esc → explore
 ```
 
 Кнопка на login: **«Посмотреть демо»** (подпись: «30 сек — как теряются и возвращаются деньги…»).
@@ -126,20 +134,20 @@ Pitch endpoints требуют `is_demo` session или `APP_DEBUG=true`.
 
 ## Что не идеально (следующий уровень)
 
-Задачи **не закрыты** — см. [`ROADMAP.md`](ROADMAP.md) § G10.8.2:
-
-- **Landing autoplay** — `/demo` или `?demo=1` без экрана логина (Stripe-style zero friction)
-- **Публичная self-demo ссылка** для cold outreach
-- **Вариант сценки booking_at_risk** (сейчас только slow_chat)
-- **Session hardening на Render** — если 401 после долгого explore (cookie / pooler; см. `SUPABASE_PREFER_TRANSACTION_POOLER`, `DEMO_ORGANIZATION_ID`)
+- **Marketing landing** — отдельная hero-страница (не admin shell)
+- **Embed iframe** — `DEMO_ALLOW_EMBED` + CSP (если нужен pitch deck embed)
+- **Session hardening на Render** — долгий explore + cookie/pooler
 
 ---
 
-## Env (prod demo-login)
+## Env (prod demo)
 
 | Переменная | Назначение |
 |------------|------------|
+| `DEMO_PUBLIC_ENABLED=true` | Включить `GET /demo` в prod |
 | `DEMO_ORGANIZATION_ID` | Fast path demo-login без SELECT org |
-| `SUPABASE_PREFER_TRANSACTION_POOLER` | `:5432` → `:6543`, меньше EMAXCONNSESSION на Render |
+| `DEMO_RATE_LIMIT_PER_HOUR=15` | Cap per IP на `/demo` |
+| `DEMO_PUBLIC_SCENES` | Опционально: `money_rescue_30s,booking_rescue_30s` |
+| `SUPABASE_PREFER_TRANSACTION_POOLER` | Pooler для Render |
 
 См. [`DEPLOY_RUNBOOK.md`](DEPLOY_RUNBOOK.md), [`CHANGELOG.md`](../CHANGELOG.md) § pool fixes.

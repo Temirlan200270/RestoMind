@@ -41,9 +41,11 @@ from app.services.integration_config import (
     whatsapp_effective_configured,
 )
 from app.services.analytics_consumer import (
+    get_cumulative_event_totals,
     get_event_stats,
     get_event_stats_for_range,
     get_today_event_summary,
+    _sum_event_rows,
 )
 from app.services.owner_dashboard import (
     build_recommendation_target,
@@ -834,14 +836,22 @@ async def dashboard_stats(
         None,
     )
 
-    # Кумулятивные метрики (all-time) — только SQL, не хранится в events
-    total_q = await db.execute(
-        select(func.count(Order.id), func.coalesce(func.sum(Order.total_price), 0))
-        .where(not_cancelled, org_orders, order_location_scope)
-    )
-    total_row = total_q.one()
-    total_orders = total_row[0]
-    total_revenue = float(total_row[1])
+    # Кумулятивные метрики (all-time) — event-first из DailyOrgStats, SQL fallback
+    if not location_scoped:
+        _cum = await get_cumulative_event_totals(db, org_id)
+    else:
+        _cum = None
+    if _cum and _cum.get("has_data"):
+        total_orders = int(_cum["total_orders"])
+        total_revenue = float(_cum["revenue_kzt"])
+    else:
+        total_q = await db.execute(
+            select(func.count(Order.id), func.coalesce(func.sum(Order.total_price), 0))
+            .where(not_cancelled, org_orders, order_location_scope)
+        )
+        total_row = total_q.one()
+        total_orders = total_row[0]
+        total_revenue = float(total_row[1])
 
     # Сегодняшние метрики — event-first, SQL как fallback
     if _event_data_active:
@@ -1313,7 +1323,13 @@ async def admin_funnel(
         )
     _funnel_dialogs_event = sum(r["dialogs_count"] for r in _funnel_event_rows)
     _funnel_completed_event = sum(r["orders_confirmed"] for r in _funnel_event_rows)
-    _funnel_event_active = _funnel_completed_event > 0 or _funnel_dialogs_event > 0
+    _funnel_created_event = sum(r.get("orders_created", 0) for r in _funnel_event_rows)
+    _funnel_cancelled_event = sum(r.get("orders_cancelled", 0) for r in _funnel_event_rows)
+    _funnel_event_active = (
+        _funnel_completed_event > 0
+        or _funnel_dialogs_event > 0
+        or _funnel_created_event > 0
+    )
 
     if _funnel_event_active and _funnel_dialogs_event > 0:
         dialogs_count = _funnel_dialogs_event
@@ -1342,6 +1358,8 @@ async def admin_funnel(
         )
         or 0,
     )
+    if _funnel_event_active and _funnel_created_event > 0:
+        drafts_count = _funnel_created_event
 
     if _funnel_event_active and _funnel_completed_event > 0:
         completed_count = _funnel_completed_event
@@ -1441,6 +1459,8 @@ async def admin_funnel(
         )
         or 0,
     )
+    if _funnel_event_active and _funnel_cancelled_event > 0:
+        cancellations = _funnel_cancelled_event
 
     dialog_to_draft = round(100 * drafts_count / dialogs_count, 1) if dialogs_count else None
     draft_to_order = round(100 * completed_count / drafts_count, 1) if drafts_count else None
@@ -1547,6 +1567,20 @@ async def admin_ai_value(
         ),
     )
     esc_scope = _escalation_tenant_clause(org_id)
+    start_d = _dt_as_utc(start).date()
+    end_d = _dt_as_utc(end).date()
+    _ai_event_rows = await get_event_stats_for_range(
+        db,
+        org_id,
+        start_date=start_d,
+        end_date=end_d,
+    )
+    _ai_period = _sum_event_rows(_ai_event_rows)
+    _ai_event_active = (
+        int(_ai_period.get("orders_created") or 0) > 0
+        or float(_ai_period.get("revenue_kzt") or 0) > 0
+    )
+
     esc_count = int(
         await db.scalar(
             select(func.count(EscalationEvent.id)).where(
@@ -1557,19 +1591,28 @@ async def admin_ai_value(
         )
         or 0,
     )
+    if _ai_event_active and int(_ai_period.get("escalations") or 0) > 0:
+        esc_count = int(_ai_period["escalations"])
 
-    total_row = (
-        await db.execute(
-            select(func.count(Order.id), func.coalesce(func.sum(Order.total_price), 0)).where(
-                not_cancelled,
-                org_orders,
-                Order.created_at >= start_sql,
-                Order.created_at <= end_sql,
-            ),
+    if _ai_event_active:
+        orders_n = max(
+            0,
+            int(_ai_period.get("orders_created") or 0) - int(_ai_period.get("orders_cancelled") or 0),
         )
-    ).one()
-    orders_n = int(total_row[0])
-    revenue_kzt = float(total_row[1])
+        revenue_kzt = float(_ai_period.get("revenue_kzt") or 0)
+    else:
+        total_row = (
+            await db.execute(
+                select(func.count(Order.id), func.coalesce(func.sum(Order.total_price), 0)).where(
+                    not_cancelled,
+                    org_orders,
+                    Order.created_at >= start_sql,
+                    Order.created_at <= end_sql,
+                ),
+            )
+        ).one()
+        orders_n = int(total_row[0])
+        revenue_kzt = float(total_row[1])
 
     bot_row = (
         await db.execute(
@@ -1636,8 +1679,6 @@ async def admin_ai_value(
         elif off == 0:
             ai_checks_no_offer.append(tp)
 
-    start_d = _dt_as_utc(start).date()
-    end_d = _dt_as_utc(end).date()
     daily_series: list[dict[str, Any]] = []
     walk = start_d
     while walk <= end_d:

@@ -71,15 +71,55 @@ class TelephonyRouter:
 
         logger.info("STT [%s]: %s", session.phone, transcript)
 
+        from app.core.config import settings
         from app.services.ai_brain import call_openai
-        from app.services.dialog_mgr import get_chat_history, append_to_history
+        from app.services.context_engine import (
+            build_llm_prompt_bundle,
+            fetch_ai_read_context,
+            schedule_save_ai_context_snapshot,
+        )
+        from app.services.dialog_mgr import append_to_history, get_chat_history
         from app.db.session import redis_client
 
-        history = await get_chat_history(redis_client, session.phone)
-        ai_response = await call_openai(history, transcript, raise_on_transient=True)
+        org_id = session.organization_id
+        if org_id is None:
+            org_id = int(settings.default_organization_id)
 
-        await append_to_history(redis_client, session.phone, "user", transcript)
-        await append_to_history(redis_client, session.phone, "assistant", ai_response.reply_text)
+        history = await get_chat_history(redis_client, session.phone, organization_id=org_id)
+        read_ctx = await fetch_ai_read_context(session.phone, int(org_id))
+        bundle = await build_llm_prompt_bundle(
+            read_ctx,
+            organization_id=int(org_id),
+            message_text=transcript,
+        )
+        schedule_save_ai_context_snapshot(
+            session.phone,
+            int(org_id),
+            read_ctx,
+            menu_context_text=bundle.menu_context,
+        )
+        ai_response = await call_openai(
+            history,
+            transcript,
+            bundle.menu_context,
+            bundle.kb_context,
+            draft_order_context=bundle.draft_ctx,
+            sales_strategy_context=bundle.strategy_ctx,
+            customer_context=bundle.customer_ctx,
+            current_time_context=bundle.current_time_ctx,
+            raise_on_transient=True,
+        )
+
+        await append_to_history(
+            redis_client, session.phone, "user", transcript, organization_id=int(org_id),
+        )
+        await append_to_history(
+            redis_client,
+            session.phone,
+            "assistant",
+            ai_response.reply_text,
+            organization_id=int(org_id),
+        )
 
         logger.info("TTS [%s]: %s", session.phone, ai_response.reply_text[:80])
 

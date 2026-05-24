@@ -915,6 +915,38 @@ async def backfill_stats(
     return result
 
 
+@router.post("/tenant-scope-backfill")
+async def tenant_scope_backfill(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    fill_org: bool = Query(True, description="Backfill NULL organization_id from users"),
+    fill_location: bool = Query(True, description="Backfill NULL location_id to default location"),
+) -> dict:
+    """Диагностика и backfill NULL organization_id / location_id для текущей org."""
+    from app.services.tenant_backfill import run_tenant_scope_backfill
+
+    org_id = admin_org_from_session(request)
+    return await run_tenant_scope_backfill(
+        db,
+        org_id,
+        fill_org=fill_org,
+        fill_location=fill_location,
+    )
+
+
+@router.get("/tenant-scope-gaps")
+async def tenant_scope_gaps(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Счётчики строк с NULL organization_id / location_id."""
+    from app.services.tenant_backfill import diagnose_tenant_scope_gaps
+
+    org_id = admin_org_from_session(request)
+    gaps = await diagnose_tenant_scope_gaps(db)
+    return {"org_id": org_id, **gaps}
+
+
 # ─── Phase 5 OS: Audit Log ───────────────────────────────────────────────────
 
 
@@ -1634,3 +1666,12 @@ async def replay_ai_decision(
             "raw": ai_response.model_dump(),
         },
     }
+
+
+@router.get("/replay/scenarios")
+async def list_replay_scenarios(request: Request) -> dict:
+    """Control Plane Phase 3 — golden conversation catalog for replay harness."""
+    _ = request
+    from app.services.replay_harness import list_golden_scenarios
+
+    return {"ok": True, "scenarios": list_golden_scenarios()}

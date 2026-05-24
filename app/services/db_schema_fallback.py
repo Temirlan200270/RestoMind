@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ def looks_like_missing_column(exc: Exception, *column_names: str) -> bool:
 
 async def with_location_scope_fallback(
     *,
+    db: AsyncSession,
     location_id: int | None,
     allowed_location_ids: set[int] | None,
     run: Callable[[int | None, set[int] | None], Awaitable[T]],
@@ -38,4 +40,8 @@ async def with_location_scope_fallback(
             "location scope query failed (schema lag); retrying org-wide: %s",
             exc,
         )
+        try:
+            await db.rollback()
+        except SQLAlchemyError:
+            logger.exception("rollback after location scope fallback failure failed")
         return await run(None, None)

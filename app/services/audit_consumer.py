@@ -57,11 +57,12 @@ def _schedule_os_audit_ws(event: "BusinessEvent", entry: object) -> None:
     """Real-time OS Decision Feed: push в admin WebSocket без polling."""
     try:
         import asyncio
-        from app.services.events import publish_event
+        from app.services.events import publish_org_event
 
         created = getattr(entry, "created_at", None)
         asyncio.create_task(
-            publish_event(
+            publish_org_event(
+                int(event.org_id),
                 "os.audit",
                 {
                     "organization_id": int(event.org_id),

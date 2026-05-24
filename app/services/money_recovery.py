@@ -84,6 +84,10 @@ async def get_recovered_today_kzt(db: AsyncSession, org_id: int) -> dict[str, fl
         ).mappings().first()
     except SQLAlchemyError as exc:
         logger.warning("get_recovered_today_kzt schema lag org=%s: %s", org_id, exc)
+        try:
+            await db.rollback()
+        except SQLAlchemyError:
+            logger.exception("rollback after recovered_kzt read failure failed")
         return {"recovered_kzt": 0.0, "focus_completed_count": 0}
 
     if not row:

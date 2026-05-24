@@ -822,7 +822,11 @@ async def patch_order_status(
             order.prepayment_status = "pending"
             await db.commit()
             raise HTTPException(status_code=409, detail=split_warn)
-        o2 = await confirm_order(db, order_id)
+        o2 = await confirm_order(
+            db,
+            order_id,
+            source=admin_actor_key(request),
+        )
         if not o2:
             raise HTTPException(status_code=400, detail="Нельзя подтвердить заказ")
         await db.commit()
@@ -1555,6 +1559,7 @@ async def bulk_cancel_orders(
     cancelled = 0
     skipped = 0
     to_emit: list[tuple[int, str, float]] = []
+    actor = admin_actor_key(request)
     for order, phone in rows:
         if order.status == OrderStatus.CANCELLED.value:
             skipped += 1
@@ -1562,6 +1567,9 @@ async def bulk_cancel_orders(
         order.status = OrderStatus.CANCELLED.value
         order.iiko_last_error = None
         await _clear_redis_pending_if_matches(phone, order.id, organization_id=org_id)
+        from app.services.order_admin_events import emit_order_cancelled_from_admin
+
+        await emit_order_cancelled_from_admin(db, order, actor=actor)
         cancelled += 1
         to_emit.append((order.id, phone, float(order.total_price)))
 

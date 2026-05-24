@@ -125,7 +125,7 @@
 - [x] **Restaurant state snapshots:** `RestaurantStateSnapshot` and `GET /api/admin/intelligence/digital-twin`.
 - [x] **Digital Twin MVP:** separate admin tab and operator-capacity simulation engine.
 - [x] **Phase 5 OS — Full OS Behavior (~98%) ✅:** Все критерии Phase 5 по [`docs/OS_TRANSITION_PLAN.md`](docs/OS_TRANSITION_PLAN.md) реализованы. **Статус: Launch Window.**
-  - **Аналитика из event stream (~92%):** `/stats`, `/analytics`, `/funnel`, `network/stats`, `/activity` — event-first. Backfill 90 дней (`POST /backfill-stats`). `get_event_stats_for_range()`. Legacy `emit_system_event` → `emit_event` в `dialog_mgr.py`, `pipeline_latency.py`.
+  - **Аналитика из event stream (~100% KPI):** `/stats` (all-time из `DailyOrgStats`), `/analytics`, `/funnel`, `/ai-value`, `network/stats`, `/activity` — event-first; SQL только для `items_json`/upsell и operational lists (`money_queue`, orders/chats). Backfill 90 дней + ops-события из `system_events`. Admin `bulk-cancel` и confirm → `order.*` events.
   - **Predictive insights (~95%):** `build_demand_forecast`, `build_cancellation_forecast`, `build_overload_risk`, `build_autopilot_pricing` (5 тактик с `price_adj_pct`). Все поля в `/os-dashboard`.
   - **Auto-recommendations (~95%):** 6 типов + `autopilot_pricing`. `POST /apply-pricing/{rec_id}` и **`POST /apply-pricing/bulk`** (все `new` за org).
   - **Self-healing (~95%):** 4 детектора + **Self-Healing 2.0** — WA-напоминание гостям с `prepayment_status=pending` при spike failed payments ([`healing_actions.py`](app/services/healing_actions.py)). `AuditLog` + `GET /audit-log`. `stock_alerts[]` на `/os-dashboard` (inventory snapshots или прокси из DailyOrgStats).
@@ -203,13 +203,15 @@
 - [x] **Tests** — `test_demo_shift_scene.py`, `test_demo_shift_scene_ui.py`, `test_demo_pitch_seed.py`, `test_demo_shift_presentation.py`.
 - [x] **Docs** — [`docs/DEMO_PITCH.md`](DEMO_PITCH.md) (канон pitch/explore, smoke, gaps).
 
-### G10.8.2 — Demo zero-friction (не начато)
+### G10.8.2 — Demo zero-friction
 
-> Landing autoplay, публичная self-demo ссылка, optional booking pitch variant.
+> Landing autoplay, публичная self-demo ссылка, booking pitch variant.
 
-- [ ] **`/demo` или `?demo=1`** — autoplay pitch без формы логина
-- [ ] **Публичная ссылка** для cold outreach / embed
-- [ ] **Сценка `booking_rescue_30s`** (альтернатива slow_chat)
+- [x] **`GET /demo` и `/demo/{slug}`** — session + redirect `/admin?demo=1&demo_scene=…#shift`; `DEMO_PUBLIC_ENABLED` (или `APP_DEBUG`)
+- [x] **Rate limit** — `DEMO_RATE_LIMIT_PER_HOUR` per IP
+- [x] **`?demo=1` autoplay** — без экрана логина после redirect
+- [x] **Сценка `booking_rescue_30s`** — booking_at_risk pitch (~8500 ₸)
+- [x] **Публичные URL:** `/demo`, `/demo/money`, `/demo/booking` — см. [`docs/DEMO_PITCH.md`](DEMO_PITCH.md)
 
 - [x] **OS Decision Feed UI:** «Лента решений ОС» в `aiCenterTab=os` ([`_tab_ai_center.html`](app/templates/screens/_tab_ai_center.html)), `loadAuditLog()`, WS `os.audit`, блок «Живая ОС» (`dashLiveFeed`) на дашборде, refresh по `order.*` / `payment.*` / `booking.*` в `handleWsEvent`. UI-тексты — язык оператора («данные ОС», не dev-жаргон).
 - [x] **Websocket audit push:** [`audit_consumer.py`](app/services/audit_consumer.py) публикует `os.audit` с `org_id` после записи в `audit_log`.

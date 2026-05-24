@@ -8,9 +8,9 @@
 
 | Слой | Суть | Статус |
 |------|------|--------|
-| **Tenant Isolation** | Каждый запрос фильтруется по `organization_id`; межтенантный доступ запрещён на уровне конвенций | ~90% |
-| **Event-Driven Core** | Бизнес-действия порождают события (`SystemEvent`, `emit_system_event`); основа аналитики и AI-контекста | ~40% |
-| **AI Context Snapshot** | `fetch_ai_read_context` → `AIReadContext`; данные для LLM готовит слой `ContextBuilder`, не raw SQL | ~70% |
+| **Tenant Isolation** | Каждый запрос фильтруется по `organization_id`; legacy NULL только default org; backfill API | **~95%** |
+| **Event-Driven Core** | Бизнес-действия порождают события (`SystemEvent`, `emit_event`); аналитика из `DailyOrgStats` + backfill | **~98%** |
+| **AI Context Snapshot** | `fetch_ai_read_context` → `AIReadContext`; данные для LLM готовит слой `ContextBuilder`, не raw SQL | ~100% |
 
 Детальная карта переходов — [`docs/OS_TRANSITION_PLAN.md`](docs/OS_TRANSITION_PLAN.md).
 
@@ -32,7 +32,7 @@
 - **Human Override** — перехват диалога оператором; в режиме оператора AI не отвечает
 - **Стоп-листы** — фоновая синхронизация из iiko (~15 мин)
 - **Админ-панель** — вход по логину/паролю (cookie-сессия), дашборд, канбан, live-чаты, WebSocket, аналитика, редактирование меню, демо-данные
-- **Demo Pitch (G10.8)** — кнопка **«Посмотреть демо»**: 30-сек counterfactual pitch → read-only осмотр; см. [`docs/DEMO_PITCH.md`](docs/DEMO_PITCH.md)
+- **Demo Pitch (G10.8)** — **«Посмотреть демо»** или **`GET /demo`** (zero-friction): 30-сек pitch → read-only осмотр; см. [`docs/DEMO_PITCH.md`](docs/DEMO_PITCH.md)
 - **Надёжность** — rate limiting по телефону, логи в файлы, опционально Sentry
 - **Мультитенантность (фундамент)** — модель `Organization`, поле `organization_id` у сущностей (см. CHANGELOG)
 

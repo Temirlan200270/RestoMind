@@ -622,6 +622,7 @@ async def build_money_queue(
     allowed_location_ids: set[int] | None = None,
 ) -> dict[str, Any]:
     return await with_location_scope_fallback(
+        db=db,
         location_id=location_id,
         allowed_location_ids=allowed_location_ids,
         run=lambda loc_id, allowed: _build_money_queue_impl(

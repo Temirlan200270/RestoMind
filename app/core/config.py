@@ -594,6 +594,20 @@ class Settings(BaseSettings):
         ge=0,
         validation_alias=AliasChoices("DEMO_ORGANIZATION_ID", "demo_organization_id"),
     )
+    demo_public_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("DEMO_PUBLIC_ENABLED", "demo_public_enabled"),
+    )
+    demo_rate_limit_per_hour: int = Field(
+        default=15,
+        ge=1,
+        validation_alias=AliasChoices("DEMO_RATE_LIMIT_PER_HOUR", "demo_rate_limit_per_hour"),
+    )
+    demo_public_scenes: str = Field(
+        default="",
+        validation_alias=AliasChoices("DEMO_PUBLIC_SCENES", "demo_public_scenes"),
+        description="Comma-separated scene ids allowed on GET /demo; empty = all registered",
+    )
     # Supabase: если DATABASE_URL на session pooler :5432 — переписать на :6543 (снимает EMAXCONNSESSION).
     supabase_prefer_transaction_pooler: bool = Field(
         default=False,
@@ -627,6 +641,10 @@ class Settings(BaseSettings):
 
     # --- Rate Limiting ---
     rate_limit_per_minute: int = 20
+    admin_rate_limit_per_minute: int = Field(
+        default=120,
+        validation_alias=AliasChoices("ADMIN_RATE_LIMIT_PER_MINUTE", "admin_rate_limit_per_minute"),
+    )
 
     # Тариф подписки (₸/мес) для грубой оценки окупаемости на дашборде; 0 — не считать.
     owner_subscription_monthly_kzt: int = Field(
@@ -791,6 +809,13 @@ class Settings(BaseSettings):
                     "Разрешено только потому, что включён ALLOW_INSECURE_PROD_SETTINGS=true."
                 )
         return self
+
+    def demo_public_scenes_list(self) -> list[str]:
+        """Allowed scene ids for GET /demo; empty string → no filter (all slugs)."""
+        raw = (self.demo_public_scenes or "").strip()
+        if not raw:
+            return []
+        return [part.strip() for part in raw.split(",") if part.strip()]
 
     @property
     def is_prod_like(self) -> bool:

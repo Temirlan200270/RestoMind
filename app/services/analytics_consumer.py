@@ -39,6 +39,11 @@ def _zero_event_summary() -> dict:
         "dialogs_count": 0,
         "recovered_kzt": 0.0,
         "focus_completed_count": 0,
+        "pricing_adjustments": 0,
+        "sla_violations": 0,
+        "healing_wa_sent": 0,
+        "draft_recovery_sent": 0,
+        "whatsapp_delivery_failed": 0,
         "source": "event_driven",
     }
 
@@ -50,6 +55,11 @@ async def _safe_daily_stats_mappings(db: "AsyncSession", sql, params: dict):
         return result.mappings()
     except SQLAlchemyError as exc:
         logger.warning("daily_org_stats read failed org=%s: %s", params.get("org_id"), exc)
+        # Postgres: failed statement aborts the whole transaction — must rollback before fallback SQL.
+        try:
+            await db.rollback()
+        except SQLAlchemyError:
+            logger.exception("rollback after daily_org_stats read failure failed")
         return None
 
 
@@ -69,6 +79,11 @@ HANDLED_EVENT_TYPES = frozenset({
     "operator.took_over",
     "shift.focus_completed",
     "order.draft_recovered",
+    "system.pricing_adjusted",
+    "system.sla_violated",
+    "system.healing_wa_sent",
+    "order.draft_recovery_sent",
+    "integration.whatsapp.failed",
 })
 
 _EVENT_COLUMN: dict[str, str] = {
@@ -85,6 +100,11 @@ _EVENT_COLUMN: dict[str, str] = {
     "ai.response.generated": "ai_messages_count",
     "ai.dialog.started": "dialogs_count",
     "operator.took_over": "operator_takeovers",
+    "system.pricing_adjusted": "pricing_adjustments",
+    "system.sla_violated": "sla_violations",
+    "system.healing_wa_sent": "healing_wa_sent",
+    "order.draft_recovery_sent": "draft_recovery_sent",
+    "integration.whatsapp.failed": "whatsapp_delivery_failed",
 }
 
 
@@ -207,7 +227,11 @@ async def get_event_stats(
             bookings_created, bookings_confirmed, bookings_cancelled,
             payments_completed, payments_failed, revenue_kzt,
             escalations, operator_takeovers,
-            ai_messages_count, dialogs_count, updated_at
+            ai_messages_count, dialogs_count,
+            recovered_kzt, focus_completed_count,
+            pricing_adjustments, sla_violations, healing_wa_sent,
+            draft_recovery_sent, whatsapp_delivery_failed,
+            updated_at
         FROM daily_org_stats
         WHERE organization_id = :org_id
           AND day >= CURRENT_DATE - :days
@@ -233,9 +257,67 @@ async def get_event_stats(
             "operator_takeovers": int(r["operator_takeovers"] or 0),
             "ai_messages_count": int(r["ai_messages_count"] or 0),
             "dialogs_count": int(r["dialogs_count"] or 0),
+            "pricing_adjustments": int(r.get("pricing_adjustments") or 0),
+            "sla_violations": int(r.get("sla_violations") or 0),
+            "healing_wa_sent": int(r.get("healing_wa_sent") or 0),
+            "draft_recovery_sent": int(r.get("draft_recovery_sent") or 0),
+            "whatsapp_delivery_failed": int(r.get("whatsapp_delivery_failed") or 0),
         }
         for r in rows
     ]
+
+
+def _sum_event_rows(rows: list[dict]) -> dict:
+    """Sum daily event rows into period totals."""
+    totals = _zero_event_summary()
+    for r in rows:
+        for key in (
+            "orders_created", "orders_confirmed", "orders_cancelled",
+            "bookings_created", "bookings_confirmed", "bookings_cancelled",
+            "payments_completed", "payments_failed", "escalations",
+            "operator_takeovers", "ai_messages_count", "dialogs_count",
+            "focus_completed_count", "pricing_adjustments", "sla_violations",
+            "healing_wa_sent", "draft_recovery_sent", "whatsapp_delivery_failed",
+        ):
+            totals[key] = int(totals.get(key, 0)) + int(r.get(key) or 0)
+        totals["revenue_kzt"] = float(totals.get("revenue_kzt", 0)) + float(r.get("revenue_kzt") or 0)
+        totals["recovered_kzt"] = float(totals.get("recovered_kzt", 0)) + float(r.get("recovered_kzt") or 0)
+    totals["source"] = "event_driven"
+    return totals
+
+
+async def get_cumulative_event_totals(db: "AsyncSession", org_id: int) -> dict | None:
+    """All-time totals from DailyOrgStats SUM; None if table unreadable or empty."""
+    sql = text("""
+        SELECT
+            COALESCE(SUM(orders_created), 0) AS orders_created,
+            COALESCE(SUM(orders_cancelled), 0) AS orders_cancelled,
+            COALESCE(SUM(orders_confirmed), 0) AS orders_confirmed,
+            COALESCE(SUM(revenue_kzt), 0) AS revenue_kzt,
+            COUNT(*) AS row_count
+        FROM daily_org_stats
+        WHERE organization_id = :org_id
+    """)
+    mappings = await _safe_daily_stats_mappings(db, sql, {"org_id": org_id})
+    if mappings is None:
+        return None
+    row = mappings.first()
+    if row is None or int(row["row_count"] or 0) <= 0:
+        return None
+    created = int(row["orders_created"] or 0)
+    cancelled = int(row["orders_cancelled"] or 0)
+    confirmed = int(row["orders_confirmed"] or 0)
+    revenue = float(row["revenue_kzt"] or 0)
+    if created <= 0 and confirmed <= 0 and revenue <= 0:
+        return None
+    return {
+        "orders_created": created,
+        "orders_cancelled": cancelled,
+        "orders_confirmed": confirmed,
+        "revenue_kzt": revenue,
+        "total_orders": max(0, created - cancelled),
+        "has_data": True,
+    }
 
 
 async def get_event_stats_for_range(
@@ -273,6 +355,7 @@ async def get_event_stats_for_range(
     return [
         {
             "date": str(r["day"]),
+            "orders_created": int(r["orders_created"] or 0),
             "orders_confirmed": int(r["orders_confirmed"] or 0),
             "orders_cancelled": int(r["orders_cancelled"] or 0),
             "revenue_kzt": float(r["revenue_kzt"] or 0),

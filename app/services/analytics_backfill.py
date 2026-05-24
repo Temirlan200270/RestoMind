@@ -14,7 +14,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.db.models import ChatLog, EscalationEvent, Order, OrderStatus
+from app.db.models import ChatLog, EscalationEvent, Order, OrderStatus, SystemEvent
 from app.services.tenant_scope import orders_tenant_clause
 
 logger = logging.getLogger(__name__)
@@ -74,6 +74,11 @@ async def backfill_daily_org_stats(
                 "escalations": 0,
                 "ai_messages_count": 0,
                 "dialogs_count": 0,
+                "pricing_adjustments": 0,
+                "sla_violations": 0,
+                "healing_wa_sent": 0,
+                "draft_recovery_sent": 0,
+                "whatsapp_delivery_failed": 0,
             }
         day_buckets[dk]["orders_created"] += 1
         s = str(status or "").lower()
@@ -102,7 +107,8 @@ async def backfill_daily_org_stats(
             day_buckets[dk] = {
                 "orders_created": 0, "orders_confirmed": 0, "orders_cancelled": 0,
                 "revenue_kzt": 0.0, "escalations": 0, "ai_messages_count": 0,
-                "dialogs_count": 0,
+                "dialogs_count": 0, "pricing_adjustments": 0, "sla_violations": 0,
+                "healing_wa_sent": 0, "draft_recovery_sent": 0, "whatsapp_delivery_failed": 0,
             }
         day_buckets[dk]["escalations"] += 1
 
@@ -126,7 +132,8 @@ async def backfill_daily_org_stats(
             day_buckets[dk] = {
                 "orders_created": 0, "orders_confirmed": 0, "orders_cancelled": 0,
                 "revenue_kzt": 0.0, "escalations": 0, "ai_messages_count": 0,
-                "dialogs_count": 0,
+                "dialogs_count": 0, "pricing_adjustments": 0, "sla_violations": 0,
+                "healing_wa_sent": 0, "draft_recovery_sent": 0, "whatsapp_delivery_failed": 0,
             }
         day_buckets[dk]["ai_messages_count"] += 1
 
@@ -152,9 +159,43 @@ async def backfill_daily_org_stats(
             day_buckets[dk] = {
                 "orders_created": 0, "orders_confirmed": 0, "orders_cancelled": 0,
                 "revenue_kzt": 0.0, "escalations": 0, "ai_messages_count": 0,
-                "dialogs_count": 0,
+                "dialogs_count": 0, "pricing_adjustments": 0, "sla_violations": 0,
+                "healing_wa_sent": 0, "draft_recovery_sent": 0, "whatsapp_delivery_failed": 0,
             }
         day_buckets[dk]["dialogs_count"] = int(cnt or 0)
+
+    _OPS_EVENT_COLUMNS = {
+        "system.pricing_adjusted": "pricing_adjustments",
+        "system.sla_violated": "sla_violations",
+        "system.healing_wa_sent": "healing_wa_sent",
+        "order.draft_recovery_sent": "draft_recovery_sent",
+        "integration.whatsapp.failed": "whatsapp_delivery_failed",
+    }
+    ops_rows = (await db.execute(
+        select(SystemEvent.event_type, SystemEvent.created_at).where(
+            SystemEvent.organization_id == org_id,
+            SystemEvent.event_type.in_(tuple(_OPS_EVENT_COLUMNS.keys())),
+            SystemEvent.created_at.isnot(None),
+            SystemEvent.created_at >= floor_sql,
+            SystemEvent.created_at <= now_sql,
+        )
+    )).all()
+    for event_type, created_at in ops_rows:
+        dt = created_at
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        dk = dt.astimezone(timezone.utc).strftime("%Y-%m-%d")
+        col = _OPS_EVENT_COLUMNS.get(str(event_type))
+        if not col:
+            continue
+        if dk not in day_buckets:
+            day_buckets[dk] = {
+                "orders_created": 0, "orders_confirmed": 0, "orders_cancelled": 0,
+                "revenue_kzt": 0.0, "escalations": 0, "ai_messages_count": 0,
+                "dialogs_count": 0, "pricing_adjustments": 0, "sla_violations": 0,
+                "healing_wa_sent": 0, "draft_recovery_sent": 0, "whatsapp_delivery_failed": 0,
+            }
+        day_buckets[dk][col] = int(day_buckets[dk].get(col, 0)) + 1
 
     if not day_buckets:
         return {"ok": True, "org_id": org_id, "days_updated": 0, "days_skipped": 0}
@@ -167,11 +208,15 @@ async def backfill_daily_org_stats(
             INSERT INTO daily_org_stats
                 (organization_id, day,
                  orders_created, orders_confirmed, orders_cancelled, revenue_kzt,
-                 escalations, ai_messages_count, dialogs_count)
+                 escalations, ai_messages_count, dialogs_count,
+                 pricing_adjustments, sla_violations, healing_wa_sent,
+                 draft_recovery_sent, whatsapp_delivery_failed)
             VALUES
                 (:org_id, :day,
                  :orders_created, :orders_confirmed, :orders_cancelled, :revenue_kzt,
-                 :escalations, :ai_messages_count, :dialogs_count)
+                 :escalations, :ai_messages_count, :dialogs_count,
+                 :pricing_adjustments, :sla_violations, :healing_wa_sent,
+                 :draft_recovery_sent, :whatsapp_delivery_failed)
             ON CONFLICT (organization_id, day)
             DO UPDATE SET
                 orders_created    = GREATEST(daily_org_stats.orders_created,    EXCLUDED.orders_created),
@@ -181,14 +226,21 @@ async def backfill_daily_org_stats(
                 escalations       = GREATEST(daily_org_stats.escalations,       EXCLUDED.escalations),
                 ai_messages_count = GREATEST(daily_org_stats.ai_messages_count, EXCLUDED.ai_messages_count),
                 dialogs_count     = GREATEST(daily_org_stats.dialogs_count,     EXCLUDED.dialogs_count),
+                pricing_adjustments = GREATEST(daily_org_stats.pricing_adjustments, EXCLUDED.pricing_adjustments),
+                sla_violations    = GREATEST(daily_org_stats.sla_violations,    EXCLUDED.sla_violations),
+                healing_wa_sent   = GREATEST(daily_org_stats.healing_wa_sent,   EXCLUDED.healing_wa_sent),
+                draft_recovery_sent = GREATEST(daily_org_stats.draft_recovery_sent, EXCLUDED.draft_recovery_sent),
+                whatsapp_delivery_failed = GREATEST(daily_org_stats.whatsapp_delivery_failed, EXCLUDED.whatsapp_delivery_failed),
                 updated_at        = CURRENT_TIMESTAMP
         """)
         await db.execute(sql, {
             "org_id": org_id,
             "day": dk,
-            **{k: bucket[k] for k in (
+            **{k: bucket.get(k, 0) for k in (
                 "orders_created", "orders_confirmed", "orders_cancelled",
                 "revenue_kzt", "escalations", "ai_messages_count", "dialogs_count",
+                "pricing_adjustments", "sla_violations", "healing_wa_sent",
+                "draft_recovery_sent", "whatsapp_delivery_failed",
             )},
         })
         updated += 1

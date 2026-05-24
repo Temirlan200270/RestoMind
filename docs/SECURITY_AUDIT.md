@@ -1,68 +1,56 @@
 # Multi-Tenant Security Audit
 
-Дата: 2026-05-13  
-Scope: изоляция данных по `organization_id` во всех сервисах и API.
+Дата: 2026-05-25 (обновлено)  
+Scope: изоляция данных по `organization_id` / `location_id` во всех сервисах и API.
 
 ---
 
 ## Гарантии изоляции (VERIFIED)
 
 ### API Layer
-- **139 мест** в `app/api/admin/` используют `admin_org_from_session(request)` для
-  извлечения `org_id` из cookie-сессии — оператор видит только свою организацию.
-- `require_admin_session_active()` проверяет: сессия активна, org активна, staff активен,
-  billing не приостановлен.
-- `StaffUser.tenant_owner_id` — сотрудники с ролью tenant_owner имеют доступ к
-  нескольким филиалам в рамках одного тенанта, но не к чужим тенантам.
+- Admin routes используют `admin_org_from_session(request)` + `require_admin_session_active`.
+- **Per-org rate limit:** `admin_org_rate_limit_middleware` — `rate:org:{id}` на POST/PATCH/PUT/DELETE `/api/admin/*` (кроме auth/ws).
+- **Admin audit:** `admin_action_audit_middleware` → `audit_log` + WS `os.audit`.
+- WebSocket: org-scoped Redis channel + `_ws_event_allowed_for_org`.
+- Shift endpoints: `location_id` + `allowed_location_ids_for_staff` ([`analytics.py`](../app/api/admin/analytics.py)).
 
-### Data Layer (критические таблицы)
+### Data Layer
 | Таблица | Изоляция |
 |---|---|
-| orders | `organization_id` обязателен, индексирован; `orders_tenant_clause()` |
-| chat_logs | `organization_id` обязателен |
-| menu_items | `organization_id` обязателен + уникальный ключ `(org_id, iiko_product_id)` |
-| escalation_events | `organization_id` обязателен |
-| operational_insights | `organization_id` обязателен |
-| ai_usage_logs | `organization_id` обязателен |
-| pipeline_latency_logs | `organization_id` обязателен (P4 sprint) |
-| business_recommendations | `organization_id` обязателен (P4 sprint) |
-| payment_transactions | `organization_id` обязателен |
-| organization_payment_configs | `organization_id` обязателен, CASCADE delete |
+| orders, chat_logs, bookings | `*_tenant_clause()` + location filters |
+| menu_items, knowledge | legacy `IS NULL` **только** `default_organization_id` |
+| system_events, audit_log | `organization_id` обязателен |
+
+### Tenant backfill (ops)
+- `GET /api/admin/intelligence/tenant-scope-gaps` — диагностика NULL org/location
+- `POST /api/admin/intelligence/tenant-scope-backfill` — backfill из users + default location
+- Сервис: [`app/services/tenant_backfill.py`](../app/services/tenant_backfill.py)
 
 ### Автоматические тесты
-`tests/test_multitenant_isolation.py` — 9 тестов, каждый создаёт 2 независимые
-организации и проверяет что данные не пересекаются:
-- `test_orders_isolated_by_org`
-- `test_chat_logs_isolated`
-- `test_menu_items_isolated`
-- `test_escalation_events_isolated`
-- `test_insights_isolated`
-- `test_ai_usage_isolated`
-- `test_pipeline_latency_isolated`
-- `test_recommendations_isolated`
-- `test_no_cross_org_escalation_via_phone`
+- [`tests/test_multitenant_isolation.py`](../tests/test_multitenant_isolation.py) — 9 базовых тестов
+- [`tests/test_tenant_hardening.py`](../tests/test_tenant_hardening.py) — Booking, SystemEvent, AIContextSnapshot, backfill, legacy clause
+- CI heuristic: [`scripts/check_tenant_scope.py`](../scripts/check_tenant_scope.py)
 
 ---
 
-## Известные ограничения (не критичные)
+## Известные ограничения
 
-1. **Legacy NULL organization_id** — исторически некоторые ChatLog/MenuItem могут иметь
-   `organization_id = NULL` (до мигращии мультитенантности). Обрабатываются через
-   `orders_tenant_clause()` с fallback на глобальный `default_organization_id`.
-   _Рекомендация:_ периодический запрос для поиска строк с NULL.
+1. **Legacy NULL organization_id** — fallback через `legacy_null_org_visible()` только для `DEFAULT_ORGANIZATION_ID`. Рекомендация: `POST /tenant-scope-backfill` на prod после миграции.
 
-2. **Аудит-лог админских действий** — текущая реализация не хранит кто и когда изменил
-   настройки (`OperationalInsight`, `BusinessRecommendation`, конфиги организации).
-   _Рекомендация:_ добавить `AdminAuditLog` модель в P5 спринте.
+2. **Location NULL** — до backfill строки с `location_id IS NULL` видны всем staff org. Backfill через tenant-scope-backfill.
 
-3. **Export endpoint** — отсутствует endpoint для экспорта данных клиентов. При добавлении
-   такого endpoint ОБЯЗАТЕЛЬНО проверять `organization_id` и логировать в AdminAuditLog.
+3. **DailyOrgStats** — org-level only; per-location KPI через SQL rollup (`rollup_location_event_stats`), не `daily_location_stats` table.
+
+4. **Postgres RLS** — не включён; изоляция на уровне приложения. Отдельный enterprise-эпик для Supabase RLS.
+
+5. **Export endpoint** — при добавлении обязателен org scope + audit log.
+
+6. **Global KnowledgeItem** (`organization_id IS NULL`) — видны только default org (не всем tenants).
 
 ---
 
-## Рекомендации для следующего спринта (P5)
+## Рекомендации (P5+)
 
-- [ ] `AdminAuditLog` модель: `(org_id, staff_id, action, resource, timestamp, ip)`
-- [ ] Middleware для автологирования всех `POST/PUT/PATCH/DELETE /api/admin/*`
-- [ ] Проверка NULL `organization_id` в существующих данных (скрипт диагностики)
-- [ ] Rate limiting по `org_id` (сейчас только глобальный rate limit)
+- [ ] Postgres RLS policies на `orders`, `chat_logs`, `users` (Supabase)
+- [ ] `daily_location_stats` materialized aggregates
+- [ ] Расширить `check_tenant_scope.py` до AST-анализа (не только heuristic)

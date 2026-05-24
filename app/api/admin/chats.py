@@ -193,6 +193,7 @@ async def list_chats_sidebar(
         return list(result.all())
 
     rows = await with_location_scope_fallback(
+        db=db,
         location_id=location_id,
         allowed_location_ids=allowed_location_ids,
         run=_load_chat_rows,
