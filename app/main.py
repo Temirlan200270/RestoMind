@@ -658,6 +658,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 await db.flush()
             await seed_demo_data(db, organization_id=int(demo_org.id))
             await db.commit()
+            from app.services.demo_login_cache import set_cached_demo_org_id
+
+            set_cached_demo_org_id(int(demo_org.id))
     except Exception as exc:
         logger.warning("Demo organization seed failed: %s", exc, exc_info=True)
 

@@ -6,7 +6,7 @@ import logging
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (
@@ -14,6 +14,7 @@ from app.db.models import (
     Booking,
     BusinessRecommendation,
     ChatLog,
+    DailyOrgStats,
     EscalationEvent,
     FailedTask,
     IntelligenceConversation,
@@ -217,6 +218,178 @@ def _set_demo_user_profile(user: User, index: int, now: datetime) -> None:
         user.ai_snoozed_until = now + timedelta(hours=4)
     if index == 8:
         user.marketing_opt_out = True
+
+
+async def _seed_demo_pitch_risks(
+    db: AsyncSession,
+    *,
+    organization_id: int,
+    demo_users: list[User],
+    demo_orders: list[Order],
+    now: datetime,
+) -> dict[str, int]:
+    """
+    Свежие риски для money queue после demo-pitch (Esc → осмотр демо-данных).
+    Сцена pitch — GET-only; здесь — «живая» очередь на реальном seed.
+    """
+    from app.services.demo_shift_scene import DEMO_RESCUE_AMOUNT_KZT
+
+    org_id = int(organization_id)
+    if not demo_users:
+        return {"pitch_risk_orders_added": 0, "pitch_risk_logs_added": 0, "pitch_risk_bookings_added": 0}
+
+    def u(i: int) -> User:
+        return demo_users[min(i, len(demo_users) - 1)]
+
+    stale_at = now - timedelta(minutes=45)
+    pitch_orders_added = 0
+    pitch_logs_added = 0
+    pitch_bookings_added = 0
+
+    for order in demo_orders:
+        if order.status != OrderStatus.DRAFT.value:
+            continue
+        items_json = order.items_json if isinstance(order.items_json, dict) else {}
+        order_meta = items_json.get("order_meta") if isinstance(items_json.get("order_meta"), dict) else {}
+        if str(order_meta.get("payment_method") or "") == "remote":
+            order.prepayment_status = "pending"
+
+    small_payload = _demo_order(
+        _line("Самса с бараниной", 2, 600),
+        order_type="pickup",
+        payment_method="cash",
+        pickup_time_note="не завершил оформление",
+    )
+    small_payload["total_price"] = float(DEMO_RESCUE_AMOUNT_KZT)
+    db.add(
+        Order(
+            organization_id=org_id,
+            user_id=int(u(8).id),
+            status=OrderStatus.DRAFT.value,
+            total_price=float(DEMO_RESCUE_AMOUNT_KZT),
+            items_json=small_payload,
+            updated_at=stale_at,
+            created_at=now - timedelta(minutes=50),
+        ),
+    )
+    pitch_orders_added += 1
+
+    pitch_chat_specs: list[tuple[int, str, int]] = [
+        (6, "Вы здесь? Жду ответ уже несколько минут", 8),
+        (7, "Можно подтвердить бронь на сегодня?", 5),
+        (8, "Заказ ещё актуален?", 4),
+    ]
+    for user_idx, content, minutes_ago in pitch_chat_specs:
+        db.add(
+            ChatLog(
+                organization_id=org_id,
+                user_id=int(u(user_idx).id),
+                role="user",
+                content=content,
+                created_at=now - timedelta(minutes=minutes_ago),
+            ),
+        )
+        pitch_logs_added += 1
+
+    today = date.today()
+    overdue_dt = now - timedelta(minutes=40)
+    db.add(
+        Booking(
+            organization_id=org_id,
+            user_id=int(u(7).id),
+            booking_date=overdue_dt.date(),
+            booking_time=overdue_dt.time().replace(second=0, microsecond=0),
+            guests=3,
+            hall="hall_1",
+            comment="Ждёт подтверждения — скоро придут",
+            status="pending",
+        ),
+    )
+    pitch_bookings_added += 1
+
+    slot_dt = now + timedelta(minutes=90)
+    if slot_dt.date() == today:
+        risk_date = today
+        risk_time = slot_dt.time().replace(second=0, microsecond=0)
+    else:
+        risk_date = today + timedelta(days=1)
+        risk_time = time(12, 30)
+    db.add(
+        Booking(
+            organization_id=org_id,
+            user_id=int(u(1).id),
+            booking_date=risk_date,
+            booking_time=risk_time,
+            guests=2,
+            hall="hall_2",
+            comment="Подтвердите, пожалуйста",
+            status="pending",
+        ),
+    )
+    pitch_bookings_added += 1
+
+    await db.flush()
+
+    stats_row = await db.scalar(
+        select(DailyOrgStats).where(
+            DailyOrgStats.organization_id == org_id,
+            DailyOrgStats.day == today,
+        ),
+    )
+    recovered = float(DEMO_RESCUE_AMOUNT_KZT)
+    if stats_row:
+        stats_row.recovered_kzt = recovered
+        stats_row.focus_completed_count = max(int(stats_row.focus_completed_count or 0), 1)
+    else:
+        db.add(
+            DailyOrgStats(
+                organization_id=org_id,
+                day=today,
+                recovered_kzt=recovered,
+                focus_completed_count=1,
+                orders_confirmed=4,
+                orders_created=6,
+                revenue_kzt=45000,
+            ),
+        )
+
+    return {
+        "pitch_risk_orders_added": pitch_orders_added,
+        "pitch_risk_logs_added": pitch_logs_added,
+        "pitch_risk_bookings_added": pitch_bookings_added,
+    }
+
+
+async def _finalize_demo_pitch_draft_timestamps(
+    db: AsyncSession,
+    *,
+    organization_id: int,
+    demo_orders: list[Order],
+    now: datetime,
+) -> None:
+    """После operational context: ORM onupdate иначе затирает stale_at на черновиках."""
+    from app.core.config import settings
+
+    stale_at = now - timedelta(minutes=45)
+    if settings.db_mode == "sqlite":
+        stale_sql = stale_at.replace(tzinfo=None)
+    else:
+        stale_sql = stale_at
+    draft_ids = [
+        int(order.id)
+        for order in demo_orders
+        if order.status == OrderStatus.DRAFT.value and order.id is not None
+    ]
+    if not draft_ids:
+        return
+    await db.execute(
+        update(Order)
+        .where(
+            Order.id.in_(draft_ids),
+            Order.organization_id == int(organization_id),
+        )
+        .values(updated_at=stale_sql),
+    )
 
 
 async def _seed_demo_operational_context(
@@ -668,6 +841,17 @@ async def seed_demo_data(db: AsyncSession, *, organization_id: int) -> dict[str,
         )
         created_logs += 1
 
+    pitch_stats = await _seed_demo_pitch_risks(
+        db,
+        organization_id=org_id,
+        demo_users=demo_users,
+        demo_orders=created_order_rows,
+        now=now,
+    )
+    created_orders += int(pitch_stats.get("pitch_risk_orders_added") or 0)
+    created_logs += int(pitch_stats.get("pitch_risk_logs_added") or 0)
+    created_bookings += int(pitch_stats.get("pitch_risk_bookings_added") or 0)
+
     extra_stats = await _seed_demo_operational_context(
         db,
         organization_id=org_id,
@@ -675,6 +859,14 @@ async def seed_demo_data(db: AsyncSession, *, organization_id: int) -> dict[str,
         demo_orders=created_order_rows,
         now=now,
     )
+
+    await _finalize_demo_pitch_draft_timestamps(
+        db,
+        organization_id=org_id,
+        demo_orders=created_order_rows,
+        now=now,
+    )
+    await db.flush()
 
     await db.commit()
     logger.info(
@@ -688,6 +880,7 @@ async def seed_demo_data(db: AsyncSession, *, organization_id: int) -> dict[str,
         "bookings_added": created_bookings,
         "chat_logs_added": created_logs,
         "menu_items_added": 0,
+        **pitch_stats,
         **extra_stats,
     }
 

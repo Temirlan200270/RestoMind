@@ -6,24 +6,40 @@
             <div x-show="currentTab === 'shift'" x-cloak class="fade-in space-y-5 max-w-7xl"
                 x-effect="shiftState?.focus?.id; mobileActiveScreen = 'focus'">
 
-                <!-- G10.8 Demo scene banner -->
-                <div x-show="demoSceneActive" x-cloak
+                <!-- G10.8 Demo scene banner (hidden during immersive pitch) -->
+                <div x-show="demoSceneActive && !demoScenePitchImmersive()" x-cloak
                     class="rm-demo-scene-banner rounded-2xl px-4 py-3 flex flex-wrap items-center justify-between gap-3 ring-1 ring-emerald-200/80 bg-emerald-50/95"
                     role="status" aria-live="polite">
                     <div class="min-w-0">
-                        <div class="text-[10px] font-bold uppercase tracking-wide text-emerald-800">Демо · 30 секунд</div>
+                        <div class="text-[10px] font-bold uppercase tracking-wide text-emerald-800">Демо-показ</div>
                         <div class="text-sm font-semibold text-emerald-950 mt-0.5" x-text="demoSceneNarrativeLine()"></div>
                     </div>
                     <div class="flex flex-wrap gap-2 shrink-0">
-                        <button type="button" @click="startDemoShiftScene(demoSceneId || 'money_rescue_30s')"
+                        <button type="button" @click="replayDemoPitchScene()"
                             class="text-xs font-semibold px-3 py-2 rounded-lg border border-emerald-300 bg-white/80 hover:bg-white min-h-[40px]">
                             ↻ Сначала
                         </button>
                         <button type="button" @click="stopDemoShiftScene()"
                             class="text-xs font-semibold px-3 py-2 rounded-lg border border-emerald-300 bg-white/80 hover:bg-white min-h-[40px]">
-                            Выход · Esc
+                            Осмотреть демо · Esc
                         </button>
                     </div>
+                </div>
+
+                <!-- G10.8.1 Counterfactual tension (pitch only) -->
+                <div x-show="demoSceneActive && demoSceneCounterfactualLine() && !shiftLiveImpactVisible() && !demoSceneResolveVisible()" x-cloak
+                    class="ds-demo-counterfactual-banner rounded-2xl px-5 py-4 ring-1 ring-red-200/90 bg-red-50/95"
+                    role="status" aria-live="polite">
+                    <div class="text-[10px] font-bold uppercase tracking-wider text-red-800/90 mb-1">Без системы</div>
+                    <div class="text-sm font-semibold text-red-950 leading-snug" x-text="demoSceneCounterfactualLine()"></div>
+                    <div class="text-xs text-red-800/85 mt-1 tabular-nums" x-show="demoSceneUrgencyLine()" x-text="demoSceneUrgencyLine()"></div>
+                </div>
+
+                <!-- G10.8.1 Auto-action confirmation (pitch action phase) -->
+                <div x-show="demoSceneActive && demoSceneActionLine && demoScenePhase === 'action'" x-cloak
+                    class="ds-demo-action-confirm rounded-2xl px-5 py-4 ring-1 ring-emerald-300 bg-emerald-50 text-center"
+                    role="status" aria-live="assertive">
+                    <div class="text-base font-bold text-emerald-950" x-text="demoSceneActionLine"></div>
                 </div>
 
                 <div class="flex flex-wrap items-end justify-between gap-4" data-demo-hide>
@@ -40,7 +56,7 @@
                 </div>
 
                 <!-- Predictive tension — before action (probability → inevitability) -->
-                <div x-show="shiftPredictiveTensionVisible() && !shiftLiveImpactVisible()"
+                <div x-show="shiftPredictiveTensionVisible() && !shiftLiveImpactVisible() && !demoSceneResolveVisible()"
                     x-transition:enter="transition ease-out duration-500"
                     x-transition:enter-start="opacity-0 translate-y-1"
                     x-transition:enter-end="opacity-100 translate-y-0"
@@ -66,6 +82,9 @@
                     ]"
                     role="status"
                     aria-live="assertive">
+                    <div x-show="shiftLiveImpactLossFlashVisible()"
+                        class="ds-live-impact-loss-flash tabular-nums"
+                        x-text="shiftLiveImpactLossFlashLine()"></div>
                     <div x-show="shiftLiveImpactPrefixVisible()"
                         class="ds-live-impact-prefix"
                         x-text="shiftLiveImpactPrefixLine()"></div>
@@ -81,6 +100,28 @@
                         x-text="shiftLiveImpactReasonLine()"></div>
                 </div>
 
+                <!-- G10.8.1 Closing frame (25–30s) -->
+                <div x-show="demoSceneResolveVisible()" x-cloak
+                    class="ds-demo-resolve-card rounded-3xl px-6 py-10 sm:px-10 sm:py-12 text-center ring-1 ring-emerald-200/90 bg-gradient-to-b from-emerald-50 to-white"
+                    role="status" aria-live="polite">
+                    <div class="text-[10px] font-bold uppercase tracking-widest text-emerald-800/80 mb-3">Итог</div>
+                    <h2 class="text-xl sm:text-2xl font-black text-emerald-950 leading-tight max-w-lg mx-auto"
+                        x-text="demoSceneClosingHeadline()"></h2>
+                    <p class="text-sm sm:text-base text-emerald-900/85 mt-4 max-w-md mx-auto font-medium"
+                        x-text="demoSceneCounterfactualSummary()"></p>
+                    <p class="text-xs text-slate-600 mt-5" x-text="demoSceneClosingStat()"></p>
+                    <div class="mt-8 flex flex-wrap items-center justify-center gap-2">
+                        <button type="button" @click="stopDemoShiftScene()"
+                            class="ds-btn ds-btn-primary ds-btn-md min-h-[44px]">
+                            Осмотреть демо · Esc
+                        </button>
+                        <button type="button" @click="replayDemoPitchScene()"
+                            class="ds-btn ds-btn-secondary ds-btn-md min-h-[44px]">
+                            ↻ Повторить
+                        </button>
+                    </div>
+                </div>
+
                 <div x-show="shiftStateLoading && !shiftState" class="h-28 rounded-2xl bg-slate-100 animate-pulse"></div>
 
                 <template x-if="shiftStateDegraded && shiftState">
@@ -91,7 +132,7 @@
                 </template>
 
                 <template x-if="shiftState && !shiftStateLoading">
-                    <div class="space-y-5" :class="shiftSceneAttentionClass()">
+                    <div class="space-y-5" :class="shiftSceneAttentionClass()" x-show="!demoSceneResolveVisible()">
                         <!-- Metrics strip (hidden in calm empty — operator sees CTA instead) -->
                         <div class="grid grid-cols-2 lg:grid-cols-5 gap-3 ds-shift-metrics-dim transition-all duration-300"
                             data-demo-hide
@@ -149,7 +190,7 @@
                         </template>
 
                         <!-- S5 Emergency -->
-                        <template x-if="shiftState.state === 'S5'">
+                        <template x-if="shiftState.state === 'S5' && !demoSceneActive">
                             {% call card(padding_class='p-6', extra_class='!border-red-600 !bg-red-950 text-white') %}
                                 <h3 class="text-lg font-black uppercase tracking-wide">Система перегружена</h3>
                                 <p class="text-sm text-red-100 mt-2">Слишком много рисков одновременно. Действуйте по одному пункту.</p>
@@ -157,35 +198,35 @@
                         </template>
 
                         <!-- S1 Critical -->
-                        <template x-if="shiftState.state === 'S1'">
+                        <template x-if="shiftState.state === 'S1' && !demoSceneActive">
                             {% call card(padding_class='p-5', extra_class='!border-red-500 !bg-red-50/90') %}
                                 <p class="text-xs font-bold uppercase text-red-700">Критично — деньги теряются сейчас</p>
                             {% endcall %}
                         </template>
 
                         <!-- S4 Recovery -->
-                        <template x-if="shiftState.state === 'S4'">
+                        <template x-if="shiftState.state === 'S4' && !demoSceneActive">
                             {% call card(padding_class='p-5', extra_class='!border-amber-300 !bg-amber-50/80') %}
                                 <p class="text-xs font-bold uppercase text-amber-900">Режим возврата — черновики и оплаты</p>
                             {% endcall %}
                         </template>
 
                         <!-- S2 Working -->
-                        <template x-if="shiftState.state === 'S2'">
+                        <template x-if="shiftState.state === 'S2' && !demoSceneActive">
                             {% call card(padding_class='p-5', extra_class='!border-violet-200 !bg-violet-50/60') %}
                                 <p class="text-xs font-bold uppercase text-violet-900">Рабочий режим — обрабатывайте очередь</p>
                             {% endcall %}
                         </template>
 
                         <!-- S3 Calm (detail banner only when not using calm-empty CTA) -->
-                        <template x-if="shiftState.state === 'S3' && !shiftIsCalmEmpty()">
+                        <template x-if="shiftState.state === 'S3' && !shiftIsCalmEmpty() && !demoSceneActive">
                             {% call card(padding_class='p-5', extra_class='!border-emerald-200 !bg-emerald-50/60') %}
                                 <p class="text-xs font-bold uppercase text-emerald-900">Смена стабильна</p>
                             {% endcall %}
                         </template>
 
                         <!-- S0 Idle (detail banner only when not using calm-empty CTA) -->
-                        <template x-if="shiftState.state === 'S0' && !shiftIsCalmEmpty()">
+                        <template x-if="shiftState.state === 'S0' && !shiftIsCalmEmpty() && !demoSceneActive">
                             {% call card(padding_class='p-8 text-center', extra_class='!border-dashed !border-slate-200') %}
                                 <div class="text-4xl mb-2">💚</div>
                                 <p class="font-semibold text-slate-800">Сейчас спокойно</p>

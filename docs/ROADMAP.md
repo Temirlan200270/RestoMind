@@ -195,11 +195,12 @@
 
 ### G10.8 — Demo Scene (30s money rescue autoplay)
 
-> **Статус:** ✅ scripted сценка «потеря → спасение → деньги» для pitch/onboarding.
+> **Статус:** ✅ scripted сценка «потеря → спасение → деньги» + **G10.8.1 counterfactual pitch**.
 
-- [x] **Backend** — `demo_shift_scene.py`: фазы `hook|tension|action|impact|next`, fixed narrative; `GET /demo/shift-scenes`, `GET /demo/shift-scene/{id}/state?phase=`.
-- [x] **Autoplay UI** — кнопка «▶ 30 сек — спасение денег» на login; fullscreen shift (`rm-demo-scene`); auto-complete + golden flow без POST (demo read-only).
-- [x] **Tests** — `test_demo_shift_scene.py`, `test_demo_shift_scene_ui.py`.
+- [x] **Backend** — `demo_shift_scene.py`: фазы `hook|tension|action|impact|next|resolve`, fixed narrative; `GET /demo/shift-scenes`, `GET /demo/shift-scene/{id}/state?phase=`.
+- [x] **G10.8.1 Counterfactual layer** — `loss_would_be_kzt`, `counterfactual_line`, `urgency_sec`, auto-action copy; live impact flash `−1200 → +1200 спасено`; closing frame 25–30s.
+- [x] **Autoplay UI** — единая кнопка «Посмотреть демо» → pitch; immersive shift (`pitch_immersive`, без кнопок/баннеров S2); live wait timer + urgency countdown; success tick на impact.
+- [x] **Tests** — `test_demo_shift_scene.py`, `test_demo_shift_scene_ui.py`, `test_demo_pitch_seed.py`.
 
 - [x] **OS Decision Feed UI:** «Лента решений ОС» в `aiCenterTab=os` ([`_tab_ai_center.html`](app/templates/screens/_tab_ai_center.html)), `loadAuditLog()`, WS `os.audit`, блок «Живая ОС» (`dashLiveFeed`) на дашборде, refresh по `order.*` / `payment.*` / `booking.*` в `handleWsEvent`. UI-тексты — язык оператора («данные ОС», не dev-жаргон).
 - [x] **Websocket audit push:** [`audit_consumer.py`](app/services/audit_consumer.py) публикует `os.audit` с `org_id` после записи в `audit_log`.

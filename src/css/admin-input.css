@@ -1059,3 +1059,37 @@ aside.bg-brand-900 nav.admin-sidebar-scroll::-webkit-scrollbar-thumb:hover {
 .admin-root.rm-demo-scene .rm-demo-scene-banner {
     @apply sticky top-0 z-20;
 }
+
+/* G10.8.1 — counterfactual pitch layer */
+.ds-demo-counterfactual-banner {
+    @apply animate-pulse;
+    animation-duration: 2.4s;
+}
+.ds-demo-action-confirm {
+    @apply shadow-lg shadow-emerald-200/60;
+    animation: ds-demo-action-pop 0.35s ease-out;
+}
+@keyframes ds-demo-action-pop {
+    0% { opacity: 0; transform: translateY(6px) scale(0.98); }
+    100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+.ds-live-impact-loss-flash {
+    @apply text-lg font-black text-red-700 mb-1;
+    animation: ds-demo-loss-flash 0.3s ease-out;
+}
+@keyframes ds-demo-loss-flash {
+    0% { opacity: 0; transform: scale(1.04); }
+    50% { opacity: 1; }
+    100% { opacity: 0.35; transform: scale(1); }
+}
+.ds-demo-resolve-card {
+    @apply max-w-2xl mx-auto;
+    animation: ds-demo-resolve-in 0.5s ease-out;
+}
+@keyframes ds-demo-resolve-in {
+    0% { opacity: 0; transform: translateY(12px); }
+    100% { opacity: 1; transform: translateY(0); }
+}
+.admin-root.rm-demo-scene .ds-demo-resolve-card {
+    @apply relative z-10;
+}

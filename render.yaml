@@ -26,13 +26,17 @@ services:
         value: "false"
       - key: DB_MODE
         value: postgres
-      # Supabase session pooler (:5432) — ~15 clients на весь проект; 1 conn на процесс.
+      # Supabase session pooler (:5432) — ~15 clients на весь проект.
+      # SUPABASE_PREFER_TRANSACTION_POOLER=true переписывает :5432 → :6543 (рекомендуется на Render).
+      - key: SUPABASE_PREFER_TRANSACTION_POOLER
+        value: "true"
       - key: DB_POOL_SIZE
         value: "1"
       - key: DB_MAX_OVERFLOW
         value: "0"
-      - key: RUN_BOOT_MIGRATIONS
-        value: "false"
+      # Опционально: demo-login без SELECT (заполнить id demo-организации после первого деплоя)
+      # - key: DEMO_ORGANIZATION_ID
+      #   sync: false
       - key: REDIS_ENABLED
         value: "false"
       - key: REDIS_MEMORY_ONLY

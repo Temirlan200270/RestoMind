@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 
 @dataclass(frozen=True)
@@ -34,6 +34,28 @@ def is_supabase_transaction_pooler(database_url: str) -> bool:
     return "pooler.supabase.com" in host and port == 6543
 
 
+def rewrite_supabase_session_to_transaction_pooler(database_url: str) -> str:
+    """
+    Session pooler (:5432) — ~15 clients на весь проект Supabase.
+    Transaction pooler (:6543) — сотни клиентов; нужен statement_cache_size=0 (см. ssl_context).
+    """
+    if not is_supabase_session_pooler(database_url):
+        return database_url
+    parsed = urlparse(database_url)
+    if parsed.hostname is None:
+        return database_url
+    auth = ""
+    if parsed.username:
+        auth = parsed.username
+        if parsed.password:
+            auth += f":{parsed.password}"
+        auth += "@"
+    netloc = f"{auth}{parsed.hostname}:6543"
+    return urlunparse(
+        (parsed.scheme, netloc, parsed.path, parsed.params, parsed.query, parsed.fragment)
+    )
+
+
 def resolve_postgres_pool_settings(
     database_url: str,
     *,
@@ -47,26 +69,21 @@ def resolve_postgres_pool_settings(
 
     pool_size=0 и max_overflow=-1 — авто по DSN (Supabase session → малый пул).
     """
-    session_pooler = is_supabase_session_pooler(database_url)
-    transaction_pooler = is_supabase_transaction_pooler(database_url)
-
-    if session_pooler:
-        # Supabase session pooler has a very small project-wide client limit.
-        # Treat env overrides as upper bounds here so stale Render values cannot
-        # accidentally exhaust all sessions during deploy/startup overlap.
-        resolved_size = 1
-    elif pool_size > 0:
+    if pool_size > 0:
         resolved_size = pool_size
-    elif transaction_pooler:
+    elif is_supabase_session_pooler(database_url):
+        # Web + ARQ worker + deploy overlap: 1 conn/process on session pooler (~15 project-wide).
+        resolved_size = 1
+    elif is_supabase_transaction_pooler(database_url):
         resolved_size = 8
     else:
         resolved_size = 10
 
-    if session_pooler:
-        resolved_overflow = 0
-    elif max_overflow >= 0:
+    if max_overflow >= 0:
         resolved_overflow = max_overflow
-    elif transaction_pooler:
+    elif is_supabase_session_pooler(database_url):
+        resolved_overflow = 0
+    elif is_supabase_transaction_pooler(database_url):
         resolved_overflow = 4
     else:
         resolved_overflow = 5

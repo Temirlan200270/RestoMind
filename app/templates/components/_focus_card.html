@@ -33,16 +33,16 @@
             <span class="text-xs font-bold uppercase"
                 :class="focusCardSemanticsClass() === 'ds-status-danger' ? 'text-red-700' : (focusCardSemanticsClass() === 'ds-status-warn' ? 'text-amber-800' : 'text-violet-700')"
                 x-text="focusCardView()?.kind_label"></span>
-            <span x-show="(focusCardView()?.wait_minutes || 0) > 0"
+            <span x-show="(demoSceneActive ? demoSceneLiveWaitMinutes() : (focusCardView()?.wait_minutes || 0)) > 0"
                 class="text-xs tabular-nums text-slate-500"
-                x-text="focusCardView().wait_minutes + ' мин'"></span>
+                x-text="(demoSceneActive ? demoSceneLiveWaitMinutes() : (focusCardView()?.wait_minutes || 0)) + ' мин'"></span>
             <span x-show="(focusCardView()?.risk_kzt || 0) > 0"
                 class="text-lg font-black tabular-nums text-red-700"
                 x-text="fmt.money(focusCardView().risk_kzt)"></span>
         </div>
         <div class="text-lg font-bold text-slate-900" x-text="focusCardView()?.title"></div>
         <p class="text-sm text-slate-600 mt-1" x-text="focusCardView()?.subtitle"></p>
-        <p x-show="focusCardView()?.why_this_card"
+        <p x-show="focusCardView()?.why_this_card && !demoScenePitchImmersive()"
             class="text-xs text-slate-500 mt-2 flex items-start gap-1.5">
             <span class="shrink-0 font-bold text-violet-600" aria-hidden="true">→</span>
             <span>
@@ -52,13 +52,13 @@
         </p>
         <div class="flex flex-wrap items-center gap-2 mt-5">
             <button type="button"
-                x-show="focusCardView()?.compressed_actions?.primary"
+                x-show="!demoScenePitchImmersive() && focusCardView()?.compressed_actions?.primary"
                 @click="runShiftCompressedAction(focusCardView()?.compressed_actions?.primary)"
                 :disabled="!!shiftActionLoading"
                 class="ds-btn ds-btn-primary ds-btn-md min-h-[44px] disabled:opacity-50"
                 x-text="shiftActionLoading ? '…' : (focusCardView()?.compressed_actions?.primary?.label || 'Готово')"></button>
             <button type="button"
-                x-show="focusCardView()?.compressed_actions?.secondary"
+                x-show="!demoScenePitchImmersive() && focusCardView()?.compressed_actions?.secondary"
                 @click="runShiftCompressedAction(focusCardView()?.compressed_actions?.secondary)"
                 :disabled="shiftActionLoading === 'skip'"
                 class="ds-btn ds-btn-secondary ds-btn-md min-h-[44px] disabled:opacity-50"
@@ -70,7 +70,7 @@
                 Контекст
             </button>
             <button type="button"
-                x-show="focusCardView()?.compressed_actions?.tertiary && !focusCardHasOwnershipConflict()"
+                x-show="!demoScenePitchImmersive() && focusCardView()?.compressed_actions?.tertiary && !focusCardHasOwnershipConflict()"
                 @click="runShiftCompressedAction(focusCardView()?.compressed_actions?.tertiary)"
                 :disabled="shiftActionLoading === 'next'"
                 class="text-sm font-semibold text-slate-500 hover:text-slate-800 px-2 min-h-[44px] disabled:opacity-50"

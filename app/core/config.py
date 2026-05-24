@@ -588,6 +588,20 @@ class Settings(BaseSettings):
         default=1,
         validation_alias=AliasChoices("DEFAULT_ORGANIZATION_ID", "default_organization_id"),
     )
+    # Demo-login fast path: без SELECT organizations при каждом POST /demo-login.
+    demo_organization_id: int = Field(
+        default=0,
+        ge=0,
+        validation_alias=AliasChoices("DEMO_ORGANIZATION_ID", "demo_organization_id"),
+    )
+    # Supabase: если DATABASE_URL на session pooler :5432 — переписать на :6543 (снимает EMAXCONNSESSION).
+    supabase_prefer_transaction_pooler: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "SUPABASE_PREFER_TRANSACTION_POOLER",
+            "supabase_prefer_transaction_pooler",
+        ),
+    )
     # Версия для отображения в админке (можно переопределить при деплое)
     app_version: str = Field(
         default="0.1.0",
@@ -793,6 +807,20 @@ class Settings(BaseSettings):
         raw = f"{self.app_name}:{self.admin_username}:{self.admin_password}:restomind-session"
         return hashlib.sha256(raw.encode()).hexdigest()
 
+    def _maybe_rewrite_supabase_pooler(self, url: str) -> str:
+        if not self.supabase_prefer_transaction_pooler:
+            return url
+        from app.db.pool_settings import rewrite_supabase_session_to_transaction_pooler
+
+        rewritten = rewrite_supabase_session_to_transaction_pooler(url)
+        if rewritten != url:
+            import logging
+
+            logging.getLogger(__name__).info(
+                "Supabase session pooler :5432 → transaction pooler :6543 (SUPABASE_PREFER_TRANSACTION_POOLER)"
+            )
+        return rewritten
+
     @property
     def database_url(self) -> str:
         """DSN для подключения к БД — SQLite или PostgreSQL в зависимости от режима."""
@@ -820,11 +848,11 @@ class Settings(BaseSettings):
             # Render и др.: postgresql:// или postgres://
             if raw.startswith("postgres://"):
                 rest = raw[len("postgres://") :]
-                return f"postgresql+asyncpg://{rest}"
-            if raw.startswith("postgresql://") and not raw.startswith("postgresql+asyncpg"):
+                raw = f"postgresql+asyncpg://{rest}"
+            elif raw.startswith("postgresql://") and not raw.startswith("postgresql+asyncpg"):
                 rest = raw[len("postgresql://") :]
-                return f"postgresql+asyncpg://{rest}"
-            return raw
+                raw = f"postgresql+asyncpg://{rest}"
+            return self._maybe_rewrite_supabase_pooler(raw)
         if self.db_mode == "postgres":
             return (
                 f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}"

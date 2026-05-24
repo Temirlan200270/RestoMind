@@ -558,7 +558,8 @@ const DEMO_SHIFT_SCENE_PHASES = Object.freeze({
         { id: 'hook', delay_ms: 0 },
         { id: 'tension', delay_ms: 5000 },
         { id: 'action', delay_ms: 10000, auto_complete: true },
-        { id: 'next', delay_ms: 25000 },
+        { id: 'next', delay_ms: 20000 },
+        { id: 'resolve', delay_ms: 25000 },
     ]),
 });
 
@@ -620,6 +621,19 @@ function adminRenderLiveImpactNarrative(liveImpact) {
 
 function adminLiveImpactMoneyLabel(liveImpact) {
     return adminLiveImpactMoneyShort(liveImpact);
+}
+
+function adminLiveImpactLossFlashLine(liveImpact) {
+    if (!liveImpact) return '';
+    if (liveImpact.loss_flash_line) return String(liveImpact.loss_flash_line).trim();
+    const loss = Number(liveImpact.loss_would_be_kzt ?? 0);
+    if (loss > 0) return `−${Math.round(loss).toLocaleString('ru-RU')} ₸ (риск)`;
+    return '';
+}
+
+function adminDemoCounterfactual(data) {
+    const cf = data?.demo_scene?.counterfactual;
+    return cf && typeof cf === 'object' ? cf : {};
 }
 
 function adminLiveImpactReasonOnly(liveImpact) {
@@ -1202,6 +1216,13 @@ function adminMixinState() {
         _pendingDemoSceneId: '',
         _demoSceneTimers: [],
         _demoSceneInternalLoad: false,
+        _demoSceneWaitBaseMin: 0,
+        _demoSceneWaitStartedAt: 0,
+        _demoSceneWaitTick: 0,
+        _demoSceneWaitTimer: null,
+        _demoSceneUrgencyRemaining: 0,
+        _demoSceneUrgencyTimer: null,
+        demoSceneActionLine: '',
         _shiftLiveImpactTimer: null,
         /** G10.6 choreography: idle | exiting | impact | entering */
         shiftChoreoPhase: 'idle',
@@ -4476,14 +4497,10 @@ function adminMixinAuthKnowledge() {
         },
 
         async submitDemoLogin() {
-            return this.submitDemoLoginWithScene('');
-        },
-
-        async submitDemoLoginWithScene(sceneId = DEMO_SHIFT_SCENE_DEFAULT) {
             this.loginError = '';
             this.auth401AlertShown = false;
             this.loginLoading = true;
-            if (sceneId) this._pendingDemoSceneId = String(sceneId);
+            this._pendingDemoSceneId = DEMO_SHIFT_SCENE_DEFAULT;
             try {
                 const res = await this.apiFetch('/api/admin/auth/demo-login', {
                     method: 'POST',
@@ -4502,35 +4519,28 @@ function adminMixinAuthKnowledge() {
                 this.staffRole = String(data.staff_role || 'operator').toLowerCase();
                 this.isSuperadmin = !!data.is_superadmin;
                 this._ensureAdminHashListener();
-                if (this._pendingDemoSceneId) {
-                    this.currentTab = 'shift';
-                    if (typeof this._pushAdminHash === 'function') this._pushAdminHash();
-                } else {
-                    const parsedLogin = adminParseLocationHash();
-                    if (!parsedLogin.tab) {
-                        await this.applyRoleDefaultLanding(null);
-                    } else {
-                        this._applyParsedHash(parsedLogin);
-                        this._bootstrapAdminMode({ tabFromHash: this.currentTab });
-                    }
-                }
+                this.currentTab = 'shift';
+                if (typeof this._pushAdminHash === 'function') this._pushAdminHash();
                 this._installAdminHashWatch();
                 this.connectWebSocket();
                 await this._afterAuthBootstrapLoads();
                 await this._consumePendingHashChatPhone();
                 await this._afterAuthTabBootstrap();
-                if (this._pendingDemoSceneId) {
-                    const pending = this._pendingDemoSceneId;
-                    this._pendingDemoSceneId = '';
-                    await this.startDemoShiftScene(pending);
-                }
-                this.$nextTick(() => this.maybeStartP15CoachTour());
+                const sceneId = this._pendingDemoSceneId || DEMO_SHIFT_SCENE_DEFAULT;
+                this._pendingDemoSceneId = '';
+                await this.startDemoShiftScene(sceneId);
             } catch {
                 this._pendingDemoSceneId = '';
                 this.loginError = 'Не удалось связаться с сервером';
             } finally {
                 this.loginLoading = false;
             }
+        },
+
+        /** Перезапуск pitch-сценки из баннера на вкладке «Смена» (demo session). */
+        replayDemoPitchScene() {
+            if (!this.isDemoSession) return;
+            void this.startDemoShiftScene(this.demoSceneId || DEMO_SHIFT_SCENE_DEFAULT);
         },
 
         async loadOrgProfile() {
@@ -7334,6 +7344,15 @@ function adminMixinShiftStagedNav() {
             return adminLiveImpactReasonOnly(this.shiftLiveImpactPayload());
         },
 
+        shiftLiveImpactLossFlashLine() {
+            const impact = this.shiftChoreoImpact || this.shiftLiveImpactPayload();
+            return adminLiveImpactLossFlashLine(impact);
+        },
+
+        shiftLiveImpactLossFlashVisible() {
+            return this.shiftImpactRevealPhase === 'loss' && !!this.shiftLiveImpactLossFlashLine();
+        },
+
         shiftLiveImpactIsCompressed() {
             return adminLiveImpactUsesCompressed(this.shiftLiveImpactPayload());
         },
@@ -7393,6 +7412,9 @@ function adminMixinShiftStagedNav() {
         },
 
         shiftPreAttentionTickLabel() {
+            if (this.demoSceneActive && adminDemoCounterfactual(this.shiftState).risk_increasing) {
+                return 'risk increasing';
+            }
             if (!this._shiftPreAttentionTick) return '';
             return 'Риск растёт';
         },
@@ -7427,6 +7449,10 @@ function adminMixinShiftStagedNav() {
                 this.shiftImpactRevealPhase = 'idle';
                 return;
             }
+            if (impact?.counterfactual_flash && adminLiveImpactLossFlashLine(impact)) {
+                this.shiftImpactRevealPhase = 'loss';
+                await adminSleep(300);
+            }
             const prefix = adminLiveImpactOutcomePrefix(impact);
             if (prefix) {
                 this.shiftImpactRevealPhase = 'prefix';
@@ -7437,6 +7463,7 @@ function adminMixinShiftStagedNav() {
             const money = adminLiveImpactMoneyShort(impact);
             if (money) {
                 this.shiftImpactRevealPhase = 'money';
+                if (impact?.counterfactual_flash) this.playDemoSuccessTick();
                 await adminSleep(ms.impactMoneyReveal);
             }
             if (impact?.animation) {
@@ -7444,6 +7471,11 @@ function adminMixinShiftStagedNav() {
             }
             await adminSleep(ms.pulseAfterImpact);
             this.shiftImpactRevealPhase = 'idle';
+        },
+
+        playDemoSuccessTick() {
+            this._playTone('sine', 880, 0.08, 0.06);
+            setTimeout(() => this._playTone('sine', 1175, 0.1, 0.05), 80);
         },
 
         shiftSceneAttentionClass() {
@@ -7465,6 +7497,7 @@ function adminMixinShiftStagedNav() {
         shiftFocusCardShown() {
             if (!this.focusCardView()) return false;
             if (this.shiftChoreoPhase === 'impact') return false;
+            if (this.demoScenePhase === 'impact' || this.demoScenePhase === 'resolve') return false;
             return this.shiftFocusCardVisible;
         },
 
@@ -9114,6 +9147,83 @@ function adminMixinDataChartsSettings() {
             return 'Потеря → спасение → деньги';
         },
 
+        demoSceneCounterfactualLine() {
+            return String(adminDemoCounterfactual(this.shiftState).counterfactual_line || '').trim();
+        },
+
+        demoSceneWithoutSystemLine() {
+            return String(adminDemoCounterfactual(this.shiftState).without_system_line || '').trim();
+        },
+
+        demoSceneUrgencyLine() {
+            if (!this.demoSceneActive) return '';
+            const left = Number(this._demoSceneUrgencyRemaining || 0);
+            if (left > 0) return `Ещё ${left} сек — и клиент уйдёт`;
+            return 'Клиент почти ушёл…';
+        },
+
+        demoSceneLiveWaitMinutes() {
+            if (!this.demoSceneActive) return Number(this.focusCardView()?.wait_minutes || 0);
+            const base = Number(this._demoSceneWaitBaseMin || 0);
+            const elapsedMin = Math.floor((Date.now() - (this._demoSceneWaitStartedAt || Date.now())) / 15000);
+            return Math.max(base, base + elapsedMin);
+        },
+
+        demoSceneResolveVisible() {
+            return this.demoSceneActive && String(this.demoScenePhase || '') === 'resolve';
+        },
+
+        demoSceneClosingHeadline() {
+            return String(this.shiftState?.demo_scene?.closing_headline || '').trim();
+        },
+
+        demoSceneClosingStat() {
+            return String(this.shiftState?.demo_scene?.closing_stat || '').trim();
+        },
+
+        demoSceneCounterfactualSummary() {
+            return String(this.shiftState?.demo_scene?.counterfactual_summary || '').trim();
+        },
+
+        demoScenePitchImmersive() {
+            return !!(this.demoSceneActive && this.shiftState?.demo_scene?.pitch_immersive);
+        },
+
+        _stopDemoSceneLiveTimers() {
+            if (this._demoSceneWaitTimer) {
+                clearInterval(this._demoSceneWaitTimer);
+                this._demoSceneWaitTimer = null;
+            }
+            if (this._demoSceneUrgencyTimer) {
+                clearInterval(this._demoSceneUrgencyTimer);
+                this._demoSceneUrgencyTimer = null;
+            }
+            this._demoSceneWaitTick = 0;
+            this._demoSceneUrgencyRemaining = 0;
+        },
+
+        _syncDemoSceneLiveTimers(data) {
+            this._stopDemoSceneLiveTimers();
+            if (!this.demoSceneActive) return;
+            const cf = adminDemoCounterfactual(data);
+            const focus = data?.focus;
+            this._demoSceneWaitBaseMin = Number(focus?.wait_minutes || 0);
+            this._demoSceneWaitStartedAt = Date.now();
+            this._demoSceneWaitTimer = setInterval(() => {
+                this._demoSceneWaitTick += 1;
+            }, 4000);
+            const urg = Number(cf.urgency_sec || 0);
+            if (urg > 0) {
+                this._demoSceneUrgencyRemaining = urg;
+                this._demoSceneUrgencyTimer = setInterval(() => {
+                    if (this._demoSceneUrgencyRemaining > 0) {
+                        this._demoSceneUrgencyRemaining -= 1;
+                    }
+                }, 1000);
+            }
+            this.demoSceneActionLine = String(cf.auto_action_line || '').trim();
+        },
+
         _clearDemoSceneTimers() {
             for (const t of this._demoSceneTimers || []) {
                 clearTimeout(t);
@@ -9138,10 +9248,12 @@ function adminMixinDataChartsSettings() {
             this.shiftStateDegraded = false;
             this.shiftStateLoadError = '';
             this.demoScenePhase = String(data?.demo_scene?.phase || '');
+            this._syncDemoSceneLiveTimers(data);
             if (!choreo && data.live_impact?.animation) {
                 void this._runImpactRevealSequence(data.live_impact);
             }
-            this.shiftFocusCardVisible = true;
+            const phase = String(data?.demo_scene?.phase || '');
+            this.shiftFocusCardVisible = phase !== 'impact' && phase !== 'resolve' && !!data?.focus;
             this._syncShiftPreAttention();
         },
 
@@ -9150,6 +9262,10 @@ function adminMixinDataChartsSettings() {
             this._abortShiftChoreo();
             this.shiftAttentionTarget = 'card';
             const impactPromise = this._fetchDemoScenePhase('impact');
+
+            if (this.demoSceneActionLine) {
+                await adminSleep(400);
+            }
 
             await adminSleep(ms.pauseBeforeExit);
             this.shiftChoreoPhase = 'exiting';
@@ -9174,15 +9290,11 @@ function adminMixinDataChartsSettings() {
             await this.$nextTick();
             await this._runImpactRevealSequence(this.shiftChoreoImpact);
 
-            this.shiftChoreoPhase = 'entering';
-            this.shiftAttentionTarget = 'focus';
-            this.shiftChoreoImpact = null;
-            this._applyDemoSceneState(data, { choreo: true });
-            this.shiftFocusCardVisible = true;
-
-            await adminSleep(ms.focusEnterAfterPulse);
             this.shiftChoreoPhase = 'idle';
             this.shiftAttentionTarget = '';
+            this.shiftChoreoImpact = null;
+            this._applyDemoSceneState(data, { choreo: true });
+            this.shiftFocusCardVisible = false;
         },
 
         _scheduleDemoScenePhases(sceneId) {
@@ -9195,11 +9307,6 @@ function adminMixinDataChartsSettings() {
                 }, Math.max(0, Number(step.delay_ms) || 0));
                 this._demoSceneTimers.push(timer);
             }
-            const finishTimer = setTimeout(() => {
-                if (!this.demoSceneActive) return;
-                void this.flashToast('Демо завершено · Esc — выход', 'success');
-            }, 30000);
-            this._demoSceneTimers.push(finishTimer);
         },
 
         async _runDemoScenePhaseStep(step) {
@@ -9255,7 +9362,9 @@ function adminMixinDataChartsSettings() {
 
         stopDemoShiftScene({ silent = false, replay = false } = {}) {
             this._clearDemoSceneTimers();
+            this._stopDemoSceneLiveTimers();
             this._abortShiftChoreo();
+            this.demoSceneActionLine = '';
             const wasActive = this.demoSceneActive;
             this.demoSceneActive = false;
             this.demoSceneId = '';
@@ -9267,7 +9376,10 @@ function adminMixinDataChartsSettings() {
                 this._syncShiftStatePolling();
             });
             if (!silent) {
-                void this.flashToast(replay ? 'Демо перезапускается…' : 'Демо-сцена закрыта', 'info');
+                void this.flashToast(
+                    replay ? 'Показ начинается…' : 'Можно осмотреть демо · ↻ — повторить показ',
+                    'info',
+                );
             }
             if (replay) {
                 void this.startDemoShiftScene(DEMO_SHIFT_SCENE_DEFAULT);

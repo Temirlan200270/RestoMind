@@ -67,10 +67,11 @@ def test_shift_polling_helpers_in_js():
     assert "_persistAnalyticsDensity()" in js
 
 
-def test_demo_login_uses_role_landing():
+def test_demo_login_starts_pitch_scene():
     js = (REPO / "app" / "static" / "js" / "admin-app.js").read_text(encoding="utf-8")
     demo_block = js.split("async submitDemoLogin()")[1].split("async loadOrgProfile()")[0]
-    assert "applyRoleDefaultLanding(null)" in demo_block
+    assert "startDemoShiftScene" in demo_block
+    assert "DEMO_SHIFT_SCENE_DEFAULT" in demo_block
     assert "currentTab = 'dashboard'" not in demo_block
 
 

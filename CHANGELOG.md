@@ -6,6 +6,17 @@
 
 ## [Unreleased] — 2026-03-20
 
+### Добавлено (2026-05-22) — G10.8.1 Counterfactual Pitch
+
+- **Counterfactual layer:** фазы `hook→tension→action→impact→next→resolve`; dual-state «без системы → потеря / с системой → спасено» в `demo_scene.counterfactual` и live impact.
+- **Pitch immersive:** скрыты кнопки focus card, S2-баннеры, demo-баннер; auto-action «✔ Ответ отправлен автоматически»; urgency countdown; live wait timer; micro-flash `−1200 ₸`; success tick.
+- **Closing frame (25–30s):** «Система автоматически спасает…» + stat + CTA «Осмотреть демо».
+
+### Добавлено (2026-05-22) — G10.8 demo pitch seed (осмотр после Esc)
+
+- **Demo seed:** `_seed_demo_pitch_risks` — свежие slow chats, брошенные черновики (~1200 ₸), брони под риском, `daily_org_stats.recovered_kzt` для hero после pitch.
+- **Единый demo-login:** одна кнопка «Посмотреть демо» → pitch → read-only осмотр; тесты [`tests/test_demo_pitch_seed.py`](tests/test_demo_pitch_seed.py).
+
 ### Добавлено (2026-05-22) — Predictive Shift Layer (G10.7)
 
 - **Anticipation на focus:** `anticipation` (tension_level, anticipation_text, inevitability, predictive_prefix) — probability до клика.
@@ -47,13 +58,18 @@
 
 - **daily_os_digest.py:** SyntaxError при сборке строки digest (`.replace()` ломал конкатенацию f-strings) — CI pytest collection.
 - **Postgres pool:** auto default Supabase session pooler `1+0` (было `2+0`); `render.yaml` `DB_POOL_SIZE=1` — снижение `EMAXCONNSESSION` при деплое.
+- **Supabase EMAXCONNSESSION (Render):** `SUPABASE_PREFER_TRANSACTION_POOLER=true` в `render.yaml` — авто `:5432`→`:6543`; demo-login fast path (кэш `DEMO_ORGANIZATION_ID` / startup cache) без SELECT; 503 вместо 500 при перегрузке pooler.
 - **_tab_dashboard.html:** лишний `</div>` после hero owner impact — регресс layout + `test_all_screen_templates_have_balanced_divs`.
 - **Тесты:** sidebar `isTabShownInSidebar`, analytics special events (`shift.focus_completed`, `order.draft_recovered`), visibility copy «Спасено действиями».
 - **twilio_media:** fallback `audioop` при отсутствии `audioop-lts` на Python 3.13+.
 
+### Изменено (2026-05-24) — единый demo pitch
+
+- **Login:** одна кнопка «Посмотреть демо» → demo-login + autoplay `money_rescue_30s`; после Esc — read-only осмотр; ↻ — повтор показа.
+
 ### Добавлено (2026-05-24) — G10.8 Demo Scene
 
-- **30-сек сценка:** `money_rescue_30s` — hook → tension → auto «Готово» → Live Impact +1 200 ₸ → следующий риск; кнопка на экране входа; Esc — выход.
+- **30-сек сценка:** `money_rescue_30s` — hook → tension → auto «Готово» → Live Impact +1 200 ₸ → следующий риск; **единая кнопка «Посмотреть демо»** на login (pitch → read-only осмотр).
 
 ### Исправлено (2026-05-22) — Postgres pool (Supabase EMAXCONNSESSION)
 

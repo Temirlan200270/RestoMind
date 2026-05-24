@@ -27,13 +27,11 @@
                 <span x-show="loginLoading" x-cloak>Вход...</span>
             </button>
             <button type="button" :disabled="loginLoading" @click="submitDemoLogin()"
-                class="w-full py-3.5 rounded-xl bg-white text-brand-700 font-semibold text-sm border border-brand-200 hover:bg-brand-50 transition disabled:opacity-50">
-                Попробовать демо
+                class="w-full py-3.5 rounded-xl bg-emerald-600 text-white font-semibold text-sm hover:bg-emerald-700 transition disabled:opacity-50 shadow-lg shadow-emerald-600/25">
+                <span x-show="!loginLoading">Посмотреть демо</span>
+                <span x-show="loginLoading" x-cloak>Открываем…</span>
             </button>
-            <button type="button" :disabled="loginLoading" @click="submitDemoLoginWithScene('money_rescue_30s')"
-                class="w-full py-3.5 rounded-xl bg-emerald-600 text-white font-semibold text-sm hover:bg-emerald-700 transition disabled:opacity-50 shadow-lg shadow-emerald-600/20">
-                ▶ 30 сек — спасение денег
-            </button>
+            <p class="text-center text-xs text-gray-500 -mt-2">30 сек — как теряются и возвращаются деньги в реальном времени</p>
             <div class="text-center text-sm text-gray-500">
                 Хотите подключить ресторан?
                 <a href="/request-access" class="inline-flex min-h-[44px] items-center font-semibold text-brand-700 hover:text-brand-800 underline underline-offset-2">
