@@ -5,6 +5,7 @@ Semantic contract: docs/G10_SEMANTIC_CONTRACT.md (v1.2 projection diff, focus ow
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from collections.abc import Awaitable
@@ -23,6 +24,7 @@ logger = logging.getLogger(__name__)
 QUEUE_PREVIEW_LIMIT = 5
 SKIP_TTL_SEC = 600
 DONE_TTL_SEC = 3600
+LIVE_IMPACT_TTL_SEC = 90
 FOCUS_LEASE_TTL_SEC = 45
 S1_LATCH_TTL_SEC = 600
 S1_ENTER_RISK_KZT = 10000
@@ -227,9 +229,248 @@ def select_focus(items: list[dict[str, Any]]) -> dict[str, Any] | None:
     return payload
 
 
+def derive_focus_why(item: dict[str, Any]) -> tuple[str, str, float]:
+    """Deterministic why-this-card hints (no LLM). Returns (why_this_card, ai_hint, confidence)."""
+    kind = str(item.get("kind") or "")
+    wait_min = int(item.get("wait_minutes") or 0)
+    pulse = str(item.get("pulse") or "")
+    amount = float(item.get("amount_kzt") or 0)
+
+    confidence = 0.75
+    if wait_min >= 10:
+        confidence = min(0.92, 0.75 + wait_min * 0.01)
+    if pulse == "red":
+        confidence = max(confidence, 0.88)
+    elif pulse == "amber":
+        confidence = max(confidence, 0.82)
+    if amount > 5000:
+        confidence = max(confidence, 0.85)
+    confidence = round(min(0.95, confidence), 2)
+
+    why_by_kind: dict[str, str] = {
+        "abandoned_draft": "Черновик без подтверждения — высокий риск потери заказа",
+        "pending_prepay": "Ожидание предоплаты — клиент может уйти без оплаты",
+        "slow_chat": (
+            f"Клиент ждёт ответ уже {wait_min} мин — риск ухода"
+            if wait_min > 0
+            else "Долгое ожидание ответа — клиент может уйти"
+        ),
+        "menu_confusion": "Повторные вопросы по меню — высокий риск отказа",
+        "booking_at_risk": "Бронь без подтверждения — риск no-show",
+        "high_value_stuck": "Крупный заказ застрял — нужно вмешательство оператора",
+    }
+    hint_by_kind: dict[str, str] = {
+        "abandoned_draft": "Клиент начал заказ, но не подтвердил — вероятность возврата падает с каждой минутой",
+        "pending_prepay": "Ссылка на оплату отправлена — без подтверждения сумма уходит в риск",
+        "slow_chat": "Без быстрого ответа гость часто уходит к конкурентам",
+        "menu_confusion": "Клиент не нашёл блюдо — высокая вероятность отказа от заказа",
+        "booking_at_risk": "Не подтверждённая бронь часто превращается в пустой стол",
+        "high_value_stuck": "Сумма заказа выше среднего — задержка бьёт по выручке сильнее",
+    }
+    why = why_by_kind.get(kind, "Система выбрала задачу с наибольшим влиянием на выручку")
+    hint = hint_by_kind.get(kind, "Приоритет по сумме риска и времени ожидания")
+    return why, hint, confidence
+
+
+def _kind_from_focus_id(focus_id: str) -> str:
+    prefix = str(focus_id or "").split(":", 1)[0].strip().lower()
+    return {
+        "draft": "abandoned_draft",
+        "prepay": "pending_prepay",
+        "chat": "slow_chat",
+        "menu": "menu_confusion",
+        "booking": "booking_at_risk",
+        "high": "high_value_stuck",
+    }.get(prefix, "")
+
+
+def derive_focus_anticipation(item: dict[str, Any]) -> dict[str, Any]:
+    """Predictive layer — tension before operator action (no LLM)."""
+    kind = str(item.get("kind") or "")
+    wait_min = int(item.get("wait_minutes") or 0)
+    pulse = str(item.get("pulse") or "")
+    amount = float(item.get("amount_kzt") or 0)
+
+    if pulse == "red" or wait_min >= 15:
+        tension_level = "imminent"
+    elif pulse == "amber" or wait_min >= 8:
+        tension_level = "critical"
+    elif wait_min >= 4 or amount >= 5000:
+        tension_level = "rising"
+    else:
+        tension_level = "stable"
+
+    risk_trajectory = "rising" if tension_level in ("rising", "critical", "imminent") else "stable"
+
+    anticipation_by_kind: dict[str, str] = {
+        "abandoned_draft": "Клиент почти потерян — заказ не подтверждён",
+        "pending_prepay": "Оплата зависла — клиент может уйти",
+        "slow_chat": (
+            f"Клиент ждёт уже {wait_min} мин — почти ушёл"
+            if wait_min >= 5
+            else "Клиент ждёт ответа — риск растёт"
+        ),
+        "menu_confusion": "Клиент не понял меню — на грани отказа",
+        "booking_at_risk": "Стол под риском no-show",
+        "high_value_stuck": "Крупный заказ застрял — потери неизбежны",
+    }
+    inevitability_by_kind: dict[str, str] = {
+        "abandoned_draft": "Без подтверждения заказ уйдёт в потери",
+        "pending_prepay": "Без оплаты сумма перейдёт в упущенную выручку",
+        "slow_chat": "Каждая минута без ответа снижает шанс возврата",
+        "menu_confusion": "Без помощи клиент часто не заказывает",
+        "booking_at_risk": "Неподтверждённая бронь часто не приходит",
+        "high_value_stuck": "Задержка по крупному заказу бьёт по выручке",
+    }
+    prefix_by_kind: dict[str, str] = {
+        "abandoned_draft": "Клиент уже почти ушёл…",
+        "pending_prepay": "Оплата на грани срыва…",
+        "slow_chat": "Клиент уже почти ушёл…",
+        "menu_confusion": "Клиент был на грани отказа…",
+        "booking_at_risk": "Стол почти потерян…",
+        "high_value_stuck": "Крупная сумма была под угрозой…",
+    }
+
+    anticipation_text = anticipation_by_kind.get(
+        kind,
+        "Система видит растущий риск по этой задаче",
+    )
+    if tension_level == "imminent" and kind == "slow_chat":
+        anticipation_text = f"Клиент почти ушёл — {wait_min} мин без ответа"
+    elif tension_level == "imminent":
+        anticipation_text = anticipation_text.replace("почти", "уже почти")
+
+    return {
+        "tension_level": tension_level,
+        "risk_trajectory": risk_trajectory,
+        "anticipation_text": anticipation_text,
+        "inevitability_text": inevitability_by_kind.get(
+            kind,
+            "Без действия риск перейдёт в реальные потери",
+        ),
+        "predictive_prefix": prefix_by_kind.get(kind, "Риск был высок…"),
+        "pre_attention": tension_level in ("rising", "critical", "imminent"),
+    }
+
+
+def _format_money_only(amount_kzt: float) -> str:
+    n = int(round(amount_kzt))
+    if n <= 0:
+        return ""
+    formatted = f"{n:,}".replace(",", " ")
+    return f"+{formatted} ₸"
+
+
+def build_live_impact_payload(
+    *,
+    last_action: str,
+    kind: str = "",
+    amount_kzt: float = 0,
+    wait_minutes: int = 0,
+    pulse: str = "",
+) -> dict[str, Any]:
+    """Compressed predictive outcome for live_impact strip."""
+    item_ctx = {
+        "kind": kind,
+        "wait_minutes": wait_minutes,
+        "pulse": pulse,
+        "amount_kzt": amount_kzt,
+    }
+    anticipation = derive_focus_anticipation(item_ctx)
+
+    outcome_emotion_by_kind: dict[str, str] = {
+        "abandoned_draft": "Вернули клиента",
+        "pending_prepay": "Оплата закрыта",
+        "slow_chat": "Вернули клиента",
+        "menu_confusion": "Помогли с меню",
+        "booking_at_risk": "Бронь спасена",
+        "high_value_stuck": "Заказ разблокирован",
+    }
+    outcome_emotion_by_action: dict[str, str] = {
+        "focus_skipped": "Отложили — следующая задача",
+        "focus_completed": outcome_emotion_by_kind.get(kind, "Готово"),
+    }
+
+    if last_action == "focus_skipped":
+        return {
+            "last_action": last_action,
+            "kind": kind or None,
+            "outcome_prefix": anticipation.get("predictive_prefix") or "",
+            "outcome_emotion": outcome_emotion_by_action["focus_skipped"],
+            "impact_money": "",
+            "impact_text": "Отложено",
+            "impact_reason": "Следующая задача в очереди",
+            "narrative_compressed": True,
+            "amount_kzt": 0,
+            "animation": "fade_shrink",
+        }
+
+    money = _format_money_only(amount_kzt)
+    emotion = outcome_emotion_by_kind.get(kind, "Готово")
+    prefix = str(anticipation.get("predictive_prefix") or "")
+
+    return {
+        "last_action": last_action,
+        "kind": kind or None,
+        "outcome_prefix": prefix,
+        "outcome_emotion": emotion,
+        "impact_money": money,
+        "impact_text": _format_saved_impact_text(amount_kzt),
+        "impact_reason": _impact_reason_for_kind(kind),
+        "narrative_compressed": True,
+        "amount_kzt": round(float(amount_kzt or 0), 2),
+        "animation": "pulse_green",
+    }
+
+
+def _impact_reason_for_kind(kind: str) -> str:
+    return {
+        "abandoned_draft": "Клиент возвращён в воронку заказа",
+        "pending_prepay": "Предоплата обработана",
+        "slow_chat": "Клиент получил ответ",
+        "menu_confusion": "Вопрос по меню закрыт",
+        "booking_at_risk": "Бронь подтверждена",
+        "high_value_stuck": "Крупный заказ разблокирован",
+    }.get(kind, "Задача выполнена")
+
+
+def _format_saved_impact_text(amount_kzt: float) -> str:
+    n = int(round(amount_kzt))
+    if n <= 0:
+        return "Задача закрыта"
+    formatted = f"{n:,}".replace(",", " ")
+    return f"+{formatted} ₸ спасено"
+
+
+def _live_impact_key(org_id: int, operator_id: str) -> str:
+    return f"shift:live_impact:{int(org_id)}:{_normalize_operator_id(operator_id)}"
+
+
+async def _store_live_impact(org_id: int, operator_id: str, payload: dict[str, Any]) -> None:
+    key = _live_impact_key(org_id, operator_id)
+    await _redis_safe(
+        redis_client.setex(key, LIVE_IMPACT_TTL_SEC, json.dumps(payload, ensure_ascii=False)),
+        None,
+    )
+
+
+async def _load_live_impact(org_id: int, operator_id: str) -> dict[str, Any] | None:
+    raw = await _redis_safe(redis_client.get(_live_impact_key(org_id, operator_id)), None)
+    if not raw:
+        return None
+    try:
+        text = raw.decode() if isinstance(raw, bytes) else str(raw)
+        data = json.loads(text)
+        return data if isinstance(data, dict) else None
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+
+
 def _focus_payload(item: dict[str, Any], *, reason: str) -> dict[str, Any]:
     kind = str(item.get("kind") or "")
     actions = item.get("actions") or []
+    why, ai_hint, confidence = derive_focus_why(item)
+    anticipation = derive_focus_anticipation(item)
     return {
         "type": KIND_TO_TYPE.get(kind, kind or "unknown"),
         "id": str(item.get("id") or ""),
@@ -244,6 +485,10 @@ def _focus_payload(item: dict[str, Any], *, reason: str) -> dict[str, Any]:
         "booking_id": item.get("booking_id"),
         "pulse": item.get("pulse"),
         "actions": actions,
+        "why_this_card": why,
+        "ai_hint": ai_hint,
+        "confidence": confidence,
+        "anticipation": anticipation,
     }
 
 
@@ -563,36 +808,136 @@ def _ui_may_show_calm_empty(*, state: str, empty_focus_reason: EmptyFocusReason 
     return state in _CALM_STATES and empty_focus_reason == "calm_no_action"
 
 
+def _build_predictive_scene(
+    focus_item: dict[str, Any] | None,
+    *,
+    state: str,
+    risk_kzt: float,
+) -> dict[str, Any]:
+    if not focus_item:
+        return {
+            "active": False,
+            "tension_level": "stable",
+            "risk_trajectory": "stable",
+            "scene_headline": "",
+        }
+    ant = focus_item.get("anticipation") or {}
+    level = str(ant.get("tension_level") or "stable")
+    headline = str(ant.get("anticipation_text") or "")
+    if state in ("S1", "S5") and risk_kzt > 0:
+        headline = headline or "Система фиксирует критический риск потерь"
+    return {
+        "active": bool(ant.get("pre_attention")),
+        "tension_level": level,
+        "risk_trajectory": str(ant.get("risk_trajectory") or "stable"),
+        "scene_headline": headline,
+        "inevitability": str(ant.get("inevitability_text") or ""),
+    }
+
+
+async def _focus_context_for_impact(
+    db: AsyncSession,
+    org_id: int,
+    focus_id: str,
+) -> dict[str, Any]:
+    from app.services.money_queue import build_money_queue
+
+    fid = str(focus_id or "").strip()
+    try:
+        money = await build_money_queue(db, org_id)
+        for it in money.get("items") or []:
+            if str(it.get("id") or "") == fid:
+                return {
+                    "kind": str(it.get("kind") or _kind_from_focus_id(fid)),
+                    "wait_minutes": int(it.get("wait_minutes") or 0),
+                    "pulse": str(it.get("pulse") or ""),
+                    "amount_kzt": float(it.get("amount_kzt") or 0),
+                }
+    except Exception as exc:
+        logger.warning("focus_context_for_impact failed org=%s fid=%s: %s", org_id, fid, exc)
+    return {
+        "kind": _kind_from_focus_id(fid),
+        "wait_minutes": 0,
+        "pulse": "",
+        "amount_kzt": 0,
+    }
+
+
 def _shift_actions(*, has_focus: bool, ownership: FocusOwnership) -> list[dict[str, Any]]:
-    actions: list[dict[str, Any]] = [
+    if not has_focus:
+        return [
+            {
+                "id": "next",
+                "label": "Другое дело",
+                "hint": "Показать следующую задачу без отказа",
+                "type": "shift_action",
+                "subtype": "next",
+            },
+        ]
+    actions: list[dict[str, Any]] = []
+    if ownership != "other":
+        actions.extend(
+            [
+                {
+                    "id": "complete",
+                    "label": "Готово",
+                    "hint": "Задача выполнена",
+                    "type": "shift_action",
+                    "subtype": "complete",
+                },
+                {
+                    "id": "skip",
+                    "label": "Не сейчас",
+                    "hint": "Осознанно отложить эту задачу",
+                    "type": "shift_action",
+                    "subtype": "skip",
+                },
+            ]
+        )
+    actions.append(
         {
             "id": "next",
             "label": "Другое дело",
             "hint": "Показать следующую задачу без отказа",
             "type": "shift_action",
             "subtype": "next",
-        },
-    ]
-    if has_focus and ownership != "other":
-        actions.append(
-            {
-                "id": "skip",
-                "label": "Не сейчас",
-                "hint": "Осознанно отложить эту задачу",
-                "type": "shift_action",
-                "subtype": "skip",
-            }
-        )
-        actions.append(
-            {
-                "id": "complete",
-                "label": "Готово",
-                "hint": "Задача выполнена",
-                "type": "shift_action",
-                "subtype": "complete",
-            }
-        )
+        }
+    )
     return actions[:3]
+
+
+def _build_compressed_actions(
+    focus: dict[str, Any] | None,
+    *,
+    has_focus: bool,
+    ownership: FocusOwnership,
+) -> dict[str, Any | None]:
+    tertiary: dict[str, Any] = {
+        "label": "Другое дело",
+        "type": "shift_action",
+        "subtype": "next",
+        "role": "tertiary",
+    }
+    if not has_focus or ownership == "other" or not focus:
+        return {"primary": None, "secondary": None, "tertiary": tertiary}
+    focus_actions = list(focus.get("actions") or [])
+    if focus_actions:
+        primary = dict(focus_actions[0])
+        primary["role"] = "primary"
+    else:
+        primary = {
+            "label": "Готово",
+            "type": "shift_action",
+            "subtype": "complete",
+            "role": "primary",
+        }
+    secondary: dict[str, Any] = {
+        "label": "Не сейчас",
+        "type": "shift_action",
+        "subtype": "skip",
+        "role": "secondary",
+    }
+    return {"primary": primary, "secondary": secondary, "tertiary": tertiary}
 
 
 def _build_presentation(
@@ -747,6 +1092,13 @@ async def build_shift_state(
             "excluded_done": len(done),
         },
         "actions": _shift_actions(has_focus=focus_item is not None, ownership=ownership),
+        "compressed_actions": _build_compressed_actions(
+            focus_item,
+            has_focus=focus_item is not None,
+            ownership=ownership,
+        ),
+        "live_impact": await _load_live_impact(org_id, op_norm),
+        "predictive_scene": _build_predictive_scene(focus_item, state=state, risk_kzt=risk_kzt),
         "presentation": presentation,
     }
 
@@ -811,6 +1163,18 @@ async def apply_shift_action(
             return
         await _register_exclusion(org_id, fid, subtype=subtype)
         await _clear_active_focus(org_id, op)
+        if subtype == "skip":
+            ctx = await _focus_context_for_impact(db, org_id, fid)
+            await _store_live_impact(
+                org_id,
+                op,
+                build_live_impact_payload(
+                    last_action="focus_skipped",
+                    kind=str(ctx.get("kind") or ""),
+                    wait_minutes=int(ctx.get("wait_minutes") or 0),
+                    pulse=str(ctx.get("pulse") or ""),
+                ),
+            )
         logger.info(
             "shift_action_applied org_id=%s operator_id=%s subtype=%s intent=%s focus_id=%s event_emitted=false",
             org_id,
@@ -841,6 +1205,19 @@ async def apply_shift_action(
     from app.services.money_recovery import resolve_focus_recovery_with_aov
 
     amount_kzt, focus_kind = await resolve_focus_recovery_with_aov(db, org_id, fid)
+    ctx = await _focus_context_for_impact(db, org_id, fid)
+    kind = str(focus_kind or ctx.get("kind") or "")
+    await _store_live_impact(
+        org_id,
+        op,
+        build_live_impact_payload(
+            last_action="focus_completed",
+            kind=kind,
+            amount_kzt=float(amount_kzt or 0),
+            wait_minutes=int(ctx.get("wait_minutes") or 0),
+            pulse=str(ctx.get("pulse") or ""),
+        ),
+    )
     await emit_event(
         db,
         BusinessEvent(

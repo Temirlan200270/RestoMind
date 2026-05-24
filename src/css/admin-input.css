@@ -295,6 +295,226 @@
 .fade-in {
     animation: fadeIn 0.2s ease-out;
 }
+/* Wow Layer — Live Impact & state animations */
+.ds-live-impact-strip {
+    border-radius: 1rem;
+    padding: 0.75rem 1rem;
+    font-size: 0.875rem;
+    line-height: 1.35;
+    transition: opacity 0.35s ease, transform 0.35s ease;
+}
+.ds-live-impact-strip--pulse_green {
+    background: linear-gradient(135deg, rgb(209 250 229) 0%, rgb(167 243 208) 100%);
+    border: 1px solid rgb(52 211 153 / 0.45);
+    color: rgb(6 78 59);
+}
+.ds-live-impact-strip--fade_shrink {
+    background: rgb(248 250 252);
+    border: 1px solid rgb(203 213 225 / 0.8);
+    color: rgb(71 85 105);
+}
+.ds-animate-pulse-green {
+    animation: wowPulseGreen 1.2s ease-in-out 2;
+}
+.ds-animate-fade-shrink {
+    animation: wowFadeShrink 0.55s ease-out forwards;
+}
+.ds-focus-slide-in {
+    animation: wowFocusSlideIn 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.ds-state-escalation-shake {
+    animation: wowEscalationShake 0.5s ease-in-out;
+}
+.ds-live-impact-strip--choreo {
+    transform-origin: top center;
+}
+.ds-live-impact-narrative {
+    font-size: 1.05rem;
+    font-weight: 800;
+    line-height: 1.35;
+    letter-spacing: -0.01em;
+}
+.ds-live-impact-narrative {
+    font-size: 1.05rem;
+    font-weight: 800;
+    line-height: 1.35;
+    letter-spacing: -0.01em;
+}
+.ds-live-impact-prefix {
+    font-size: 0.875rem;
+    font-weight: 600;
+    opacity: 0.75;
+    font-style: italic;
+    line-height: 1.35;
+    animation: wowImpactPrefixIn 0.35s ease-out;
+}
+.ds-live-impact-emotion {
+    font-size: 1.25rem;
+    font-weight: 900;
+    line-height: 1.25;
+    letter-spacing: -0.02em;
+    margin-top: 0.15rem;
+    animation: wowImpactEmotionIn 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.ds-live-impact-emotion--confirmed {
+    color: rgb(6 78 59);
+}
+.ds-live-impact-money {
+    font-size: 1.75rem;
+    font-weight: 900;
+    color: rgb(6 78 59);
+    animation: wowImpactMoneyIn 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes wowImpactPrefixIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 0.75; transform: translateY(0); }
+}
+@keyframes wowImpactEmotionIn {
+    from { opacity: 0; transform: translateY(8px) scale(0.97); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes wowImpactMoneyIn {
+    from { opacity: 0; transform: scale(0.85); }
+    to { opacity: 1; transform: scale(1); }
+}
+.ds-predictive-tension-banner {
+    background: linear-gradient(135deg, rgb(254 243 199) 0%, rgb(253 230 138) 100%);
+    border-color: rgb(251 191 36 / 0.45);
+    color: rgb(120 53 15);
+}
+.ds-predictive-tension--rising {
+    animation: wowPredictivePulse 2.4s ease-in-out infinite;
+}
+.ds-predictive-tension--critical {
+    background: linear-gradient(135deg, rgb(254 226 226) 0%, rgb(252 165 165) 100%);
+    border-color: rgb(248 113 113 / 0.5);
+    color: rgb(127 29 29);
+    animation: wowPredictivePulse 1.8s ease-in-out infinite;
+}
+.ds-predictive-tension--imminent {
+    background: linear-gradient(135deg, rgb(254 202 202) 0%, rgb(239 68 68) 100%);
+    border-color: rgb(220 38 38 / 0.55);
+    color: rgb(255 255 255);
+    animation: wowPredictivePulse 1.2s ease-in-out infinite;
+}
+@keyframes wowPredictivePulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgb(239 68 68 / 0.25); }
+    50% { box-shadow: 0 0 0 8px rgb(239 68 68 / 0); }
+}
+.ds-focus-pre-attention--rising {
+    animation: wowPreAttentionIdle 2.8s ease-in-out infinite;
+}
+.ds-focus-pre-attention--critical {
+    animation: wowPreAttentionIdle 2s ease-in-out infinite;
+    box-shadow: inset 0 0 0 2px rgb(251 191 36 / 0.35);
+}
+.ds-focus-pre-attention--imminent {
+    animation: wowPreAttentionIdle 1.4s ease-in-out infinite;
+    box-shadow: inset 0 0 0 2px rgb(239 68 68 / 0.4);
+}
+@keyframes wowPreAttentionIdle {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.92; }
+}
+.ds-metric-risk-rising {
+    animation: wowMetricRiskRising 2.5s ease-in-out infinite;
+}
+@keyframes wowMetricRiskRising {
+    0%, 100% { box-shadow: 0 0 0 0 rgb(239 68 68 / 0.2); }
+    50% { box-shadow: 0 0 0 6px rgb(239 68 68 / 0); }
+}
+.ds-risk-trajectory-rising .ds-metric-risk-rising {
+    ring-color: rgb(248 113 113 / 0.6);
+}
+.ds-live-impact-reason {
+    font-weight: 500;
+}
+.ds-live-impact-strip--spotlight {
+    box-shadow: 0 8px 28px rgb(16 185 129 / 0.18);
+}
+.ds-focus-choreo-exit {
+    animation: wowFocusExit 0.2s ease-in forwards;
+    pointer-events: none;
+}
+.ds-focus-choreo-hidden {
+    opacity: 0 !important;
+    max-height: 0 !important;
+    overflow: hidden !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    pointer-events: none !important;
+}
+.ds-focus-choreo-enter {
+    animation: wowFocusSlideIn 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes wowFocusExit {
+    from {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+    to {
+        opacity: 0;
+        transform: translateY(-10px) scale(0.97);
+    }
+}
+.ds-shift-scene--exit .ds-shift-metrics-dim,
+.ds-shift-scene--impact .ds-shift-metrics-dim {
+    opacity: 0.32;
+    transform: scale(0.985);
+    filter: saturate(0.85);
+}
+.ds-shift-scene--impact .ds-shift-focus-spotlight {
+    opacity: 0.25;
+    pointer-events: none;
+}
+.ds-shift-scene--focus .ds-shift-focus-spotlight {
+    box-shadow: 0 0 0 3px rgb(52 211 153 / 0.4), 0 12px 32px rgb(16 185 129 / 0.12);
+    border-radius: 1rem;
+}
+.ds-shift-scene--impact .ds-live-impact-strip {
+    z-index: 2;
+    position: relative;
+}
+@keyframes wowPulseGreen {
+    0%, 100% {
+        box-shadow: 0 0 0 0 rgb(52 211 153 / 0.45);
+        transform: scale(1);
+    }
+    50% {
+        box-shadow: 0 0 0 10px rgb(52 211 153 / 0);
+        transform: scale(1.01);
+    }
+}
+@keyframes wowFadeShrink {
+    from {
+        opacity: 1;
+        transform: scale(1);
+    }
+    to {
+        opacity: 0.65;
+        transform: scale(0.98);
+    }
+}
+@keyframes wowFocusSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(12px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+@keyframes wowEscalationShake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-4px); }
+    40% { transform: translateX(4px); }
+    60% { transform: translateX(-3px); }
+    80% { transform: translateX(3px); }
+}
+.ds-owner-impact-pulse {
+    animation: wowPulseGreen 1.2s ease-in-out 2;
+}
 @keyframes fadeIn {
     from {
         opacity: 0;

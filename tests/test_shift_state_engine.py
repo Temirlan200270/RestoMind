@@ -12,10 +12,14 @@ from app.services.shift_state_engine import (
     apply_shift_action,
     build_shift_state,
     compute_projection_gap,
+    derive_focus_why,
     derive_state_reason,
     item_priority_score,
     resolve_state,
     select_focus,
+    _build_compressed_actions,
+    _format_saved_impact_text,
+    _shift_actions,
 )
 
 
@@ -580,3 +584,76 @@ async def test_shift_state_endpoint_smoke(db_session) -> None:
     assert out["ok"] is True
     assert out["state"] in {"S0", "S1", "S2", "S3", "S4", "S5"}
     assert isinstance(out.get("actions"), list)
+    assert "live_impact" in out
+    assert "compressed_actions" in out
+    assert "predictive_scene" in out
+    if out.get("focus"):
+        assert "anticipation" in out["focus"]
+
+
+def test_derive_focus_why_menu_confusion() -> None:
+    why, hint, confidence = derive_focus_why(
+        {"kind": "menu_confusion", "wait_minutes": 3, "amount_kzt": 4000, "pulse": "amber"},
+    )
+    assert "меню" in why.lower()
+    assert hint
+    assert 0.7 <= confidence <= 0.95
+
+
+def test_format_saved_impact_text() -> None:
+    assert "+1 200 ₸ спасено" == _format_saved_impact_text(1200)
+    assert "Задача закрыта" == _format_saved_impact_text(0)
+
+
+def test_shift_actions_order_complete_first() -> None:
+    actions = _shift_actions(has_focus=True, ownership="mine")
+    assert actions[0]["subtype"] == "complete"
+    assert actions[1]["subtype"] == "skip"
+    assert actions[2]["subtype"] == "next"
+
+
+def test_build_compressed_actions_primary_from_focus() -> None:
+    focus = {
+        "id": "chat:1",
+        "actions": [{"label": "Ответить", "type": "navigate", "tab": "chats"}],
+    }
+    out = _build_compressed_actions(focus, has_focus=True, ownership="mine")
+    assert out["primary"]["label"] == "Ответить"
+    assert out["secondary"]["subtype"] == "skip"
+    assert out["tertiary"]["subtype"] == "next"
+
+
+@pytest.mark.asyncio
+async def test_live_impact_after_skip(db_session, monkeypatch) -> None:
+    from app.services import shift_state_engine as sse
+
+    org = Organization(name="Impact Org", slug="impact-org")
+    db_session.add(org)
+    await db_session.flush()
+    user = User(organization_id=int(org.id), phone="+77005557005")
+    db_session.add(user)
+    await db_session.flush()
+    db_session.add(
+        Order(
+            organization_id=int(org.id),
+            user_id=int(user.id),
+            status=OrderStatus.DRAFT.value,
+            total_price=5000,
+            items_json={"items": [{"name": "D", "quantity": 1, "item_total": 5000}]},
+            updated_at=datetime.now(timezone.utc) - timedelta(minutes=50),
+        )
+    )
+    await db_session.flush()
+
+    fake = FakeRedis()
+    monkeypatch.setattr(sse, "redis_client", fake)
+
+    before = await build_shift_state(db_session, int(org.id), operator_id="op1")
+    focus_id = before["focus"]["id"]
+    await apply_shift_action(db_session, int(org.id), "skip", focus_id, operator_id="op1")
+    after = await build_shift_state(db_session, int(org.id), operator_id="op1")
+
+    impact = after.get("live_impact") or {}
+    assert impact.get("last_action") == "focus_skipped"
+    assert impact.get("animation") == "fade_shrink"
+    assert impact.get("narrative_compressed") is True

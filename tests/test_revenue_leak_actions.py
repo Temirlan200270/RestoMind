@@ -66,6 +66,8 @@ async def test_build_revenue_leak_includes_action_surfaces(db_session) -> None:
     assert lost["risk_kzt"] == 8000.0
     assert any(a["type"] == "api" for a in lost["actions"])
     assert out["action_risk_kzt"] > 0
+    assert "recovered_today_kzt" in out
+    assert "focus_completed_today" in out
 
 
 @pytest.mark.asyncio

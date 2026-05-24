@@ -1,22 +1,34 @@
-{# Shell v2 G10.5 — Focus Card (Execution Kernel).
-   Requires Alpine: focusCardView(), focusCardSemanticsClass(), runShiftFocusAction(), runShiftStateAction(),
-   shiftActionLoading, shiftHasContextDock(), openShiftContext(), focusCardHasOwnershipConflict(). #}
+{# Shell v2 G10.5 + G10.7 Predictive Shift Layer #}
 {% from "components/_card.html" import card %}
 
 {% macro focus_card() %}
-{% call card(padding_class='p-0', extra_class='ds-focus-card overflow-hidden !border-2') %}
+{% call card(padding_class='p-0', extra_class='ds-focus-card overflow-hidden !border-2 transition-all duration-300') %}
     <div class="px-5 py-4 text-white"
         :class="{
             'bg-red-600': focusCardSemanticsClass() === 'ds-status-danger',
             'bg-amber-500': focusCardSemanticsClass() === 'ds-status-warn',
             'bg-violet-600': focusCardSemanticsClass() !== 'ds-status-danger' && focusCardSemanticsClass() !== 'ds-status-warn'
         }">
-        <div class="text-xs font-bold uppercase tracking-wide opacity-90">Следующее действие</div>
+        <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="text-xs font-bold uppercase tracking-wide opacity-90">Следующее действие</div>
+            <span x-show="shiftPreAttentionTickLabel()"
+                class="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-white/20 animate-pulse"
+                x-text="shiftPreAttentionTickLabel()"></span>
+        </div>
         <p class="text-[11px] mt-1 opacity-80" x-show="focusCardHasOwnershipConflict()">
             Другой оператор уже взял эту задачу — дождитесь или выберите «Другое дело».
         </p>
     </div>
-    <div class="px-5 py-5" x-show="focusCardView()">
+    <div class="px-5 py-3 bg-slate-50 border-b border-slate-100"
+        x-show="focusCardView()?.anticipation?.pre_attention && shiftChoreoPhase === 'idle'"
+        :class="focusCardPreAttentionClass()">
+        <p class="text-sm font-semibold text-slate-800" x-text="focusCardView()?.anticipation?.anticipation_text"></p>
+        <p class="text-xs text-slate-500 mt-0.5" x-text="focusCardView()?.anticipation?.inevitability_text"></p>
+    </div>
+    <div class="px-5 py-5 ds-focus-slide-in"
+        :class="[shiftFocusCardChoreoClass(), focusCardPreAttentionClass()]"
+        :key="shiftFocusEnterKey"
+        x-show="shiftFocusCardShown()">
         <div class="flex flex-wrap items-center gap-2 mb-2">
             <span class="text-xs font-bold uppercase"
                 :class="focusCardSemanticsClass() === 'ds-status-danger' ? 'text-red-700' : (focusCardSemanticsClass() === 'ds-status-warn' ? 'text-amber-800' : 'text-violet-700')"
@@ -30,26 +42,39 @@
         </div>
         <div class="text-lg font-bold text-slate-900" x-text="focusCardView()?.title"></div>
         <p class="text-sm text-slate-600 mt-1" x-text="focusCardView()?.subtitle"></p>
-        <div class="flex flex-wrap gap-2 mt-5">
-            <template x-for="(act, idx) in (focusCardView()?.actions || []).slice(0, 1)" :key="'fca-' + idx">
-                <button type="button" @click="runShiftFocusAction(act)"
-                    class="ds-btn ds-btn-primary ds-btn-md min-h-[44px]"
-                    x-text="act.label"></button>
-            </template>
+        <p x-show="focusCardView()?.why_this_card"
+            class="text-xs text-slate-500 mt-2 flex items-start gap-1.5">
+            <span class="shrink-0 font-bold text-violet-600" aria-hidden="true">→</span>
+            <span>
+                <span class="font-semibold text-slate-700">Система видит:</span>
+                <span x-text="focusCardView()?.why_this_card"></span>
+            </span>
+        </p>
+        <div class="flex flex-wrap items-center gap-2 mt-5">
+            <button type="button"
+                x-show="focusCardView()?.compressed_actions?.primary"
+                @click="runShiftCompressedAction(focusCardView()?.compressed_actions?.primary)"
+                :disabled="!!shiftActionLoading"
+                class="ds-btn ds-btn-primary ds-btn-md min-h-[44px] disabled:opacity-50"
+                x-text="shiftActionLoading ? '…' : (focusCardView()?.compressed_actions?.primary?.label || 'Готово')"></button>
+            <button type="button"
+                x-show="focusCardView()?.compressed_actions?.secondary"
+                @click="runShiftCompressedAction(focusCardView()?.compressed_actions?.secondary)"
+                :disabled="shiftActionLoading === 'skip'"
+                class="ds-btn ds-btn-secondary ds-btn-md min-h-[44px] disabled:opacity-50"
+                x-text="shiftActionLoading === 'skip' ? '…' : (focusCardView()?.compressed_actions?.secondary?.label || 'Не сейчас')"></button>
             <button type="button"
                 x-show="shiftHasContextDock()"
                 @click="openShiftContext()"
                 class="ds-btn ds-btn-secondary ds-btn-md min-h-[44px] lg:hidden">
                 Контекст
             </button>
-            <template x-for="act in (focusCardView()?.state_actions || [])" :key="'fca-sa-' + act.id">
-                <button type="button"
-                    @click="runShiftStateAction(act.subtype, focusCardView()?.id)"
-                    :disabled="shiftActionLoading === act.id"
-                    class="ds-btn ds-btn-secondary ds-btn-md min-h-[44px] disabled:opacity-50"
-                    :title="act.hint || ''"
-                    x-text="shiftActionLoading === act.id ? '…' : act.label"></button>
-            </template>
+            <button type="button"
+                x-show="focusCardView()?.compressed_actions?.tertiary && !focusCardHasOwnershipConflict()"
+                @click="runShiftCompressedAction(focusCardView()?.compressed_actions?.tertiary)"
+                :disabled="shiftActionLoading === 'next'"
+                class="text-sm font-semibold text-slate-500 hover:text-slate-800 px-2 min-h-[44px] disabled:opacity-50"
+                x-text="shiftActionLoading === 'next' ? '…' : (focusCardView()?.compressed_actions?.tertiary?.label || 'Другое дело')"></button>
         </div>
     </div>
 {% endcall %}

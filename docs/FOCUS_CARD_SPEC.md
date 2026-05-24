@@ -31,9 +31,20 @@ Projection из [`shift_state_engine.py`](../app/services/shift_state_engine.py)
 | `pulse` | string | `red` / `amber` / … → semantics |
 | `phone`, `order_id` | string / int | Context Dock |
 | `actions` | array | primary CTA (≤3) |
+| `why_this_card` | string | «Почему эта задача» (heuristics) |
+| `ai_hint` | string | краткое пояснение риска |
+| `confidence` | number | 0.7–0.95 (эвристика приоритета) |
 | `reason` | string | только debug/logs |
 
-Top-level `shiftState.actions` — вторичные кнопки (`skip`, `next`, `reset_skips`, …).
+Top-level `shiftState.actions` — вторичные кнопки (`complete`, `skip`, `next`, …) в порядке complete → skip → next.
+
+Top-level `shiftState.compressed_actions` — `{ primary, secondary, tertiary }` для UI action compression.
+
+Top-level `shiftState.live_impact` — последнее действие оператора (TTL ~90s): `impact_text`, `impact_reason`, `animation`.
+
+**UI choreography (G10.6.1):** `complete` / `skip` проходят golden flow в `admin-app.js` (`SHIFT_CHOREO_MS`); strip показывает **staged outcome** (`outcome_prefix` → `outcome_emotion` → `impact_money`).
+
+**Predictive layer (G10.7):** `focus.anticipation` + `predictive_scene`; pre-attention до клика; см. `derive_focus_anticipation` / `build_live_impact_payload`.
 
 ---
 
@@ -45,6 +56,8 @@ Top-level `shiftState.actions` — вторичные кнопки (`skip`, `nex
   risk_kzt, wait_minutes,
   semantics,        // ds-status-danger | warn | ok | inactive
   actions,          // focus.actions
+  compressed_actions, // shiftState.compressed_actions
+  why_this_card, ai_hint, confidence,
   state_actions,    // shiftState.actions
   context_route,    // { type: 'chat'|'order', id }
   ownership,        // presentation.focus_ownership

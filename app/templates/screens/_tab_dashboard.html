@@ -31,6 +31,28 @@
                     </div>
                 </div>
 
+                </div>
+
+                <!-- Wow Layer: today impact for owner -->
+                <template x-if="revenueLeak && (revenueLeak.recovered_today_kzt ?? 0) > 0">
+                    <div class="rounded-2xl bg-emerald-50 ring-1 ring-emerald-200/80 px-5 py-4 flex flex-wrap items-center justify-between gap-3"
+                        :class="ownerImpactPulse ? 'ds-owner-impact-pulse' : ''"
+                        role="status"
+                        aria-live="polite">
+                        <div>
+                            <div class="text-[10px] font-bold uppercase text-emerald-800 tracking-wide">Спасено сегодня</div>
+                            <div class="text-sm text-emerald-900/80 mt-0.5">Действия команды вернули деньги в выручку</div>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-2xl font-black tabular-nums text-emerald-950"
+                                x-text="fmt.money(revenueLeak.recovered_today_kzt ?? 0)"></div>
+                            <div class="text-[10px] text-emerald-800/80 tabular-nums"
+                                x-show="(revenueLeak.focus_completed_today ?? 0) > 0"
+                                x-text="(revenueLeak.focus_completed_today ?? 0) + ' действий по смене'"></div>
+                        </div>
+                    </div>
+                </template>
+
                 <!-- Money MVP G8: action layer — каждая утечка → действие -->
                 <template x-if="revenueLeak && (revenueLeak.surfaces || []).length > 0">
                     <div class="space-y-3">

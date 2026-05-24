@@ -44,7 +44,7 @@
                 </button>
 
                 <!-- Заказы -->
-                <button type="button" x-show="isTabVisibleForRole('orders')" x-cloak
+                <button type="button" x-show="bottomNavShowsPrimaryTab('orders')" x-cloak
                     @click="navigateToTab('orders')"
                     :class="currentTab === 'orders' ? 'text-brand-600' : 'text-gray-500 hover:text-gray-700'"
                     class="flex-1 flex flex-col items-center justify-center gap-0.5 pt-1 transition-colors relative min-h-[44px]">
@@ -58,7 +58,7 @@
                 </button>
 
                 <!-- Диалоги -->
-                <button type="button" x-show="isTabVisibleForRole('chats')" x-cloak
+                <button type="button" x-show="bottomNavShowsPrimaryTab('chats')" x-cloak
                     @click="navigateToTab('chats')"
                     :class="currentTab === 'chats' ? 'text-brand-600' : 'text-gray-500 hover:text-gray-700'"
                     class="flex-1 flex flex-col items-center justify-center gap-0.5 pt-1 transition-colors relative min-h-[44px]">

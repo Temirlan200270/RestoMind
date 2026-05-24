@@ -6,6 +6,27 @@
 
 ## [Unreleased] — 2026-03-20
 
+### Добавлено (2026-05-22) — Predictive Shift Layer (G10.7)
+
+- **Anticipation на focus:** `anticipation` (tension_level, anticipation_text, inevitability, predictive_prefix) — probability до клика.
+- **Predictive scene:** banner «Система предупреждает» + `predictive_scene` в shift/state.
+- **Pre-attention:** idle pulse на focus card, «Риск растёт» каждые 12s, pulsing metric «Под риском».
+- **Compressed outcome:** live_impact = prefix → emotion («Вернули клиента») → money (`+N ₸`) с staged reveal в golden flow.
+
+### Добавлено (2026-05-22) — Wow Layer UX choreography (G10.6.1)
+
+- **Golden flow `complete`/`skip`:** staged timeline 150→200→200→300→500 ms (exit → impact strip → pulse → focus enter).
+- **Narrative renderer:** одна строка `reason → money` вместо двух равноправных полей в strip.
+- **Attention layer:** `ds-shift-scene--impact/focus/exit` — dim metrics, spotlight focus deck во время момента.
+
+### Добавлено (2026-05-22) — Wow Layer (G10.6)
+
+- **Live Impact Strip:** `live_impact` в `GET/POST /shift/state` (Redis TTL 90s) — мгновенная обратная связь после complete/skip; UI strip на экране смены.
+- **Focus Card wow:** `why_this_card`, `ai_hint`, `confidence` (heuristics без LLM); `compressed_actions` (primary/secondary/tertiary).
+- **State animations:** pulse green / fade shrink / focus slide-in / escalation shake (`admin-input.css` + `admin-app.js`).
+- **Operator one-screen:** primary nav = shift + inbox; orders/chats/bookings в «Разделы» и mobile «Ещё»; lazy mount bookings.
+- **Owner today impact:** `recovered_today_kzt` в `GET /revenue-leak` + hero «Спасено сегодня» на дашборде с WS pulse.
+
 ### Добавлено (2026-05-22) — Money Layer v2
 
 - **Recovered $:** колонки `recovered_kzt`, `focus_completed_count` в `daily_org_stats`; агрегация по `shift.focus_completed` и `order.draft_recovered` ([`money_recovery.py`](app/services/money_recovery.py), [`analytics_consumer.py`](app/services/analytics_consumer.py)).

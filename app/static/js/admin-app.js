@@ -88,6 +88,8 @@ function adminDefaultRevenueLeak() {
     return {
         total_leak_kzt: 0,
         action_risk_kzt: 0,
+        recovered_today_kzt: 0,
+        focus_completed_today: 0,
         surfaces: [],
         breakdown: {
             abandoned_drafts_kzt: 0,
@@ -528,6 +530,96 @@ const ADMIN_ROLE_TABS = Object.freeze({
     admin: null,
 });
 
+/** Wow Layer: primary sidebar/bottom nav for operator (secondary via «Ещё»). */
+const ADMIN_ROLE_PRIMARY_NAV = Object.freeze({
+    operator: Object.freeze(['shift', 'inbox']),
+    manager: null,
+    admin: null,
+});
+
+const ADMIN_OPERATOR_SECONDARY_TABS = Object.freeze(['orders', 'chats', 'bookings']);
+
+/** G10.6 golden UX flow — complete/skip choreography (ms). */
+const SHIFT_CHOREO_MS = Object.freeze({
+    pauseBeforeExit: 150,
+    exitDuration: 200,
+    impactRevealDelay: 200,
+    impactPrefixReveal: 120,
+    impactEmotionReveal: 180,
+    impactMoneyReveal: 100,
+    pulseAfterImpact: 300,
+    focusEnterAfterPulse: 500,
+});
+
+function adminSleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+}
+
+function adminLiveImpactUsesCompressed(liveImpact) {
+    return !!(liveImpact && (liveImpact.narrative_compressed || liveImpact.outcome_emotion));
+}
+
+function adminLiveImpactOutcomePrefix(liveImpact) {
+    if (!liveImpact) return '';
+    if (liveImpact.outcome_prefix) return String(liveImpact.outcome_prefix).trim();
+    const action = String(liveImpact.last_action || '');
+    if (action === 'focus_completed') return 'Риск был высок…';
+    return '';
+}
+
+function adminLiveImpactOutcomeEmotion(liveImpact) {
+    if (!liveImpact) return '';
+    if (liveImpact.outcome_emotion) return String(liveImpact.outcome_emotion).trim();
+    const action = String(liveImpact.last_action || '');
+    if (action === 'focus_skipped') return 'Отложили — следующая задача';
+    const reason = String(liveImpact.impact_reason || '').trim();
+    if (reason.includes('Клиент')) return 'Вернули клиента';
+    return reason || 'Готово';
+}
+
+function adminLiveImpactMoneyShort(liveImpact) {
+    if (!liveImpact) return '';
+    if (liveImpact.impact_money) return String(liveImpact.impact_money).trim();
+    const text = String(liveImpact.impact_text || '').trim();
+    const amount = Number(liveImpact.amount_kzt ?? 0);
+    if (amount > 0 && text) {
+        const m = text.match(/\+[\d\s]+₸/);
+        if (m) return m[0].trim();
+        return text;
+    }
+    if (text.startsWith('+')) return text.split(' ').slice(0, 2).join(' ');
+    return '';
+}
+
+/** Legacy combined line (fallback when not compressed). */
+function adminRenderLiveImpactNarrative(liveImpact) {
+    if (!liveImpact || typeof liveImpact !== 'object') return '';
+    if (adminLiveImpactUsesCompressed(liveImpact)) {
+        return adminLiveImpactOutcomeEmotion(liveImpact);
+    }
+    const reason = String(liveImpact.impact_reason || '').trim();
+    const text = String(liveImpact.impact_text || '').trim();
+    const action = String(liveImpact.last_action || '');
+    if (action === 'focus_skipped') {
+        return reason || text || 'Отложено — следующая задача';
+    }
+    if (reason && text) return `${reason} → ${text}`;
+    return text || reason;
+}
+
+function adminLiveImpactMoneyLabel(liveImpact) {
+    return adminLiveImpactMoneyShort(liveImpact);
+}
+
+function adminLiveImpactReasonOnly(liveImpact) {
+    if (!liveImpact || adminLiveImpactUsesCompressed(liveImpact)) return '';
+    const narrative = adminRenderLiveImpactNarrative(liveImpact);
+    const money = adminLiveImpactMoneyLabel(liveImpact);
+    const reason = String(liveImpact.impact_reason || '').trim();
+    if (narrative.includes('→') && money) return '';
+    return reason;
+}
+
 function adminNormalizeStaffRole(role) {
     const r = String(role || 'admin').trim().toLowerCase();
     if (r === 'operator' || r === 'manager' || r === 'admin') return r;
@@ -545,6 +637,17 @@ function adminTabVisibleForRole(tabId, role) {
     const tabs = adminTabsForRole(role);
     if (tabs === null) return true;
     return tabs.includes(String(tabId || '').trim());
+}
+
+function adminTabPrimaryNavForRole(tabId, role) {
+    const r = adminNormalizeStaffRole(role);
+    const primary = ADMIN_ROLE_PRIMARY_NAV[r];
+    if (primary === null) return adminTabVisibleForRole(tabId, role);
+    return primary.includes(String(tabId || '').trim());
+}
+
+function adminOperatorSecondaryTab(tabId) {
+    return ADMIN_OPERATOR_SECONDARY_TABS.includes(String(tabId || '').trim());
 }
 
 /** Sprint B: чаты грузим только на вкладках, где список реально нужен. */
@@ -854,7 +957,7 @@ function adminMixinState() {
 
         currentTab: 'dashboard',
         /** P0 lazy DOM: монтировать разметку тяжёлых вкладок после первого визита (`admin.html` + `template x-if`). */
-        lazyTabMount: { chats: false, orders: false, settings: false },
+        lazyTabMount: { chats: false, orders: false, bookings: false, settings: false },
         /** E5 UI: ответ `GET /api/admin/system/task-queue-health` (если есть на бэкенде). */
         taskQueueHealth: null,
         taskQueueHealthChecked: false,
@@ -1078,6 +1181,20 @@ function adminMixinState() {
         shiftStateDegraded: false,
         shiftStateLoadError: '',
         shiftActionLoading: '',
+        shiftLiveImpactPulse: '',
+        shiftFocusEnterKey: 0,
+        ownerImpactPulse: false,
+        _shiftLiveImpactTimer: null,
+        /** G10.6 choreography: idle | exiting | impact | entering */
+        shiftChoreoPhase: 'idle',
+        /** card | impact | focus — attention steering */
+        shiftAttentionTarget: '',
+        shiftChoreoImpact: null,
+        shiftFocusCardVisible: true,
+        /** impact reveal: idle | prefix | emotion | money */
+        shiftImpactRevealPhase: 'idle',
+        _shiftPreAttentionTimer: null,
+        _shiftPreAttentionTick: 0,
         _shiftStateRefreshTimer: null,
         _shiftHeartbeatTimer: null,
         botSlaStatus: { bot_short_mode: false, slow_chats: 0 },
@@ -3896,6 +4013,20 @@ function adminMixinAuthKnowledge() {
             return adminTabVisibleForRole(tabId, this.effectiveStaffRole());
         },
 
+        isTabPrimaryNavForRole(tabId) {
+            return adminTabPrimaryNavForRole(tabId, this.effectiveStaffRole());
+        },
+
+        isOperatorSecondaryTab(tabId) {
+            return this.effectiveStaffRole() === 'operator' && adminOperatorSecondaryTab(tabId);
+        },
+
+        isTabShownInSidebar(item) {
+            if (!item) return false;
+            if (!this.isTabVisibleForRole(item.id)) return false;
+            return this.isTabPrimaryNavForRole(item.id);
+        },
+
         /** Shell v2: operator sees shift as execution kernel; inbox as secondary list. */
         navItemDisplayLabel(item) {
             if (!item) return '';
@@ -3950,11 +4081,21 @@ function adminMixinAuthKnowledge() {
         /** Мобильный tab-bar «Ещё»: подсветка вторичных вкладок по роли. */
         bottomNavMoreTabActive() {
             const tabs = ['bookings'];
-            if (this.effectiveStaffRole() !== 'operator') tabs.push('inbox');
+            if (this.effectiveStaffRole() === 'operator') {
+                tabs.push('orders', 'chats', 'bookings');
+            } else {
+                tabs.push('inbox');
+            }
             if (this.isTabVisibleForRole('ai_center')) tabs.push('ai_center');
             if (this.isTabVisibleForRole('settings')) tabs.push('settings');
             if (this.isTabVisibleForRole('marketing')) tabs.push('marketing');
             return tabs.includes(this.currentTab);
+        },
+
+        bottomNavShowsPrimaryTab(tabId) {
+            if (!this.isTabVisibleForRole(tabId)) return false;
+            if (this.effectiveStaffRole() === 'operator' && adminOperatorSecondaryTab(tabId)) return false;
+            return true;
         },
 
         /** Фоновый poll shift/state для badge риска вне вкладки «Смена». */
@@ -6110,6 +6251,12 @@ function adminMixinWebSocketEvents() {
                     this._pushDashLiveFeed(type, data?.title || data?.action || 'ОС');
                     this.scheduleDashStatsRefreshDebounced();
                 }
+            } else if (type === 'shift.focus_completed' || type === 'order.draft_recovered') {
+                this._triggerOwnerImpactPulse();
+                void this.loadRevenueLeak();
+                if (this.currentTab === 'shift' || this.shouldPollShiftStateBadge()) {
+                    void this.loadShiftState(true);
+                }
             } else if (
                 type === 'order.created'
                 || type === 'order.confirmed'
@@ -6915,6 +7062,9 @@ function adminFocusCardFromShiftState(shiftState) {
     const ss = shiftState && typeof shiftState === 'object' ? shiftState : {};
     const focus = ss.focus;
     if (!focus || !focus.id) return null;
+    const compressed = ss.compressed_actions && typeof ss.compressed_actions === 'object'
+        ? ss.compressed_actions
+        : { primary: null, secondary: null, tertiary: null };
     return {
         id: focus.id,
         kind: focus.kind,
@@ -6924,10 +7074,15 @@ function adminFocusCardFromShiftState(shiftState) {
         wait_minutes: Number(focus.wait_minutes ?? 0),
         pulse: focus.pulse || '',
         semantics: adminFocusCardSemantics(focus),
+        why_this_card: focus.why_this_card || '',
+        ai_hint: focus.ai_hint || '',
+        confidence: Number(focus.confidence ?? 0),
         actions: Array.isArray(focus.actions) ? focus.actions.slice(0, 3) : [],
+        compressed_actions: compressed,
         state_actions: Array.isArray(ss.actions) ? ss.actions : [],
         context_route: adminFocusCardContextRoute(focus),
         ownership: ss.presentation?.focus_ownership || focus.ownership || 'mine',
+        anticipation: focus.anticipation && typeof focus.anticipation === 'object' ? focus.anticipation : {},
         phone: focus.phone || '',
         order_id: focus.order_id != null ? focus.order_id : null,
         booking_id: focus.booking_id != null ? focus.booking_id : null,
@@ -7043,6 +7198,254 @@ function adminMixinShiftStagedNav() {
 
         focusCardHasOwnershipConflict() {
             return String(this.focusCardView()?.ownership || '') === 'other';
+        },
+
+        shiftLiveImpactStripClass() {
+            const anim = String(this.shiftState?.live_impact?.animation || '');
+            if (anim === 'pulse_green') return 'ds-live-impact-strip--pulse_green';
+            if (anim === 'fade_shrink') return 'ds-live-impact-strip--fade_shrink';
+            return 'ds-live-impact-strip--pulse_green';
+        },
+
+        shiftLiveImpactPulseActive() {
+            return !!this.shiftLiveImpactPulse;
+        },
+
+        shiftStateEscalationClass() {
+            const state = String(this.shiftState?.state || '');
+            if (state === 'S1' || state === 'S5') return 'ds-state-escalation-shake';
+            return '';
+        },
+
+        shiftLiveImpactPayload() {
+            if (this.shiftChoreoImpact) return this.shiftChoreoImpact;
+            return this.shiftState?.live_impact || null;
+        },
+
+        shiftLiveImpactVisible() {
+            if (this.shiftChoreoImpact) return true;
+            if (this.shiftChoreoPhase === 'exiting') return false;
+            return !!this.shiftState?.live_impact;
+        },
+
+        shiftLiveImpactNarrative() {
+            return adminRenderLiveImpactNarrative(this.shiftLiveImpactPayload());
+        },
+
+        shiftLiveImpactPrefixLine() {
+            return adminLiveImpactOutcomePrefix(this.shiftLiveImpactPayload());
+        },
+
+        shiftLiveImpactEmotionLine() {
+            return adminLiveImpactOutcomeEmotion(this.shiftLiveImpactPayload());
+        },
+
+        shiftLiveImpactPrefixVisible() {
+            const p = this.shiftLiveImpactPayload();
+            if (!p || !adminLiveImpactUsesCompressed(p)) return false;
+            const prefix = this.shiftLiveImpactPrefixLine();
+            if (!prefix) return false;
+            if (this.shiftChoreoPhase === 'impact') {
+                return ['prefix', 'emotion', 'money'].includes(this.shiftImpactRevealPhase);
+            }
+            return true;
+        },
+
+        shiftLiveImpactEmotionVisible() {
+            const p = this.shiftLiveImpactPayload();
+            if (!p) return false;
+            if (this.shiftChoreoPhase === 'impact') {
+                return ['emotion', 'money'].includes(this.shiftImpactRevealPhase);
+            }
+            return !!this.shiftLiveImpactEmotionLine();
+        },
+
+        shiftLiveImpactMoneyVisible() {
+            const p = this.shiftLiveImpactPayload();
+            if (!p || !this.shiftLiveImpactMoneyLine()) return false;
+            if (this.shiftChoreoPhase === 'impact') {
+                return this.shiftImpactRevealPhase === 'money';
+            }
+            return true;
+        },
+
+        shiftLiveImpactMoneyLine() {
+            return adminLiveImpactMoneyLabel(this.shiftLiveImpactPayload());
+        },
+
+        shiftLiveImpactReasonLine() {
+            return adminLiveImpactReasonOnly(this.shiftLiveImpactPayload());
+        },
+
+        shiftLiveImpactIsCompressed() {
+            return adminLiveImpactUsesCompressed(this.shiftLiveImpactPayload());
+        },
+
+        shiftPredictiveScene() {
+            return this.shiftState?.predictive_scene && typeof this.shiftState.predictive_scene === 'object'
+                ? this.shiftState.predictive_scene
+                : {};
+        },
+
+        shiftPredictiveTensionVisible() {
+            if (this.shiftChoreoPhase !== 'idle' && this.shiftChoreoPhase !== 'entering') return false;
+            const scene = this.shiftPredictiveScene();
+            if (scene.active) return true;
+            const ant = this.focusCardView()?.anticipation || {};
+            return !!ant.pre_attention;
+        },
+
+        shiftPredictiveAnticipationText() {
+            const scene = this.shiftPredictiveScene();
+            if (scene.scene_headline) return scene.scene_headline;
+            return String(this.focusCardView()?.anticipation?.anticipation_text || '');
+        },
+
+        shiftPredictiveInevitabilityText() {
+            const scene = this.shiftPredictiveScene();
+            if (scene.inevitability) return scene.inevitability;
+            return String(this.focusCardView()?.anticipation?.inevitability_text || '');
+        },
+
+        shiftPredictiveTensionClass() {
+            const level = String(
+                this.shiftPredictiveScene().tension_level
+                || this.focusCardView()?.anticipation?.tension_level
+                || 'stable',
+            );
+            if (level === 'imminent') return 'ds-predictive-tension--imminent';
+            if (level === 'critical') return 'ds-predictive-tension--critical';
+            if (level === 'rising') return 'ds-predictive-tension--rising';
+            return '';
+        },
+
+        focusCardPreAttentionClass() {
+            if (this.shiftChoreoPhase !== 'idle') return '';
+            const ant = this.focusCardView()?.anticipation || {};
+            if (!ant.pre_attention) return '';
+            const level = String(ant.tension_level || 'rising');
+            if (level === 'imminent') return 'ds-focus-pre-attention--imminent';
+            if (level === 'critical') return 'ds-focus-pre-attention--critical';
+            return 'ds-focus-pre-attention--rising';
+        },
+
+        shiftRiskTrajectoryClass() {
+            const traj = String(this.shiftPredictiveScene().risk_trajectory || '');
+            if (traj === 'rising') return 'ds-risk-trajectory-rising';
+            return '';
+        },
+
+        shiftPreAttentionTickLabel() {
+            if (!this._shiftPreAttentionTick) return '';
+            return 'Риск растёт';
+        },
+
+        _stopShiftPreAttention() {
+            if (this._shiftPreAttentionTimer) {
+                clearInterval(this._shiftPreAttentionTimer);
+                this._shiftPreAttentionTimer = null;
+            }
+            this._shiftPreAttentionTick = 0;
+        },
+
+        _syncShiftPreAttention() {
+            this._stopShiftPreAttention();
+            const card = this.focusCardView();
+            if (!card || this.currentTab !== 'shift') return;
+            const ant = card.anticipation || {};
+            if (!ant.pre_attention) return;
+            this._shiftPreAttentionTimer = setInterval(() => {
+                this._shiftPreAttentionTick += 1;
+            }, 12000);
+        },
+
+        async _runImpactRevealSequence(impact) {
+            const ms = SHIFT_CHOREO_MS;
+            this.shiftImpactRevealPhase = 'idle';
+            const compressed = adminLiveImpactUsesCompressed(impact);
+            if (!compressed) {
+                this.shiftImpactRevealPhase = 'emotion';
+                if (impact?.animation) this._triggerShiftLiveImpactPulse(impact.animation);
+                await adminSleep(ms.pulseAfterImpact);
+                this.shiftImpactRevealPhase = 'idle';
+                return;
+            }
+            const prefix = adminLiveImpactOutcomePrefix(impact);
+            if (prefix) {
+                this.shiftImpactRevealPhase = 'prefix';
+                await adminSleep(ms.impactPrefixReveal);
+            }
+            this.shiftImpactRevealPhase = 'emotion';
+            await adminSleep(ms.impactEmotionReveal);
+            const money = adminLiveImpactMoneyShort(impact);
+            if (money) {
+                this.shiftImpactRevealPhase = 'money';
+                await adminSleep(ms.impactMoneyReveal);
+            }
+            if (impact?.animation) {
+                this._triggerShiftLiveImpactPulse(impact.animation);
+            }
+            await adminSleep(ms.pulseAfterImpact);
+            this.shiftImpactRevealPhase = 'idle';
+        },
+
+        shiftSceneAttentionClass() {
+            const t = String(this.shiftAttentionTarget || '');
+            if (t === 'impact') return 'ds-shift-scene--impact';
+            if (t === 'focus') return 'ds-shift-scene--focus';
+            if (t === 'card') return 'ds-shift-scene--exit';
+            return '';
+        },
+
+        shiftFocusCardChoreoClass() {
+            if (this.shiftChoreoPhase === 'exiting') return 'ds-focus-choreo-exit';
+            if (this.shiftChoreoPhase === 'impact') return 'ds-focus-choreo-hidden';
+            if (this.shiftChoreoPhase === 'entering') return 'ds-focus-choreo-enter';
+            if (!this.shiftFocusCardVisible) return 'ds-focus-choreo-hidden';
+            return '';
+        },
+
+        shiftFocusCardShown() {
+            if (!this.focusCardView()) return false;
+            if (this.shiftChoreoPhase === 'impact') return false;
+            return this.shiftFocusCardVisible;
+        },
+
+        _abortShiftChoreo() {
+            this.shiftChoreoPhase = 'idle';
+            this.shiftAttentionTarget = '';
+            this.shiftChoreoImpact = null;
+            this.shiftFocusCardVisible = true;
+            this.shiftImpactRevealPhase = 'idle';
+        },
+
+        _triggerShiftLiveImpactPulse(animation) {
+            this.shiftLiveImpactPulse = String(animation || 'pulse_green');
+            if (this._shiftLiveImpactTimer) clearTimeout(this._shiftLiveImpactTimer);
+            this._shiftLiveImpactTimer = setTimeout(() => {
+                this.shiftLiveImpactPulse = '';
+                this._shiftLiveImpactTimer = null;
+            }, 4000);
+        },
+
+        _triggerOwnerImpactPulse() {
+            this.ownerImpactPulse = true;
+            setTimeout(() => { this.ownerImpactPulse = false; }, 4000);
+        },
+
+        runShiftCompressedAction(action) {
+            if (!action || this.shiftActionLoading) return;
+            const act = { ...action };
+            if (act.type === 'shift_action' || act.subtype) {
+                const subtype = act.subtype || act.id || 'complete';
+                void this.runShiftStateAction(subtype, this.focusCardView()?.id);
+                return;
+            }
+            if (act.type === 'api' || act.type === 'navigate') {
+                void this.runShiftFocusAction(act);
+                return;
+            }
+            this.runMoneyQueueAction(act);
         },
     };
 }
@@ -7179,6 +7582,7 @@ function adminMixinLiveChat() {
             const t = this.currentTab;
             if (t === 'chats') this.lazyTabMount.chats = true;
             else if (t === 'orders') this.lazyTabMount.orders = true;
+            else if (t === 'bookings') this.lazyTabMount.bookings = true;
             else if (t === 'settings') this.lazyTabMount.settings = true;
         },
 
@@ -8532,6 +8936,7 @@ function adminMixinDataChartsSettings() {
                     if (this.currentTab === 'shift' && data.focus?.id) {
                         this._startShiftHeartbeat();
                     }
+                    this._syncShiftPreAttention();
                 } else if (this.shiftState) {
                     this.shiftStateDegraded = true;
                     this.shiftStateLoadError =
@@ -8555,28 +8960,92 @@ function adminMixinDataChartsSettings() {
             this.shiftActionLoading = actionId;
             this._stopShiftHeartbeat(true);
             try {
-                const locQuery = this.locationQueryParams().toString();
-                const url = locQuery ? `/api/admin/shift/action?${locQuery}` : '/api/admin/shift/action';
-                const { ok, data } = await this.apiJsonResponse(url, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        subtype: String(subtype || 'next'),
-                        focus_id: focusId || null,
-                    }),
-                });
-                if (ok && data?.ok) {
-                    this.shiftState = data;
-                    this.shiftStateFetchedAt = Date.now();
+                const useGoldenFlow = actionId === 'complete' || actionId === 'skip';
+                if (useGoldenFlow) {
+                    await this._runShiftActionGoldenFlow(actionId, focusId);
                 } else {
-                    void this.flashToast(this.formatApiError(data?.detail) || 'Не удалось выполнить действие', 'error');
+                    await this._runShiftActionImmediate(actionId, focusId);
                 }
             } catch (e) {
                 adminLogger.error('[admin] runShiftStateAction', e);
+                this._abortShiftChoreo();
                 void this.flashToast('Ошибка сети', 'error');
             } finally {
                 this.shiftActionLoading = '';
             }
+        },
+
+        async _postShiftAction(subtype, focusId) {
+            const locQuery = this.locationQueryParams().toString();
+            const url = locQuery ? `/api/admin/shift/action?${locQuery}` : '/api/admin/shift/action';
+            return this.apiJsonResponse(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    subtype: String(subtype || 'next'),
+                    focus_id: focusId || null,
+                }),
+            });
+        },
+
+        _applyShiftStateResponse(data, { choreo = false } = {}) {
+            const prevFocusId = this.shiftState?.focus?.id;
+            this.shiftState = data;
+            this.shiftStateFetchedAt = Date.now();
+            if (!choreo && data.live_impact?.animation) {
+                void this._runImpactRevealSequence(data.live_impact);
+            }
+            if (data.focus?.id && data.focus.id !== prevFocusId) {
+                this.shiftFocusEnterKey += 1;
+            }
+            this._syncShiftPreAttention();
+        },
+
+        async _runShiftActionImmediate(subtype, focusId) {
+            const { ok, data } = await this._postShiftAction(subtype, focusId);
+            if (ok && data?.ok) {
+                this._applyShiftStateResponse(data);
+            } else {
+                void this.flashToast(this.formatApiError(data?.detail) || 'Не удалось выполнить действие', 'error');
+            }
+        },
+
+        async _runShiftActionGoldenFlow(subtype, focusId) {
+            const ms = SHIFT_CHOREO_MS;
+            this._abortShiftChoreo();
+            this.shiftAttentionTarget = 'card';
+
+            const apiPromise = this._postShiftAction(subtype, focusId);
+
+            await adminSleep(ms.pauseBeforeExit);
+            this.shiftChoreoPhase = 'exiting';
+            this.shiftFocusCardVisible = false;
+
+            await adminSleep(ms.exitDuration);
+
+            const { ok, data } = await apiPromise;
+            if (!ok || !data?.ok) {
+                this._abortShiftChoreo();
+                void this.flashToast(this.formatApiError(data?.detail) || 'Не удалось выполнить действие', 'error');
+                return;
+            }
+
+            await adminSleep(ms.impactRevealDelay);
+            this.shiftChoreoPhase = 'impact';
+            this.shiftAttentionTarget = 'impact';
+            this.shiftChoreoImpact = data.live_impact || null;
+            await this.$nextTick();
+            await this._runImpactRevealSequence(this.shiftChoreoImpact);
+
+            this.shiftChoreoPhase = 'entering';
+            this.shiftAttentionTarget = 'focus';
+            this.shiftChoreoImpact = null;
+            this._applyShiftStateResponse(data, { choreo: true });
+            this.shiftFocusCardVisible = true;
+
+            await adminSleep(ms.focusEnterAfterPulse);
+            this.shiftChoreoPhase = 'idle';
+            this.shiftAttentionTarget = '';
         },
 
         runShiftFocusAction(action) {

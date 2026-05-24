@@ -172,6 +172,27 @@
 
 **Не в scope G10.5:** возврат Mode Bar, `POST /shell/mode`, big-bang rewrite `admin.html` (Phase D — отдельно).
 
+### G10.6 — Wow Layer (Live Impact & Operational Scene)
+
+> **Статус:** ✅ Live feedback loop action→деньги, one-screen operator, compressed actions, state animations.
+
+- [x] **Live Impact Strip** — `live_impact` в `GET/POST /shift/state` (Redis TTL 90s); UI strip в `_tab_shift_control.html`.
+- [x] **AI reasoning hint (heuristics)** — `why_this_card`, `ai_hint`, `confidence` в `focus`; строка «Почему эта задача» в `_focus_card.html`.
+- [x] **Action compression** — `compressed_actions` (primary/secondary/tertiary) + UI 1+1+link.
+- [x] **State animation layer** — CSS `ds-animate-pulse-green`, `ds-focus-slide-in`, escalation shake; JS pulse hooks.
+- [x] **Operator one-screen** — primary nav shift+inbox; orders/chats/bookings в «Разделы» + mobile «Ещё»; lazy mount bookings.
+- [x] **Owner today impact** — `recovered_today_kzt` в `GET /revenue-leak` + hero strip на дашборде + WS pulse.
+
+### G10.7 — Predictive Shift Layer (operational perception)
+
+> **Статус:** ✅ anticipation → inevitability → compressed outcome; pre-attention до клика.
+
+- [x] **Focus anticipation** — `anticipation` на focus (`tension_level`, `anticipation_text`, `inevitability_text`, `predictive_prefix`).
+- [x] **Predictive scene** — `predictive_scene` в shift/state + tension banner до действия.
+- [x] **Pre-attention UI** — idle pulse на focus card, «Риск растёт» tick, metric risk rising.
+- [x] **Compressed live impact** — `outcome_prefix` → `outcome_emotion` → `impact_money` (staged reveal в golden flow).
+- [x] **Tests** — `test_predictive_shift_layer.py`.
+
 - [x] **OS Decision Feed UI:** «Лента решений ОС» в `aiCenterTab=os` ([`_tab_ai_center.html`](app/templates/screens/_tab_ai_center.html)), `loadAuditLog()`, WS `os.audit`, блок «Живая ОС» (`dashLiveFeed`) на дашборде, refresh по `order.*` / `payment.*` / `booking.*` в `handleWsEvent`. UI-тексты — язык оператора («данные ОС», не dev-жаргон).
 - [x] **Websocket audit push:** [`audit_consumer.py`](app/services/audit_consumer.py) публикует `os.audit` с `org_id` после записи в `audit_log`.
 - [x] **Daily OS Digest (backend):** [`daily_os_digest.py`](app/services/daily_os_digest.py) — `GET /daily-os-digest/preview`, cron `daily_os_digest_scheduled_tick` (окно 09:00 по `Organization.timezone`). Staging-проверка Telegram — [`docs/TELEGRAM_DIGEST_STAGING.md`](docs/TELEGRAM_DIGEST_STAGING.md).

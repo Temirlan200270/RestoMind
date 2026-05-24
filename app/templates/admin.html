@@ -64,7 +64,9 @@
             <template x-if="lazyTabMount.chats">
             {% include "screens/_tab_chats.html" %}
             </template>
+            <template x-if="lazyTabMount.bookings">
             {% include "screens/_tab_bookings.html" %}
+            </template>
             {% include "screens/_tab_operator_queue.html" %}
             {% include "screens/_tab_incidents.html" %}
 

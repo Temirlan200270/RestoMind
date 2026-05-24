@@ -436,6 +436,11 @@ async def _build_revenue_leak_impl(
         2,
     )
 
+    from app.services.money_recovery import get_recovered_today_kzt
+
+    recovered_stats = await get_recovered_today_kzt(db, org_id)
+    recovered_today_kzt = float(recovered_stats.get("recovered_kzt") or 0)
+
     logger.debug(
         "revenue_leak org=%d: total=%.0f abandoned=%.0f slow=%.0f cancelled=%.0f menu_confusion=%.0f aov=%.0f surfaces=%d",
         org_id, total, abandoned, slow, cancelled, menu_confusion, aov, len(surfaces),
@@ -444,6 +449,8 @@ async def _build_revenue_leak_impl(
     return {
         "total_leak_kzt": total,
         "action_risk_kzt": action_risk_kzt,
+        "recovered_today_kzt": round(recovered_today_kzt, 2),
+        "focus_completed_today": int(recovered_stats.get("focus_completed_count") or 0),
         "aov": aov,
         "location_id": location_id,
         "surfaces": surfaces,
