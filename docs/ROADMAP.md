@@ -193,6 +193,14 @@
 - [x] **Compressed live impact** — `outcome_prefix` → `outcome_emotion` → `impact_money` (staged reveal в golden flow).
 - [x] **Tests** — `test_predictive_shift_layer.py`.
 
+### G10.8 — Demo Scene (30s money rescue autoplay)
+
+> **Статус:** ✅ scripted сценка «потеря → спасение → деньги» для pitch/onboarding.
+
+- [x] **Backend** — `demo_shift_scene.py`: фазы `hook|tension|action|impact|next`, fixed narrative; `GET /demo/shift-scenes`, `GET /demo/shift-scene/{id}/state?phase=`.
+- [x] **Autoplay UI** — кнопка «▶ 30 сек — спасение денег» на login; fullscreen shift (`rm-demo-scene`); auto-complete + golden flow без POST (demo read-only).
+- [x] **Tests** — `test_demo_shift_scene.py`, `test_demo_shift_scene_ui.py`.
+
 - [x] **OS Decision Feed UI:** «Лента решений ОС» в `aiCenterTab=os` ([`_tab_ai_center.html`](app/templates/screens/_tab_ai_center.html)), `loadAuditLog()`, WS `os.audit`, блок «Живая ОС» (`dashLiveFeed`) на дашборде, refresh по `order.*` / `payment.*` / `booking.*` в `handleWsEvent`. UI-тексты — язык оператора («данные ОС», не dev-жаргон).
 - [x] **Websocket audit push:** [`audit_consumer.py`](app/services/audit_consumer.py) публикует `os.audit` с `org_id` после записи в `audit_log`.
 - [x] **Daily OS Digest (backend):** [`daily_os_digest.py`](app/services/daily_os_digest.py) — `GET /daily-os-digest/preview`, cron `daily_os_digest_scheduled_tick` (окно 09:00 по `Organization.timezone`). Staging-проверка Telegram — [`docs/TELEGRAM_DIGEST_STAGING.md`](docs/TELEGRAM_DIGEST_STAGING.md).

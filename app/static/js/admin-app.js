@@ -551,6 +551,17 @@ const SHIFT_CHOREO_MS = Object.freeze({
     focusEnterAfterPulse: 500,
 });
 
+/** G10.8 — scripted 30s sales demo (must match demo_shift_scene.py delays). */
+const DEMO_SHIFT_SCENE_DEFAULT = 'money_rescue_30s';
+const DEMO_SHIFT_SCENE_PHASES = Object.freeze({
+    money_rescue_30s: Object.freeze([
+        { id: 'hook', delay_ms: 0 },
+        { id: 'tension', delay_ms: 5000 },
+        { id: 'action', delay_ms: 10000, auto_complete: true },
+        { id: 'next', delay_ms: 25000 },
+    ]),
+});
+
 function adminSleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
 }
@@ -1184,6 +1195,13 @@ function adminMixinState() {
         shiftLiveImpactPulse: '',
         shiftFocusEnterKey: 0,
         ownerImpactPulse: false,
+        /** G10.8 scripted demo scene (fullscreen shift autoplay). */
+        demoSceneActive: false,
+        demoSceneId: '',
+        demoScenePhase: '',
+        _pendingDemoSceneId: '',
+        _demoSceneTimers: [],
+        _demoSceneInternalLoad: false,
         _shiftLiveImpactTimer: null,
         /** G10.6 choreography: idle | exiting | impact | entering */
         shiftChoreoPhase: 'idle',
@@ -1952,6 +1970,19 @@ function adminMixinMenuOrdersUi() {
             }
 
             await this.checkSession();
+
+            try {
+                const sceneFromUrl = new URLSearchParams(window.location.search).get('demo_scene');
+                if (sceneFromUrl && this.authenticated && this.isDemoSession) {
+                    await this.startDemoShiftScene(sceneFromUrl);
+                } else if (this._pendingDemoSceneId && this.authenticated) {
+                    const pending = this._pendingDemoSceneId;
+                    this._pendingDemoSceneId = '';
+                    await this.startDemoShiftScene(pending);
+                }
+            } catch (_demoInitErr) {
+                adminLogger.warn('[admin] demo scene init', _demoInitErr);
+            }
 
             if ('serviceWorker' in navigator) {
                 navigator.serviceWorker.register('/static/sw.js').catch(() => {});
@@ -3256,6 +3287,11 @@ function adminMixinSearchBookings() {
                 this.closeCommandBar();
                 return;
             }
+            if (this.demoSceneActive) {
+                e.preventDefault();
+                this.stopDemoShiftScene();
+                return;
+            }
             /** Закрытие оверлеев сверху вниз (одна Esc — один слой). */
             if (this.p15TourActive) {
                 e.preventDefault();
@@ -4111,6 +4147,10 @@ function adminMixinAuthKnowledge() {
         },
 
         _syncShiftStatePolling() {
+            if (this.demoSceneActive) {
+                this._stopShiftStateAutoRefresh();
+                return;
+            }
             if (this.currentTab === 'shift') {
                 this._startShiftStateAutoRefresh();
                 return;
@@ -4436,9 +4476,14 @@ function adminMixinAuthKnowledge() {
         },
 
         async submitDemoLogin() {
+            return this.submitDemoLoginWithScene('');
+        },
+
+        async submitDemoLoginWithScene(sceneId = DEMO_SHIFT_SCENE_DEFAULT) {
             this.loginError = '';
             this.auth401AlertShown = false;
             this.loginLoading = true;
+            if (sceneId) this._pendingDemoSceneId = String(sceneId);
             try {
                 const res = await this.apiFetch('/api/admin/auth/demo-login', {
                     method: 'POST',
@@ -4447,6 +4492,7 @@ function adminMixinAuthKnowledge() {
                 let data = {};
                 try { data = await res.json(); } catch { /* empty */ }
                 if (!res.ok) {
+                    this._pendingDemoSceneId = '';
                     this.loginError = typeof data.detail === 'string' ? data.detail : 'Не удалось открыть демо';
                     return;
                 }
@@ -4456,20 +4502,31 @@ function adminMixinAuthKnowledge() {
                 this.staffRole = String(data.staff_role || 'operator').toLowerCase();
                 this.isSuperadmin = !!data.is_superadmin;
                 this._ensureAdminHashListener();
-                const parsedLogin = adminParseLocationHash();
-                if (!parsedLogin.tab) {
-                    await this.applyRoleDefaultLanding(null);
+                if (this._pendingDemoSceneId) {
+                    this.currentTab = 'shift';
+                    if (typeof this._pushAdminHash === 'function') this._pushAdminHash();
                 } else {
-                    this._applyParsedHash(parsedLogin);
-                    this._bootstrapAdminMode({ tabFromHash: this.currentTab });
+                    const parsedLogin = adminParseLocationHash();
+                    if (!parsedLogin.tab) {
+                        await this.applyRoleDefaultLanding(null);
+                    } else {
+                        this._applyParsedHash(parsedLogin);
+                        this._bootstrapAdminMode({ tabFromHash: this.currentTab });
+                    }
                 }
                 this._installAdminHashWatch();
                 this.connectWebSocket();
                 await this._afterAuthBootstrapLoads();
                 await this._consumePendingHashChatPhone();
                 await this._afterAuthTabBootstrap();
+                if (this._pendingDemoSceneId) {
+                    const pending = this._pendingDemoSceneId;
+                    this._pendingDemoSceneId = '';
+                    await this.startDemoShiftScene(pending);
+                }
                 this.$nextTick(() => this.maybeStartP15CoachTour());
             } catch {
+                this._pendingDemoSceneId = '';
                 this.loginError = 'Не удалось связаться с сервером';
             } finally {
                 this.loginLoading = false;
@@ -8913,6 +8970,9 @@ function adminMixinDataChartsSettings() {
         },
 
         async loadShiftState(force = false) {
+            if (this.demoSceneActive && !this._demoSceneInternalLoad) {
+                return;
+            }
             const ttlMs = 30000;
             const now = Date.now();
             if (
@@ -9046,6 +9106,172 @@ function adminMixinDataChartsSettings() {
             await adminSleep(ms.focusEnterAfterPulse);
             this.shiftChoreoPhase = 'idle';
             this.shiftAttentionTarget = '';
+        },
+
+        demoSceneNarrativeLine() {
+            const narrative = String(this.shiftState?.demo_scene?.narrative || '').trim();
+            if (narrative) return narrative;
+            return 'Потеря → спасение → деньги';
+        },
+
+        _clearDemoSceneTimers() {
+            for (const t of this._demoSceneTimers || []) {
+                clearTimeout(t);
+            }
+            this._demoSceneTimers = [];
+        },
+
+        async _fetchDemoScenePhase(phaseId) {
+            const sceneId = this.demoSceneId || DEMO_SHIFT_SCENE_DEFAULT;
+            const { ok, data } = await this.apiJsonResponse(
+                `/api/admin/demo/shift-scene/${encodeURIComponent(sceneId)}/state?phase=${encodeURIComponent(phaseId)}`,
+            );
+            if (!ok || !data?.ok) {
+                throw new Error(this.formatApiError(data?.detail) || 'demo scene fetch failed');
+            }
+            return data;
+        },
+
+        _applyDemoSceneState(data, { choreo = false } = {}) {
+            this.shiftState = data;
+            this.shiftStateFetchedAt = Date.now();
+            this.shiftStateDegraded = false;
+            this.shiftStateLoadError = '';
+            this.demoScenePhase = String(data?.demo_scene?.phase || '');
+            if (!choreo && data.live_impact?.animation) {
+                void this._runImpactRevealSequence(data.live_impact);
+            }
+            this.shiftFocusCardVisible = true;
+            this._syncShiftPreAttention();
+        },
+
+        async _runDemoSceneAutoComplete() {
+            const ms = SHIFT_CHOREO_MS;
+            this._abortShiftChoreo();
+            this.shiftAttentionTarget = 'card';
+            const impactPromise = this._fetchDemoScenePhase('impact');
+
+            await adminSleep(ms.pauseBeforeExit);
+            this.shiftChoreoPhase = 'exiting';
+            this.shiftFocusCardVisible = false;
+
+            await adminSleep(ms.exitDuration);
+
+            let data;
+            try {
+                data = await impactPromise;
+            } catch (e) {
+                this._abortShiftChoreo();
+                adminLogger.error('[admin] demo scene impact', e);
+                void this.flashToast('Не удалось загрузить сцену демо', 'error');
+                return;
+            }
+
+            await adminSleep(ms.impactRevealDelay);
+            this.shiftChoreoPhase = 'impact';
+            this.shiftAttentionTarget = 'impact';
+            this.shiftChoreoImpact = data.live_impact || null;
+            await this.$nextTick();
+            await this._runImpactRevealSequence(this.shiftChoreoImpact);
+
+            this.shiftChoreoPhase = 'entering';
+            this.shiftAttentionTarget = 'focus';
+            this.shiftChoreoImpact = null;
+            this._applyDemoSceneState(data, { choreo: true });
+            this.shiftFocusCardVisible = true;
+
+            await adminSleep(ms.focusEnterAfterPulse);
+            this.shiftChoreoPhase = 'idle';
+            this.shiftAttentionTarget = '';
+        },
+
+        _scheduleDemoScenePhases(sceneId) {
+            this._clearDemoSceneTimers();
+            const phases = DEMO_SHIFT_SCENE_PHASES[sceneId] || DEMO_SHIFT_SCENE_PHASES[DEMO_SHIFT_SCENE_DEFAULT];
+            for (const step of phases) {
+                const timer = setTimeout(() => {
+                    if (!this.demoSceneActive || this.demoSceneId !== sceneId) return;
+                    void this._runDemoScenePhaseStep(step);
+                }, Math.max(0, Number(step.delay_ms) || 0));
+                this._demoSceneTimers.push(timer);
+            }
+            const finishTimer = setTimeout(() => {
+                if (!this.demoSceneActive) return;
+                void this.flashToast('Демо завершено · Esc — выход', 'success');
+            }, 30000);
+            this._demoSceneTimers.push(finishTimer);
+        },
+
+        async _runDemoScenePhaseStep(step) {
+            if (!this.demoSceneActive) return;
+            const phaseId = String(step?.id || '');
+            if (!phaseId) return;
+            if (step.auto_complete) {
+                try {
+                    const actionData = await this._fetchDemoScenePhase('action');
+                    this._applyDemoSceneState(actionData);
+                } catch (e) {
+                    adminLogger.error('[admin] demo scene action', e);
+                }
+                await this._runDemoSceneAutoComplete();
+                return;
+            }
+            try {
+                const data = await this._fetchDemoScenePhase(phaseId);
+                this._applyDemoSceneState(data);
+                if (phaseId === 'hook') {
+                    this.shiftFocusEnterKey += 1;
+                }
+            } catch (e) {
+                adminLogger.error('[admin] demo scene phase', phaseId, e);
+            }
+        },
+
+        async startDemoShiftScene(sceneId = DEMO_SHIFT_SCENE_DEFAULT) {
+            const sid = String(sceneId || DEMO_SHIFT_SCENE_DEFAULT).trim();
+            this.stopDemoShiftScene({ silent: true });
+            this.demoSceneActive = true;
+            this.demoSceneId = sid;
+            this.demoScenePhase = 'hook';
+            this.currentTab = 'shift';
+            this.sidebarOpen = false;
+            this._stopShiftHeartbeat(true);
+            this._stopShiftStateAutoRefresh();
+            if (typeof this._pushAdminHash === 'function') this._pushAdminHash();
+            this.shiftStateLoading = true;
+            try {
+                const data = await this._fetchDemoScenePhase('hook');
+                this._applyDemoSceneState(data);
+                this.shiftFocusEnterKey += 1;
+                this._scheduleDemoScenePhases(sid);
+            } catch (e) {
+                adminLogger.error('[admin] startDemoShiftScene', e);
+                this.demoSceneActive = false;
+                void this.flashToast('Не удалось запустить демо-сцену', 'error');
+            } finally {
+                this.shiftStateLoading = false;
+            }
+        },
+
+        stopDemoShiftScene({ silent = false, replay = false } = {}) {
+            this._clearDemoSceneTimers();
+            this._abortShiftChoreo();
+            const wasActive = this.demoSceneActive;
+            this.demoSceneActive = false;
+            this.demoSceneId = '';
+            this.demoScenePhase = '';
+            if (!wasActive) return;
+            this._demoSceneInternalLoad = true;
+            void this.loadShiftState(true).finally(() => {
+                this._demoSceneInternalLoad = false;
+                this._syncShiftStatePolling();
+            });
+            if (!silent) {
+                void this.flashToast(replay ? 'Демо перезапускается…' : 'Демо-сцена закрыта', 'info');
+            }
+            if (replay) {
+                void this.startDemoShiftScene(DEMO_SHIFT_SCENE_DEFAULT);
+            }
         },
 
         runShiftFocusAction(action) {

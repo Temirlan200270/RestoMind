@@ -1043,3 +1043,19 @@ aside.bg-brand-900 nav.admin-sidebar-scroll::-webkit-scrollbar-thumb:hover {
 .admin-root .ds-chat-bubble--ai {
     /* AI assistant bubble — violet per UI_DESIGN_SYSTEM */
 }
+
+/* G10.8 — fullscreen scripted demo scene (shift only) */
+.admin-root.rm-demo-scene aside,
+.admin-root.rm-demo-scene main > header,
+.admin-root.rm-demo-scene nav[aria-label="Основная навигация"] {
+    display: none !important;
+}
+.admin-root.rm-demo-scene #admin-content-scroll {
+    @apply px-4 py-4 md:px-8 md:py-6 pb-6;
+}
+.admin-root.rm-demo-scene [data-demo-hide] {
+    display: none !important;
+}
+.admin-root.rm-demo-scene .rm-demo-scene-banner {
+    @apply sticky top-0 z-20;
+}

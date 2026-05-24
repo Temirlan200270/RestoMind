@@ -33,7 +33,10 @@
 <!-- ========== ПРИЛОЖЕНИЕ (после входа): вся высота — 100dvh, без calc; алерт в потоке — чат сжимается ========== -->
 <div x-show="authenticated" x-cloak
     class="flex h-[100dvh] min-h-0 w-full overflow-hidden bg-gray-50 relative transition-[opacity,filter] duration-200 ease-out"
-    :class="orgSwitchChromeDimmed ? 'rm-chrome-org-switch' : ''">
+    :class="[
+        orgSwitchChromeDimmed ? 'rm-chrome-org-switch' : '',
+        demoSceneActive ? 'rm-demo-scene' : '',
+    ]">
 
     {# Navigation shell #}
     {% include "screens/_sidebar.html" %}

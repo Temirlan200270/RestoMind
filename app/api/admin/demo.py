@@ -1,20 +1,33 @@
-"""Demo data seed/clear for admin (E0.1 tail)."""
+"""Demo data seed/clear for admin (E0.1 tail). G10.8 — scripted shift demo scenes."""
 
 from __future__ import annotations
 
 import logging
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.db.session import get_db
 from app.services.demo_data import clear_demo_data, demo_data_exists, seed_demo_data
+from app.services.demo_shift_scene import build_demo_shift_state, list_demo_shift_scenes
 
 from .deps import admin_org_from_session, require_admin_session_active
 
 logger = logging.getLogger(__name__)
 
 demo_router = APIRouter(dependencies=[Depends(require_admin_session_active)])
+
+
+def _require_demo_scene_access(request: Request) -> None:
+    """Demo scenes: demo-login session or local APP_DEBUG."""
+    if bool(request.session.get("is_demo")) or settings.app_debug:
+        return
+    raise HTTPException(
+        status_code=403,
+        detail="Сценарий демо доступен после «Попробовать демо» или при APP_DEBUG=true",
+    )
 
 
 @demo_router.get("/demo/status")
@@ -66,3 +79,26 @@ async def demo_delete_post(request: Request, db: AsyncSession = Depends(get_db))
     Нужен для сред, где HTTP DELETE режется прокси/CDN (удаление «не работает», а POST проходит).
     """
     return await _demo_delete_core(db, admin_org_from_session(request))
+
+
+@demo_router.get("/demo/shift-scenes")
+async def demo_shift_scenes_list(request: Request) -> dict[str, Any]:
+    """G10.8: каталог scripted demo-сцен для 20–30 сек pitch."""
+    _require_demo_scene_access(request)
+    return {"ok": True, "scenes": list_demo_shift_scenes()}
+
+
+@demo_router.get("/demo/shift-scene/{scene_id}/state")
+async def demo_shift_scene_state(
+    request: Request,
+    scene_id: str,
+    phase: Annotated[str, Query(description="hook|tension|action|impact|next")] = "hook",
+) -> dict[str, Any]:
+    """G10.8: canned GET /shift/state для фазы сценки (без мутаций БД)."""
+    _require_demo_scene_access(request)
+    org_id = admin_org_from_session(request)
+    try:
+        payload = build_demo_shift_state(scene_id, phase, org_id=org_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return payload

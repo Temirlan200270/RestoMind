@@ -47,21 +47,26 @@ def resolve_postgres_pool_settings(
 
     pool_size=0 и max_overflow=-1 — авто по DSN (Supabase session → малый пул).
     """
-    if pool_size > 0:
-        resolved_size = pool_size
-    elif is_supabase_session_pooler(database_url):
-        # Web + ARQ worker + deploy overlap: 1 conn/process on session pooler (~15 project-wide).
+    session_pooler = is_supabase_session_pooler(database_url)
+    transaction_pooler = is_supabase_transaction_pooler(database_url)
+
+    if session_pooler:
+        # Supabase session pooler has a very small project-wide client limit.
+        # Treat env overrides as upper bounds here so stale Render values cannot
+        # accidentally exhaust all sessions during deploy/startup overlap.
         resolved_size = 1
-    elif is_supabase_transaction_pooler(database_url):
+    elif pool_size > 0:
+        resolved_size = pool_size
+    elif transaction_pooler:
         resolved_size = 8
     else:
         resolved_size = 10
 
-    if max_overflow >= 0:
-        resolved_overflow = max_overflow
-    elif is_supabase_session_pooler(database_url):
+    if session_pooler:
         resolved_overflow = 0
-    elif is_supabase_transaction_pooler(database_url):
+    elif max_overflow >= 0:
+        resolved_overflow = max_overflow
+    elif transaction_pooler:
         resolved_overflow = 4
     else:
         resolved_overflow = 5

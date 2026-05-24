@@ -5,7 +5,28 @@
             <!-- ========== G10 SHIFT STATE MACHINE (Focus-Driven OS Sprint 2 split) ========== -->
             <div x-show="currentTab === 'shift'" x-cloak class="fade-in space-y-5 max-w-7xl"
                 x-effect="shiftState?.focus?.id; mobileActiveScreen = 'focus'">
-                <div class="flex flex-wrap items-end justify-between gap-4">
+
+                <!-- G10.8 Demo scene banner -->
+                <div x-show="demoSceneActive" x-cloak
+                    class="rm-demo-scene-banner rounded-2xl px-4 py-3 flex flex-wrap items-center justify-between gap-3 ring-1 ring-emerald-200/80 bg-emerald-50/95"
+                    role="status" aria-live="polite">
+                    <div class="min-w-0">
+                        <div class="text-[10px] font-bold uppercase tracking-wide text-emerald-800">Демо · 30 секунд</div>
+                        <div class="text-sm font-semibold text-emerald-950 mt-0.5" x-text="demoSceneNarrativeLine()"></div>
+                    </div>
+                    <div class="flex flex-wrap gap-2 shrink-0">
+                        <button type="button" @click="startDemoShiftScene(demoSceneId || 'money_rescue_30s')"
+                            class="text-xs font-semibold px-3 py-2 rounded-lg border border-emerald-300 bg-white/80 hover:bg-white min-h-[40px]">
+                            ↻ Сначала
+                        </button>
+                        <button type="button" @click="stopDemoShiftScene()"
+                            class="text-xs font-semibold px-3 py-2 rounded-lg border border-emerald-300 bg-white/80 hover:bg-white min-h-[40px]">
+                            Выход · Esc
+                        </button>
+                    </div>
+                </div>
+
+                <div class="flex flex-wrap items-end justify-between gap-4" data-demo-hide>
                     <div class="min-w-0">
                         {{ section_header('Смена', subtitle='Один экран — одно следующее действие.', extra_class='!mb-0') }}
                         <div class="flex flex-wrap items-center gap-2 mt-2 text-sm text-slate-600"
@@ -73,6 +94,7 @@
                     <div class="space-y-5" :class="shiftSceneAttentionClass()">
                         <!-- Metrics strip (hidden in calm empty — operator sees CTA instead) -->
                         <div class="grid grid-cols-2 lg:grid-cols-5 gap-3 ds-shift-metrics-dim transition-all duration-300"
+                            data-demo-hide
                             :class="shiftRiskTrajectoryClass()"
                             x-show="!shiftIsCalmEmpty()">
                             <div class="rounded-2xl bg-red-50 ring-1 ring-red-200/80 px-4 py-3 transition-all duration-300"

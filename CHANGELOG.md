@@ -51,6 +51,10 @@
 - **Тесты:** sidebar `isTabShownInSidebar`, analytics special events (`shift.focus_completed`, `order.draft_recovered`), visibility copy «Спасено действиями».
 - **twilio_media:** fallback `audioop` при отсутствии `audioop-lts` на Python 3.13+.
 
+### Добавлено (2026-05-24) — G10.8 Demo Scene
+
+- **30-сек сценка:** `money_rescue_30s` — hook → tension → auto «Готово» → Live Impact +1 200 ₸ → следующий риск; кнопка на экране входа; Esc — выход.
+
 ### Исправлено (2026-05-22) — Postgres pool (Supabase EMAXCONNSESSION)
 
 - **Пул SQLAlchemy:** вместо `pool_size=20` / `max_overflow=10` — авто по DSN: Supabase session pooler (`:5432`) → **`2+0`** на процесс (было 4+1); env `DB_POOL_SIZE`, `DB_MAX_OVERFLOW`; дефолты в `render.yaml`.

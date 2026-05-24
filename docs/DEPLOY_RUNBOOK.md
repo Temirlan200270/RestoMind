@@ -72,8 +72,8 @@ flowchart LR
 | Runtime | Docker (`Dockerfile` в корне) |
 | Region | `frankfurt` (или ближе к Supabase/клиентам) |
 | Health check | `GET /health` |
-| Pre-deploy | `alembic upgrade head` (уже в `render.yaml`; дублируется в `start.sh` как `alembic upgrade heads`) |
-| Start command | из Dockerfile / `start.sh` → `uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
+| Pre-deploy | `alembic upgrade head` (уже в `render.yaml`) |
+| Start command | из Dockerfile / `start.sh` → без Alembic по умолчанию, затем `uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
 
 Blueprint: **New → Blueprint** → репозиторий с `render.yaml`.  
 Вручную: см. [`DEPLOY_RENDER.md`](../DEPLOY_RENDER.md) вариант B.
@@ -183,7 +183,7 @@ Sign-off: [`docs/VOICE_STAGING_CHECKLIST.md`](VOICE_STAGING_CHECKLIST.md).
 2. Заполнить env из §2.1–2.2.
 3. Деплой → дождаться **Live**.
 
-Миграции: `preDeployCommand` + `start.sh` выполняют Alembic автоматически.
+Миграции: `preDeployCommand` выполняет Alembic автоматически. `start.sh` запускает Alembic только при `RUN_BOOT_MIGRATIONS=true`.
 
 ### Шаг 3 — Render Worker
 
