@@ -82,10 +82,11 @@ async def build_daily_os_digest_payload(
     except Exception:
         recovered_kzt = 0.0
     hours_saved = round(float(audit_count) * 0.08 + float(escalations) * 0.25, 1)
+    recovered_str = f"{recovered_kzt:,.0f} ₸".replace(",", " ")
     text = (
         f"Daily OS Digest за {day.isoformat()}\n"
         f"OS-действий: {int(audit_count)}\n"
-        f"Спасено действиями: {recovered_kzt:,.0f} ₸\n".replace(",", " ")
+        f"Спасено действиями: {recovered_str}\n"
         f"Эскалаций/перехватов: {int(escalations)}\n"
         f"Сбоев интеграций: {int(integration_failures)}\n"
         f"Новых рекомендаций: {int(recommendations)}\n"

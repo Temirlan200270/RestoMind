@@ -43,6 +43,14 @@
 - **Operator scene:** sidebar «Следующее действие» / «Все риски»; inbox hero «Открыть в смене»; `openMoneyQueueItemViaShift` для operator.
 - **Smoke operator:** login → landing shift при risk → focus card → mobile context → inbox «Открыть в смене» → карточка риска → shift context.
 
+### Исправлено (2026-05-24)
+
+- **daily_os_digest.py:** SyntaxError при сборке строки digest (`.replace()` ломал конкатенацию f-strings) — CI pytest collection.
+- **Postgres pool:** auto default Supabase session pooler `1+0` (было `2+0`); `render.yaml` `DB_POOL_SIZE=1` — снижение `EMAXCONNSESSION` при деплое.
+- **_tab_dashboard.html:** лишний `</div>` после hero owner impact — регресс layout + `test_all_screen_templates_have_balanced_divs`.
+- **Тесты:** sidebar `isTabShownInSidebar`, analytics special events (`shift.focus_completed`, `order.draft_recovered`), visibility copy «Спасено действиями».
+- **twilio_media:** fallback `audioop` при отсутствии `audioop-lts` на Python 3.13+.
+
 ### Исправлено (2026-05-22) — Postgres pool (Supabase EMAXCONNSESSION)
 
 - **Пул SQLAlchemy:** вместо `pool_size=20` / `max_overflow=10` — авто по DSN: Supabase session pooler (`:5432`) → **`2+0`** на процесс (было 4+1); env `DB_POOL_SIZE`, `DB_MAX_OVERFLOW`; дефолты в `render.yaml`.

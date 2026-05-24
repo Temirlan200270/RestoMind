@@ -299,7 +299,7 @@ def test_visibility_ui_hooks_are_present():
     assert "Деньги под контролем" in dash
     shift = Path("app/templates/screens/_tab_shift_control.html").read_text(encoding="utf-8")
     assert "shiftState" in shift
-    assert "Следующее действие" in shift
+    assert "Спасено действиями" in shift
     assert "selectedLocationId" in js
     assert "locationQueryParams" in js
     assert "available_locations" in js

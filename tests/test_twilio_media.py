@@ -6,15 +6,10 @@ from io import BytesIO
 
 import pytest
 
-from app.integrations.twilio_media import mulaw_8k_to_wav, mulaw_to_linear_pcm16
-
-try:
-    import audioop
-except ImportError:
-    audioop = None
+from app.integrations.twilio_media import mulaw_8k_to_wav, mulaw_to_linear_pcm16, audioop as twilio_audioop
 
 
-@pytest.mark.skipif(audioop is None, reason="нужен audioop-lts")
+@pytest.mark.skipif(twilio_audioop is None, reason="нужен audioop или audioop-lts")
 def test_mulaw_silence_to_pcm() -> None:
     """Тишина в μ-law часто кодируется как 0xFF."""
     pcm = mulaw_to_linear_pcm16(bytes([0xFF] * 160))
@@ -23,7 +18,7 @@ def test_mulaw_silence_to_pcm() -> None:
     assert -50 < s < 50
 
 
-@pytest.mark.skipif(audioop is None, reason="нужен audioop-lts")
+@pytest.mark.skipif(twilio_audioop is None, reason="нужен audioop или audioop-lts")
 def test_mulaw_8k_to_wav_header() -> None:
     raw = bytes([0xFF] * 8000)
     wav = mulaw_8k_to_wav(raw)

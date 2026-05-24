@@ -50,8 +50,8 @@ def resolve_postgres_pool_settings(
     if pool_size > 0:
         resolved_size = pool_size
     elif is_supabase_session_pooler(database_url):
-        # Web + ARQ worker + overlap при деплое: жёсткий потолок 2 conn/проц.
-        resolved_size = 2
+        # Web + ARQ worker + deploy overlap: 1 conn/process on session pooler (~15 project-wide).
+        resolved_size = 1
     elif is_supabase_transaction_pooler(database_url):
         resolved_size = 8
     else:

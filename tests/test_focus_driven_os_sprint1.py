@@ -16,7 +16,7 @@ def test_admin_mode_engine_wired_in_js():
 
 def test_sidebar_filters_by_role_not_mode():
     sidebar = (REPO / "app" / "templates" / "screens" / "_sidebar.html").read_text(encoding="utf-8")
-    assert "isTabVisibleForRole(i.id)" in sidebar
+    assert "isTabShownInSidebar(i)" in sidebar
     assert "isTabInCurrentMode" not in sidebar
 
 

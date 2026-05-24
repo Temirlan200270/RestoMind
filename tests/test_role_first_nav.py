@@ -21,7 +21,7 @@ def test_role_nav_constants_and_helpers_in_js():
 
 def test_sidebar_filters_by_role():
     sidebar = (REPO / "app" / "templates" / "screens" / "_sidebar.html").read_text(encoding="utf-8")
-    assert "isTabVisibleForRole(i.id)" in sidebar
+    assert "isTabShownInSidebar(i)" in sidebar
     assert "isTabInCurrentMode" not in sidebar
 
 

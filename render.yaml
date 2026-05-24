@@ -26,9 +26,9 @@ services:
         value: "false"
       - key: DB_MODE
         value: postgres
-      # Supabase session pooler (:5432) — ~15 clients на весь проект; 2 conn на процесс (web + worker).
+      # Supabase session pooler (:5432) — ~15 clients на весь проект; 1 conn на процесс.
       - key: DB_POOL_SIZE
-        value: "2"
+        value: "1"
       - key: DB_MAX_OVERFLOW
         value: "0"
       - key: REDIS_ENABLED

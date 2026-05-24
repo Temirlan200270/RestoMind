@@ -8,10 +8,16 @@ import sys
 import wave
 
 if sys.version_info >= (3, 13):
-    try:
-        import audioop_lts as audioop  # type: ignore[import-untyped, no-redef]
-    except ImportError:
-        audioop = None  # type: ignore[misc, assignment]
+    audioop = None  # type: ignore[misc, assignment]
+    for _mod in ("audioop_lts", "audioop"):
+        try:
+            if _mod == "audioop_lts":
+                import audioop_lts as audioop  # type: ignore[import-untyped, no-redef]
+            else:
+                import audioop  # type: ignore[import-untyped, no-redef]
+            break
+        except ImportError:
+            continue
 else:
     import audioop  # type: ignore[deprecated]
 

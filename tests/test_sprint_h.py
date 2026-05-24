@@ -131,9 +131,14 @@ class TestDailyOrgStatsH1:
         events_with_column = set(_EVENT_COLUMN.keys())
         # payment.completed maps to payments_completed AND triggers revenue
         # so all 10 types should be covered (9 in _EVENT_COLUMN + payment.completed special)
+        special_types = frozenset({
+            "payment.completed",  # also triggers _upsert_daily_revenue
+            "shift.focus_completed",  # _upsert_recovered (+ focus count)
+            "order.draft_recovered",  # _upsert_recovered
+        })
         for etype in HANDLED_EVENT_TYPES:
             has_column = etype in _EVENT_COLUMN
-            is_special = etype == "payment.completed"  # also triggers _upsert_daily_revenue
+            is_special = etype in special_types
             assert has_column or is_special, (
                 f"Event type '{etype}' has no column mapping in _EVENT_COLUMN"
             )
