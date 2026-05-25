@@ -1358,6 +1358,7 @@ function adminMixinState() {
         waiterKpiSyncLoading: false,
         shiftState: adminDefaultShiftState(),
         shiftStateLoading: false,
+        shiftStateRefreshing: false,
         shiftStateFetchedAt: 0,
         shiftStateDegraded: false,
         shiftStateLoadError: '',
@@ -1392,6 +1393,7 @@ function adminMixinState() {
         _shiftPreAttentionTimer: null,
         _shiftPreAttentionTick: 0,
         _shiftStateRefreshTimer: null,
+        _shiftFocusClaimReleasePending: false,
         _shiftHeartbeatTimer: null,
         botSlaStatus: { bot_short_mode: false, slow_chats: 0 },
         /** Phase 3b OS: AI Snapshot list */
@@ -3415,12 +3417,7 @@ function adminMixinMenuOrdersUi() {
                     this.flashToast(`Удалено заказов: ${data.deleted ?? ids.length}`, 'success', 4000);
                 }
                 this.removeOrderIdsFromLocalState(ids);
-                try {
-                    await Promise.all([this.loadOrders(), this.loadDashStats(), this.loadSettingsOrders()]);
-                    await this.syncDashboardChartIfVisible();
-                } catch (refreshErr) {
-                    adminLogger.error('[admin] обновление списков после удаления заказа', refreshErr);
-                }
+                this._refreshAfterOrderDelete(src);
             } catch (e) {
                 adminLogger.error('[admin] _executeOrderDeleteDirect', e);
                 await this.openUiConfirm({
@@ -6504,7 +6501,7 @@ function adminMixinWebSocketEvents() {
                 this._triggerOwnerImpactPulse();
                 void this.loadRevenueLeak();
                 if (this.currentTab === 'shift' || this.shouldPollShiftStateBadge()) {
-                    void this.loadShiftState(true);
+                    void this.loadShiftState(true, { soft: true });
                 }
             } else if (
                 type === 'order.created'
@@ -9157,7 +9154,7 @@ function adminMixinDataChartsSettings() {
                 });
                 if (!ok || !data?.renewed) {
                     if (this.currentTab === 'shift') {
-                        await this.loadShiftState(true);
+                        await this.loadShiftState(true, { soft: true });
                     }
                 }
             } catch (e) {
@@ -9168,7 +9165,8 @@ function adminMixinDataChartsSettings() {
         releaseShiftFocusClaim() {
             if (this.demoSceneActive || this.isDemoSession) return;
             const focusId = this.shiftState?.focus?.id;
-            if (!focusId) return;
+            if (!focusId || this._shiftFocusClaimReleasePending) return;
+            this._shiftFocusClaimReleasePending = true;
             const locQuery = this.locationQueryParams().toString();
             const url = locQuery ? `/api/admin/shift/heartbeat?${locQuery}` : '/api/admin/shift/heartbeat';
             void fetch(url, {
@@ -9177,7 +9175,11 @@ function adminMixinDataChartsSettings() {
                 body: JSON.stringify({ focus_id: focusId }),
                 keepalive: true,
                 credentials: 'same-origin',
-            }).catch((e) => adminLogger.debug('[admin] releaseShiftFocusClaim', e));
+            })
+                .catch((e) => adminLogger.debug('[admin] releaseShiftFocusClaim', e))
+                .finally(() => {
+                    this._shiftFocusClaimReleasePending = false;
+                });
         },
 
         _startShiftHeartbeat() {
@@ -9199,11 +9201,13 @@ function adminMixinDataChartsSettings() {
         },
 
         _startShiftStateAutoRefresh() {
-            this._stopShiftStateAutoRefresh();
-            this._startShiftHeartbeat();
+            if (!this._shiftHeartbeatTimer && !this.demoSceneActive && !this.isDemoSession) {
+                this._startShiftHeartbeat();
+            }
+            if (this._shiftStateRefreshTimer) return;
             this._shiftStateRefreshTimer = setInterval(() => {
                 if (this.currentTab !== 'shift' || document.hidden) return;
-                void this.loadShiftState(false);
+                void this.loadShiftState(false, { soft: true });
             }, 45000);
         },
 
@@ -9245,22 +9249,27 @@ function adminMixinDataChartsSettings() {
             })[reason] || '';
         },
 
-        async loadShiftState(force = false) {
+        async loadShiftState(force = false, options = {}) {
             if (this.demoSceneActive) {
                 return;
             }
+            const soft = !!(options && options.soft);
             const loadSeq = this._demoShiftLoadSeq;
             const ttlMs = 30000;
             const now = Date.now();
             if (
                 !force &&
-                this.shiftState &&
                 this.shiftStateFetchedAt > 0 &&
                 now - this.shiftStateFetchedAt < ttlMs
             ) {
                 return;
             }
-            this.shiftStateLoading = true;
+            const needsInitialShell = this.shiftStateFetchedAt === 0;
+            if (needsInitialShell && !soft) {
+                this.shiftStateLoading = true;
+            } else if (!needsInitialShell) {
+                this.shiftStateRefreshing = true;
+            }
             try {
                 const { ok, data, status } = await this.apiJsonResponse(
                     `/api/admin/shift/state${this.locationQueryString('?')}`,
@@ -9269,27 +9278,32 @@ function adminMixinDataChartsSettings() {
                     if (loadSeq !== this._demoShiftLoadSeq || this.demoSceneActive) {
                         return;
                     }
+                    const prevFocusId = this.shiftState?.focus?.id;
                     this.shiftState = data;
                     this.shiftStateFetchedAt = Date.now();
                     this.shiftStateDegraded = false;
                     this.shiftStateLoadError = '';
+                    if (data.focus?.id && data.focus.id !== prevFocusId) {
+                        this.shiftFocusEnterKey += 1;
+                    }
                     if (this.currentTab === 'shift' && data.focus?.id && !this.isDemoSession) {
                         this._startShiftHeartbeat();
                     }
                     this._syncShiftPreAttention();
-                } else if (this.shiftState) {
+                } else if (this.shiftStateFetchedAt > 0) {
                     this.shiftStateDegraded = true;
                     this.shiftStateLoadError =
                         this.formatApiError(data?.detail) || `Ошибка загрузки (${status || '—'})`;
                 }
             } catch (e) {
                 adminLogger.error('[admin] loadShiftState', e);
-                if (this.shiftState) {
+                if (this.shiftStateFetchedAt > 0) {
                     this.shiftStateDegraded = true;
                     this.shiftStateLoadError = 'Нет связи с сервером — показаны последние данные';
                 }
             } finally {
                 this.shiftStateLoading = false;
+                this.shiftStateRefreshing = false;
                 if (!this.demoSceneActive) {
                     this._syncShiftStatePolling();
                 }
@@ -11094,6 +11108,25 @@ function adminMixinDataChartsSettings() {
                 this.showOrderModal = false;
                 this.selectedOrder = null;
             }
+        },
+
+        /** Фоновое обновление после удаления — UI уже обновлён через removeOrderIdsFromLocalState. */
+        _refreshAfterOrderDelete(_source) {
+            const tasks = [];
+            if (this.currentTab === 'orders' || this.ordersView === 'kanban') {
+                tasks.push(this.loadOrders());
+            }
+            if (this.currentTab === 'settings' && String(this.settingsTab || '') === 'technical') {
+                tasks.push(this.loadSettingsOrders());
+            }
+            if (this.currentTab === 'dashboard' || tasks.length === 0) {
+                tasks.push(this.loadDashStats());
+            }
+            void Promise.all(tasks)
+                .then(() => this.syncDashboardChartIfVisible())
+                .catch((refreshErr) => {
+                    adminLogger.error('[admin] обновление списков после удаления заказа', refreshErr);
+                });
         },
 
         toggleAnalyticsDaySort(col) {

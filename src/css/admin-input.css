@@ -383,19 +383,19 @@
     color: rgb(120 53 15);
 }
 .ds-predictive-tension--rising {
-    animation: wowPredictivePulse 2.4s ease-in-out infinite;
+    animation: wowPredictivePulse 2.4s ease-in-out 2;
 }
 .ds-predictive-tension--critical {
     background: linear-gradient(135deg, rgb(254 226 226) 0%, rgb(252 165 165) 100%);
     border-color: rgb(248 113 113 / 0.5);
     color: rgb(127 29 29);
-    animation: wowPredictivePulse 1.8s ease-in-out infinite;
+    animation: wowPredictivePulse 1.8s ease-in-out 2;
 }
 .ds-predictive-tension--imminent {
     background: linear-gradient(135deg, rgb(254 202 202) 0%, rgb(239 68 68) 100%);
     border-color: rgb(220 38 38 / 0.55);
     color: rgb(255 255 255);
-    animation: wowPredictivePulse 1.2s ease-in-out infinite;
+    animation: wowPredictivePulse 1.2s ease-in-out 2;
 }
 @keyframes wowPredictivePulse {
     0%, 100% { box-shadow: 0 0 0 0 rgb(239 68 68 / 0.25); }

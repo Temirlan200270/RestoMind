@@ -20,7 +20,7 @@
         </p>
     </div>
     <div class="px-5 py-3 bg-slate-50 border-b border-slate-100"
-        x-show="focusCardView()?.anticipation?.pre_attention && shiftChoreoPhase === 'idle'"
+        x-show="focusCardView()?.anticipation?.pre_attention && shiftChoreoPhase === 'idle' && !shiftPredictiveTensionVisible()"
         :class="focusCardPreAttentionClass()">
         <p class="text-sm font-semibold text-slate-800" x-text="focusCardView()?.anticipation?.anticipation_text"></p>
         <p class="text-xs text-slate-500 mt-0.5" x-text="focusCardView()?.anticipation?.inevitability_text"></p>

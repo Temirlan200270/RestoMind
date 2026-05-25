@@ -51,15 +51,12 @@
                                 x-text="shiftStatusHeadline()"></p>
                         </div>
                     </div>
-                    <button type="button" @click="loadShiftState(true)" :disabled="shiftStateLoading"
+                    <button type="button" @click="loadShiftState(true, { soft: true })" :disabled="shiftStateRefreshing"
                         class="ds-btn ds-btn-secondary ds-btn-md min-h-[44px]">Обновить</button>
                 </div>
 
                 <!-- Predictive tension — before action (probability → inevitability) -->
                 <div x-show="shiftPredictiveTensionVisible() && !shiftLiveImpactVisible() && !demoSceneResolveVisible()"
-                    x-transition:enter="transition ease-out duration-500"
-                    x-transition:enter-start="opacity-0 translate-y-1"
-                    x-transition:enter-end="opacity-100 translate-y-0"
                     class="ds-predictive-tension-banner rounded-2xl px-5 py-4 ring-1"
                     :class="shiftPredictiveTensionClass()"
                     role="status"
@@ -122,7 +119,7 @@
                     </div>
                 </div>
 
-                <div x-show="shiftStateLoading && !shiftState" class="h-28 rounded-2xl bg-slate-100 animate-pulse"></div>
+                <div x-show="shiftStateLoading && shiftStateFetchedAt === 0" class="h-28 rounded-2xl bg-slate-100 animate-pulse"></div>
 
                 <template x-if="shiftStateDegraded && shiftState">
                     <div class="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950" role="alert">
@@ -131,7 +128,7 @@
                     </div>
                 </template>
 
-                <template x-if="shiftState && !shiftStateLoading">
+                <template x-if="shiftStateFetchedAt > 0">
                     <div class="space-y-5" :class="shiftSceneAttentionClass()" x-show="!demoSceneResolveVisible()">
                         <!-- Metrics strip (hidden in calm empty — operator sees CTA instead) -->
                         <div class="grid grid-cols-2 lg:grid-cols-5 gap-3 ds-shift-metrics-dim transition-all duration-300"

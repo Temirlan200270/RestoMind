@@ -234,7 +234,7 @@ async def get_event_stats(
             updated_at
         FROM daily_org_stats
         WHERE organization_id = :org_id
-          AND day >= CURRENT_DATE - :days
+          AND day >= (CURRENT_DATE - CAST(:days AS INTEGER))
         ORDER BY day DESC
     """)
     mappings = await _safe_daily_stats_mappings(db, sql, {"org_id": org_id, "days": days - 1})
