@@ -96,10 +96,27 @@ async def test_login_with_default_credentials(login_client: AsyncClient):
     )
     data = resp.json()
     assert data.get("ok") is True, f"Login не вернул ok=True: {data}"
+    assert data.get("role") == "admin", f"Login должен возвращать role=admin для UI: {data}"
+    assert data.get("staff_role") == "admin"
 
 
 @pytest.mark.asyncio
-async def test_organization_model_columns_accessible(login_client: AsyncClient):
+async def test_superadmin_login_returns_admin_role_for_ui(login_client: AsyncClient, monkeypatch):
+    """POST /login с SUPERADMIN_* env: role=admin (не operator), is_superadmin=true."""
+    from app.core import config as config_module
+
+    monkeypatch.setattr(config_module.settings, "superadmin_username", "platform-root")
+    monkeypatch.setattr(config_module.settings, "superadmin_password", "super-secret")
+
+    resp = await login_client.post(
+        "/api/admin/auth/login",
+        json={"username": "platform-root", "password": "super-secret"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data.get("role") == "admin"
+    assert data.get("staff_role") == "admin"
+    assert data.get("is_superadmin") is True
     """
     SELECT * FROM organizations должен работать без ошибок.
 

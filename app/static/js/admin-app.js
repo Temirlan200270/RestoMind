@@ -4254,7 +4254,7 @@ function adminMixinAuthKnowledge() {
             return {
                 id: root.id ?? null,
                 email: root.email || '',
-                role: String(root.role || 'operator').toLowerCase(),
+                role: String(root.role || root.staff_role || 'admin').toLowerCase(),
                 is_superadmin: !!root.is_superadmin,
                 tenant_owner_id: root.tenant_owner_id ?? null,
                 active_organization_id: root.active_organization_id ?? null,

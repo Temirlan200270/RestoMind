@@ -187,6 +187,7 @@ async def admin_login(request: Request, body: LoginBody, db: AsyncSession = Depe
                 "username": staff.email,
                 "organization_id": int(staff.organization_id),
                 "staff_role": (staff.role or StaffRole.ADMIN.value).strip().lower(),
+                "role": (staff.role or StaffRole.ADMIN.value).strip().lower(),
                 "is_superadmin": bool(staff.is_superadmin),
                 "ws_token": ws_token,
             }
@@ -217,6 +218,7 @@ async def admin_login(request: Request, body: LoginBody, db: AsyncSession = Depe
             "username": body.username.strip(),
             "organization_id": oid,
             "staff_role": StaffRole.ADMIN.value,
+            "role": StaffRole.ADMIN.value,
             "is_superadmin": False,
             "ws_token": ws_token,
         }
@@ -242,6 +244,7 @@ async def admin_login(request: Request, body: LoginBody, db: AsyncSession = Depe
             "username": body.username.strip(),
             "organization_id": oid,
             "staff_role": StaffRole.ADMIN.value,
+            "role": StaffRole.ADMIN.value,
             "is_superadmin": True,
             "ws_token": ws_token,
         }
@@ -316,6 +319,7 @@ def _demo_login_session_response(request: Request, organization_id: int) -> dict
         "username": "demo-guest",
         "organization_id": int(organization_id),
         "staff_role": StaffRole.OPERATOR.value,
+        "role": StaffRole.OPERATOR.value,
         "is_superadmin": False,
         "ws_token": ws_token,
     }
