@@ -36,7 +36,9 @@ from __future__ import annotations
 
 import json
 import logging
+import hashlib
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -211,6 +213,20 @@ def _session_key_from_auth_response(response: httpx.Response) -> str:
     return text.strip('"')
 
 
+def _office_password_candidates(password: str) -> list[str]:
+    value = str(password or "").strip()
+    if not value:
+        return [""]
+    lower = value.lower()
+    is_sha1_hex = len(lower) == 40 and all(ch in "0123456789abcdef" for ch in lower)
+    candidates = [lower] if is_sha1_hex else [hashlib.sha1(value.encode("utf-8")).hexdigest(), value]
+    deduped: list[str] = []
+    for candidate in candidates:
+        if candidate not in deduped:
+            deduped.append(candidate)
+    return deduped
+
+
 class IikoOfficeClient:
     """httpx-клиент iiko Office с опциональной подгрузкой fixture (тесты / dev)."""
 
@@ -248,17 +264,21 @@ class IikoOfficeClient:
         if not self._http:
             raise RuntimeError("HTTP client not initialized")
         response: httpx.Response | None = None
-        attempts: list[tuple[str, dict[str, Any]]] = [
-            ("POST", {"params": {"login": self._creds.login, "pass": self._creds.password}}),
-            ("POST", {"data": {"login": self._creds.login, "pass": self._creds.password}}),
-            ("POST", {"json": {"login": self._creds.login, "pass": self._creds.password}}),
-            ("GET", {"params": {"login": self._creds.login, "pass": self._creds.password}}),
-        ]
+        attempts: list[tuple[str, dict[str, Any]]] = []
+        for password in _office_password_candidates(self._creds.password):
+            attempts.extend(
+                [
+                    ("POST", {"params": {"login": self._creds.login, "pass": password}}),
+                    ("POST", {"data": {"login": self._creds.login, "pass": password}}),
+                    ("POST", {"json": {"login": self._creds.login, "pass": password}}),
+                    ("GET", {"params": {"login": self._creds.login, "pass": password}}),
+                ],
+            )
         for method, kwargs in attempts:
             response = await self._http.request(method, AUTH_PATH, **kwargs)
             if response.status_code < 400:
                 break
-            if response.status_code not in {400, 404, 405, 415}:
+            if response.status_code not in {400, 401, 403, 404, 405, 415, 500}:
                 response.raise_for_status()
         if response is None:
             raise RuntimeError("iiko Office auth: request was not sent")
@@ -274,7 +294,7 @@ class IikoOfficeClient:
             raise RuntimeError("iiko Office: нет ключа сессии")
         return {"key": self._session_key}
 
-    async def fetch_stock_balances(self) -> list[IikoOfficeStockRow]:
+    async def fetch_stock_balances(self, *, timestamp: str | None = None) -> list[IikoOfficeStockRow]:
         """
         Остатки по складу из iiko Office.
         При ``fixture_path`` читает JSON с диска (без HTTP).
@@ -285,7 +305,11 @@ class IikoOfficeClient:
 
         if not self._http:
             raise RuntimeError("HTTP client not initialized")
-        params: dict[str, str] = {**self._auth_params(), "store": self._creds.store_id}
+        params: dict[str, str] = {
+            **self._auth_params(),
+            "store": self._creds.store_id,
+            "timestamp": timestamp or datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+        }
         if self._creds.department_id:
             params["department"] = self._creds.department_id
         response = await self._http.get(BALANCE_PATH, params=params)

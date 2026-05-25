@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import httpx
@@ -152,7 +153,7 @@ async def test_sync_inventory_from_fixture(db_session) -> None:
 
 
 @pytest.mark.asyncio
-async def test_iiko_office_client_accepts_plain_text_auth_token() -> None:
+async def test_iiko_office_client_prefers_sha1_auth_password() -> None:
     creds = OrgIikoOfficeCredentials(
         host="https://office.test.local",
         login="user",
@@ -166,11 +167,12 @@ async def test_iiko_office_client_accepts_plain_text_auth_token() -> None:
         seen.append(request)
         if request.url.path == "/resto/api/auth":
             assert request.url.params["login"] == "user"
-            assert request.url.params["pass"] == "secret"
+            assert request.url.params["pass"] == hashlib.sha1(b"secret").hexdigest()
             return httpx.Response(200, text="session-key-123")
         if request.url.path == "/resto/api/v2/reports/balance/stores":
             assert request.url.params["key"] == "session-key-123"
             assert request.url.params["store"] == "store-uuid"
+            assert request.url.params["timestamp"]
             return httpx.Response(
                 200,
                 json={"items": [{"productId": "p1", "productNum": "SKU-1", "productName": "Rice", "amount": 1}]},
@@ -182,6 +184,39 @@ async def test_iiko_office_client_accepts_plain_text_auth_token() -> None:
 
     assert [r.sku for r in rows] == ["SKU-1"]
     assert seen[0].method == "POST"
+
+
+@pytest.mark.asyncio
+async def test_iiko_office_client_falls_back_to_plain_auth_password() -> None:
+    creds = OrgIikoOfficeCredentials(
+        host="https://office.test.local",
+        login="user",
+        password="secret",
+        store_id="store-uuid",
+        department_id="",
+    )
+    seen: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path == "/resto/api/auth":
+            if request.url.params.get("pass") != "secret":
+                return httpx.Response(500)
+            return httpx.Response(200, text="session-key-raw")
+        if request.url.path == "/resto/api/v2/reports/balance/stores":
+            assert request.url.params["key"] == "session-key-raw"
+            assert request.url.params["timestamp"]
+            return httpx.Response(200, json={"items": []})
+        return httpx.Response(404)
+
+    async with IikoOfficeClient(creds, transport=httpx.MockTransport(handler)) as client:
+        rows = await client.fetch_stock_balances()
+
+    auth_attempts = [r for r in seen if r.url.path == "/resto/api/auth"]
+    assert rows == []
+    assert len(auth_attempts) == 5
+    assert auth_attempts[0].url.params["pass"] == hashlib.sha1(b"secret").hexdigest()
+    assert auth_attempts[-1].url.params["pass"] == "secret"
 
 
 @pytest.mark.asyncio
@@ -203,14 +238,17 @@ async def test_iiko_office_client_falls_back_to_json_auth_shape() -> None:
             return httpx.Response(200, json={"key": "json-key"})
         if request.url.path == "/resto/api/v2/reports/balance/stores":
             assert request.url.params["key"] == "json-key"
+            assert request.url.params["timestamp"]
             return httpx.Response(200, json={"items": []})
         return httpx.Response(404)
 
     async with IikoOfficeClient(creds, transport=httpx.MockTransport(handler)) as client:
         rows = await client.fetch_stock_balances()
 
+    auth_attempts = [r for r in attempts if r.url.path == "/resto/api/auth"]
     assert rows == []
-    assert len([r for r in attempts if r.url.path == "/resto/api/auth"]) == 3
+    assert len(auth_attempts) == 3
+    assert auth_attempts[-1].content == b'{"login":"user","pass":"e5e9fa1ba31ecd1ae84f75caaa474f3a663f05f4"}'
 
 
 @pytest.mark.asyncio
@@ -370,6 +408,7 @@ async def test_iiko_office_client_http_mock_transport(db_session) -> None:
         if BALANCE_PATH in request.url.path:
             assert request.url.params.get("store") == "warehouse-1"
             assert request.url.params.get("key") == "mock-session-key-abc"
+            assert request.url.params.get("timestamp")
             return httpx.Response(200, json=fixture)
         return httpx.Response(404, text="not found")
 
