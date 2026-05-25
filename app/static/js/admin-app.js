@@ -27,6 +27,45 @@ function adminEnsureChartJs() {
     return adminChartJsLoadPromise;
 }
 
+function adminAssetVer() {
+    try {
+        const link = document.querySelector('link[href*="/static/css/admin.css"]');
+        const href = link && link.getAttribute('href');
+        if (!href) return '';
+        const query = href.includes('?') ? href.split('?')[1] : '';
+        const match = query.match(/(?:^|&)v=([^&]+)/);
+        return match ? decodeURIComponent(match[1]) : '';
+    } catch (_e) {
+        return '';
+    }
+}
+
+let adminMarketingTabLoadPromise = null;
+function adminEnsureMarketingTab() {
+    if (typeof window !== 'undefined' && typeof window.marketingTab === 'function') {
+        return Promise.resolve(window.marketingTab);
+    }
+    if (adminMarketingTabLoadPromise) return adminMarketingTabLoadPromise;
+    adminMarketingTabLoadPromise = new Promise((resolve, reject) => {
+        const ver = adminAssetVer();
+        const existing = document.querySelector('script[data-admin-marketing-tab]');
+        if (existing) {
+            existing.addEventListener('load', () => resolve(window.marketingTab), { once: true });
+            existing.addEventListener('error', reject, { once: true });
+            return;
+        }
+        const script = document.createElement('script');
+        script.src = `/static/js/admin-marketing.js${ver ? `?v=${encodeURIComponent(ver)}` : ''}`;
+        script.async = true;
+        script.defer = true;
+        script.dataset.adminMarketingTab = 'true';
+        script.onload = () => resolve(window.marketingTab);
+        script.onerror = () => reject(new Error('admin-marketing.js failed to load'));
+        document.head.appendChild(script);
+    });
+    return adminMarketingTabLoadPromise;
+}
+
 /**
  * Экземпляры Chart.js вне реактивного объекта Alpine — иначе Proxy может ломать внутренние ссылки на canvas.
  */
@@ -1034,7 +1073,16 @@ function adminMixinState() {
 
         currentTab: 'dashboard',
         /** P0 lazy DOM: монтировать разметку тяжёлых вкладок после первого визита (`admin.html` + `template x-if`). */
-        lazyTabMount: { chats: false, orders: false, bookings: false, settings: false },
+        lazyTabMount: {
+            chats: false,
+            orders: false,
+            bookings: false,
+            settings: false,
+            dashboard: false,
+            menu: false,
+            ai_center: false,
+            marketing: false,
+        },
         /** E5 UI: ответ `GET /api/admin/system/task-queue-health` (если есть на бэкенде). */
         taskQueueHealth: null,
         taskQueueHealthChecked: false,
@@ -4030,11 +4078,11 @@ function adminMixinAuthKnowledge() {
         },
 
         async _afterAuthBootstrapLoads() {
-            await this.refreshDemoStatus();
-            await this.loadTabData();
+            const bootstrapTasks = [this.refreshDemoStatus(), this.loadTabData()];
             if (adminTabNeedsChatList(this.currentTab)) {
-                await this.loadChatList();
+                bootstrapTasks.push(this.loadChatList());
             }
+            await Promise.all(bootstrapTasks);
             this.deferIdleWork(() => {
                 void this.loadOrgProfile();
                 void this.loadIntegrationStatus();
@@ -7747,12 +7795,19 @@ function adminMixinLiveChat() {
          * @param {string} tabId
          * @param {{ settingsTab?: string }} [opts]
          */
-        _touchLazyTabMount() {
+        async _touchLazyTabMount() {
             const t = this.currentTab;
             if (t === 'chats') this.lazyTabMount.chats = true;
             else if (t === 'orders') this.lazyTabMount.orders = true;
             else if (t === 'bookings') this.lazyTabMount.bookings = true;
             else if (t === 'settings') this.lazyTabMount.settings = true;
+            else if (t === 'dashboard') this.lazyTabMount.dashboard = true;
+            else if (t === 'menu') this.lazyTabMount.menu = true;
+            else if (t === 'ai_center') this.lazyTabMount.ai_center = true;
+            else if (t === 'marketing') {
+                await adminEnsureMarketingTab();
+                this.lazyTabMount.marketing = true;
+            }
         },
 
         /**
@@ -8866,7 +8921,7 @@ function adminMixinDataChartsSettings() {
                 this.menuBulkSelectedIds = [];
                 this.menuView = 'catalog';
             }
-            this._touchLazyTabMount();
+            await this._touchLazyTabMount();
             await this.$nextTick();
             this.tabDataLoading = true;
             try {
@@ -8907,7 +8962,7 @@ function adminMixinDataChartsSettings() {
                         await this.loadAiValue();
                     }
                 } else if (this.currentTab === 'shift') {
-                    await this.loadShiftState(true);
+                    await this.loadShiftState(false);
                     this._startShiftStateAutoRefresh();
                 } else if (this.currentTab === 'inbox') {
                     if (this.effectiveStaffRole() === 'operator') {
@@ -12832,194 +12887,3 @@ function adminApp() {
 }
 
 window.adminApp = adminApp;
-
-function marketingTab() {
-    return {
-        subTab: 'blasts',
-        blasts: [],
-        loading: false,
-        saving: false,
-        formError: '',
-        segmentCount: null,
-        form: { name: '', segment_type: 'inactive_30d', message_text: '', template_name: '', scheduled_for: '' },
-        iikoSyncLoading: false,
-        iikoSyncResult: null,
-        iikoSyncError: '',
-        loyaltyEnabled: false,
-        loyaltyPointsPerKzt: 0,
-        loyaltyHistory: [],
-        loyaltyBalance: 0,
-        adjustPhone: '',
-        adjustPoints: 0,
-        adjustNote: '',
-        adjustResult: '',
-        confirm: { open: false, title: '', body: '', danger: false, _resolve: null },
-
-        openConfirm(title, body, danger = false) {
-            return new Promise(resolve => {
-                this.confirm = { open: true, title, body, danger, _resolve: resolve };
-            });
-        },
-        doConfirm(ok) {
-            const resolve = this.confirm._resolve;
-            this.confirm.open = false;
-            if (resolve) resolve(ok);
-        },
-
-        async init() {
-            await this.loadBlasts();
-        },
-
-        async loadBlasts() {
-            this.loading = true;
-            try {
-                const r = await fetch('/api/admin/marketing/blasts');
-                if (r.ok) { const d = await r.json(); this.blasts = d.items || []; }
-            } catch(_e) {}
-            this.loading = false;
-        },
-
-        async previewSegment() {
-            this.segmentCount = null;
-            try {
-                const r = await fetch(`/api/admin/marketing/segment-preview/${this.form.segment_type}`);
-                if (r.ok) { const d = await r.json(); this.segmentCount = d.count; }
-            } catch(_e) {}
-        },
-
-        async syncIikoCustomers() {
-            this.iikoSyncLoading = true;
-            this.iikoSyncError = '';
-            this.iikoSyncResult = null;
-            try {
-                const r = await fetch('/api/admin/marketing/sync-iiko-customers?days=90', { method: 'POST' });
-                const d = await r.json().catch(() => ({}));
-                if (!r.ok) {
-                    this.iikoSyncError = (typeof d.detail === 'string' ? d.detail : d.detail?.msg) || 'Не удалось импортировать базу';
-                    return;
-                }
-                this.iikoSyncResult = d;
-                await this.previewSegment();
-            } catch (_e) {
-                this.iikoSyncError = 'Сетевая ошибка';
-            } finally {
-                this.iikoSyncLoading = false;
-            }
-        },
-
-        async createBlast() {
-            this.formError = '';
-            if (!this.form.name.trim() || !this.form.message_text.trim()) {
-                this.formError = 'Заполните название и текст'; return;
-            }
-            this.saving = true;
-            try {
-                const payload = { ...this.form };
-                if (!payload.scheduled_for) payload.scheduled_for = null;
-                if (!payload.template_name) payload.template_name = null;
-
-                const r = await fetch('/api/admin/marketing/blasts', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload),
-                });
-                if (r.ok) {
-                    this.form = { name: '', segment_type: 'inactive_30d', message_text: '', template_name: '', scheduled_for: '' };
-                    this.segmentCount = null;
-                    await this.loadBlasts();
-                } else {
-                    const d = await r.json();
-                    this.formError = d.detail || 'Ошибка создания';
-                }
-            } catch(_e) { this.formError = 'Сетевая ошибка'; }
-            this.saving = false;
-        },
-
-        async sendBlast(id) {
-            const ok = await this.openConfirm('Запустить рассылку?', 'Сообщения уйдут получателям. При необходимости можно отменить кнопкой «Отменить».', true);
-            if (!ok) return;
-            try {
-                await fetch(`/api/admin/marketing/blasts/${id}/send`, { method: 'POST' });
-                await this.loadBlasts();
-            } catch(_e) {}
-        },
-
-        async cancelBlast(id) {
-            const ok = await this.openConfirm('Отменить рассылку?', 'Отправка будет остановлена. Уже отправленные сообщения не отзываются.');
-            if (!ok) return;
-            try {
-                await fetch(`/api/admin/marketing/blasts/${id}/cancel`, { method: 'POST' });
-                await this.loadBlasts();
-            } catch(_e) {}
-        },
-
-        duplicateBlast(blast) {
-            this.form = {
-                name: blast.name + ' (копия)',
-                segment_type: blast.segment_type,
-                message_text: blast.message_text,
-                template_name: blast.template_name || '',
-                scheduled_for: '',
-            };
-            this.previewSegment();
-            document.getElementById('rm-tab-marketing')?.scrollIntoView({ behavior: 'smooth' });
-        },
-
-        async deleteBlast(id) {
-            const ok = await this.openConfirm('Удалить рассылку?', 'Рассылка и список получателей будут удалены безвозвратно.');
-            if (!ok) return;
-            try {
-                await fetch(`/api/admin/marketing/blasts/${id}`, { method: 'DELETE' });
-                await this.loadBlasts();
-            } catch(_e) {}
-        },
-
-        async loadLoyalty() {
-            try {
-                const r = await fetch('/api/admin/settings/environment');
-                if (r.ok) {
-                    const d = await r.json();
-                    const lo = d.loyalty && typeof d.loyalty === 'object' ? d.loyalty : {};
-                    this.loyaltyEnabled = !!lo.enabled;
-                    this.loyaltyPointsPerKzt = Number(lo.points_per_kzt) || 0;
-                }
-            } catch (_e) {}
-        },
-
-        async loadLoyaltyHistory() {
-            if (!this.adjustPhone) return;
-            this.loyaltyHistory = [];
-            this.loyaltyBalance = 0;
-            try {
-                const r = await fetch(`/api/admin/loyalty/transactions?phone=${encodeURIComponent(this.adjustPhone)}`);
-                if (r.ok) {
-                    const d = await r.json();
-                    this.loyaltyHistory = d.transactions || [];
-                    this.loyaltyBalance = d.balance || 0;
-                }
-            } catch(_e) {}
-        },
-
-        async submitAdjust() {
-            if (!this.adjustPhone || this.adjustPoints === 0) return;
-            this.adjustResult = '';
-            try {
-                const r = await fetch('/api/admin/loyalty/adjust', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ phone: this.adjustPhone, points: this.adjustPoints, note: this.adjustNote }),
-                });
-                if (r.ok) {
-                    const d = await r.json();
-                    this.adjustResult = `✅ Новый баланс: ${d.new_balance} баллов`;
-                    this.adjustPoints = 0;
-                    await this.loadLoyaltyHistory();
-                } else {
-                    const d = await r.json();
-                    this.adjustResult = `❌ ${d.detail || 'Ошибка'}`;
-                }
-            } catch(_e) { this.adjustResult = '❌ Сетевая ошибка'; }
-        },
-    };
-}
-window.marketingTab = marketingTab;

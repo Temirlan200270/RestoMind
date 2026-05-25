@@ -339,6 +339,7 @@ async def allowed_location_ids_for_staff(
     staff: StaffUser | None,
     org_id: int,
     is_superadmin: bool,
+    locations: list | None = None,
 ) -> set[int] | None:
     """None = все точки org; пустой set = доступ запрещён."""
     if is_superadmin or staff is None:
@@ -346,7 +347,7 @@ async def allowed_location_ids_for_staff(
     role = staff_role_normalized(staff)
     if role == StaffRole.ADMIN.value:
         return None
-    locs = await list_locations_for_org(db, org_id)
+    locs = locations if locations is not None else await list_locations_for_org(db, org_id)
     all_ids = {int(x.id) for x in locs}
     if not all_ids:
         default = await ensure_default_location(db, org_id)

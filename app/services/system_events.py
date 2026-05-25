@@ -47,7 +47,8 @@ async def emit_event(db: AsyncSession, event: BusinessEvent) -> SystemEvent | No
     Оборачивает emit_system_event(), добавляя структурированные поля:
     actor, version, location_id — хранятся в payload_json под ключами _actor, _version, _location_id.
 
-    После записи в БД вызывает синхронные consumers (analytics_consumer).
+    После записи в БД вызывает consumers (analytics / audit / healing).
+    По умолчанию — post-commit в отдельной сессии (`event_consumers_async=true`).
     Не коммитит — вызывается внутри существующей транзакции.
     """
     enriched_payload = {
@@ -87,24 +88,23 @@ async def emit_event(db: AsyncSession, event: BusinessEvent) -> SystemEvent | No
     )
 
     if result is not None:
-        try:
-            from app.services.analytics_consumer import on_business_event
-            await on_business_event(event, db)
-        except Exception:
-            logger.exception("analytics_consumer failed for event type=%s org=%d", event.type, event.org_id)
+        from app.core.config import settings
+        from app.services.event_consumer_runner import (
+            run_event_consumers,
+            schedule_event_consumers_after_commit,
+        )
 
-        # Phase 5 OS: audit_consumer — иммутабельный лог действий
-        try:
-            from app.services.audit_consumer import on_business_event as _audit_on_event
-            await _audit_on_event(event, db)
-        except Exception:
-            logger.exception("audit_consumer failed for event type=%s org=%d", event.type, event.org_id)
-
-        try:
-            from app.services.healing_realtime import maybe_trigger_realtime_healing
-            await maybe_trigger_realtime_healing(db, event)
-        except Exception:
-            logger.exception("healing_realtime failed for event type=%s org=%d", event.type, event.org_id)
+        if settings.event_consumers_async:
+            schedule_event_consumers_after_commit(db, event)
+        else:
+            try:
+                await run_event_consumers(event, db)
+            except Exception:
+                logger.exception(
+                    "event consumers failed for event type=%s org=%d",
+                    event.type,
+                    event.org_id,
+                )
 
         # Phase 2a/5 OS: websocket_consumer — org-scoped Pub/Sub push
         try:

@@ -683,6 +683,53 @@ class Settings(BaseSettings):
         description="Через сколько минут после открытия алертовать суперадмина, если никто не нажал «на смене»",
     )
 
+    # --- Performance: quick replies / FAQ cache / prompt budget ---
+    quick_replies_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("QUICK_REPLIES_ENABLED", "quick_replies_enabled"),
+        description="Детерминированные короткие ответы без LLM (приветствие, спасибо, оператор и т.д.)",
+    )
+    faq_cache_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("FAQ_CACHE_ENABLED", "faq_cache_enabled"),
+        description="Кеш FAQ-ответов LLM в Redis по org_id + hash вопроса",
+    )
+    faq_cache_ttl_sec: int = Field(
+        default=86400,
+        ge=300,
+        le=604800,
+        validation_alias=AliasChoices("FAQ_CACHE_TTL_SEC", "faq_cache_ttl_sec"),
+    )
+    prompt_size_metric_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("PROMPT_SIZE_METRIC_ENABLED", "prompt_size_metric_enabled"),
+    )
+    prompt_max_tokens_soft: int = Field(
+        default=8000,
+        ge=2000,
+        le=64000,
+        validation_alias=AliasChoices("PROMPT_MAX_TOKENS_SOFT", "prompt_max_tokens_soft"),
+        description="Превышение → обрезка chat_history перед LLM",
+    )
+    prompt_max_tokens_hard: int = Field(
+        default=12000,
+        ge=4000,
+        le=128000,
+        validation_alias=AliasChoices("PROMPT_MAX_TOKENS_HARD", "prompt_max_tokens_hard"),
+        description="Превышение после обрезки history → warning в логах",
+    )
+    prompt_history_min_keep: int = Field(
+        default=4,
+        ge=2,
+        le=20,
+        validation_alias=AliasChoices("PROMPT_HISTORY_MIN_KEEP", "prompt_history_min_keep"),
+    )
+    event_consumers_async: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("EVENT_CONSUMERS_ASYNC", "event_consumers_async"),
+        description="Analytics/audit/healing после commit родительской транзакции (не блокирует WhatsApp hot path)",
+    )
+
     # --- Лояльность ---
     loyalty_enabled: bool = Field(
         default=False,

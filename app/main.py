@@ -14,7 +14,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
-from fastapi.staticfiles import StaticFiles
+from app.middleware.static_cache import LongCacheStaticFiles
 from fastapi.templating import Jinja2Templates
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from sqlalchemy import select, text
@@ -751,7 +751,7 @@ app.include_router(telegram_webhook_router, prefix="/api")
 app.include_router(iiko_webhook_router)  # prefix="/api/iiko" уже задан внутри роутера
 
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+app.mount("/static", LongCacheStaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 # --- Системные эндпоинты ---

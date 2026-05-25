@@ -6,6 +6,19 @@
 
 ## [Unreleased] — 2026-03-20
 
+### Добавлено (2026-05-25) — Performance Pack (WhatsApp hot path)
+
+- **Kitchen-gate:** при закрытой кухне (но открытом зале) новые заказы без `is_preorder` → `kind='night_preorder'` и утренний flow активации.
+- **Quick replies:** детерминированные ответы без LLM (`greeting`, `thanks`, `operator`, `cancel`, `working_hours`) — `app/services/quick_replies.py`, toggle `QUICK_REPLIES_ENABLED`.
+- **FAQ cache:** Redis-кеш ответов `intent=faq` по `(org_id, hash вопроса, kb_fingerprint)` — `FAQ_CACHE_ENABLED` (default on).
+- **Prompt metrics:** замер размера промпта + обрезка `chat_history` при превышении `PROMPT_MAX_TOKENS_SOFT`.
+
+### Добавлено (2026-05-25) — Performance Pack phase 2
+
+- **Event pipeline async:** analytics / audit / healing после commit родительской транзакции (`event_consumer_runner.py`, `EVENT_CONSUMERS_ASYNC=true` по умолчанию; тесты — sync через `EVENT_CONSUMERS_ASYNC=false` в conftest).
+- **Parallel LLM context:** `build_menu_context_for_ai` и `build_sales_strategy` параллельно в `build_llm_prompt_bundle`.
+- **Admin perf:** lazy-mount `dashboard` / `menu` / `ai_center` / `marketing`; lazy chunk `admin-marketing.js`; long-cache на versioned `/static/*`.
+
 ### Добавлено (2026-05-24) — G10.8.2 zero-friction demo + OS gap closure
 
 - **Public demo:** `GET /demo`, `/demo/money`, `/demo/booking` → demo session + redirect autoplay; `DEMO_PUBLIC_ENABLED`, `DEMO_RATE_LIMIT_PER_HOUR`.

@@ -37,8 +37,7 @@ from app.services.tenant_scope import (
     ensure_default_location,
     list_locations_for_org,
     organization_id_allowed_for_admin_session,
-    resolve_branding_for_session,
-    resolve_tenant_summary_for_session,
+    branding_empty_payload,
 )
 
 from .deps import _credentials_ok, _superadmin_credentials_ok, admin_org_from_session
@@ -52,6 +51,8 @@ auth_router = APIRouter(prefix="/admin/auth", tags=["Admin Auth"])
 async def _resolve_network_info(
     db: AsyncSession,
     org_id: int,
+    *,
+    org: Organization | None = None,
 ) -> tuple[bool, list[dict]]:
     """Один проход — возвращает (is_network, network_orgs).
 
@@ -59,7 +60,8 @@ async def _resolve_network_info(
     Заменяет два отдельных вызова, каждый из которых повторял те же два db.get().
     """
     try:
-        org = await db.get(Organization, org_id)
+        if org is None:
+            org = await db.get(Organization, org_id)
         if org is None or org.tenant_id is None:
             return False, []
         tenant = await db.get(Tenant, int(org.tenant_id))
@@ -399,12 +401,14 @@ async def _admin_auth_me_payload(request: Request, db: AsyncSession) -> dict[str
         if staff_me is not None:
             staff_role = (staff_me.role or StaffRole.ADMIN.value).strip().lower()
             is_superadmin = bool(staff_me.is_superadmin)
+    org_me = await db.get(Organization, int(oid))
     if not is_superadmin:
-        org_me = await db.get(Organization, int(oid))
         if org_me is not None and not bool(org_me.is_active):
             raise HTTPException(status_code=403, detail="Подписка приостановлена. Свяжитесь с администратором.")
 
-        tenant_me = await load_tenant_for_organization(db, int(oid))
+        tenant_me = None
+        if org_me is not None and org_me.tenant_id is not None:
+            tenant_me = await db.get(Tenant, int(org_me.tenant_id))
         if tenant_is_billing_suspended(tenant_me):
             raise billing_suspended_http_exception()
 
@@ -423,22 +427,34 @@ async def _admin_auth_me_payload(request: Request, db: AsyncSession) -> dict[str
         staff=staff_me,
         org_id=int(oid),
         is_superadmin=is_superadmin,
+        locations=all_locations,
     )
     available_locations = [
         {"id": int(loc.id), "name": str(loc.name), "slug": str(loc.slug or "")}
         for loc in all_locations
         if allowed_location_ids is None or int(loc.id) in allowed_location_ids
     ]
-    tenant_payload = await resolve_tenant_summary_for_session(
-        db,
-        staff=staff_me,
-        active_organization_id=int(oid),
-    )
-    branding = await resolve_branding_for_session(
-        db,
-        staff=staff_me,
-        active_organization_id=int(oid),
-    )
+    tenant_id: int | None = None
+    if staff_me is not None and staff_me.tenant_owner_id is not None:
+        tenant_id = int(staff_me.tenant_owner_id)
+    elif org_me is not None and org_me.tenant_id is not None:
+        tenant_id = int(org_me.tenant_id)
+    tenant_payload = None
+    branding = branding_empty_payload()
+    if tenant_id is not None:
+        tenant_row = await db.get(Tenant, tenant_id)
+        if tenant_row is not None:
+            tenant_payload = {
+                "id": int(tenant_row.id),
+                "name": str(tenant_row.name),
+                "plan": str(tenant_row.plan),
+                "plan_status": str(tenant_row.plan_status or "active"),
+            }
+            branding = {
+                "brand_name": str(tenant_row.brand_name) if tenant_row.brand_name else None,
+                "brand_color_hex": str(tenant_row.brand_color_hex) if tenant_row.brand_color_hex else None,
+                "brand_logo_url": str(tenant_row.brand_logo_url) if tenant_row.brand_logo_url else None,
+            }
 
     staff_id_val: int | None = int(sid) if sid is not None else None
     email_out = str(user)
@@ -471,7 +487,7 @@ async def _admin_auth_me_payload(request: Request, db: AsyncSession) -> dict[str
         "billing_blocked": False,
         "tour_completed_at": _staff_tour_completed_at(staff_me),
     }
-    is_net, net_orgs = await _resolve_network_info(db, int(oid))
+    is_net, net_orgs = await _resolve_network_info(db, int(oid), org=org_me)
     result["is_network"] = is_net
     result["network_orgs"] = net_orgs
     return result

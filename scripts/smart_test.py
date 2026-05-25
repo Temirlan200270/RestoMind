@@ -113,6 +113,22 @@ GROUPS: dict[str, list[str]] = {
         "tests/test_action_id_dedup.py",
         "tests/test_pricing.py",
         "tests/test_order_confidence.py",
+        "tests/test_kitchen_gate.py",
+    ],
+    "app/services/quick_replies.py": [
+        "tests/test_quick_replies.py",
+    ],
+    "app/services/faq_cache.py": [
+        "tests/test_faq_cache.py",
+    ],
+    "app/services/prompt_metrics.py": [
+        "tests/test_prompt_metrics.py",
+    ],
+    "app/api/webhooks.py": [
+        "tests/test_quick_replies.py",
+        "tests/test_faq_cache.py",
+        "tests/test_prompt_metrics.py",
+        "tests/test_pipeline_timing.py",
     ],
     "app/services/order_logic.py": [
         "tests/test_order_logic.py",

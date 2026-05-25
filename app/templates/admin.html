@@ -73,14 +73,24 @@
             {% include "screens/_tab_operator_queue.html" %}
             {% include "screens/_tab_incidents.html" %}
 
-            {# Management #}
+            {# Management — lazy DOM (dashboard, marketing, AI, menu) #}
+            <template x-if="lazyTabMount.dashboard">
             {% include "screens/_tab_dashboard.html" %}
+            </template>
+            <template x-if="lazyTabMount.marketing">
             {% include "screens/_tab_marketing.html" %}
-            {% include "screens/_tab_ai_center.html" %}
-            {% include "screens/_tab_ai_value.html" %}
-            {% include "screens/_tab_intelligence.html" %}
-            {% include "screens/_tab_digital_twin.html" %}
+            </template>
+            <template x-if="lazyTabMount.ai_center">
+            <div class="contents">
+                {% include "screens/_tab_ai_center.html" %}
+                {% include "screens/_tab_ai_value.html" %}
+                {% include "screens/_tab_intelligence.html" %}
+                {% include "screens/_tab_digital_twin.html" %}
+            </div>
+            </template>
+            <template x-if="lazyTabMount.menu">
             {% include "screens/_tab_menu.html" %}
+            </template>
 
             {# Settings sections — lazy mount (один флаг на все подстраницы настроек). #}
             <template x-if="lazyTabMount.settings">

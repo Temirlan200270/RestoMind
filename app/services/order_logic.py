@@ -988,6 +988,9 @@ async def build_menu_context_for_ai(menu_items: list[MenuItem], user_query: str)
     - Smart Category Filter (default): при >= menu_smart_filter_min_items позиций и
       найденной категории в user_query — полный контекст только для неё + upsell, компакт для остальных.
     - Полный каталог: кэшируется по org_id через Redis + in-memory 90 с.
+
+    RAG (menu_rag_enabled) — опциональный legacy-путь для неструктурированных каталогов;
+    для iiko-меню с категориями предпочтителен Smart Category Filter (menu_rag_enabled=False).
     """
     if not settings.menu_rag_enabled:
         org_id: int | None = menu_items[0].organization_id if menu_items else None

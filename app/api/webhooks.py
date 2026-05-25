@@ -42,8 +42,11 @@ from app.services.ai_brain import (
     voice_supported,
 )
 from app.services.chat_delivery import apply_whatsapp_status_webhook
-from app.services.context_engine import fetch_ai_read_context, schedule_save_ai_context_snapshot
-from app.services.restaurant_context_cache import cached_format_org_current_time_block
+from app.services.context_engine import (
+    build_llm_prompt_bundle,
+    fetch_ai_read_context,
+    schedule_save_ai_context_snapshot,
+)
 from app.services.customer_reply import (
     reset_twilio_call_context,
     send_customer_text,
@@ -76,7 +79,15 @@ from app.services.events import publish_event
 from app.services.billing_guard import tenant_billing_blocks_inbound
 from app.services.system_events import BusinessEvent, emit_event
 from app.services.decision_engine import decision_engine
+from app.services.faq_cache import (
+    get_cached_faq_reply,
+    kb_fingerprint_from_text,
+    save_faq_reply,
+    should_save_faq_reply,
+)
 from app.services.org_resolve import organization_id_for_whatsapp_value
+from app.services.prompt_metrics import apply_prompt_size_controls
+from app.services.quick_replies import QuickReplyHit, try_quick_reply
 from app.services.tenant_scope import ensure_default_location
 from app.services.trace_context import (
     build_conversation_id,
@@ -101,16 +112,12 @@ from app.services.intent_router import (
     route_intent,
 )
 from app.services.order_logic import (
-    build_menu_context_for_ai,
     build_summary_text_from_stored_items,
     detect_payment_method_from_text,
-    format_draft_order_context_for_prompt,
     format_whatsapp_order_card,
     merge_total_into_items_json,
 )
-from app.services.sales_strategy import build_sales_strategy, format_strategy_for_prompt
 from app.services.stoplist_session import (
-    format_stoplist_change_for_menu_context,
     load_seen_stopped_keys,
     newly_stopped_names,
     save_seen_stopped_keys,
@@ -298,52 +305,6 @@ def _canonical_whatsapp_phone(phone: str) -> str:
     return normalized if normalized else raw
 
 
-def _is_plain_greeting(text: str) -> bool:
-    """
-    Простое приветствие без запроса (детерминированный short-circuit до LLM).
-    """
-    raw = (text or "").strip().lower()
-    if not raw:
-        return False
-    norm = re.sub(r"[^\w\s]+", " ", raw, flags=re.UNICODE)
-    words = [w for w in re.split(r"\s+", norm) if w]
-    if not words or len(words) > 4:
-        return False
-    greeting_words = {
-        "привет",
-        "здравствуйте",
-        "здравствуй",
-        "салам",
-        "ассаламуалейкум",
-        "hello",
-        "hi",
-        "добрый",
-        "день",
-        "вечер",
-        "утро",
-    }
-    intent_words = {
-        "меню",
-        "заказ",
-        "доставка",
-        "самовывоз",
-        "бронь",
-        "бронирование",
-        "адрес",
-        "часы",
-        "время",
-        "order",
-        "menu",
-    }
-    if any(w in intent_words for w in words):
-        return False
-    return all(w in greeting_words for w in words)
-
-
-def _greeting_reply() -> str:
-    return "Здравствуйте! Чем могу помочь?"
-
-
 async def _delayed_processing_feedback(
     phone: str,
     whatsapp_message_id: str,
@@ -352,7 +313,7 @@ async def _delayed_processing_feedback(
 ) -> None:
     """Typing indicator (wamid) или короткий ack после задержки — не блокирует LLM."""
     try:
-        await asyncio.sleep(max(0.5, delay_sec))
+        await asyncio.sleep(max(0.0, delay_sec))
         wmid = (whatsapp_message_id or "").strip()
         if wmid:
             from app.integrations.whatsapp import send_typing_indicator
@@ -371,10 +332,12 @@ async def _delayed_processing_feedback(
 def _start_slow_processing_feedback(
     phone: str,
     whatsapp_message_id: str,
+    *,
+    delay_sec: float | None = None,
 ) -> asyncio.Task[None] | None:
     if not settings.bot_slow_ack_enabled:
         return None
-    delay = float(settings.bot_slow_ack_delay_sec or 2.0)
+    delay = float(settings.bot_slow_ack_delay_sec or 2.0) if delay_sec is None else float(delay_sec)
     try:
         return asyncio.create_task(
             _delayed_processing_feedback(phone, whatsapp_message_id, delay_sec=delay),
@@ -1128,6 +1091,142 @@ _OPERATOR_ONLY_REPLY = (
 )
 
 
+async def _dispatch_bypass_assistant_reply(
+    *,
+    phone: str,
+    organization_id: int,
+    message_text: str,
+    reply_text: str,
+    trace_id: str,
+    conversation_id: str,
+    pipeline_stage: str,
+    qr_hit: QuickReplyHit | None = None,
+    active_location_id: int | None = None,
+    u_row: User | None = None,
+    pipe_sw: PipelineStopwatch | None = None,
+) -> None:
+    """Отправка детерминированного ответа (quick reply / FAQ cache) без LLM."""
+    outbound_id: int | None = None
+    async with async_session_factory() as db:
+        if active_location_id is None:
+            active_location_id = await _resolve_default_location_id(db, organization_id)
+        if qr_hit is not None and "cancel_open_draft" in qr_hit.side_effects:
+            await cancel_all_draft_orders_for_phone(
+                db,
+                phone,
+                organization_id,
+                trace_id=trace_id,
+                conversation_id=conversation_id,
+                source="webhooks.quick_reply",
+            )
+            await clear_pending_order_durable(
+                redis_client,
+                db,
+                phone=phone,
+                organization_id=organization_id,
+            )
+        if qr_hit is not None and qr_hit.set_human_mode:
+            db.add(
+                EscalationEvent(
+                    organization_id=organization_id,
+                    phone=phone,
+                    user_message=(message_text or "")[:2000],
+                    reason=(reply_text or "")[:2000],
+                ),
+            )
+            await emit_event(
+                db,
+                BusinessEvent(
+                    org_id=organization_id,
+                    type="ai.escalated",
+                    actor="quick_reply",
+                    entity_type="user",
+                    entity_id=phone,
+                    payload={
+                        "phone": phone,
+                        "reason": (reply_text or "")[:500],
+                        "template_id": qr_hit.template_id,
+                    },
+                ),
+            )
+        outbound_id = await _save_chat_log(
+            db,
+            phone,
+            message_text,
+            reply_text,
+            organization_id=organization_id,
+            trace_id=trace_id,
+            conversation_id=conversation_id,
+            location_id=active_location_id,
+            known_user_id=int(u_row.id) if u_row is not None and u_row.id is not None else None,
+        )
+        await db.commit()
+
+    await append_to_history(
+        redis_client, phone, "assistant", reply_text, organization_id=organization_id,
+    )
+    await publish_chat_event(
+        phone=phone,
+        role="assistant",
+        content=reply_text,
+        organization_id=organization_id,
+        chat_log_id=outbound_id,
+        trace_id=trace_id,
+        conversation_id=conversation_id,
+        meta={"bypass": pipeline_stage, "template_id": qr_hit.template_id if qr_hit else None},
+    )
+    await send_customer_text(phone, reply_text, outbound_chat_log_id=outbound_id)
+
+    if qr_hit is not None and qr_hit.set_human_mode:
+        await set_user_state(redis_client, phone, UserState.HUMAN_MODE, organization_id=organization_id)
+        await publish_human_event(
+            phone=phone,
+            organization_id=organization_id,
+            reason=reply_text,
+            user_message=message_text or "",
+            trace_id=trace_id,
+            conversation_id=conversation_id,
+            intent="escalate",
+        )
+        await publish_state_event(
+            phone=phone,
+            state=UserState.HUMAN_MODE.value,
+            organization_id=organization_id,
+            trace_id=trace_id,
+            conversation_id=conversation_id,
+        )
+        try:
+            await send_tg_fallback_alert(
+                phone,
+                message_text,
+                reply_text,
+                extras=EscalationAlertExtras(intent="escalate", fsm_state=UserState.HUMAN_MODE.value),
+                organization_id=organization_id,
+            )
+        except Exception as tg_exc:
+            logger.warning("Telegram quick_reply escalation alert failed: %s", tg_exc)
+    elif qr_hit is not None and qr_hit.new_state is not None:
+        await set_user_state(
+            redis_client, phone, qr_hit.new_state, organization_id=organization_id,
+        )
+
+    log_pipeline_stage(
+        pipeline_stage,
+        phone=phone,
+        extra={
+            "organization_id": organization_id,
+            "template_id": qr_hit.template_id if qr_hit else None,
+        },
+    )
+    if pipe_sw is not None and settings.pipeline_timing_enabled:
+        pipe_sw.split(pipeline_stage)
+        log_pipeline_rm_stage_ms(
+            phone_tail=_redact_msisdn_for_log(phone),
+            rm_stage_ms=pipe_sw.rm_stage_ms,
+            extra={"organization_id": organization_id, "path": pipeline_stage},
+        )
+
+
 async def _reset_stale_cart_if_needed(
     phone: str,
     organization_id: int,
@@ -1340,38 +1439,6 @@ async def _process_message_inner(
         pipe_sw = pipeline_sw or PipelineStopwatch()
         active_location_id: int | None = None
         state = await get_user_state(redis_client, phone, organization_id=organization_id)
-        if message_text and _is_plain_greeting(message_text):
-            if state == UserState.CHATTING and voice_audio is None:
-                quick_reply = _greeting_reply()
-                outbound_id_quick: int | None = None
-                async with async_session_factory() as db_quick:
-                    active_location_id = await _resolve_default_location_id(db_quick, organization_id)
-                    outbound_id_quick = await _save_chat_log(
-                        db_quick,
-                        phone,
-                        message_text,
-                        quick_reply,
-                        organization_id=organization_id,
-                        trace_id=trace_id,
-                        conversation_id=conversation_id,
-                        location_id=active_location_id,
-                    )
-                    await db_quick.commit()
-                await append_to_history(redis_client, phone, "user", message_text, organization_id=organization_id)
-                await append_to_history(redis_client, phone, "assistant", quick_reply, organization_id=organization_id)
-                await publish_event("new_message", {
-                    "phone": phone,
-                    "role": "assistant",
-                    "content": quick_reply,
-                    "id": outbound_id_quick,
-                    "delivery_status": "sending",
-                    "organization_id": organization_id,
-                    "location_id": active_location_id,
-                    "trace_id": trace_id,
-                    "conversation_id": conversation_id,
-                })
-                await send_customer_text(phone, quick_reply, outbound_chat_log_id=outbound_id_quick)
-                return
 
         wmid = (whatsapp_message_id or "").strip()
         if not await check_rate_limit(phone):
@@ -1777,83 +1844,75 @@ async def _process_message_inner(
 
         outbound_id_chat: int | None = None
         tg_alert_ctx: EscalationAlertExtras | None = None
-        # 1) DB: параллельное чтение (несколько коротких сессий), затем сбор строк без I/O
-        read_ctx = await fetch_ai_read_context(phone, organization_id)
-        menu_items = read_ctx.menu_items
-        menu_context = await build_menu_context_for_ai(menu_items, message_text)
-        prev_stopped_keys = await load_seen_stopped_keys(
-            redis_client, phone, organization_id,
+        slow_feedback_task = _start_slow_processing_feedback(phone, wmid, delay_sec=0.0)
+
+        if settings.quick_replies_enabled and message_text.strip() and not had_voice:
+            qr_org: Organization | None = None
+            qr_has_draft = False
+            async with async_session_factory() as db_qr:
+                qr_org = await db_qr.get(Organization, organization_id)
+                draft_q = await get_open_draft_order(db_qr, phone, organization_id)
+                qr_has_draft = draft_q is not None
+            qr_hit = await try_quick_reply(
+                phone=phone,
+                organization_id=organization_id,
+                message_text=message_text,
+                state=state,
+                has_open_draft=qr_has_draft,
+                org=qr_org,
+            )
+            if qr_hit is not None:
+                if slow_feedback_task is not None:
+                    slow_feedback_task.cancel()
+                    try:
+                        await slow_feedback_task
+                    except asyncio.CancelledError:
+                        pass
+                await _dispatch_bypass_assistant_reply(
+                    phone=phone,
+                    organization_id=organization_id,
+                    message_text=message_text,
+                    reply_text=qr_hit.reply_text,
+                    trace_id=trace_id,
+                    conversation_id=conversation_id,
+                    pipeline_stage="quick_reply_bypass",
+                    qr_hit=qr_hit,
+                    u_row=None,
+                    pipe_sw=pipe_sw,
+                )
+                return
+
+        # 1) Параллельное чтение контекста + Redis stoplist keys
+        read_ctx, prev_stopped_keys = await asyncio.gather(
+            fetch_ai_read_context(phone, organization_id),
+            load_seen_stopped_keys(redis_client, phone, organization_id),
         )
-        # Первый снимок в диалоге — только база; иначе все стоп-позиции «как новые»
+        menu_items = read_ctx.menu_items
         if prev_stopped_keys:
             fresh_stopped = newly_stopped_names(prev_stopped_keys, menu_items)
         else:
             fresh_stopped = []
-        u_row = read_ctx.user
-        customer_ctx = read_ctx.customer_ctx
-        org_ent = read_ctx.org
-        current_time_ctx = cached_format_org_current_time_block(
-            organization_id,
-            getattr(org_ent, "timezone", None) if org_ent is not None else "Etc/GMT-5",
-            getattr(org_ent, "schedule_json", None) if org_ent is not None else None,
+        prompt_bundle = await build_llm_prompt_bundle(
+            read_ctx,
+            organization_id=organization_id,
+            message_text=message_text,
+            fresh_stopped=fresh_stopped,
         )
-        kb_context = read_ctx.kb_context
+        menu_context = prompt_bundle.menu_context
+        kb_context = prompt_bundle.kb_context
+        draft_ctx = prompt_bundle.draft_ctx
+        strategy_ctx = prompt_bundle.strategy_ctx
+        customer_ctx = prompt_bundle.customer_ctx
+        current_time_ctx = prompt_bundle.current_time_ctx
+        sales_gastro_hint = prompt_bundle.sales_gastro_hint
+        sales_target_iiko_ids = prompt_bundle.sales_target_iiko_ids
         draft_row = read_ctx.draft_row
-        draft_ctx = format_draft_order_context_for_prompt(
-            draft_row.items_json if draft_row else None,
-        )
-        draft_overlap: list[str] = []
-        if fresh_stopped and draft_row and isinstance(draft_row.items_json, dict):
-            _draft_norm = {
-                str(x.get("name", "")).lower().strip()
-                for x in (draft_row.items_json.get("items") or [])
-                if isinstance(x, dict) and x.get("name")
-            }
-            draft_overlap = [
-                n for n in fresh_stopped if n.lower().strip() in _draft_norm
-            ]
-        stoplist_change_ctx = format_stoplist_change_for_menu_context(
-            fresh_stopped, draft_overlap=draft_overlap,
-        )
-        if stoplist_change_ctx:
-            menu_context = f"{menu_context}\n\n{stoplist_change_ctx}"
-
-        # G3 Money MVP: профиль гостя — одна строка, помогает боту «узнать» постоянного клиента
-        _prefs = read_ctx.user_preferences or {}
-        _top = _prefs.get("top_items") or []
-        _disliked = _prefs.get("disliked") or []
-        if _top:
-            _guest_line = f"Профиль гостя: обычно берёт {', '.join(_top[:2])}"
-            if _disliked:
-                _guest_line += f"; не берёт {_disliked[0]}"
-            menu_context = f"{_guest_line}\n{menu_context}"
-
-        if draft_row and isinstance(draft_row.items_json, dict):
-            cart = [
-                x for x in (draft_row.items_json.get("items") or [])
-                if isinstance(x, dict)
-            ]
-            om = draft_row.items_json.get("order_meta")
-            meta_d = om if isinstance(om, dict) else {}
-            total = float(draft_row.total_price or 0)
-            decision = build_sales_strategy(
-                cart, total, meta_d, menu_items,
-                u_row.meta_json if u_row is not None else None,
-                user_preferences=read_ctx.user_preferences,
-            )
-            strategy_ctx = format_strategy_for_prompt(decision)
-            sales_gastro_hint = (decision.gastro_hint or "").strip()
-            sales_target_iiko_ids = list(decision.target_iiko_ids or [])
-        else:
-            strategy_ctx = ""
-            sales_gastro_hint = ""
-            sales_target_iiko_ids = []
+        u_row = read_ctx.user
 
         if settings.pipeline_timing_enabled:
             pipe_sw.split("context")
 
         # Phase 3 OS: сохранить снимок контекста до LLM (fire-and-forget, не блокирует)
-        # menu_context уже вычислен выше — передаём для точного replay
         ai_snapshot_id = schedule_save_ai_context_snapshot(
             phone,
             organization_id,
@@ -1883,8 +1942,81 @@ async def _process_message_inner(
         if short_after:
             menu_context = "[КРАТКИЙ РЕЖИМ] Очередь загружена — отвечай коротко и по делу, без апсейла.\n" + menu_context
 
+        kb_fp = kb_fingerprint_from_text(kb_context)
+        if (
+            settings.faq_cache_enabled
+            and not had_voice
+            and draft_row is None
+            and state == UserState.CHATTING
+        ):
+            faq_reply = await get_cached_faq_reply(
+                org_id=organization_id,
+                message_text=message_text,
+                kb_fingerprint=kb_fp,
+            )
+            if faq_reply:
+                if slow_feedback_task is not None:
+                    slow_feedback_task.cancel()
+                    try:
+                        await slow_feedback_task
+                    except asyncio.CancelledError:
+                        pass
+                await _dispatch_bypass_assistant_reply(
+                    phone=phone,
+                    organization_id=organization_id,
+                    message_text=message_text,
+                    reply_text=faq_reply,
+                    trace_id=trace_id,
+                    conversation_id=conversation_id,
+                    pipeline_stage="faq_cache_hit",
+                    active_location_id=active_location_id,
+                    u_row=u_row,
+                    pipe_sw=pipe_sw,
+                )
+                return
+
+        if settings.prompt_size_metric_enabled:
+            history, size_before, size_after, trimmed = apply_prompt_size_controls(
+                history,
+                menu_context=menu_context,
+                kb_context=kb_context,
+                draft_ctx=draft_ctx,
+                strategy_ctx=strategy_ctx,
+                customer_ctx=customer_ctx,
+                current_time_ctx=current_time_ctx,
+                user_text=message_text,
+                soft_limit=settings.prompt_max_tokens_soft,
+                hard_limit=settings.prompt_max_tokens_hard,
+                min_keep=settings.prompt_history_min_keep,
+            )
+            log_pipeline_stage(
+                "prompt_size",
+                phone=phone,
+                extra={
+                    "organization_id": organization_id,
+                    "tokens": size_before.estimated_tokens,
+                    "parts": size_before.parts,
+                    "trimmed": trimmed,
+                    "tokens_after": size_after.estimated_tokens if size_after else None,
+                },
+            )
+            if trimmed and size_after is not None:
+                logger.warning(
+                    "prompt_oversize org=%d tokens_before=%d tokens_after=%d history_len=%d",
+                    organization_id,
+                    size_before.estimated_tokens,
+                    size_after.estimated_tokens,
+                    len(history),
+                )
+            if size_after is not None and size_after.estimated_tokens > settings.prompt_max_tokens_hard:
+                logger.warning(
+                    "prompt_hard_limit org=%d tokens=%d hard=%d",
+                    organization_id,
+                    size_after.estimated_tokens,
+                    settings.prompt_max_tokens_hard,
+                )
+
         # 2) OpenAI: без DB-сессии
-        slow_feedback_task = _start_slow_processing_feedback(phone, wmid)
         try:
             if had_voice:
                 if voice_bytes is None:
@@ -1942,6 +2074,14 @@ async def _process_message_inner(
         if is_openai_fallback_escalation_reply(ai_response.reply_text):
             schedule_log_ai_error(organization_id)
 
+        if should_save_faq_reply(ai_response, has_draft=draft_row is not None):
+            await save_faq_reply(
+                org_id=organization_id,
+                message_text=message_text,
+                kb_fingerprint=kb_fp,
+                reply=ai_response.reply_text,
+            )
+
         # Phase 4 OS: Decision Engine — валидация AI-ответа до исполнения
         try:
             de_result = await decision_engine.validate(
@@ -1977,6 +2117,9 @@ async def _process_message_inner(
                 trace_id=trace_id,
                 conversation_id=conversation_id,
                 location_id=active_location_id,
+                draft_order=read_ctx.draft_row,
+                user=read_ctx.user,
+                org=read_ctx.org,
             )
             log_pipeline_stage(
                 "route_ok",

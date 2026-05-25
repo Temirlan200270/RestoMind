@@ -96,12 +96,21 @@ def _sanitize_reply_before_order_card(reply_text: str) -> str:
 
 
 async def get_open_draft_order(
-    db: AsyncSession, phone: str, organization_id: int,
+    db: AsyncSession,
+    phone: str,
+    organization_id: int,
+    *,
+    user: User | None = None,
 ) -> Order | None:
     """Последний заказ пользователя в статусе DRAFT (для merge и обновления корзины)."""
-    user = await db.scalar(
-        select(User).where(User.phone == phone, User.organization_id == organization_id),
-    )
+    if user is None:
+        user = await db.scalar(
+            select(User).where(User.phone == phone, User.organization_id == organization_id),
+        )
+    elif int(user.organization_id) != int(organization_id) or user.phone != phone:
+        user = await db.scalar(
+            select(User).where(User.phone == phone, User.organization_id == organization_id),
+        )
     if user is None:
         return None
     q = await db.execute(
@@ -391,8 +400,15 @@ async def get_or_create_user(
     organization_id: int,
     *,
     defer_flush: bool = False,
+    existing: User | None = None,
 ) -> User:
     """Находит пользователя по телефону в организации или создаёт нового."""
+    if (
+        existing is not None
+        and existing.phone == phone
+        and int(existing.organization_id) == int(organization_id)
+    ):
+        return existing
     user = await db.scalar(
         select(User).where(User.phone == phone, User.organization_id == organization_id),
     )
@@ -424,6 +440,9 @@ async def _handle_order(
     trace_id: str = "",
     conversation_id: str = "",
     location_id: int | None = None,
+    draft_order: Order | None = None,
+    user: User | None = None,
+    org: Organization | None = None,
 ) -> RouteResult:
     """
     Обработка intent='order':
@@ -435,7 +454,11 @@ async def _handle_order(
             db, organization_id=organization_id, include_unavailable=True,
         )
 
-    existing_draft = await get_open_draft_order(db, phone, organization_id)
+    existing_draft = (
+        draft_order
+        if draft_order is not None and draft_order.status == OrderStatus.DRAFT
+        else await get_open_draft_order(db, phone, organization_id, user=user)
+    )
     draft_item_names: list[str] = []
     if existing_draft and isinstance(existing_draft.items_json, dict):
         draft_item_names = [
@@ -525,7 +548,9 @@ async def _handle_order(
             )
         )
 
-    user = await get_or_create_user(db, phone, organization_id, defer_flush=True)
+    user = await get_or_create_user(
+        db, phone, organization_id, defer_flush=True, existing=user,
+    )
     if user.id is None:
         await db.flush()
 
@@ -594,7 +619,7 @@ async def _handle_order(
         db.add(booking_row)
 
     packaging_rules = await load_packaging_rules(db, organization_id)
-    org_row = await db.get(Organization, organization_id)
+    org_row = org if org is not None else await db.get(Organization, organization_id)
     prepay_enf = bool(org_row.prepayment_enforced) if org_row else True
     items_json, grand_total = finalize_order_draft(
         validated, ai_eff, packaging_rules=packaging_rules, prepayment_enforced=prepay_enf,
@@ -725,8 +750,8 @@ async def _handle_order(
             ),
         )
 
-    # Ночной предзаказ: если ресторан закрыт — сохранить как kind='night_preorder' и выйти.
-    # Исключение: заказы с бронированием — гость едет в зал к конкретному времени, не нужен night flow.
+    # Ночной предзаказ: если ресторан или кухня закрыты — kind='night_preorder' и выход.
+    # Исключение: is_preorder + booking_details (бронь на конкретное время).
     if org_row is not None and not bool(ai_eff.is_preorder) and booking_row is None:
         from app.services.time_context import check_operational_status
         _op_status = check_operational_status(
@@ -734,14 +759,18 @@ async def _handle_order(
             org_row.schedule_json,
             force_closed_until=org_row.force_closed_until,
         )
-        if not _op_status.is_business_open:
+        if not _op_status.is_business_open or not _op_status.is_kitchen_open:
             order.kind = "night_preorder"
             await db.flush()
-            reply_night = (
-                f"{ai_response.reply_text}\n\n"
-                "🌙 Сейчас мы закрыты, но записали ваш заказ. "
-                "Утром, как откроемся, оператор свяжется с вами для подтверждения."
-            )
+            next_open = _op_status.next_kitchen_open_at or _op_status.next_business_open_at
+            if not _op_status.is_business_open:
+                note = "🌙 Сейчас мы закрыты, но записали ваш заказ."
+            else:
+                note = "🌙 Кухня уже не принимает новые заказы на сегодня."
+            if next_open:
+                note += f" Ближайшее принятие к готовке: {next_open}."
+            note += " Утром оператор свяжется с вами для подтверждения."
+            reply_night = f"{ai_response.reply_text}\n\n{note}"
             return RouteResult(
                 reply_text=reply_night,
                 pending_order_id=order.id,
@@ -1252,6 +1281,9 @@ async def route_intent(
     trace_id: str = "",
     conversation_id: str = "",
     location_id: int | None = None,
+    draft_order: Order | None = None,
+    user: User | None = None,
+    org: Organization | None = None,
 ) -> RouteResult:
     """
     Главный маршрутизатор — вызывает обработчик в зависимости от intent.
@@ -1277,6 +1309,9 @@ async def route_intent(
             trace_id=trace_id,
             conversation_id=conversation_id,
             location_id=location_id,
+            draft_order=draft_order,
+            user=user,
+            org=org,
         )
     elif intent == "book":
         return await _handle_booking(db, phone, ai_response, organization_id=oid, location_id=location_id)

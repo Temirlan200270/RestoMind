@@ -369,6 +369,8 @@ async def build_llm_prompt_bundle(
     fresh_stopped: list[str] | None = None,
 ) -> LLMPromptBundle:
     """Единая сборка LLM-контекста (WhatsApp, test_bot, telephony stub)."""
+    import asyncio
+
     from app.services.order_logic import (
         build_menu_context_for_ai,
         format_draft_order_context_for_prompt,
@@ -378,17 +380,48 @@ async def build_llm_prompt_bundle(
     from app.services.sales_strategy import build_sales_strategy, format_strategy_for_prompt
 
     menu_items = read_ctx.menu_items
-    menu_context = await build_menu_context_for_ai(menu_items, message_text)
     org_ent = read_ctx.org
+    draft_row = read_ctx.draft_row
+    u_row = read_ctx.user
+
+    async def _build_strategy_part() -> tuple[str, str, list[str]]:
+        if not draft_row or not isinstance(draft_row.items_json, dict):
+            return "", "", []
+
+        def _sync() -> tuple[str, str, list[str]]:
+            cart = [x for x in (draft_row.items_json.get("items") or []) if isinstance(x, dict)]
+            om = draft_row.items_json.get("order_meta")
+            meta_d = om if isinstance(om, dict) else {}
+            total = float(draft_row.total_price or 0)
+            decision = build_sales_strategy(
+                cart,
+                total,
+                meta_d,
+                menu_items,
+                u_row.meta_json if u_row is not None else None,
+                user_preferences=read_ctx.user_preferences,
+            )
+            return (
+                format_strategy_for_prompt(decision),
+                (decision.gastro_hint or "").strip(),
+                list(decision.target_iiko_ids or []),
+            )
+
+        return await asyncio.to_thread(_sync)
+
+    menu_task = asyncio.create_task(build_menu_context_for_ai(menu_items, message_text))
+    strategy_task = asyncio.create_task(_build_strategy_part())
+
     current_time_ctx = cached_format_org_current_time_block(
         organization_id,
         getattr(org_ent, "timezone", None) if org_ent is not None else "Etc/GMT-5",
         getattr(org_ent, "schedule_json", None) if org_ent is not None else None,
     )
-    draft_row = read_ctx.draft_row
     draft_ctx = format_draft_order_context_for_prompt(
         draft_row.items_json if draft_row else None,
     )
+
+    menu_context = await menu_task
     stopped = fresh_stopped or []
     draft_overlap: list[str] = []
     if stopped and draft_row and isinstance(draft_row.items_json, dict):
@@ -413,26 +446,7 @@ async def build_llm_prompt_bundle(
             guest_line += f"; не берёт {disliked[0]}"
         menu_context = f"{guest_line}\n{menu_context}"
 
-    u_row = read_ctx.user
-    strategy_ctx = ""
-    sales_gastro_hint = ""
-    sales_target_iiko_ids: list[str] = []
-    if draft_row and isinstance(draft_row.items_json, dict):
-        cart = [x for x in (draft_row.items_json.get("items") or []) if isinstance(x, dict)]
-        om = draft_row.items_json.get("order_meta")
-        meta_d = om if isinstance(om, dict) else {}
-        total = float(draft_row.total_price or 0)
-        decision = build_sales_strategy(
-            cart,
-            total,
-            meta_d,
-            menu_items,
-            u_row.meta_json if u_row is not None else None,
-            user_preferences=read_ctx.user_preferences,
-        )
-        strategy_ctx = format_strategy_for_prompt(decision)
-        sales_gastro_hint = (decision.gastro_hint or "").strip()
-        sales_target_iiko_ids = list(decision.target_iiko_ids or [])
+    strategy_ctx, sales_gastro_hint, sales_target_iiko_ids = await strategy_task
 
     return LLMPromptBundle(
         menu_items=menu_items,

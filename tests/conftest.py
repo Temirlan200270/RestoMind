@@ -6,6 +6,8 @@ import os
 
 # До импорта app.core.config: SessionMiddleware с https_only=True не отдаёт cookie в httpx по http:// (ASGITransport).
 os.environ.setdefault("APP_DEBUG", "true")
+# Тесты ожидают синхронные consumers в той же транзакции (DailyOrgStats и т.д.).
+os.environ.setdefault("EVENT_CONSUMERS_ASYNC", "false")
 
 import asyncio
 from collections.abc import AsyncGenerator

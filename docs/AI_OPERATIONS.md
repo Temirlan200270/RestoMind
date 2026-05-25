@@ -432,3 +432,22 @@ Location scope поддержан в:
 - [ ] Hourly baselines (нужен накопленный датасет)
 - [ ] Causal graph (корреляции между метриками)
 - [ ] Feedback calibration (автокалибровка порогов по `was_useful`)
+
+---
+
+## WhatsApp Performance Pack (hot path)
+
+| Компонент | Файл | Env |
+|---|---|---|
+| Quick replies (bypass LLM) | `app/services/quick_replies.py` | `QUICK_REPLIES_ENABLED=true` (default) |
+| FAQ cache | `app/services/faq_cache.py` | `FAQ_CACHE_ENABLED`, `FAQ_CACHE_TTL_SEC` |
+| Prompt budget | `app/services/prompt_metrics.py` | `PROMPT_MAX_TOKENS_SOFT`, `PROMPT_HISTORY_MIN_KEEP` |
+
+**Redis keys (org-scoped):**
+- `rm:faq_cache:{org_id}:{hash16}` — кеш FAQ-ответа (TTL 24h по умолчанию)
+- `rm:metrics:faq_cache:{hit|miss|save}:{org_id}:{YYYY-MM-DD}`
+- `rm:metrics:quick_reply:{org_id}:{template_id}:{YYYY-MM-DD}`
+
+**FAQ cache:** сохраняется только при `intent=faq`, без draft/items/upsell, reply ≤600 символов, вопрос 5–100 символов после нормализации. Инвалидация по `kb_fingerprint` (hash KB-текста в промпте).
+
+**Kitchen-gate:** в `_handle_order` при `not is_kitchen_open` (и без `is_preorder`) заказ → `kind='night_preorder'`.
