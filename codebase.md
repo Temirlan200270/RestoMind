@@ -70,7 +70,15 @@ RestoMind/
 │   ├── services/                  # бизнес-логика и оркестрация
 │   │   ├── ai_brain.py            # вызов LLM, парсинг в схему
 │   │   ├── ai_engine/             # openai_p (prompt caching order), gemini_p, prompting.py, базовые абстракции
-│   │   ├── intent_router.py       # маршрутизация намерений, черновик заказа, stoplist handling
+│   │   ├── intent_router.py       # маршрутизация намерений, get_or_create_user (E.164), черновик заказа
+│   │   ├── phone_normalize.py     # E.164: normalize_phone_e164, canonical_user_phone, lookup variants
+│   │   ├── user_phone_resolve.py  # find_user_by_phone (7705… vs +7705…)
+│   │   ├── user_phone_merge.py    # merge duplicate User rows (one-off / scripts)
+│   │   ├── wa_queue_metrics.py    # queue_wait_ms: enqueue → process_with_retry start
+│   │   ├── quick_replies.py       # детерминированные ответы без LLM (greeting, menu, status, …)
+│   │   ├── faq_cache.py           # Redis-кеш intent=faq + get_faq_cache_metrics
+│   │   ├── task_queue.py          # ARQ enqueue / dispatch_arq_or_background
+│   │   ├── event_consumer_runner.py # post-commit analytics/audit consumers (async по умолчанию)
 │   │   ├── dialog_mgr.py          # состояния чата, Redis, синхронизация с БД; clear_pending_order не сбрасывает HUMAN_MODE
 │   │   ├── stoplist_session.py    # Redis rm:stoplist_seen — diff «только что на стопе» в диалоге
 │   │   ├── trace_context.py       # publish_chat_event / publish_state_event / publish_human_event (WS payload)
@@ -119,7 +127,8 @@ RestoMind/
 │
 ├── alembic/                       # миграции PostgreSQL (Alembic)
 ├── tests/                         # pytest-asyncio; интеграционные и модульные тесты
-├── scripts/                       # sync_menu_from_iiko, grant_superadmin, capture_admin_mobile_review.py, run_admin_lighthouse.mjs, …
+├── scripts/                       # sync_menu_from_iiko, grant_superadmin, diag_duplicate_phones,
+│                                  # diag_whatsapp_latency, merge_duplicate_users, …
 │
 ├── .github/workflows/
 │   ├── ci.yml                     # push: pytest + импорт приложения
@@ -128,7 +137,7 @@ RestoMind/
 ├── Dockerfile
 ├── docker-compose.yml
 ├── docker-compose.prod.yml
-├── render.yaml                    # Blueprint Render (Docker)
+├── render.yaml                    # Blueprint Render: web `restomind` + worker `restomind-worker`
 │
 ├── README.md                      # быстрый старт и возможности
 ├── codebase.md                    # этот файл
@@ -149,8 +158,8 @@ RestoMind/
 
 | Направление | Где вход | Куда логика |
 |-------------|----------|-------------|
-| WhatsApp → бот | `api/webhooks.py` | preflight: канон. телефон, сброс DRAFT при пустой истории, stoplist_session; `dialog_mgr`, `intent_router`, `ai_brain`; operator_only / эскалация → `trace_context.publish_*` |
-| Админ UI | `templates/` + `static/js/admin-app.js` | `api/admin/` → сервисы, БД; чаты: FSM-бейдж, `formatChatDisplayContent`, takeover/release |
+| WhatsApp → бот | `api/webhooks.py` | E.164 (`phone_normalize`); ARQ или BackgroundTasks → `process_with_retry`; `wa_queue_metrics` (`queue_wait_ms`); preflight, stoplist_session; `dialog_mgr`, `intent_router`, `ai_brain`; quick_replies / faq_cache bypass LLM |
+| Админ UI | `templates/` + `static/js/admin-app.js` | `api/admin/` → сервисы, БД; чаты: E.164 dedupe в списке (`adminNormalizePhone`), FSM-бейдж, takeover/release |
 | Live-обновления | WS `/api/admin/ws` | `services/events` + `trace_context`; `os.audit`, business events, `new_message`, `state_changed`, … |
 | Voice (Twilio) | `api/webhooks.py` voice routes | `voice_ai.py` → STT/Realtime → `process_message`; `GET /voice/calls` journal |
 | Control Plane trace | WhatsApp webhook, ARQ, admin chats | `trace_context.py`, `trace_timeline.py`, `GET /intelligence/trace-timeline` |
@@ -166,7 +175,7 @@ RestoMind/
 python -m pytest tests/ -v
 ```
 
-В репозитории — **порядка двухсот** тестов и десятки файлов в `tests/`; точное число может расти. GitHub Actions: [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (`push` на `main` / `develop`, PR в `main`).
+В репозитории — **800+** тестов в `tests/`; точное число растёт. GitHub Actions: [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (`push` на `main` / `develop`, PR в `main`).
 
 ---
 

@@ -1,8 +1,7 @@
 """
-Интеграция fetch_ai_read_context: реальные AsyncSession + asyncio.gather, без моков ORM.
+Интеграция fetch_ai_read_context: реальные AsyncSession, без моков ORM.
 
-Патчим только фабрику сессий на in-memory SQLite (как в payment webhook тестах) —
-сам SQLAlchemy-стек, пул и закрытие context manager — настоящие.
+Патчим только фабрику сессий на in-memory SQLite — один context manager на fetch.
 """
 
 from __future__ import annotations
@@ -36,7 +35,7 @@ def _make_tracking_session_factory(
 ) -> async_sessionmaker[AsyncSession]:
     """
     Оборачивает фабрику: считает +1 на __aenter__, −1 в finally __aexit__.
-    Ожидаем 0 после await fetch (5 параллельных with внутри gather).
+    Ожидаем 0 после await fetch (один with на fetch).
     """
 
     class _TrackedFactory:

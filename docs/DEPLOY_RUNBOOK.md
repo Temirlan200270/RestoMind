@@ -59,7 +59,7 @@ flowchart LR
   - `WHATSAPP_VERIFY_TOKEN` — произвольная строка для Meta webhook verify
 - [ ] Понятен план: **staging** (`APP_ENV=staging`) или **production** (`APP_ENV=production`).
 
-> **Важно:** в [`render.yaml`](../render.yaml) по умолчанию `REDIS_ENABLED=false` и `REDIS_MEMORY_ONLY=true`. Для staging/prod **обязательно перебить** (см. матрицу ниже). Иначе web стартует без очереди или ARQ-проверка упадёт при `APP_ENV=production|staging`.
+> **Важно:** Blueprint [`render.yaml`](../render.yaml) уже включает `REDIS_ENABLED=true`, `ARQ_ENABLED=true`, `APP_ENV=production` и worker. В Dashboard **обязательно** задайте **`REDIS_URL`** и **`DATABASE_URL`**. Для dev/sandbox можно временно выставить `REDIS_MEMORY_ONLY=true` (не для prod).
 
 ---
 
@@ -108,6 +108,8 @@ Worker не слушает HTTP; healthcheck Render для него — по л�
 | `REDIS_MEMORY_ONLY` | `false` | **`true` отключает внешний Redis** (дефолт blueprint!) |
 | `ARQ_ENABLED` | `true` | |
 | `ARQ_QUEUE_NAME` | `restomind` | Должен совпадать у web и worker |
+| `DB_POOL_SIZE` | `3` | Пул SQLAlchemy на процесс (blueprint); при `EMAXCONNSESSION` на Supabase — см. [`SUPABASE_MIGRATION.md`](SUPABASE_MIGRATION.md) |
+| `DB_MAX_OVERFLOW` | `2` | |
 | `SESSION_SECRET` | 64+ hex chars | Cookie-сессия + `ws_token` |
 | `ADMIN_PASSWORD` | сильный пароль | Не `restomind` |
 | `OPENAI_API_KEY` | `sk-…` | Если `AI_PROVIDER=openai` (default) |
@@ -161,7 +163,7 @@ Sign-off: [`docs/VOICE_STAGING_CHECKLIST.md`](VOICE_STAGING_CHECKLIST.md).
 | `AI_MODEL_ROUTING_ENABLED` | `true` | fast→strong routing |
 | `BOT_SLOW_ACK_ENABLED` | `true` | typing indicator после 2с |
 | `WHATSAPP_FAST_ACK_ENABLED` | `true` | короткие «спасибо» без LLM |
-| `PIPELINE_TIMING_ENABLED` | `false` | структурные логи latency |
+| `PIPELINE_TIMING_ENABLED` | `false` | структурные логи latency (`rm_stage_ms`, incl. `queue_wait`) |
 | `SENTRY_DSN` | — | Error tracking |
 | `ALLOW_INSECURE_PROD_SETTINGS` | — | **Только аварийно**, потом убрать |
 
@@ -260,6 +262,7 @@ curl -sS https://<host>/api/admin/system/task-queue-health \
 - [ ] Тестовое входящее сообщение → ответ бота в течение SLA
 - [ ] В логах web: `task_queue_enqueue_ok job=whatsapp_process_text`
 - [ ] В логах worker: job completed
+- [ ] При задержках: в Render Logs grep `queue_wait_ms` и `rm_stage_ms` по `trace_id` (Control Plane в чате → «Цепочка trace»)
 
 ### 4.5 Cron (worker logs, первые 24ч)
 
@@ -271,6 +274,21 @@ curl -sS https://<host>/api/admin/system/task-queue-health \
 | `iiko_inventory_sync_scheduled_tick` | 00:20, 06:20, 12:20, 18:20 | остатки iiko Office |
 | `billing_usage_daily_scheduled_tick` | 00:12 | rollup billing |
 
+### 4.6 Ops-скрипты (из корня репо, с prod `DATABASE_URL`)
+
+```bash
+# Дубли users.phone (7705… vs +7705…)
+python scripts/diag_duplicate_phones.py --org-id 1 --phone +77051310837
+
+# Слияние legacy-дублей (сначала dry-run)
+python scripts/merge_duplicate_users.py --org-id 1 --dry-run
+python scripts/merge_duplicate_users.py --org-id 1 --apply
+
+# Latency / trace (после медленного сообщения)
+python scripts/diag_whatsapp_latency.py --org-id 1 --trace-id <trace_id>
+python scripts/diag_whatsapp_latency.py --org-id 1 --phone +77051310837
+```
+
 ---
 
 ## 5. Troubleshooting
@@ -280,6 +298,8 @@ curl -sS https://<host>/api/admin/system/task-queue-health \
 | Web crash loop при старте | `APP_ENV=production` без Redis/ARQ | `REDIS_URL`, `REDIS_ENABLED=true`, `REDIS_MEMORY_ONLY=false`, `ARQ_ENABLED=true`, worker запущен |
 | `SESSION_SECRET обязателен` | Пустой секрет + Postgres | Задать `SESSION_SECRET` или временно `ALLOW_INSECURE_PROD_SETTINGS=true` (**убрать после**) |
 | WhatsApp webhook 200, нет ответа | Worker down / ARQ off | §4.2 task-queue-health |
+| Ответ 1–2 мин | Web без worker / `DB_POOL_SIZE=1` / очередь LLM | Worker live, pool 3+, grep `queue_wait_ms`, `rm_stage_ms.llm` |
+| Дубль номера в «Диалогах» | Два `User` с разным форматом phone | `diag_duplicate_phones.py` → `merge_duplicate_users.py --apply` |
 | Admin WS не обновляется | Redis in-memory на web | Upstash + `REDIS_MEMORY_ONLY=false` |
 | `health/deep` redis error | Неверный `REDIS_URL` или REST вместо TCP | Upstash **Redis Connect** `rediss://` |
 | TLS errors к Redis | CA на Render | временно `REDIS_SSL_SKIP_VERIFY=true` (не для prod long-term) |

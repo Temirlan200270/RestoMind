@@ -1,8 +1,9 @@
 """
-Параллельная фаза чтения для AI-контекста: независимые AsyncSession на каждый запрос.
+Параллельная фаза чтения для AI-контекста.
 
-Один и тот же session нельзя безопасно нагружать concurrent awaits — поэтому asyncio.gather
-здесь используется с отдельными короткими сессиями (пул async_engine).
+Один AsyncSession на весь fetch: меньше checkout'ов из пула и один roundtrip к БД
+(sequential queries). AsyncSession не thread-safe для concurrent awaits — поэтому
+не используем asyncio.gather внутри одной сессии.
 """
 
 from __future__ import annotations
@@ -39,77 +40,54 @@ class AIReadContext:
 
 
 async def fetch_ai_read_context(phone: str, organization_id: int) -> AIReadContext:
-    """
-    Собирает независимые части контекста параллельно; «user» и customer_ctx — в одной сессии,
-    т.к. build_customer_context читает заказы по user_id.
-    """
+    """Собирает контекст одной короткой DB-сессией (sequential queries)."""
 
     phone_s = (phone or "").strip()
 
-    async def get_menu() -> list[MenuItem]:
-        async with async_session_factory() as db:
-            # include_unavailable=True: ИИ видит стоп-позиции (с меткой), но не добавляет их в заказ
-            return await load_available_menu(db, organization_id=organization_id, include_unavailable=True)
+    async with async_session_factory() as db:
+        menu_items = await load_available_menu(
+            db,
+            organization_id=organization_id,
+            include_unavailable=True,
+        )
 
-    async def get_user_and_customer_ctx() -> tuple[User | None, str, dict]:
-        async with async_session_factory() as db:
-            u = await db.scalar(
-                select(User).where(
-                    User.phone == phone_s,
-                    User.organization_id == organization_id,
-                ),
-            )
-            ctx = await build_customer_context(db, u)
-            if u is not None:
-                try:
-                    from app.services.loyalty import get_loyalty_context_line
-                    loyalty_line = await get_loyalty_context_line(db, organization_id, u.id)
-                    if loyalty_line:
-                        ctx = f"{ctx}\n{loyalty_line}".strip() if ctx else loyalty_line
-                except Exception:
-                    pass
-            prefs: dict = {}
-            if u is not None:
-                try:
-                    from app.services.personalization import get_user_preferences
-                    prefs = await get_user_preferences(db, u.id, organization_id)
-                except Exception:
-                    pass
-            return u, ctx, prefs
+        u = await db.scalar(
+            select(User).where(
+                User.phone == phone_s,
+                User.organization_id == organization_id,
+            ),
+        )
 
-    async def get_org() -> Organization | None:
-        async with async_session_factory() as db:
-            return await db.get(Organization, organization_id)
+        customer_ctx = await build_customer_context(db, u)
+        user_preferences: dict = {}
+        if u is not None:
+            try:
+                from app.services.loyalty import get_loyalty_context_line
 
-    async def get_tenant() -> Tenant | None:
-        async with async_session_factory() as db:
-            row = await db.scalar(
-                select(Tenant)
-                .join(Organization, Organization.tenant_id == Tenant.id)
-                .where(Organization.id == organization_id)
-            )
-            return row
+                loyalty_line = await get_loyalty_context_line(db, organization_id, u.id)
+                if loyalty_line:
+                    customer_ctx = f"{customer_ctx}\n{loyalty_line}".strip() if customer_ctx else loyalty_line
+            except Exception:
+                pass
+            try:
+                from app.services.personalization import get_user_preferences
 
-    async def get_kb() -> str:
-        async with async_session_factory() as db:
-            return await load_knowledge_context_block(db, organization_id)
+                user_preferences = await get_user_preferences(db, u.id, organization_id)
+            except Exception:
+                pass
 
-    async def get_draft() -> Order | None:
-        async with async_session_factory() as db:
-            return await get_open_draft_order(db, phone_s, organization_id)
+        org_row = await db.get(Organization, organization_id)
+        kb = await load_knowledge_context_block(db, organization_id)
+        draft = await get_open_draft_order(db, phone_s, organization_id)
+        tenant_row = await db.scalar(
+            select(Tenant)
+            .join(Organization, Organization.tenant_id == Tenant.id)
+            .where(Organization.id == organization_id),
+        )
 
-    menu_items, u_ctx, org_row, kb, draft, tenant_row = await asyncio.gather(
-        get_menu(),
-        get_user_and_customer_ctx(),
-        get_org(),
-        get_kb(),
-        get_draft(),
-        get_tenant(),
-    )
-    u_row, customer_ctx, user_preferences = u_ctx
     return AIReadContext(
         menu_items=menu_items,
-        user=u_row,
+        user=u,
         org=org_row,
         kb_context=kb,
         draft_row=draft,

@@ -109,3 +109,59 @@ async def test_working_hours_needs_org() -> None:
 
 def test_is_plain_greeting_rejects_menu_intent() -> None:
     assert is_plain_greeting("привет, меню") is False
+
+
+@pytest.mark.asyncio
+async def test_menu_request(db_with_menu) -> None:
+    from app.services.quick_replies import build_menu_quick_reply_text
+
+    preview = await build_menu_quick_reply_text(db_with_menu, 1)
+    hit = await try_quick_reply(
+        phone="+77001112233",
+        organization_id=1,
+        message_text="меню",
+        state=UserState.CHATTING,
+        has_open_draft=False,
+        menu_preview=preview,
+    )
+    assert hit is not None
+    assert hit.template_id == "menu_request"
+    assert "Плов" in hit.reply_text or "меню" in hit.reply_text.lower()
+
+
+@pytest.mark.asyncio
+async def test_order_status_with_draft(db_with_menu) -> None:
+    from app.db.models import Order, OrderStatus, User
+    from app.services.quick_replies import build_order_status_quick_reply_text
+
+    user = User(organization_id=1, phone="+77001112233", name="T")
+    db_with_menu.add(user)
+    await db_with_menu.flush()
+    draft = Order(
+        organization_id=1,
+        user_id=user.id,
+        status=OrderStatus.DRAFT,
+        total_price=2790.0,
+        items_json={"items": [{"name": "Плов", "qty": 1}]},
+    )
+    db_with_menu.add(draft)
+    await db_with_menu.flush()
+
+    status_text = await build_order_status_quick_reply_text(
+        db_with_menu,
+        phone="+77001112233",
+        organization_id=1,
+        draft_row=draft,
+    )
+    hit = await try_quick_reply(
+        phone="+77001112233",
+        organization_id=1,
+        message_text="статус заказа",
+        state=UserState.CHATTING,
+        has_open_draft=True,
+        order_status_text=status_text,
+    )
+    assert hit is not None
+    assert hit.template_id == "order_status"
+    assert "Плов" in hit.reply_text
+    assert "черновик" in hit.reply_text.lower()

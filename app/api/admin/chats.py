@@ -36,6 +36,8 @@ from app.services.bot_sla_status import (
 )
 from app.services.events import publish_event
 from app.services.intent_router import get_or_create_user
+from app.services.phone_normalize import canonical_user_phone
+from app.services.user_phone_resolve import find_user_by_phone
 from app.services.system_events import BusinessEvent, emit_event
 from app.services.db_schema_fallback import with_location_scope_fallback
 from app.services.tenant_scope import allowed_location_ids_for_staff, chat_logs_location_filter
@@ -82,10 +84,14 @@ def _chat_triage_from_meta(meta: object) -> dict[str, Any]:
 
 
 async def _user_for_chat(db: AsyncSession, org_id: int, phone: str) -> User:
-    user = await db.scalar(select(User).where(User.phone == phone, User.organization_id == org_id))
+    user = await find_user_by_phone(db, org_id, phone)
     if user is None:
         raise HTTPException(status_code=404, detail="Chat user not found")
     return user
+
+
+def _canonical_chat_phone(phone: str) -> str:
+    return canonical_user_phone(phone) or (phone or "").strip()
 
 
 async def _save_chat_triage(
@@ -96,6 +102,7 @@ async def _save_chat_triage(
 ) -> dict:
     org_id = admin_org_from_session(request)
     user = await _user_for_chat(db, org_id, phone)
+    phone = user.phone
     meta = dict(user.meta_json or {}) if isinstance(user.meta_json, dict) else {}
     triage = _chat_triage_from_meta(meta)
     triage.update(patch)
@@ -281,13 +288,11 @@ async def get_chat_log(
 ) -> dict:
     """Просмотр истории диалога с клиентом по номеру телефона."""
     org_id = admin_org_from_session(request)
-    result = await db.execute(
-        select(User).where(User.phone == phone, User.organization_id == org_id),
-    )
-    user = result.scalar_one_or_none()
+    user = await find_user_by_phone(db, org_id, phone)
 
     if user is None:
         raise HTTPException(status_code=404, detail=f"Пользователь с номером {phone} не найден")
+    phone = user.phone
 
     staff = await _session_staff_user(request, db)
     is_super = await _session_is_superadmin(request, db)
@@ -343,12 +348,18 @@ async def get_chat_log(
 
 
 @chats_router.post("/chats/{phone}/takeover")
-async def takeover_chat(request: Request, phone: str, db: AsyncSession = Depends(get_db)) -> dict:
+async def takeover_chat(
+    request: Request,
+    phone: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
     """
     Перехватить диалог — AI замолкает, оператор ведёт общение вручную.
     Устанавливает флаг HUMAN_MODE в Redis.
     """
     org_id = admin_org_from_session(request)
+    user = await find_user_by_phone(db, org_id, phone)
+    phone = user.phone if user is not None else _canonical_chat_phone(phone)
     await set_user_state_durable(
         redis_client,
         phone=phone,
@@ -386,12 +397,18 @@ async def takeover_chat(request: Request, phone: str, db: AsyncSession = Depends
 
 
 @chats_router.post("/chats/{phone}/release")
-async def release_chat(request: Request, phone: str) -> dict:
+async def release_chat(
+    request: Request,
+    phone: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
     """
     Вернуть управление боту — AI снова отвечает на сообщения.
     Возвращает состояние в CHATTING.
     """
     org_id = admin_org_from_session(request)
+    user = await find_user_by_phone(db, org_id, phone)
+    phone = user.phone if user is not None else _canonical_chat_phone(phone)
     await set_user_state_durable(
         redis_client,
         phone=phone,
@@ -424,12 +441,13 @@ async def set_chat_ai_snooze(
     Не путать с POST /chats/{phone}/snooze — там triage очереди оператора.
     """
     org_id = admin_org_from_session(request)
-    user = await db.scalar(select(User).where(User.phone == phone, User.organization_id == org_id))
+    user = await find_user_by_phone(db, org_id, phone)
     if user is None:
         raise HTTPException(
             status_code=404,
             detail="Пользователь не найден для этого номера в филиале",
         )
+    phone = user.phone
     org = await db.get(Organization, org_id)
     tz = getattr(org, "timezone", None) if org else None
     from app.services.ai_snooze import snooze_until_for_preset
@@ -569,6 +587,7 @@ async def admin_send_message(
     """
     org_id = admin_org_from_session(request)
     user = await get_or_create_user(db, phone, org_id)
+    phone = user.phone
     now = datetime.now(timezone.utc)
     from app.services.trace_context import (
         build_trace_id,
@@ -649,9 +668,10 @@ async def resend_failed_chat_message(
     log = await db.get(ChatLog, chat_log_id)
     if log is None:
         raise HTTPException(status_code=404, detail="Сообщение не найдено")
-    user = await db.get(User, log.user_id)
-    if user is None or int(user.organization_id) != org_id or user.phone != phone:
+    user = await find_user_by_phone(db, org_id, phone)
+    if user is None or int(log.user_id) != int(user.id):
         raise HTTPException(status_code=404, detail="Сообщение не найдено")
+    phone = user.phone
     if (log.delivery_status or "").lower() != "failed":
         raise HTTPException(status_code=400, detail="Переотправка доступна только для failed")
     if (log.role or "") not in ("operator", "assistant", "system"):
@@ -704,8 +724,9 @@ async def get_chat_state(
     bot_short_mode = slow_chats_count > SHORT_MODE_THRESHOLD
     chat_slow = await is_chat_slow(redis_client, org_id, phone, location_id)
     ai_snoozed_until: str | None = None
-    u = await db.scalar(select(User).where(User.phone == phone, User.organization_id == org_id))
+    u = await find_user_by_phone(db, org_id, phone)
     if u is not None:
+        phone = u.phone
         from app.services.ai_snooze import ai_snooze_is_active, clear_ai_snooze_if_expired
 
         await clear_ai_snooze_if_expired(db, u)

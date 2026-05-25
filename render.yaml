@@ -4,6 +4,9 @@
 # 3. В Environment задайте DATABASE_URL (Supabase или другой managed PostgreSQL) и секреты из sync: false
 #
 # База данных не создаётся этим файлом — используйте Supabase или вставьте URL существующего Postgres (см. docs/SUPABASE_MIGRATION.md).
+#
+# Production/staging: после Blueprint в Dashboard задайте REDIS_URL (Upstash TCP rediss://…),
+# включите worker-сервис ниже. См. docs/DEPLOY_RUNBOOK.md §2.
 
 services:
   - type: web
@@ -22,6 +25,8 @@ services:
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port 10000
 
     envVars:
+      - key: APP_ENV
+        value: production
       - key: APP_DEBUG
         value: "false"
       - key: DB_MODE
@@ -31,16 +36,20 @@ services:
       - key: SUPABASE_PREFER_TRANSACTION_POOLER
         value: "true"
       - key: DB_POOL_SIZE
-        value: "1"
+        value: "3"
       - key: DB_MAX_OVERFLOW
-        value: "0"
-      # Опционально: demo-login без SELECT (заполнить id demo-организации после первого деплоя)
-      # - key: DEMO_ORGANIZATION_ID
-      #   sync: false
+        value: "2"
       - key: REDIS_ENABLED
-        value: "false"
-      - key: REDIS_MEMORY_ONLY
         value: "true"
+      - key: REDIS_MEMORY_ONLY
+        value: "false"
+      - key: ARQ_ENABLED
+        value: "true"
+      - key: ARQ_QUEUE_NAME
+        value: restomind
+      # Upstash / Render Redis — задайте в Dashboard (sync: false):
+      - key: REDIS_URL
+        sync: false
       
       # PostgreSQL: Supabase (рекомендуется) или URL из Render/Railway — см. docs/SUPABASE_MIGRATION.md
       - key: DATABASE_URL
@@ -70,6 +79,45 @@ services:
         sync: false
       - key: IIKO_ORGANIZATION_ID
         sync: false
-      # Опционально: авто-импорт меню из iiko (сек). 0 по умолчанию в коде; типично 3600–21600.
-      # - key: IIKO_MENU_AUTO_SYNC_INTERVAL_SECONDS
-      #   value: "10800"
+
+  - type: worker
+    name: restomind-worker
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    startCommand: python -m arq app.worker.WorkerSettings
+
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: "false"
+      - key: DB_MODE
+        value: postgres
+      - key: SUPABASE_PREFER_TRANSACTION_POOLER
+        value: "true"
+      - key: DB_POOL_SIZE
+        value: "3"
+      - key: DB_MAX_OVERFLOW
+        value: "2"
+      - key: REDIS_ENABLED
+        value: "true"
+      - key: REDIS_MEMORY_ONLY
+        value: "false"
+      - key: ARQ_ENABLED
+        value: "true"
+      - key: ARQ_QUEUE_NAME
+        value: restomind
+      - key: REDIS_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: SESSION_SECRET
+        fromService:
+          type: web
+          name: restomind
+          envVarKey: SESSION_SECRET

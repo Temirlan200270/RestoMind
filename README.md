@@ -46,7 +46,7 @@
 | AI | OpenAI (`gpt-4o-mini`, env `OPENAI_MODEL`) или Gemini (`AI_PROVIDER=gemini`, `GEMINI_API_KEY`); structured output + Whisper (`OPENAI_TRANSCRIPTION_MODEL`); опц. `OPENAI_BASE_URL` |
 | Интеграции | Meta WhatsApp API, iiko Cloud API |
 | Админка | Jinja2 + Alpine.js + Tailwind CSS + Chart.js |
-| Тесты | pytest, pytest-asyncio (`tests/`, порядка 200 тестов — см. CI) |
+| Тесты | pytest, pytest-asyncio (`tests/`, **800+** тестов — см. CI) |
 | Продакшен | Docker; **Render** ([DEPLOY_RENDER.md](DEPLOY_RENDER.md)); либо VPS + [DEPLOY_GUIDE.md](DEPLOY_GUIDE.md) |
 
 ## Быстрый старт
@@ -135,14 +135,28 @@ curl -b cookies.txt -X POST http://localhost:8000/api/admin/test-bot \
 
 Автоматически задеплоить в ваш аккаунт нельзя — нужен ваш git-репозиторий и вход в Render. Плагины Vercel/Render в IDE только помогают связать проект; шаги — в таблице выше.
 
-Кратко для продакшена: `APP_DEBUG=false`, PostgreSQL, секреты `OPENAI_API_KEY`, админка, `SESSION_SECRET` / `generateValue` на Render, токены WhatsApp; **Redis обязателен** для очереди; **`REDIS_ENABLED=true`**, **`ARQ_ENABLED=true`**, задайте **`REDIS_URL`** (или host/port). Отдельным процессом поднимите worker:
+Кратко для продакшена: `APP_DEBUG=false`, `APP_ENV=production`, PostgreSQL, секреты `OPENAI_API_KEY`, админка, `SESSION_SECRET` / `generateValue` на Render, токены WhatsApp; **Redis обязателен** для очереди и live WS; **`REDIS_ENABLED=true`**, **`REDIS_MEMORY_ONLY=false`**, **`ARQ_ENABLED=true`**, задайте **`REDIS_URL`** (Upstash TCP `rediss://…`). Blueprint [`render.yaml`](render.yaml) поднимает **web** + **worker** `restomind-worker`; в Dashboard обязательно задайте `REDIS_URL` и `DATABASE_URL`. Пул БД на процесс: `DB_POOL_SIZE=3`, `DB_MAX_OVERFLOW=2` (см. [`docs/SUPABASE_MIGRATION.md`](docs/SUPABASE_MIGRATION.md) при `EMAXCONNSESSION`).
+
+Отдельным процессом (или сервисом worker на Render) поднимите ARQ worker:
 
 ```bash
 python -m arq app.worker.WorkerSettings
 ```
 
 Имя очереди по умолчанию — `restomind` (`ARQ_QUEUE_NAME`). В `APP_ENV=production|staging` приложение при старте проверяет, что к Redis можно подключиться и ARQ включён; без worker задачи из вебхуков не выполнятся.
-Worker слушает ту же очередь, что и web-процесс использует для `enqueue_job`; статус можно проверить в админке через `GET /api/admin/system/task-queue-health`.
+Worker слушает ту же очередь, что и web-процесс использует для `enqueue_job`; статус можно проверить в админке через `GET /api/admin/system/task-queue-health`. Полный чеклист выкатки — [`docs/DEPLOY_RUNBOOK.md`](docs/DEPLOY_RUNBOOK.md).
+
+### WhatsApp: диагностика (prod / staging)
+
+| Задача | Команда / сигнал |
+|--------|------------------|
+| Дубли гостя (`7705…` vs `+7705…`) | `python scripts/diag_duplicate_phones.py --org-id N --phone +7705…` |
+| Слияние legacy-дублей | `python scripts/merge_duplicate_users.py --org-id N --dry-run` → `--apply` |
+| Медленный ответ (trace / latency) | `python scripts/diag_whatsapp_latency.py --org-id N --trace-id …` или `--phone +7705…` |
+| Очередь ARQ | `GET /api/admin/system/task-queue-health` |
+| Queue wait в логах | grep `queue_wait_ms` / `rm_stage_ms` по `trace_id` в Render Logs |
+
+Телефоны гостей в БД и admin API нормализуются в **E.164** (`+7705…`); см. `app/services/phone_normalize.py`.
 
 ## Структура проекта
 
@@ -188,6 +202,7 @@ RestoMind/
 | [docs/DEMO_PITCH.md](docs/DEMO_PITCH.md) | 30-сек sales demo: pitch / explore, API, smoke |
 | [docs/SUPERADMIN_GUIDE.md](docs/SUPERADMIN_GUIDE.md) | Панель superadmin |
 | [docs/SUPABASE_MIGRATION.md](docs/SUPABASE_MIGRATION.md) | Миграция БД на Supabase |
+| [docs/DEPLOY_RUNBOOK.md](docs/DEPLOY_RUNBOOK.md) | Чеклист Render: web + worker, env-матрица, smoke, troubleshooting |
 | [docs/WHATSAPP_PHASE13_TEMPLATES.md](docs/WHATSAPP_PHASE13_TEMPLATES.md) | Шаблоны WhatsApp (Meta) |
 
 ## API (кратко)
@@ -265,7 +280,8 @@ RestoMind/
 | `ARQ_ENABLED` | `false` | Включает постановку фоновых задач в ARQ; в `production/staging` должен быть `true` |
 | `ARQ_QUEUE_NAME` | `restomind` | Имя очереди ARQ; web и worker используют одно значение |
 | `WHATSAPP_FAST_ACK_ENABLED` | `true` | Safe fast-path: короткое «спасибо» отвечает без LLM |
-| `PIPELINE_TIMING_ENABLED` | `true` | Логирует `rm_stage_ms` по этапам inbound-пайплайна |
+| `PIPELINE_TIMING_ENABLED` | `true` | Логирует `rm_stage_ms` по этапам inbound-пайплайна (в т.ч. `queue_wait` при Redis) |
+| `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` | `3` / `2` | Пул SQLAlchemy на процесс (Render blueprint); при Supabase session pooler см. [`docs/SUPABASE_MIGRATION.md`](docs/SUPABASE_MIGRATION.md) |
 | `RESTAURANT_MENU_CTX_REDIS_TTL_SEC` | `90` | TTL Redis-кэша строки меню для AI-контекста |
 
 ## Разработка

@@ -99,6 +99,9 @@ GROUPS: dict[str, list[str]] = {
         "tests/test_context_engine.py",
         "tests/test_restaurant_context_cache.py",
     ],
+    "app/api/admin/system.py": [
+        "tests/test_faq_cache.py",
+    ],
     "app/schemas/": [
         "tests/test_ai_schemas.py",
         "tests/test_order_logic.py",

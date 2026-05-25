@@ -23,14 +23,17 @@
 2. Залейте код в удалённый репозиторий (ветка `main` или `master`).
 3. В Render: **New** → **Blueprint**.
 4. Укажите репозиторий и корень с `render.yaml`.
-5. Подтвердите создание **Web Service** `restomind`.
-6. В интерфейсе Render задайте секреты, которые запросит мастер (в т.ч. **`DATABASE_URL`** — строка подключения к Postgres):
+5. Подтвердите создание сервисов из Blueprint:
+   - **Web Service** `restomind`
+   - **Background Worker** `restomind-worker`
+6. В интерфейсе Render задайте секреты (как минимум **`DATABASE_URL`** и **`REDIS_URL`**):
    - `DATABASE_URL` — URI Supabase или другого PostgreSQL (обязательно перед первым успешным деплоем).
+   - `REDIS_URL` — Upstash **Redis Connect** `rediss://…` (TCP, не REST API).
    - `SESSION_SECRET` — если не используете `generateValue` из Blueprint, задайте вручную длинную случайную строку для cookie-сессии и подписи `ws_token`.
    - `OPENAI_API_KEY`
    - `ADMIN_PASSWORD` (и при желании смените `ADMIN_USERNAME` в Environment)
    - токены WhatsApp (`WHATSAPP_*`), когда подключите бота.
-7. Дождитесь сборки и деплоя. Логи: сервис → **Logs**.
+7. Дождитесь сборки и деплоя **web и worker**. Логи: **Logs** у каждого сервиса.
 
 Миграции выполняются командой **`preDeployCommand: alembic upgrade head`** перед выкладкой.
 
@@ -56,12 +59,15 @@
 2. **New** → **Web Service** → подключите репозиторий, окружение **Docker**, путь к `Dockerfile` — корень.
 3. В **Environment** добавьте:
    - `DATABASE_URL` = вставьте URL из шага 1 (или соберите из полей, как в `.env.example`).
-   - `APP_DEBUG=false`, `DB_MODE=postgres`, `REDIS_ENABLED=false` (или подключите Redis позже).
+   - `APP_ENV=production`, `APP_DEBUG=false`, `DB_MODE=postgres`
+   - `REDIS_ENABLED=true`, `REDIS_MEMORY_ONLY=false`, `REDIS_URL=…`, `ARQ_ENABLED=true`
+   - `DB_POOL_SIZE=3`, `DB_MAX_OVERFLOW=2`
    - `SESSION_SECRET` — случайная длинная строка (`openssl rand -hex 32`).
    - (временно, если нужно “разблокировать деплой”): `ALLOW_INSECURE_PROD_SETTINGS=true` — **небезопасно**, потом убрать.
    - `OPENAI_API_KEY`, `ADMIN_PASSWORD`, при необходимости WhatsApp/iiko.
-4. В настройках сервиса укажите **Pre-Deploy Command**: `alembic upgrade head`.
-5. **Start Command** оставьте из Dockerfile (uvicorn с `$PORT`) или пусто, если используется только `CMD` образа.
+4. Создайте **Background Worker** с тем же Docker-образом: Start Command `python -m arq app.worker.WorkerSettings`, те же env (минимум `DATABASE_URL`, `REDIS_*`, `ARQ_*`, `APP_ENV`, AI keys).
+5. В настройках web-сервиса укажите **Pre-Deploy Command**: `alembic upgrade head`.
+6. **Start Command** оставьте из Dockerfile (uvicorn с `$PORT`) или пусто, если используется только `CMD` образа.
 
 ---
 
@@ -78,11 +84,13 @@
 
 Сервис **засыпает** после простоя; первый запрос может занять ~30–60 с. Для продакшена без «сна» нужен платный план.
 
-### Redis (опционально)
+### Redis (обязателен для prod/staging)
 
-Сейчас в Blueprint **`REDIS_ENABLED=false`** — сессии/события работают в in-memory в рамках одного инстанса. Для нескольких инстансов или устойчивости включите Redis и задайте URL.
+Blueprint [`render.yaml`](render.yaml) по умолчанию: **`REDIS_ENABLED=true`**, **`REDIS_MEMORY_ONLY=false`**, **`ARQ_ENABLED=true`**, **`APP_ENV=production`**, worker **`restomind-worker`**. В Dashboard всё равно нужно задать секрет **`REDIS_URL`** (Upstash TCP).
 
-**Тесты без лимитов Upstash:** задайте **`REDIS_MEMORY_ONLY=true`** (можно оставить `REDIS_URL` в секретах). Внешний Redis не вызывается; приложение использует только память процесса — удобно, пока квота исчерпана или не нужен общий кэш.
+Без внешнего Redis и worker входящие WhatsApp не обрабатываются (очередь ARQ), live WebSocket админки не шарится между инстансами.
+
+**Только для локальных тестов / исчерпанной квоты Upstash:** **`REDIS_MEMORY_ONLY=true`** — внешний Redis не вызывается; in-memory в процессе web (не для prod).
 
 - **Render Key Value:** `REDIS_ENABLED=true` и внутренний хост/порт (или одна строка **`REDIS_URL`**, если Render отдаёт полный URL).
 - **Upstash:** в Dashboard скопируйте **Redis Connect** (`rediss://default:ПАРОЛЬ@….upstash.io:6379`) → в Render добавьте секрет **`REDIS_URL`** (значение целиком) и **`REDIS_ENABLED=true`**.  
@@ -106,6 +114,6 @@ curl -sS https://<ваш-хост>/health
 
 | Файл | Назначение |
 |------|------------|
-| `render.yaml` | Blueprint: веб-сервис + env (БД — внешняя, `DATABASE_URL`) |
+| `render.yaml` | Blueprint: web `restomind` + worker `restomind-worker`, env (БД и Redis — внешние, `DATABASE_URL` + `REDIS_URL`) |
 | `Dockerfile` | Сборка образа; слушает `$PORT` |
 | `DEPLOY_GUIDE.md` | Альтернатива: свой VPS + Docker + Traefik |

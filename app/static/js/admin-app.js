@@ -399,6 +399,62 @@ const ADMIN_TOP_TAB_IDS = new Set([
 const SUPERADMIN_TAB_HASH_IDS = new Set(['orgs', 'requests', 'audit']);
 
 /**
+ * Цифры MSISDN для сравнения дублей (77051310837).
+ * @param {string | null | undefined} phone
+ */
+function adminPhoneDigitsKey(phone) {
+    return String(phone || '').replace(/\D/g, '').slice(-15);
+}
+
+/** E.164 с «+» для API и dedupe в списке чатов. */
+function adminNormalizePhone(phone) {
+    const raw = String(phone || '').trim();
+    if (!raw) return '';
+    if (raw.startsWith('+')) return raw;
+    const digits = raw.replace(/\D/g, '');
+    if (!digits) return raw;
+    if (digits.length === 11 && digits.startsWith('7')) return `+${digits}`;
+    if (digits.length === 10) return `+7${digits}`;
+    return `+${digits}`;
+}
+
+function adminPhonesMatch(a, b) {
+    const da = adminPhoneDigitsKey(a);
+    const db = adminPhoneDigitsKey(b);
+    return Boolean(da && db && da === db);
+}
+
+/** Схлопывает legacy-дубли (+7705… vs 7705…) в одну строку списка. */
+function adminDedupeChatListByPhone(chats) {
+    const byDigits = new Map();
+    for (const c of chats || []) {
+        if (!c?.phone) continue;
+        const key = adminPhoneDigitsKey(c.phone);
+        if (!key) continue;
+        const norm = adminNormalizePhone(c.phone);
+        const row = { ...c, phone: norm };
+        const prev = byDigits.get(key);
+        if (!prev) {
+            byDigits.set(key, row);
+            continue;
+        }
+        const prevTs = prev.lastAt ? new Date(prev.lastAt).getTime() : 0;
+        const rowTs = row.lastAt ? new Date(row.lastAt).getTime() : 0;
+        if (rowTs >= prevTs) {
+            row.unread = Boolean(prev.unread || row.unread);
+            byDigits.set(key, row);
+        } else {
+            prev.unread = Boolean(prev.unread || row.unread);
+        }
+    }
+    return Array.from(byDigits.values()).sort((a, b) => {
+        const ta = a.lastAt ? new Date(a.lastAt).getTime() : 0;
+        const tb = b.lastAt ? new Date(b.lastAt).getTime() : 0;
+        return tb - ta;
+    });
+}
+
+/**
  * Фрагмент админки в location.hash.
  * Примеры: #dashboard, #chats?phone=7705…, #settings/connections, #inbox?tab=system, #dashboard?tab=analytics.
  * @returns {{ tab: string | null, settingsTab: string | null, phone: string | null, menuView: string | null, inboxTab: string | null, dashboardTab: string | null, aiCenterTab: string | null }}
@@ -419,7 +475,7 @@ function adminParseLocationHash() {
     try {
         const sp = new URLSearchParams(qs);
         const p = (sp.get('phone') || '').trim();
-        phone = p || null;
+        phone = p ? adminNormalizePhone(p) : null;
         const mv = (sp.get('view') || '').trim().toLowerCase();
         if (mv === 'stoplist' || mv === 'catalog') menuView = mv;
         subTab = (sp.get('tab') || '').trim().toLowerCase();
@@ -6776,9 +6832,11 @@ function adminMixinWebSocketEvents() {
             const eventLocationId = Number(data?.location_id || 0);
             const selectedLocationId = Number(this.selectedLocationId || 0);
             if (selectedLocationId > 0 && eventLocationId > 0 && eventLocationId !== selectedLocationId) return;
-            const chatIdx = this.chatList.findIndex(c => c.phone === data.phone);
+            const msgPhone = adminNormalizePhone(data.phone);
+            const chatIdx = this.chatList.findIndex(c => adminPhonesMatch(c.phone, msgPhone));
             const msgRole = String(data.role || 'user').toLowerCase();
             if (chatIdx >= 0) {
+                this.chatList[chatIdx].phone = msgPhone;
                 this.chatList[chatIdx].lastMessage = data.content?.slice(0, 60) || '';
                 this.chatList[chatIdx].lastAt = data.created_at || new Date().toISOString();
                 this.chatList[chatIdx].lastRole = msgRole;
@@ -6786,7 +6844,7 @@ function adminMixinWebSocketEvents() {
                 this.chatList[chatIdx].pulse = msgRole === 'user' ? 'green' : 'green';
                 this.chatList[chatIdx].slaStatus = this.chatList[chatIdx].pulse;
                 if (msgRole !== 'user') this.chatList[chatIdx].chatSlow = false;
-                if (data.phone !== this.activeChatPhone) {
+                if (msgPhone !== this.activeChatPhone && !adminPhonesMatch(msgPhone, this.activeChatPhone)) {
                     this.chatList[chatIdx].unread = true;
                     this.unreadChats = this.chatList.filter(c => c.unread).length;
                 }
@@ -6794,10 +6852,10 @@ function adminMixinWebSocketEvents() {
                 this.chatList.unshift(item);
             } else {
                 this.chatList.unshift({
-                    phone: data.phone,
+                    phone: msgPhone,
                     lastMessage: data.content?.slice(0, 60) || '',
                     state: 'chatting',
-                    unread: data.phone !== this.activeChatPhone,
+                    unread: !adminPhonesMatch(msgPhone, this.activeChatPhone),
                     lastAt: data.created_at || new Date().toISOString(),
                     lastRole: msgRole,
                     waitSeconds: msgRole === 'user' ? 0 : null,
@@ -6822,18 +6880,18 @@ function adminMixinWebSocketEvents() {
                 meta: (data.meta && typeof data.meta === 'object') ? data.meta : null,
             };
             // Обновляем кэш чата, даже если он не открыт сейчас
-            const cachedForMsg = this._chatCacheGet(data.phone);
+            const cachedForMsg = this._chatCacheGet(msgPhone);
             if (cachedForMsg) {
                 cachedForMsg.messages.push(newMsg);
                 cachedForMsg.ts = Date.now();
             }
-            if (data.phone === this.activeChatPhone) {
+            if (adminPhonesMatch(msgPhone, this.activeChatPhone)) {
                 this.chatMessages.push(newMsg);
                 this.scrollChatToBottom();
             }
 
             // Звук входящего от клиента (если смотрим другой чат или вкладка в фоне)
-            if (data.role === 'user' && (data.phone !== this.activeChatPhone || document.hidden)) {
+            if (data.role === 'user' && (!adminPhonesMatch(msgPhone, this.activeChatPhone) || document.hidden)) {
                 this.playChatPing();
             }
         },
@@ -8233,14 +8291,31 @@ function adminMixinLiveChat() {
                 });
 
                 if (reset) {
-                    this.chatList = mapped;
+                    this.chatList = adminDedupeChatListByPhone(mapped);
                 } else {
-                    const seen = new Set(this.chatList.map((c) => c.phone));
+                    const seen = new Set(this.chatList.map((c) => adminPhoneDigitsKey(c.phone)));
                     for (const c of mapped) {
-                        if (!c?.phone || seen.has(c.phone)) continue;
-                        this.chatList.push(c);
-                        seen.add(c.phone);
+                        const key = adminPhoneDigitsKey(c.phone);
+                        if (!c?.phone || !key) continue;
+                        const norm = adminNormalizePhone(c.phone);
+                        const existingIdx = this.chatList.findIndex((row) => adminPhonesMatch(row.phone, norm));
+                        if (existingIdx >= 0) {
+                            const prevTs = this.chatList[existingIdx].lastAt
+                                ? new Date(this.chatList[existingIdx].lastAt).getTime()
+                                : 0;
+                            const newTs = c.lastAt ? new Date(c.lastAt).getTime() : 0;
+                            if (newTs >= prevTs) {
+                                c.phone = norm;
+                                c.unread = Boolean(this.chatList[existingIdx].unread || c.unread);
+                                this.chatList.splice(existingIdx, 1, c);
+                            }
+                            continue;
+                        }
+                        if (seen.has(key)) continue;
+                        this.chatList.push({ ...c, phone: norm });
+                        seen.add(key);
                     }
+                    this.chatList = adminDedupeChatListByPhone(this.chatList);
                 }
 
                 this.chatListHasMore = !!data.has_more;
@@ -8359,7 +8434,7 @@ function adminMixinLiveChat() {
 
         async selectChat(phone) {
             if (!phone?.trim()) return;
-            phone = phone.trim();
+            phone = adminNormalizePhone(phone.trim());
             const requestId = Symbol(phone);
             this._selectChatRequestId = requestId;
             this.chatMobileInfoOpen = false;
@@ -8378,7 +8453,7 @@ function adminMixinLiveChat() {
             this.guestContextLoading = true;
             this.activeChatTraceId = '';
 
-            const chatIdx = this.chatList.findIndex(c => c.phone === phone);
+            const chatIdx = this.chatList.findIndex(c => adminPhonesMatch(c.phone, phone));
             if (chatIdx >= 0) {
                 this.chatList[chatIdx].unread = false;
                 this.unreadChats = this.chatList.filter(c => c.unread).length;

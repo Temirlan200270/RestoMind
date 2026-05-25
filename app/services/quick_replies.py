@@ -4,13 +4,18 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass, field
+from collections import defaultdict
+from dataclasses import dataclass
 from datetime import date, datetime
 
+from sqlalchemy import desc, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.config import settings
-from app.db.models import Organization
+from app.db.models import Order, OrderStatus, Organization, User
 from app.db.session import redis_client
 from app.services.dialog_mgr import UserState
+from app.services.order_logic import load_available_menu
 from app.services.time_context import (
     _WEEKDAY_KEYS,
     check_operational_status,
@@ -38,6 +43,44 @@ _WORKING_HOURS_PHRASES = frozenset({
     "когда открываетесь",
     "до скольки работаете",
 })
+_MENU_PHRASES = frozenset({
+    "меню",
+    "menu",
+    "покажите меню",
+    "покажи меню",
+    "что есть",
+    "ассортимент",
+    "что у вас",
+    "что можно заказать",
+})
+_ORDER_STATUS_PHRASES = frozenset({
+    "статус заказа",
+    "статус моего заказа",
+    "где мой заказ",
+    "где заказ",
+    "мой заказ",
+    "как мой заказ",
+    "проверь заказ",
+})
+
+_ACTIVE_ORDER_STATUSES = (
+    OrderStatus.CONFIRMED.value,
+    OrderStatus.SENDING_TO_IIKO.value,
+    OrderStatus.SENT_TO_IIKO.value,
+    OrderStatus.IN_TRANSIT.value,
+    OrderStatus.WAITING_PICKUP.value,
+)
+
+_STATUS_LABELS_RU: dict[str, str] = {
+    OrderStatus.DRAFT.value: "черновик — ждёт подтверждения",
+    OrderStatus.CONFIRMED.value: "подтверждён",
+    OrderStatus.SENDING_TO_IIKO.value: "отправляется на кухню",
+    OrderStatus.SENT_TO_IIKO.value: "на кухне",
+    OrderStatus.IN_TRANSIT.value: "в пути",
+    OrderStatus.WAITING_PICKUP.value: "готов к выдаче",
+    OrderStatus.COMPLETED.value: "выполнен",
+    OrderStatus.CANCELLED.value: "отменён",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +90,14 @@ class QuickReplyHit:
     new_state: UserState | None = None
     set_human_mode: bool = False
     side_effects: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class QuickReplyPreload:
+    org: Organization | None
+    has_open_draft: bool
+    menu_preview: str | None = None
+    order_status_text: str | None = None
 
 
 def _normalize(text: str) -> str:
@@ -79,6 +130,11 @@ def greeting_reply() -> str:
     return "Здравствуйте! Чем могу помочь?"
 
 
+def peek_quick_reply_trigger(text: str) -> str | None:
+    """Синхронный peek для preload в webhooks (без DB)."""
+    return _match_trigger(text)
+
+
 def _match_trigger(text: str) -> str | None:
     norm = _normalize(text)
     if not norm or len(norm) > 40:
@@ -93,6 +149,10 @@ def _match_trigger(text: str) -> str | None:
         return "cancel_order"
     if norm in _WORKING_HOURS_PHRASES:
         return "working_hours"
+    if norm in _MENU_PHRASES:
+        return "menu_request"
+    if norm in _ORDER_STATUS_PHRASES:
+        return "order_status"
     return None
 
 
@@ -117,6 +177,140 @@ def _format_working_hours_reply(org: Organization) -> str:
     return f"{sched_line} {op.human_label}"
 
 
+def _order_item_names(order: Order, *, limit: int = 4) -> list[str]:
+    raw = order.items_json if isinstance(order.items_json, dict) else {}
+    items_list = raw.get("items")
+    names: list[str] = []
+    if isinstance(items_list, list):
+        for it in items_list:
+            if isinstance(it, dict) and it.get("name"):
+                names.append(str(it["name"]).strip())
+            if len(names) >= limit:
+                break
+    return names
+
+
+def _format_order_status_reply(order: Order) -> str:
+    status = str(order.status or OrderStatus.DRAFT.value)
+    label = _STATUS_LABELS_RU.get(status, status)
+    names = _order_item_names(order)
+    items_line = ", ".join(names) if names else "состав уточняется"
+    total = float(order.total_price or 0)
+    total_line = f" на {total:,.0f} ₸".replace(",", " ") if total > 0 else ""
+    return f"Заказ: {items_line}{total_line}. Статус: {label}."
+
+
+async def build_menu_quick_reply_text(db: AsyncSession, organization_id: int) -> str:
+    items = await load_available_menu(
+        db,
+        organization_id=organization_id,
+        include_unavailable=False,
+    )
+    by_cat: dict[str, list[str]] = defaultdict(list)
+    for item in items:
+        if not item.is_available:
+            continue
+        cat = (item.category or "Другое").strip() or "Другое"
+        if len(by_cat[cat]) < 3:
+            by_cat[cat].append(str(item.name or "").strip())
+
+    lines: list[str] = []
+    for cat in sorted(by_cat.keys())[:6]:
+        sample = ", ".join(by_cat[cat][:3])
+        if sample:
+            lines.append(f"• {cat}: {sample}")
+
+    menu_url = (settings.menu_public_url or "").strip()
+    if not lines:
+        if menu_url:
+            return f"Меню обновляется. Полный список блюд: {menu_url}"
+        return "Меню временно недоступно — напишите, что хотите заказать, и я помогу."
+
+    body = "Кратко по меню:\n" + "\n".join(lines)
+    if menu_url:
+        body += f"\n\nПолное меню: {menu_url}"
+    return body[:600]
+
+
+async def build_order_status_quick_reply_text(
+    db: AsyncSession,
+    *,
+    phone: str,
+    organization_id: int,
+    draft_row: Order | None,
+) -> str:
+    if draft_row is not None:
+        return _format_order_status_reply(draft_row)
+
+    phone_s = (phone or "").strip()
+    user = await db.scalar(
+        select(User).where(
+            User.phone == phone_s,
+            User.organization_id == organization_id,
+        ),
+    )
+    if user is None:
+        return "Активных заказов не нашёл. Напишите, что хотите заказать — оформлю."
+
+    order = await db.scalar(
+        select(Order)
+        .where(
+            Order.user_id == user.id,
+            Order.organization_id == organization_id,
+            Order.status.in_(_ACTIVE_ORDER_STATUSES),
+        )
+        .order_by(desc(Order.created_at))
+        .limit(1),
+    )
+    if order is None:
+        order = await db.scalar(
+            select(Order)
+            .where(
+                Order.user_id == user.id,
+                Order.organization_id == organization_id,
+                Order.status != OrderStatus.CANCELLED.value,
+            )
+            .order_by(desc(Order.created_at))
+            .limit(1),
+        )
+    if order is None:
+        return "Активных заказов не нашёл. Напишите, что хотите заказать — оформлю."
+
+    return _format_order_status_reply(order)
+
+
+async def load_quick_reply_preload(
+    db: AsyncSession,
+    *,
+    phone: str,
+    organization_id: int,
+    message_text: str,
+) -> QuickReplyPreload:
+    """Один DB roundtrip для quick reply (org + draft + опционально menu/status)."""
+    org = await db.get(Organization, organization_id)
+    from app.services.intent_router import get_open_draft_order
+
+    draft_row = await get_open_draft_order(db, phone, organization_id)
+    trigger = peek_quick_reply_trigger(message_text)
+    menu_preview: str | None = None
+    order_status_text: str | None = None
+    if trigger == "menu_request":
+        menu_preview = await build_menu_quick_reply_text(db, organization_id)
+    elif trigger == "order_status":
+        order_status_text = await build_order_status_quick_reply_text(
+            db,
+            phone=phone,
+            organization_id=organization_id,
+            draft_row=draft_row,
+        )
+    return QuickReplyPreload(
+        org=org,
+        has_open_draft=draft_row is not None,
+        menu_preview=menu_preview,
+        order_status_text=order_status_text,
+    )
+
+
 async def _bump_metric(org_id: int, template_id: str) -> None:
     if not settings.redis_enabled:
         return
@@ -136,6 +330,8 @@ async def try_quick_reply(
     state: UserState,
     has_open_draft: bool,
     org: Organization | None = None,
+    menu_preview: str | None = None,
+    order_status_text: str | None = None,
     user_locale: str = "ru",
 ) -> QuickReplyHit | None:
     if not settings.quick_replies_enabled:
@@ -186,6 +382,14 @@ async def try_quick_reply(
             template_id=template_id,
             reply_text=_format_working_hours_reply(org),
         )
+    elif template_id == "menu_request":
+        if state != UserState.CHATTING or not menu_preview:
+            return None
+        hit = QuickReplyHit(template_id=template_id, reply_text=menu_preview)
+    elif template_id == "order_status":
+        if not order_status_text:
+            return None
+        hit = QuickReplyHit(template_id=template_id, reply_text=order_status_text)
     else:
         return None
 

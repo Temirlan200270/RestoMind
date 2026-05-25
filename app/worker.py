@@ -319,3 +319,18 @@ class WorkerSettings:
         else [],
     )
 
+
+def _build_worker_redis_settings():
+    from arq.connections import RedisSettings
+
+    if settings.redis_url:
+        return RedisSettings.from_dsn(settings.redis_url)
+    return RedisSettings(
+        host=settings.redis_host or "localhost",
+        port=int(settings.redis_port or 6379),
+        database=int(settings.redis_db or 0),
+    )
+
+
+WorkerSettings.redis_settings = _build_worker_redis_settings()
+

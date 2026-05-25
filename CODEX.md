@@ -13,6 +13,7 @@
 5. `docs/ROADMAP.md` — **единственный** трекер задач/статусов (P0–P4).
 6. `CHANGELOG.md` — что уже сделано (дописываем в `## [Unreleased]`).
 7. **Sales demo (G10.8):** `docs/DEMO_PITCH.md` — 30-сек pitch, explore, smoke; кнопка на login — «Посмотреть демо».
+8. **WhatsApp ops:** дубли телефона / latency — `scripts/diag_duplicate_phones.py`, `scripts/diag_whatsapp_latency.py`, `scripts/merge_duplicate_users.py`; E.164 — `app/services/phone_normalize.py`.
 
 ## Правила работы (важно)
 

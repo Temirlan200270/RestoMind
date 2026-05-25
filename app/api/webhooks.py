@@ -87,7 +87,7 @@ from app.services.faq_cache import (
 )
 from app.services.org_resolve import organization_id_for_whatsapp_value
 from app.services.prompt_metrics import apply_prompt_size_controls
-from app.services.quick_replies import QuickReplyHit, try_quick_reply
+from app.services.quick_replies import QuickReplyHit, load_quick_reply_preload, try_quick_reply
 from app.services.tenant_scope import ensure_default_location
 from app.services.trace_context import (
     build_conversation_id,
@@ -276,33 +276,15 @@ async def _get_twilio_location_id(call_sid: str) -> int | None:
 
 
 def _normalize_phone_e164(phone: str) -> str:
-    """
-    iiko deliveries/create строго валидирует customer.phone.
-    В БД/вебхуке у нас телефон обычно хранится как '7705...' (без '+').
-    Приводим к E.164: '+7705...'.
-    """
-    raw = (phone or "").strip()
-    if raw.startswith("+"):
-        return raw
-    digits = re.sub(r"\D+", "", raw)
-    if not digits:
-        return ""
-    # Казахстан/Россия: +7XXXXXXXXXX (11 цифр)
-    if len(digits) == 11 and digits.startswith("7"):
-        return f"+{digits}"
-    # Если дали 10 цифр без кода страны — попробуем трактовать как KZ/RU
-    if len(digits) == 10:
-        return f"+7{digits}"
-    return f"+{digits}"
+    from app.services.phone_normalize import normalize_phone_e164
+
+    return normalize_phone_e164(phone)
 
 
 def _canonical_whatsapp_phone(phone: str) -> str:
-    """Единый ключ пользователя в БД/Redis: E.164 с «+» (как в admin/test)."""
-    raw = (phone or "").strip()
-    if not raw:
-        return ""
-    normalized = _normalize_phone_e164(raw)
-    return normalized if normalized else raw
+    from app.services.phone_normalize import canonical_user_phone
+
+    return canonical_user_phone(phone)
 
 
 async def _delayed_processing_feedback(
@@ -975,6 +957,20 @@ async def process_with_retry(
     org_id = int(organization_id) if organization_id is not None else int(settings.default_organization_id)
     org_active = True
     pipeline_sw = PipelineStopwatch()
+    from app.services.wa_queue_metrics import pop_queue_wait_ms
+
+    queue_wait_ms = await pop_queue_wait_ms(
+        trace_id=trace_id,
+        whatsapp_message_id=whatsapp_message_id,
+    )
+    if queue_wait_ms is not None:
+        pipeline_sw.rm_stage_ms["queue_wait"] = queue_wait_ms
+        logger.info(
+            "[trace_id=%s] WhatsApp queue_wait_ms=%.0f wmid=%s",
+            trace_id or "-",
+            queue_wait_ms,
+            (whatsapp_message_id or "")[:24],
+        )
     if webhook_value is not None and organization_id is None:
         try:
             async with async_session_factory() as db:
@@ -1847,19 +1843,22 @@ async def _process_message_inner(
         slow_feedback_task = _start_slow_processing_feedback(phone, wmid, delay_sec=0.0)
 
         if settings.quick_replies_enabled and message_text.strip() and not had_voice:
-            qr_org: Organization | None = None
-            qr_has_draft = False
             async with async_session_factory() as db_qr:
-                qr_org = await db_qr.get(Organization, organization_id)
-                draft_q = await get_open_draft_order(db_qr, phone, organization_id)
-                qr_has_draft = draft_q is not None
+                qr_preload = await load_quick_reply_preload(
+                    db_qr,
+                    phone=phone,
+                    organization_id=organization_id,
+                    message_text=message_text,
+                )
             qr_hit = await try_quick_reply(
                 phone=phone,
                 organization_id=organization_id,
                 message_text=message_text,
                 state=state,
-                has_open_draft=qr_has_draft,
-                org=qr_org,
+                has_open_draft=qr_preload.has_open_draft,
+                org=qr_preload.org,
+                menu_preview=qr_preload.menu_preview,
+                order_status_text=qr_preload.order_status_text,
             )
             if qr_hit is not None:
                 if slow_feedback_task is not None:

@@ -182,6 +182,14 @@ async def dispatch_arq_or_background(
     наверх без fallback (Redis сконфигурирован, но недостижим — нужно знать об этом).
     Fallback на BackgroundTasks работает только когда Redis вообще не настроен.
     """
+    from app.services.wa_queue_metrics import mark_whatsapp_enqueued
+
+    if job_name.startswith("whatsapp_process"):
+        await mark_whatsapp_enqueued(
+            trace_id=kwargs.get("trace_id"),
+            whatsapp_message_id=kwargs.get("whatsapp_message_id"),
+        )
+
     if arq_can_run():
         await enqueue_job(job_name, **kwargs)
         logger.debug("ARQ: task %s enqueued", job_name)

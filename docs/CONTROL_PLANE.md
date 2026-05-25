@@ -36,6 +36,7 @@ Implemented:
 - `app/services/trace_context.py` — `contextvars` для `trace_id` / `conversation_id`; `build_trace_id(seed)` (WhatsApp `message_id` как seed); `trace_log_prefix()` для structured logs;
 - WhatsApp inbound: `trace_context()` в `process_message` / `process_with_retry` ([`webhooks.py`](app/api/webhooks.py)); seed из `whatsapp_message_id`;
 - ARQ: `trace_id` пробрасывается через enqueue ([`task_queue.py`](app/services/task_queue.py)) и worker kwargs ([`worker.py`](app/worker.py));
+- **Queue wait:** [`wa_queue_metrics.py`](app/services/wa_queue_metrics.py) — `queue_wait_ms` в `rm_stage_ms` (enqueue → `process_with_retry`); диагностика — `scripts/diag_whatsapp_latency.py`;
 - Durable events: `emit_event` автоматически обогащает payload через `enrich_payload_with_trace` ([`system_events.py`](app/services/system_events.py));
 - Order draft: `stamp_order_meta_trace` пишет trace в `items_json.order_meta` для join с timeline;
 - AI logs: `[trace_id=…]` prefix в [`ai_brain.py`](app/services/ai_brain.py);

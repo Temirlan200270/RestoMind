@@ -27,7 +27,16 @@ GET  /api/admin/intelligence/operator-efficiency
 GET  /api/admin/intelligence/recommendations
 POST /api/admin/intelligence/recommendations/refresh
 PATCH /api/admin/intelligence/recommendations/{id}
+GET  /api/admin/system/task-queue-health
+GET  /api/admin/system/faq-cache-metrics?days=7
 ```
+
+**System (не Intelligence, но ops для WhatsApp hot path):**
+
+| Endpoint | Scope | UI |
+|---|---|---|
+| `GET /api/admin/system/task-queue-health` | Процесс (Redis / ARQ / worker) | **Настройки → Подключения** — бейджи «Хранилище / Очередь / Воркер» (`refreshTaskQueueHealth`, `taskQueueStatusClass`) |
+| `GET /api/admin/system/faq-cache-metrics` | **Только текущий `organization_id` сессии** | Пока **нет** отдельной панели — prod smoke через curl / скрипт |
 
 ---
 
@@ -441,7 +450,17 @@ Location scope поддержан в:
 |---|---|---|
 | Quick replies (bypass LLM) | `app/services/quick_replies.py` | `QUICK_REPLIES_ENABLED=true` (default) |
 | FAQ cache | `app/services/faq_cache.py` | `FAQ_CACHE_ENABLED`, `FAQ_CACHE_TTL_SEC` |
+| FAQ cache metrics (prod smoke) | `GET /api/admin/system/faq-cache-metrics?days=1..31` | Redis keys `rm:metrics:faq_cache:{hit\|miss\|save}:{org_id}:{date}` |
 | Prompt budget | `app/services/prompt_metrics.py` | `PROMPT_MAX_TOKENS_SOFT`, `PROMPT_HISTORY_MIN_KEEP` |
+| Queue wait (latency diag) | `app/services/wa_queue_metrics.py` | `queue_wait_ms` в `rm_stage_ms`; см. `scripts/diag_whatsapp_latency.py` |
+
+**Мультитенантность FAQ (важно):** кеш **строго org-scoped**. У каждого заведения (`organization_id`):
+
+- свой Redis-ключ ответа: `rm:faq_cache:{org_id}:{hash_вопроса}`;
+- свои метрики hit/miss/save: `rm:metrics:faq_cache:*:{org_id}:{date}`;
+- своя **база знаний** в промпте → `kb_fingerprint` (SHA256 KB-текста org). Если оператор меняет KB в **Настройки → Мой ресторан**, старые записи кеша не матчятся (`kb_fp` mismatch → miss → новый LLM-ответ).
+
+Один и тот же текст вопроса у **разных** org может дать **разные** ответы — это ожидаемо. Между филиалами одной сети (разные `organization_id`) кеш **не** шарится.
 
 **Redis keys (org-scoped):**
 - `rm:faq_cache:{org_id}:{hash16}` — кеш FAQ-ответа (TTL 24h по умолчанию)
@@ -449,5 +468,14 @@ Location scope поддержан в:
 - `rm:metrics:quick_reply:{org_id}:{template_id}:{YYYY-MM-DD}`
 
 **FAQ cache:** сохраняется только при `intent=faq`, без draft/items/upsell, reply ≤600 символов, вопрос 5–100 символов после нормализации. Инвалидация по `kb_fingerprint` (hash KB-текста в промпте).
+
+**Пример smoke (текущий филиал сессии):**
+
+```bash
+curl -sS -b cookies.txt "https://<host>/api/admin/system/faq-cache-metrics?days=7"
+# → enabled, organization_id, today.{hit,miss,save,hit_rate_pct}, totals, daily[]
+```
+
+**Quick replies** (`quick_replies.py`) тоже учитывают org: шаблоны «меню» / «статус заказа» подставляют данные текущей организации (меню, активный заказ гостя).
 
 **Kitchen-gate:** в `_handle_order` при `not is_kitchen_open` (и без `is_preorder`) заказ → `kind='night_preorder'`.

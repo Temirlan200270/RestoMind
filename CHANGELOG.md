@@ -6,6 +6,21 @@
 
 ## [Unreleased] — 2026-03-20
 
+### Добавлено (2026-05-25) — WhatsApp duplicate phone + latency diagnostics
+
+- **E.164 canonicalization:** `app/services/phone_normalize.py`, `user_phone_resolve.py` — единый lookup для `7705…` / `+7705…` в `get_or_create_user`, admin chats и webhooks.
+- **Admin dedupe:** `adminNormalizePhone` / `adminDedupeChatListByPhone` в `admin-app.js` — один диалог в списке при legacy-дублях.
+- **Queue wait metric:** `wa_queue_metrics.py` — `queue_wait_ms` в `rm_stage_ms` (enqueue → `process_with_retry` start).
+- **Diagnostics:** `scripts/diag_duplicate_phones.py`, `scripts/diag_whatsapp_latency.py`, `scripts/merge_duplicate_users.py`.
+- **Render blueprint:** worker `restomind-worker`, `REDIS_ENABLED=true`, `ARQ_ENABLED=true`, `DB_POOL_SIZE=3`, `APP_ENV=production` (задать `REDIS_URL` в Dashboard).
+
+### Изменено (2026-05-25) — документация WhatsApp dup + latency
+
+- **README / codebase / CODEX:** E.164, diag-скрипты, 800+ тестов, актуальный `render.yaml` (web + worker).
+- **DEPLOY_RENDER / DEPLOY_RUNBOOK / SUPABASE_MIGRATION:** Redis+ARQ по умолчанию в blueprint, `DB_POOL_SIZE=3`, troubleshooting (дубль телефона, `queue_wait_ms`).
+- **UI_MAP / AI_OPERATIONS:** task-queue-health в «Подключения», FAQ cache org-scoped + `faq-cache-metrics` API, quick replies / queue wait.
+- **`.env.example`**, **CONTROL_PLANE:** queue wait metric и ops-скрипты.
+
 ### Добавлено (2026-05-25) — Performance Pack (WhatsApp hot path)
 
 - **Kitchen-gate:** при закрытой кухне (но открытом зале) новые заказы без `is_preorder` → `kind='night_preorder'` и утренний flow активации.
@@ -18,6 +33,12 @@
 - **Event pipeline async:** analytics / audit / healing после commit родительской транзакции (`event_consumer_runner.py`, `EVENT_CONSUMERS_ASYNC=true` по умолчанию; тесты — sync через `EVENT_CONSUMERS_ASYNC=false` в conftest).
 - **Parallel LLM context:** `build_menu_context_for_ai` и `build_sales_strategy` параллельно в `build_llm_prompt_bundle`.
 - **Admin perf:** lazy-mount `dashboard` / `menu` / `ai_center` / `marketing`; lazy chunk `admin-marketing.js`; long-cache на versioned `/static/*`.
+
+### Добавлено (2026-05-25) — Performance Pack phase 3
+
+- **FAQ cache metrics:** `GET /api/admin/system/faq-cache-metrics` — hit/miss/save и `hit_rate_pct` по `rm:metrics:faq_cache:*`.
+- **Quick replies:** детерминированные «меню» и «статус заказа» без LLM.
+- **Context fetch:** `fetch_ai_read_context` — одна DB-сессия вместо шести параллельных (меньше pool checkout / roundtrip).
 
 ### Добавлено (2026-05-24) — G10.8.2 zero-friction demo + OS gap closure
 

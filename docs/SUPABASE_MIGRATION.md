@@ -9,7 +9,7 @@ RestoMind использует обычный PostgreSQL (`DATABASE_URL`, SQLAlc
    - Скопируйте **URI** в разделе connection strings.
    - Для приложения на Render (долгоживущий процесс + пул SQLAlchemy в [app/db/session.py](app/db/session.py)) предпочтительны:
      - **Direct connection** (порт `5432`), или
-     - **Session pooler** (порт `5432`, `*.pooler.supabase.com`) — лимит **~15 клиентов на весь проект**. RestoMind: **`pool_size=2`, `max_overflow=0`** на процесс ([`app/db/pool_settings.py`](app/db/pool_settings.py)); в [`render.yaml`](../render.yaml) те же env по умолчанию. При `EMAXCONNSESSION`: переключитесь на **transaction pooler :6543** или уменьшите worker до `DB_POOL_SIZE=1`.
+     - **Session pooler** (порт `5432`, `*.pooler.supabase.com`) — лимит **~15 клиентов на весь проект**. RestoMind на Render: **`DB_POOL_SIZE=3`, `DB_MAX_OVERFLOW=2`** на процесс (web + worker) — см. [`render.yaml`](../render.yaml). При `EMAXCONNSESSION`: **transaction pooler :6543** (`SUPABASE_PREFER_TRANSACTION_POOLER=true`) или уменьшите pool.
    - **Transaction pooler** (порт `6543`) — больше соединений; приложение отключает prepared statement cache для asyncpg. Подходит при высокой параллельности.
 3. Убедитесь, что в URI есть `?sslmode=require` (часто уже встроен в строку из Dashboard).
 

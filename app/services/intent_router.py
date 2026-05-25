@@ -403,24 +403,47 @@ async def get_or_create_user(
     existing: User | None = None,
 ) -> User:
     """Находит пользователя по телефону в организации или создаёт нового."""
+    from app.services.phone_normalize import canonical_user_phone
+    from app.services.user_phone_resolve import ensure_user_phone_canonical, find_user_by_phone
+
+    canon_phone = canonical_user_phone(phone) or (phone or "").strip()
     if (
         existing is not None
-        and existing.phone == phone
-        and int(existing.organization_id) == int(organization_id)
+        and existing.organization_id == organization_id
     ):
-        return existing
-    user = await db.scalar(
-        select(User).where(User.phone == phone, User.organization_id == organization_id),
-    )
+        from app.services.phone_normalize import phone_digits_key
 
-    if user is None:
-        user = User(phone=phone, organization_id=organization_id)
-        db.add(user)
-        if not defer_flush:
+        if (
+            existing.phone == canon_phone
+            or phone_digits_key(existing.phone) == phone_digits_key(canon_phone)
+        ):
+            if await ensure_user_phone_canonical(existing, canon_phone):
+                if not defer_flush:
+                    await db.flush()
+            return existing
+
+    user = await find_user_by_phone(db, organization_id, canon_phone)
+    if user is not None:
+        if await ensure_user_phone_canonical(user, canon_phone) and not defer_flush:
             await db.flush()
+        return user
+
+    user = User(phone=canon_phone, organization_id=organization_id)
+    db.add(user)
+    if not defer_flush:
+        await db.flush()
+        logger.info(
+            "Создан новый пользователь: org=%s phone=%s, id=%s",
+            organization_id,
+            canon_phone,
+            user.id,
+        )
+    else:
         logger.info(
             "Создан новый пользователь: org=%s phone=%s%s",
-            organization_id, phone, "" if defer_flush else f", id={user.id}",
+            organization_id,
+            canon_phone,
+            "",
         )
 
     return user

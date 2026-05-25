@@ -19,7 +19,12 @@ class FakeRedis:
         self.counters: dict[str, int] = {}
 
     async def get(self, key: str):
-        return self.store.get(key)
+        if key in self.store:
+            return self.store.get(key)
+        val = self.counters.get(key)
+        if val is None:
+            return None
+        return str(val)
 
     async def setex(self, key: str, ttl: int, value: str) -> None:
         self.store[key] = value
@@ -109,3 +114,27 @@ async def test_too_short_question_not_cached(monkeypatch) -> None:
         reply="ок",
     )
     assert not fake.store
+
+
+@pytest.mark.asyncio
+async def test_faq_cache_metrics(monkeypatch) -> None:
+    from datetime import date
+
+    from app.services.faq_cache import get_faq_cache_metrics
+
+    fake = FakeRedis()
+    monkeypatch.setattr("app.services.faq_cache.redis_client", fake)
+    monkeypatch.setattr("app.services.faq_cache.settings.faq_cache_enabled", True)
+    monkeypatch.setattr("app.services.faq_cache.settings.redis_enabled", True)
+
+    day = date.today().isoformat()
+    fake.counters[f"rm:metrics:faq_cache:hit:1:{day}"] = 3
+    fake.counters[f"rm:metrics:faq_cache:miss:1:{day}"] = 1
+    fake.counters[f"rm:metrics:faq_cache:save:1:{day}"] = 2
+
+    stats = await get_faq_cache_metrics(1, days=1)
+    assert stats["enabled"] is True
+    assert stats["today"]["hit"] == 3
+    assert stats["today"]["miss"] == 1
+    assert stats["today"]["save"] == 2
+    assert stats["today"]["hit_rate_pct"] == 75.0

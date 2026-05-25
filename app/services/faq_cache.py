@@ -47,6 +47,75 @@ async def _bump_metric(org_id: int, kind: str) -> None:
         logger.debug("faq_cache metric incr failed org=%s kind=%s: %s", org_id, kind, exc)
 
 
+async def _read_metric(org_id: int, kind: str, day: date) -> int:
+    if not settings.redis_enabled:
+        return 0
+    try:
+        key = f"rm:metrics:faq_cache:{kind}:{int(org_id)}:{day.isoformat()}"
+        raw = await redis_client.get(key)
+        if raw is None:
+            return 0
+        if isinstance(raw, (bytes, bytearray)):
+            raw = raw.decode("utf-8", errors="replace")
+        return int(raw)
+    except Exception as exc:
+        logger.debug("faq_cache metric read failed org=%s kind=%s: %s", org_id, kind, exc)
+        return 0
+
+
+def _day_hit_rate(hit: int, miss: int) -> float | None:
+    total = hit + miss
+    if total <= 0:
+        return None
+    return round(100.0 * hit / total, 1)
+
+
+async def get_faq_cache_metrics(org_id: int, *, days: int = 7) -> dict:
+    """Сводка hit/miss/save для prod smoke (`rm:metrics:faq_cache:*`)."""
+    from datetime import timedelta
+
+    days = max(1, min(int(days), 31))
+    today = date.today()
+    daily: list[dict] = []
+    totals = {"hit": 0, "miss": 0, "save": 0}
+
+    for offset in range(days):
+        day = today - timedelta(days=offset)
+        hit = await _read_metric(org_id, "hit", day)
+        miss = await _read_metric(org_id, "miss", day)
+        save = await _read_metric(org_id, "save", day)
+        totals["hit"] += hit
+        totals["miss"] += miss
+        totals["save"] += save
+        daily.append(
+            {
+                "date": day.isoformat(),
+                "hit": hit,
+                "miss": miss,
+                "save": save,
+                "hit_rate_pct": _day_hit_rate(hit, miss),
+            },
+        )
+
+    today_row = daily[0] if daily else {"hit": 0, "miss": 0, "save": 0, "hit_rate_pct": None}
+    return {
+        "enabled": bool(settings.faq_cache_enabled and settings.redis_enabled),
+        "organization_id": int(org_id),
+        "today": {
+            "hit": today_row["hit"],
+            "miss": today_row["miss"],
+            "save": today_row["save"],
+            "hit_rate_pct": today_row["hit_rate_pct"],
+        },
+        "window_days": days,
+        "totals": {
+            **totals,
+            "hit_rate_pct": _day_hit_rate(totals["hit"], totals["miss"]),
+        },
+        "daily": daily,
+    }
+
+
 async def get_cached_faq_reply(
     *,
     org_id: int,

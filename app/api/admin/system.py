@@ -14,11 +14,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query, Request
 
+from app.services.faq_cache import get_faq_cache_metrics
 from app.services.task_queue_health import check_task_queue_health
 
-from .deps import require_admin_session_active
+from .deps import admin_org_from_session, require_admin_session_active
 
 logger = logging.getLogger(__name__)
 
@@ -47,3 +48,17 @@ async def system_task_queue_health() -> dict[str, Any]:
     подбирается по строке (`taskQueueStatusClass`).
     """
     return await check_task_queue_health()
+
+
+@system_router.get("/system/faq-cache-metrics")
+async def system_faq_cache_metrics(
+    request: Request,
+    days: int = Query(default=7, ge=1, le=31),
+) -> dict[str, Any]:
+    """
+    Prod smoke: hit/miss/save по ключам ``rm:metrics:faq_cache:*`` для текущего филиала.
+
+    ``hit_rate_pct`` = hit / (hit + miss); ``save`` — записи после LLM intent=faq.
+    """
+    org_id = admin_org_from_session(request)
+    return await get_faq_cache_metrics(org_id, days=days)

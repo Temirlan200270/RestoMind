@@ -59,10 +59,10 @@
 
 - `_tab_settings_restaurant.html` — профиль, расписание, база знаний, force-close, упаковка.
 - `_tab_settings_branding.html` — брендинг шапки.
-- `_tab_settings_connections.html` — интеграции (iiko, WhatsApp, Telegram).
+- `_tab_settings_connections.html` — интеграции (iiko, WhatsApp, Telegram). **E5:** бейджи очереди задач (`taskQueueHealth` ← `GET /api/admin/system/task-queue-health`; вызов `refreshTaskQueueHealth()` при входе на dashboard и при открытии connections).
 - `_tab_settings_smart_sales.html` — правила допродаж.
 - `_tab_settings_team.html` — команда и роли. **StaffMind:** onboarding-сессии, Q&A (`loadStaffMindOnboarding`, …) и **step tracker** (`staffMindTrackerMeta()` — часть метрик на эвристиках до backend).
-- `_tab_settings_health.html` — проверки окружения.
+- `_tab_settings_health.html` — проверки окружения (`loadReadiness()` → `GET /api/admin/settings/environment` или readiness API). FAQ cache metrics **здесь не выводятся** — только API `GET /api/admin/system/faq-cache-metrics`.
 - `_tab_settings_technical.html` — экспорт, retention, опасные действия.
 - `_tab_settings_bot_test.html` — лаборатория бота / тестовый чат.
 
@@ -93,6 +93,7 @@
 
 - `app/static/js/admin-app.js` — большой Alpine `adminApp()` и миксины. Следующая крупная цель для раскола.
 - Location UI state: `userData.available_locations`, `selectedLocationId` / `activeLocationId`, `locationQueryParams()`, `onLocationFilterChanged()`. Прокидывается в `loadOrders`, `loadChatList`, dashboard loaders, Intelligence/Digital Twin/OS Dashboard.
+- **System diagnostics (JS):** `refreshTaskQueueHealth()` → `/api/admin/system/task-queue-health`; FAQ metrics endpoint есть на бэкенде, UI-панели пока нет.
 - `app/static/js/admin-brand-tokens.js` — CSS-токены бренда.
 - `app/static/js/onboarding.js` — логика onboarding/request access.
 - `src/css/admin-input.css` — исходник Tailwind/CSS. Не редактировать `app/static/css/admin.css` напрямую.
@@ -117,8 +118,9 @@
 - **Текст в ленте:** `formatChatDisplayContent(msg)` — legacy `[OPERATOR_ONLY …]` и `meta.operator_only` → «ИИ не отвечает (ожидает оператора)»; клиенту в WhatsApp уходит отдельный шаблон из webhook.
 - **Сбой LLM:** `meta.technical_fallback` на исходящих assistant → бейдж «Сбой ИИ» (`chatTechnicalFallbackBadge`). Ставится в `webhooks.py` при совпадении с fallback-текстом `ai_brain._FALLBACK_RESPONSE`.
 - **Realtime:** `new_message` должен пробрасывать `meta` в объект сообщения (`onNewMessage`), иначе бейджи не появятся до перезагрузки истории.
+- **E.164 / дубли номера:** `adminNormalizePhone`, `adminPhonesMatch`, `adminDedupeChatListByPhone` — legacy `7705…` и `+7705…` схлопываются в одной строке списка; полное слияние истории — `scripts/merge_duplicate_users.py`.
 
-Подробнее про FSM и события: `docs/STATE_MACHINE.md`, `docs/EVENT_ARCHITECTURE.md`.
+Подробнее про FSM и события: `docs/STATE_MACHINE.md`, `docs/EVENT_ARCHITECTURE.md`. FAQ cache и ops — `docs/AI_OPERATIONS.md` § WhatsApp Performance Pack.
 
 - Глобальный `_header.html` отвечает за название активной вкладки. Внутри экранов не добавлять второй крупный `section_header` с тем же названием.
 - `docs/ROADMAP.md` — единственный трекер задач и статусов.
