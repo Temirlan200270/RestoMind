@@ -117,6 +117,29 @@ async def test_superadmin_login_returns_admin_role_for_ui(login_client: AsyncCli
     assert data.get("role") == "admin"
     assert data.get("staff_role") == "admin"
     assert data.get("is_superadmin") is True
+
+
+@pytest.mark.asyncio
+async def test_superadmin_me_after_env_login(login_client: AsyncClient, monkeypatch):
+    """Legacy SUPERADMIN_* login: /api/superadmin/me не возвращает 403."""
+    from app.core import config as config_module
+
+    monkeypatch.setattr(config_module.settings, "superadmin_username", "platform-root")
+    monkeypatch.setattr(config_module.settings, "superadmin_password", "super-secret")
+
+    login = await login_client.post(
+        "/api/admin/auth/login",
+        json={"username": "platform-root", "password": "super-secret"},
+    )
+    assert login.status_code == 200
+
+    me = await login_client.get("/api/superadmin/me")
+    assert me.status_code == 200, me.text
+    assert me.json().get("ok") is True
+
+
+@pytest.mark.asyncio
+async def test_organizations_model_columns_accessible():
     """
     SELECT * FROM organizations должен работать без ошибок.
 

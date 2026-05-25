@@ -351,6 +351,14 @@ const adminFormat = {
     },
 };
 
+/** Допустимые верхнеуровневые вкладки (id из navItems). */
+const ADMIN_TOP_TAB_IDS = new Set([
+    'shift', 'dashboard', 'inbox', 'ai_center', 'marketing', 'orders', 'bookings', 'chats', 'menu', 'settings',
+]);
+
+/** Super Admin (#sa/*) — не для /admin; #analytics — legacy админки. */
+const SUPERADMIN_TAB_HASH_IDS = new Set(['orgs', 'requests', 'audit']);
+
 /**
  * Фрагмент админки в location.hash.
  * Примеры: #dashboard, #chats?phone=7705…, #settings/connections, #inbox?tab=system, #dashboard?tab=analytics.
@@ -363,6 +371,9 @@ function adminParseLocationHash() {
     const q = raw.indexOf('?');
     const path = (q >= 0 ? raw.slice(0, q) : raw).trim();
     const qs = q >= 0 ? raw.slice(q + 1) : '';
+    if (SUPERADMIN_TAB_HASH_IDS.has(path) || path === 'sa' || path.startsWith('sa/')) {
+        return { ...empty };
+    }
     let phone = null;
     let menuView = null;
     let subTab = '';
@@ -447,13 +458,45 @@ function adminParseLocationHash() {
         return { ...empty, tab: 'ai_center', phone, aiCenterTab: ac };
     }
 
-    return { ...empty, tab: path || null, phone };
+    if (ADMIN_TOP_TAB_IDS.has(path)) {
+        return { ...empty, tab: path, phone };
+    }
+    return { ...empty };
 }
 
-/** Допустимые верхнеуровневые вкладки (id из navItems). */
-const ADMIN_TOP_TAB_IDS = new Set([
-    'shift', 'dashboard', 'inbox', 'ai_center', 'marketing', 'orders', 'bookings', 'chats', 'menu', 'settings',
-]);
+/** Разрешён ли hash для роли staff (operator/manager/admin). */
+function adminHashAllowedForRole(parsed, role, settingsTabIds) {
+    if (!parsed?.tab) return true;
+    const tab = parsed.tab;
+    if (tab === 'settings') {
+        if (!adminTabVisibleForRole('settings', role)) return false;
+        const st = parsed.settingsTab;
+        if (st && settingsTabIds && !settingsTabIds.has(st)) return false;
+        return true;
+    }
+    if (!ADMIN_TOP_TAB_IDS.has(tab)) return false;
+    return adminTabVisibleForRole(tab, role);
+}
+
+/** Опции для navigateToTab из результата adminParseLocationHash. */
+function adminHashNavigateOpts(parsed) {
+    const opts = {};
+    if (parsed?.settingsTab) opts.settingsTab = parsed.settingsTab;
+    if (parsed?.menuView) opts.menuView = parsed.menuView;
+    if (parsed?.inboxTab) opts.inboxTab = parsed.inboxTab;
+    if (parsed?.dashboardTab) opts.dashboardTab = parsed.dashboardTab;
+    if (parsed?.aiCenterTab) opts.aiCenterTab = parsed.aiCenterTab;
+    return opts;
+}
+
+/** Убрать hash из адресной строки (после logout / чужой вкладки). */
+function adminClearLocationHash() {
+    try {
+        const u = new URL(window.location.href);
+        if (!u.hash) return;
+        window.history.replaceState({}, '', u.pathname + u.search);
+    } catch (_e) { /* ignore */ }
+}
 
 /**
  * Focus-Driven OS — Mode Engine (Sprint 1, Strangler).
@@ -4066,6 +4109,7 @@ function adminMixinAuthKnowledge() {
             }
             this.brandingPreviewObjectUrl = '';
             this.brandingApiUnavailable = false;
+            adminClearLocationHash();
         },
 
         /** Текущая роль staff (legacy без staff_id → admin). */
@@ -4427,6 +4471,7 @@ function adminMixinAuthKnowledge() {
                     if (!data?.authenticated) {
                         this.authenticated = false;
                         this.wsToken = '';
+                        adminClearLocationHash();
                         return;
                     }
                     const me = this.normalizeMePayload(data);
@@ -4440,13 +4485,7 @@ function adminMixinAuthKnowledge() {
                     this.staffRole = me.role;
                     this.isSuperadmin = me.is_superadmin;
                     this._ensureAdminHashListener();
-                    const parsed = adminParseLocationHash();
-                    if (!parsed.tab) {
-                        await this.applyRoleDefaultLanding(null);
-                    } else {
-                        this._applyParsedHash(parsed);
-                        this._bootstrapAdminMode({ tabFromHash: this.currentTab });
-                    }
+                    await this._bootstrapAdminFromHash();
                     this._installAdminHashWatch();
                     this.connectWebSocket();
                     await this._afterAuthBootstrapLoads();
@@ -4456,10 +4495,12 @@ function adminMixinAuthKnowledge() {
                 } else {
                     this.authenticated = false;
                     this.wsToken = '';
+                    adminClearLocationHash();
                 }
             } catch {
                 this.authenticated = false;
                 this.wsToken = '';
+                adminClearLocationHash();
             }
         },
 
@@ -4496,17 +4537,12 @@ function adminMixinAuthKnowledge() {
                 this.staffRole = me.role;
                 this.isSuperadmin = me.is_superadmin;
                 if (me.is_superadmin && !window.location.pathname.startsWith('/superadmin')) {
+                    adminClearLocationHash();
                     window.location.href = '/superadmin';
                     return;
                 }
                 this._ensureAdminHashListener();
-                const parsedLogin = adminParseLocationHash();
-                if (!parsedLogin.tab) {
-                    await this.applyRoleDefaultLanding(null);
-                } else {
-                    this._applyParsedHash(parsedLogin);
-                    this._bootstrapAdminMode({ tabFromHash: this.currentTab });
-                }
+                await this._bootstrapAdminFromHash();
                 this._installAdminHashWatch();
                 this.connectWebSocket();
                 await this._afterAuthBootstrapLoads();
@@ -5114,6 +5150,10 @@ function adminMixinAuthKnowledge() {
             };
             this.hasDemoData = false;
             this.auth401AlertShown = false;
+            this.currentTab = 'dashboard';
+            this.settingsTab = 'restaurant';
+            this.activeChatPhone = '';
+            this.chatMobileInfoOpen = false;
             this.orgProfile = {
                 id: null,
                 organization_id: null,
@@ -5128,6 +5168,7 @@ function adminMixinAuthKnowledge() {
                 schedule_json: null,
                 schedule_json_text: '',
             };
+            adminClearLocationHash();
         },
 
         async refreshDemoStatus() {
@@ -7964,6 +8005,29 @@ function adminMixinLiveChat() {
             }
         },
 
+        _isParsedHashAllowedForRole(parsed) {
+            return adminHashAllowedForRole(parsed, this.effectiveStaffRole(), this._adminSettingsTabIds);
+        },
+
+        /** После auth: открыть вкладку по hash с проверкой роли или default landing. */
+        async _bootstrapAdminFromHash() {
+            const parsed = adminParseLocationHash();
+            if (!parsed.tab) {
+                await this.applyRoleDefaultLanding(null);
+                return;
+            }
+            if (!this._isParsedHashAllowedForRole(parsed)) {
+                adminClearLocationHash();
+                await this.applyRoleDefaultLanding(null);
+                return;
+            }
+            if (parsed.phone && parsed.tab === 'chats') {
+                this._pendingHashChatPhone = parsed.phone;
+            }
+            this.navigateToTab(parsed.tab, adminHashNavigateOpts(parsed));
+            this._bootstrapAdminMode({ tabFromHash: this.currentTab });
+        },
+
         _applyParsedHash(parsed) {
             this._pendingHashChatPhone = null;
             const tab = parsed?.tab;
@@ -8035,8 +8099,16 @@ function adminMixinLiveChat() {
             this._applyingHashFromBrowser = true;
             try {
                 const parsed = adminParseLocationHash();
-                this._applyParsedHash(parsed);
-                await this.loadTabData();
+                if (!parsed.tab) {
+                    await this.applyRoleDefaultLanding(null);
+                    return;
+                }
+                if (!this._isParsedHashAllowedForRole(parsed)) {
+                    adminClearLocationHash();
+                    await this.applyRoleDefaultLanding(null);
+                    return;
+                }
+                this.navigateToTab(parsed.tab, adminHashNavigateOpts(parsed));
                 if (this.currentTab === 'chats') {
                     await this.loadChatList();
                     if (parsed.phone) await this.selectChat(parsed.phone);

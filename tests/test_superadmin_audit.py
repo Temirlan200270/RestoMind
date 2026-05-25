@@ -9,6 +9,7 @@ from sqlalchemy import select
 from app.api.superadmin import (
     OrganizationCredentialsBody,
     OrganizationStatusBody,
+    SuperadminSession,
     require_superadmin,
     superadmin_audit_log,
     superadmin_set_organization_status,
@@ -45,10 +46,12 @@ async def test_superadmin_audit_log_written_on_status_change(db_session):
     db_session.add(actor)
     await db_session.commit()
 
+    session = SuperadminSession(staff=actor, email=actor.email or "")
+
     out = await superadmin_set_organization_status(
         int(org.id),
         OrganizationStatusBody(is_active=False),
-        actor,
+        session,
         db_session,
     )
     assert out["is_active"] is False
@@ -76,13 +79,15 @@ async def test_superadmin_credentials_audit_masks_secret_values(db_session):
     db_session.add(actor)
     await db_session.commit()
 
+    session = SuperadminSession(staff=actor, email=actor.email or "")
+
     await superadmin_update_organization_credentials(
         int(org.id),
         OrganizationCredentialsBody(
             iiko_api_login="secret-login",
             telegram_ops_chat_id="-100123",
         ),
-        actor,
+        session,
         db_session,
     )
 
@@ -122,7 +127,7 @@ async def test_superadmin_audit_endpoint_returns_entries(db_session):
     )
     await db_session.commit()
 
-    out = await superadmin_audit_log(_staff=actor, db=db_session)
+    out = await superadmin_audit_log(_staff=SuperadminSession(staff=actor, email=actor.email or ""), db=db_session)
     assert out["total"] == 1
     assert len(out["items"]) == 1
     assert out["items"][0]["action"] == "organization.create"

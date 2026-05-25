@@ -8,7 +8,12 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.api import webhooks
 from app.api.admin import LoginBody, admin_demo_login, admin_login, require_admin_session_active
-from app.api.superadmin import RegistrationApproveBody, require_superadmin, superadmin_approve_registration_request
+from app.api.superadmin import (
+    RegistrationApproveBody,
+    SuperadminSession,
+    require_superadmin,
+    superadmin_approve_registration_request,
+)
 from app.core.passwords import hash_password
 from app.db.models import Base, Organization, RegistrationRequest, StaffRole, StaffUser
 
@@ -25,6 +30,7 @@ def test_superadmin_passwords_use_acknowledged_modal() -> None:
     assert "passwordModal.open" in html
     assert "showPasswordModal" in html
     assert "copyPasswordModal" in html
+    assert "logoutSuperadmin" in html
     assert ":disabled=\"!passwordModal.copied\"" in html
     assert "generated_password ? `" not in html
     assert "Новый пароль: ${out.new_password}" not in html
@@ -51,6 +57,15 @@ async def test_require_superadmin_blocks_regular_staff(db_session):
     with pytest.raises(HTTPException) as exc:
         await require_superadmin(req, db_session)
     assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_require_superadmin_allows_legacy_env_session(db_session):
+    req = DummyRequest()
+    req.session.update({"admin_ok": True, "superadmin_ok": True, "admin_user": "platform@restomind"})
+    result = await require_superadmin(req, db_session)
+    assert result.staff is None
+    assert result.email == "platform@restomind"
 
 
 @pytest.mark.asyncio
@@ -81,7 +96,7 @@ async def test_approve_registration_request_creates_org_and_staff(db_session):
     out = await superadmin_approve_registration_request(
         int(req.id),
         RegistrationApproveBody(),
-        super_staff,
+        SuperadminSession(staff=super_staff, email=super_staff.email or ""),
         db_session,
     )
 

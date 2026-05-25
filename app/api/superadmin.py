@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import secrets
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 
 import httpx
@@ -15,6 +16,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.admin import require_admin_session
+from app.api.admin.deps import _session_is_superadmin
 from app.core.config import settings
 from app.core.passwords import hash_password
 from app.db.models import (
@@ -38,6 +40,14 @@ from app.services.superadmin_audit import list_superadmin_audit, log_superadmin_
 from app.services.time_context import check_operational_status, parse_schedule_json
 
 router = APIRouter(prefix="/superadmin", tags=["Super Admin"])
+
+
+@dataclass(frozen=True, slots=True)
+class SuperadminSession:
+    """Staff superadmin или legacy env-сессия (superadmin_ok без staff_id)."""
+
+    staff: StaffUser | None
+    email: str
 
 
 def _now_utc() -> datetime:
@@ -79,15 +89,20 @@ async def _send_superadmin_telegram_html(text: str) -> None:
         resp.raise_for_status()
 
 
-async def require_superadmin(request: Request, db: AsyncSession = Depends(get_db)) -> StaffUser:
+async def require_superadmin(request: Request, db: AsyncSession = Depends(get_db)) -> SuperadminSession:
     require_admin_session(request)
+    if not await _session_is_superadmin(request, db):
+        raise HTTPException(status_code=403, detail="Недостаточно прав")
     sid = request.session.get("staff_id")
     if sid is None:
-        raise HTTPException(status_code=403, detail="Только для Super Admin")
+        return SuperadminSession(
+            staff=None,
+            email=str(request.session.get("admin_user") or "superadmin@env"),
+        )
     staff = await db.get(StaffUser, int(sid))
     if staff is None or not staff.is_active or not bool(staff.is_superadmin):
-        raise HTTPException(status_code=403, detail="Только для Super Admin")
-    return staff
+        raise HTTPException(status_code=403, detail="Недостаточно прав")
+    return SuperadminSession(staff=staff, email=staff.email or "")
 
 
 class OrganizationCreateBody(BaseModel):
@@ -139,13 +154,13 @@ class PasswordResetBody(BaseModel):
 
 
 @router.get("/me")
-async def superadmin_me(_staff: StaffUser = Depends(require_superadmin)) -> dict:
+async def superadmin_me(_staff: SuperadminSession = Depends(require_superadmin)) -> dict:
     return {"ok": True}
 
 
 @router.get("/organizations")
 async def superadmin_organizations(
-    _staff: StaffUser = Depends(require_superadmin),
+    _staff: SuperadminSession = Depends(require_superadmin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     now = _now_utc()
@@ -226,7 +241,7 @@ async def superadmin_audit_log(
     limit: int = 50,
     offset: int = 0,
     organization_id: int | None = None,
-    _staff: StaffUser = Depends(require_superadmin),
+    _staff: SuperadminSession = Depends(require_superadmin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     rows, total = await list_superadmin_audit(
@@ -248,7 +263,7 @@ async def superadmin_audit_log(
 @router.post("/organizations")
 async def superadmin_create_organization(
     body: OrganizationCreateBody,
-    current: StaffUser = Depends(require_superadmin),
+    current: SuperadminSession = Depends(require_superadmin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     email = (body.admin_email or "").strip().lower()
@@ -288,7 +303,8 @@ async def superadmin_create_organization(
     db.add(staff)
     await log_superadmin_action(
         db,
-        actor=current,
+        actor=current.staff,
+        actor_email=current.email,
         action="organization.create",
         target_type="organization",
         target_id=int(org.id),
@@ -314,7 +330,7 @@ async def superadmin_create_organization(
 @router.get("/organizations/{organization_id}/staff")
 async def superadmin_organization_staff(
     organization_id: int,
-    _staff: StaffUser = Depends(require_superadmin),
+    _staff: SuperadminSession = Depends(require_superadmin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     org = await db.get(Organization, int(organization_id))
@@ -345,7 +361,7 @@ async def superadmin_reset_staff_password(
     organization_id: int,
     staff_id: int,
     body: PasswordResetBody,
-    current: StaffUser = Depends(require_superadmin),
+    current: SuperadminSession = Depends(require_superadmin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     org = await db.get(Organization, int(organization_id))
@@ -358,7 +374,8 @@ async def superadmin_reset_staff_password(
     target.password_hash = hash_password(new_password)
     await log_superadmin_action(
         db,
-        actor=current,
+        actor=current.staff,
+        actor_email=current.email,
         action="staff.password_reset",
         target_type="staff_user",
         target_id=int(target.id),
@@ -377,7 +394,7 @@ async def superadmin_reset_staff_password(
 async def superadmin_set_organization_status(
     organization_id: int,
     body: OrganizationStatusBody,
-    current: StaffUser = Depends(require_superadmin),
+    current: SuperadminSession = Depends(require_superadmin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     org = await db.get(Organization, int(organization_id))
@@ -386,7 +403,8 @@ async def superadmin_set_organization_status(
     org.is_active = bool(body.is_active)
     await log_superadmin_action(
         db,
-        actor=current,
+        actor=current.staff,
+        actor_email=current.email,
         action="organization.status_change",
         target_type="organization",
         target_id=int(org.id),
@@ -404,7 +422,7 @@ async def superadmin_set_organization_status(
 async def superadmin_update_organization_credentials(
     organization_id: int,
     body: OrganizationCredentialsBody,
-    current: StaffUser = Depends(require_superadmin),
+    current: SuperadminSession = Depends(require_superadmin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     org = await db.get(Organization, int(organization_id))
@@ -441,7 +459,8 @@ async def superadmin_update_organization_credentials(
     if changed_fields:
         await log_superadmin_action(
             db,
-            actor=current,
+            actor=current.staff,
+        actor_email=current.email,
             action="organization.credentials_update",
             target_type="organization",
             target_id=int(org.id),
@@ -460,7 +479,7 @@ async def superadmin_update_organization_credentials(
 async def superadmin_update_organization_schedule(
     organization_id: int,
     body: OrganizationScheduleBody,
-    current: StaffUser = Depends(require_superadmin),
+    current: SuperadminSession = Depends(require_superadmin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     org = await db.get(Organization, int(organization_id))
@@ -469,7 +488,8 @@ async def superadmin_update_organization_schedule(
     org.schedule_json = parse_schedule_json(body.schedule_json).model_dump(mode="json")
     await log_superadmin_action(
         db,
-        actor=current,
+        actor=current.staff,
+        actor_email=current.email,
         action="organization.schedule_update",
         target_type="organization",
         target_id=int(org.id),
@@ -483,7 +503,7 @@ async def superadmin_update_organization_schedule(
 @router.post("/organizations/{organization_id}/sync-menu")
 async def superadmin_sync_org_menu(
     organization_id: int,
-    current: StaffUser = Depends(require_superadmin),
+    current: SuperadminSession = Depends(require_superadmin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     org = await db.get(Organization, int(organization_id))
@@ -509,7 +529,8 @@ async def superadmin_sync_org_menu(
         await record_menu_sync(db, True, None, detail=detail_m, organization_id=int(org.id))
         await log_superadmin_action(
             db,
-            actor=current,
+            actor=current.staff,
+        actor_email=current.email,
             action="organization.sync_menu",
             target_type="organization",
             target_id=int(org.id),
@@ -531,7 +552,7 @@ async def superadmin_sync_org_menu(
 @router.get("/registration-requests")
 async def superadmin_registration_requests(
     status: str = "pending",
-    _staff: StaffUser = Depends(require_superadmin),
+    _staff: SuperadminSession = Depends(require_superadmin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     st = (status or "").strip().lower()
@@ -597,7 +618,7 @@ async def create_registration_request(
 async def superadmin_approve_registration_request(
     request_id: int,
     body: RegistrationApproveBody,
-    current: StaffUser = Depends(require_superadmin),
+    current: SuperadminSession = Depends(require_superadmin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     req = await db.get(RegistrationRequest, int(request_id))
@@ -641,10 +662,11 @@ async def superadmin_approve_registration_request(
 
     req.status = "approved"
     req.decided_at = _now_utc()
-    req.decided_by_staff_id = int(current.id)
+    req.decided_by_staff_id = int(current.staff.id) if current.staff is not None else None
     await log_superadmin_action(
         db,
-        actor=current,
+        actor=current.staff,
+        actor_email=current.email,
         action="registration_request.approve",
         target_type="registration_request",
         target_id=int(req.id),
@@ -671,7 +693,7 @@ async def superadmin_approve_registration_request(
 async def superadmin_reject_registration_request(
     request_id: int,
     body: RegistrationDecisionBody,
-    current: StaffUser = Depends(require_superadmin),
+    current: SuperadminSession = Depends(require_superadmin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     req = await db.get(RegistrationRequest, int(request_id))
@@ -681,10 +703,11 @@ async def superadmin_reject_registration_request(
         raise HTTPException(status_code=409, detail="Заявка уже обработана")
     req.status = "rejected"
     req.decided_at = _now_utc()
-    req.decided_by_staff_id = int(current.id)
+    req.decided_by_staff_id = int(current.staff.id) if current.staff is not None else None
     await log_superadmin_action(
         db,
-        actor=current,
+        actor=current.staff,
+        actor_email=current.email,
         action="registration_request.reject",
         target_type="registration_request",
         target_id=int(req.id),
@@ -703,7 +726,7 @@ async def superadmin_payment_webhook_events(
     applied: bool | None = None,
     limit: int = 50,
     offset: int = 0,
-    _staff: StaffUser = Depends(require_superadmin),
+    _staff: SuperadminSession = Depends(require_superadmin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Аудит входящих платёжных webhook (сырой payload)."""
@@ -740,7 +763,7 @@ async def superadmin_payment_webhook_events(
 @router.get("/payment-webhook-events/{event_id}")
 async def superadmin_payment_webhook_event_detail(
     event_id: int,
-    _staff: StaffUser = Depends(require_superadmin),
+    _staff: SuperadminSession = Depends(require_superadmin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     ev = await db.get(PaymentWebhookEvent, int(event_id))
@@ -775,7 +798,7 @@ async def superadmin_payment_webhook_event_detail(
 
 @router.get("/ai-usage")
 async def superadmin_ai_usage(
-    _staff: StaffUser = Depends(require_superadmin),
+    _staff: SuperadminSession = Depends(require_superadmin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Токены ИИ за сегодня по всем организациям."""
@@ -799,7 +822,7 @@ async def superadmin_ai_usage(
 @router.get("/message-accounting")
 async def superadmin_message_accounting(
     days: int = 7,
-    _staff: StaffUser = Depends(require_superadmin),
+    _staff: SuperadminSession = Depends(require_superadmin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Сводка входящих/исходящих сообщений WhatsApp по организациям за N дней."""
@@ -875,7 +898,7 @@ async def superadmin_message_accounting(
 @router.get("/payment-webhook-events/{event_id}/payload.bin")
 async def superadmin_payment_webhook_payload_bin(
     event_id: int,
-    _staff: StaffUser = Depends(require_superadmin),
+    _staff: SuperadminSession = Depends(require_superadmin),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
     """Скачивание сырого тела webhook (как пришло), для Super Admin."""

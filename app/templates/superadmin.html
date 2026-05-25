@@ -15,7 +15,13 @@
                 <h1 class="text-2xl font-bold text-slate-900">Super Admin</h1>
                 <p class="text-sm text-slate-500">Платформенное управление: рестораны, заявки, аналитика, аудит.</p>
             </div>
-            <a href="/admin" class="px-4 py-2 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 hover:bg-slate-50">Открыть админку</a>
+            <div class="flex flex-wrap items-center gap-2">
+                <a href="/admin" class="px-4 py-2 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 hover:bg-slate-50">Открыть админку</a>
+                <button type="button" @click="logoutSuperadmin()"
+                    class="px-4 py-2 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                    Выйти
+                </button>
+            </div>
         </div>
         <nav class="flex flex-wrap gap-1 rounded-2xl border border-slate-200 bg-white p-1 shadow-sm" aria-label="Super Admin sections">
             <template x-for="t in tabs" :key="t.id">
@@ -278,9 +284,44 @@
     </section>
 
     <section class="rounded-2xl bg-white border border-slate-200 shadow-sm p-5">
-        <div class="flex items-center justify-between gap-3 mb-4">
-            <h2 class="text-lg font-bold text-slate-900">Рестораны</h2>
-            <button type="button" @click="loadOrganizations()" class="px-3 py-2 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Обновить</button>
+        <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-4">
+            <div>
+                <h2 class="text-lg font-bold text-slate-900">Рестораны</h2>
+                <p class="text-xs text-slate-500">
+                    Показано <span class="font-semibold text-slate-700" x-text="filteredOrganizations.length"></span>
+                    из <span class="font-semibold text-slate-700" x-text="organizations.length"></span>
+                </p>
+            </div>
+            <button type="button" @click="loadOrganizations()" class="px-3 py-2 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 self-start">Обновить</button>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-[minmax(0,1.4fr)_repeat(3,minmax(0,1fr))_auto] gap-2 mb-4">
+            <div class="relative">
+                <input x-model.debounce.250ms="orgFilter.q" type="search" placeholder="Поиск: название или сеть"
+                    class="w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+                <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z"/>
+                </svg>
+            </div>
+            <select x-model="orgFilter.status" class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" aria-label="Статус доступа">
+                <option value="">Все статусы</option>
+                <option value="active">Активные</option>
+                <option value="blocked">Заблокированные</option>
+            </select>
+            <select x-model="orgFilter.iiko" class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" aria-label="iiko">
+                <option value="">iiko: все</option>
+                <option value="yes">iiko: подключен</option>
+                <option value="no">iiko: нет</option>
+            </select>
+            <select x-model="orgFilter.whatsapp" class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" aria-label="WhatsApp">
+                <option value="">WhatsApp: все</option>
+                <option value="yes">WhatsApp: подключен</option>
+                <option value="no">WhatsApp: нет</option>
+            </select>
+            <button type="button" @click="resetOrgFilter()" :disabled="!orgFilterActive"
+                class="px-3 py-2 rounded-xl text-xs font-semibold"
+                :class="orgFilterActive ? 'bg-slate-100 text-slate-700 hover:bg-slate-200' : 'bg-slate-50 text-slate-400 cursor-not-allowed'">
+                Сбросить
+            </button>
         </div>
         <div class="overflow-x-auto">
             <table class="w-full min-w-[980px] text-sm">
@@ -295,7 +336,7 @@
                 </tr>
                 </thead>
                 <tbody>
-                <template x-for="org in organizations" :key="org.id">
+                <template x-for="org in filteredOrganizations" :key="org.id">
                     <tr class="border-b border-slate-100 align-top">
                         <td class="py-2">
                             <div class="font-semibold text-slate-900" x-text="org.name"></div>
@@ -351,6 +392,15 @@
                         </td>
                     </tr>
                 </template>
+                <tr x-show="organizations.length && !filteredOrganizations.length">
+                    <td colspan="6" class="py-6 text-center text-slate-400">
+                        Ничего не нашлось по текущим фильтрам.
+                        <button type="button" @click="resetOrgFilter()" class="ml-2 text-brand-600 hover:text-brand-700 font-semibold">Сбросить</button>
+                    </td>
+                </tr>
+                <tr x-show="!organizations.length">
+                    <td colspan="6" class="py-6 text-center text-slate-400">Пока нет ресторанов.</td>
+                </tr>
                 </tbody>
             </table>
         </div>
@@ -585,6 +635,32 @@ function superAdminPage() {
         loadedTabs: { orgs: false, requests: false, analytics: false, audit: false },
         pendingRequestsCount: 0,
         organizations: [],
+        orgFilter: { q: '', status: '', iiko: '', whatsapp: '' },
+        get orgFilterActive() {
+            const f = this.orgFilter;
+            return !!(f.q || f.status || f.iiko || f.whatsapp);
+        },
+        get filteredOrganizations() {
+            const f = this.orgFilter;
+            const q = (f.q || '').trim().toLowerCase();
+            if (!this.orgFilterActive) return this.organizations;
+            return this.organizations.filter((o) => {
+                if (q) {
+                    const haystack = `${o.name || ''} ${o.tenant_name || ''}`.toLowerCase();
+                    if (!haystack.includes(q)) return false;
+                }
+                if (f.status === 'active' && !o.is_active) return false;
+                if (f.status === 'blocked' && o.is_active) return false;
+                if (f.iiko === 'yes' && !o.has_iiko) return false;
+                if (f.iiko === 'no' && o.has_iiko) return false;
+                if (f.whatsapp === 'yes' && !o.has_whatsapp) return false;
+                if (f.whatsapp === 'no' && o.has_whatsapp) return false;
+                return true;
+            });
+        },
+        resetOrgFilter() {
+            this.orgFilter = { q: '', status: '', iiko: '', whatsapp: '' };
+        },
         requests: [],
         aiUsage: [],
         aiUsageDate: '',
@@ -633,7 +709,13 @@ function superAdminPage() {
             const hash = (window.location.hash || '').replace(/^#/, '').trim();
             const stored = (() => { try { return window.localStorage.getItem(SUPERADMIN_TAB_STORAGE_KEY) || ''; } catch (_e) { return ''; } })();
             const known = this.tabs.map((t) => t.id);
-            if (known.includes(hash)) this.activeTab = hash;
+            let tabFromHash = '';
+            if (hash.startsWith('sa/')) {
+                tabFromHash = hash.slice(3).trim();
+            } else if (known.includes(hash)) {
+                tabFromHash = hash;
+            }
+            if (known.includes(tabFromHash)) this.activeTab = tabFromHash;
             else if (known.includes(stored)) this.activeTab = stored;
             // Pending-badge на табе «Заявки» — лёгкий запрос всегда.
             this.refreshPendingRequestsBadge();
@@ -643,8 +725,18 @@ function superAdminPage() {
             if (!this.tabs.some((t) => t.id === id)) return;
             this.activeTab = id;
             try { window.localStorage.setItem(SUPERADMIN_TAB_STORAGE_KEY, id); } catch (_e) { /* ignore */ }
-            try { window.history.replaceState({}, '', '#' + id); } catch (_e) { /* ignore */ }
+            try {
+                const base = window.location.pathname || '/superadmin';
+                window.history.replaceState({}, '', `${base}#sa/${id}`);
+            } catch (_e) { /* ignore */ }
             await this.ensureTabLoaded(id);
+        },
+        async logoutSuperadmin() {
+            try {
+                await fetch('/api/admin/auth/logout', { method: 'POST', credentials: 'same-origin' });
+            } catch (_e) { /* ignore */ }
+            try { window.localStorage.removeItem(SUPERADMIN_TAB_STORAGE_KEY); } catch (_e) { /* ignore */ }
+            window.location.href = '/admin';
         },
         async ensureTabLoaded(id) {
             if (this.loadedTabs[id]) return;

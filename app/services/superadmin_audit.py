@@ -21,7 +21,8 @@ def sanitize_credentials_audit_details(changed_fields: list[str]) -> dict[str, o
 async def log_superadmin_action(
     db: AsyncSession,
     *,
-    actor: StaffUser,
+    actor: StaffUser | None,
+    actor_email: str,
     action: str,
     target_type: str,
     target_id: str | int,
@@ -29,8 +30,8 @@ async def log_superadmin_action(
     details: dict[str, object] | None = None,
 ) -> SuperadminAuditLog:
     entry = SuperadminAuditLog(
-        actor_staff_user_id=int(actor.id),
-        actor_email=(actor.email or "").strip(),
+        actor_staff_user_id=int(actor.id) if actor is not None else None,
+        actor_email=(actor_email or (actor.email if actor is not None else "") or "").strip(),
         action=(action or "").strip(),
         target_type=(target_type or "").strip(),
         target_id=str(target_id),
