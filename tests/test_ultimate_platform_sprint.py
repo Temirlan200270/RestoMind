@@ -20,8 +20,10 @@ from app.services.owner_dashboard import build_stock_alerts_from_inventory, buil
 
 class TestStockAlertsStub:
     def test_returns_proxy_when_orders_present(self):
+        from datetime import date
+
         rows = [{"date": "2026-05-19", "orders_confirmed": 10}]
-        alerts = build_stock_alerts_stub(rows)
+        alerts = build_stock_alerts_stub(rows, today=date(2026, 5, 19))
         assert len(alerts) == 1
         assert alerts[0]["source"] == "daily_org_stats.orders_confirmed"
 
