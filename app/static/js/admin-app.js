@@ -4495,6 +4495,10 @@ function adminMixinAuthKnowledge() {
                 this.isDemoSession = false;
                 this.staffRole = me.role;
                 this.isSuperadmin = me.is_superadmin;
+                if (me.is_superadmin && !window.location.pathname.startsWith('/superadmin')) {
+                    window.location.href = '/superadmin';
+                    return;
+                }
                 this._ensureAdminHashListener();
                 const parsedLogin = adminParseLocationHash();
                 if (!parsedLogin.tab) {

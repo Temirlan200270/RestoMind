@@ -9,17 +9,34 @@
 </head>
 <body class="bg-slate-50 min-h-screen font-sans text-slate-800">
 <div class="max-w-7xl mx-auto px-4 py-8" x-data="superAdminPage()" x-init="init()">
-    <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
-        <div>
-            <h1 class="text-2xl font-bold text-slate-900">Super Admin</h1>
-            <p class="text-sm text-slate-500">Управление заявками, клиентами и технастройкой.</p>
+    <div class="sticky top-0 z-40 -mx-4 px-4 pt-2 pb-3 mb-6 bg-slate-50/85 backdrop-blur supports-[backdrop-filter]:bg-slate-50/70">
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+            <div>
+                <h1 class="text-2xl font-bold text-slate-900">Super Admin</h1>
+                <p class="text-sm text-slate-500">Платформенное управление: рестораны, заявки, аналитика, аудит.</p>
+            </div>
+            <a href="/admin" class="px-4 py-2 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 hover:bg-slate-50">Открыть админку</a>
         </div>
-        <a href="/admin" class="px-4 py-2 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 hover:bg-slate-50">Открыть админку</a>
+        <nav class="flex flex-wrap gap-1 rounded-2xl border border-slate-200 bg-white p-1 shadow-sm" aria-label="Super Admin sections">
+            <template x-for="t in tabs" :key="t.id">
+                <button type="button" @click="setTab(t.id)"
+                    class="relative px-4 py-2 rounded-xl text-sm font-semibold transition"
+                    :class="activeTab === t.id ? 'bg-brand-600 text-white shadow' : 'text-slate-700 hover:bg-slate-100'">
+                    <span x-text="t.label"></span>
+                    <span x-show="t.id === 'requests' && pendingRequestsCount > 0"
+                        class="ml-1.5 inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-bold"
+                        :class="activeTab === t.id ? 'bg-white text-brand-700' : 'bg-rose-100 text-rose-700'"
+                        x-text="pendingRequestsCount"></span>
+                </button>
+            </template>
+        </nav>
     </div>
 
     <div x-show="error" x-cloak class="mb-4 rounded-xl border border-red-200 bg-red-50 text-red-700 px-4 py-3 text-sm" x-text="error"></div>
     <div x-show="toast" x-cloak class="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-800 px-4 py-3 text-sm" x-text="toast"></div>
 
+    <!-- ────────────────── AUDIT TAB ────────────────── -->
+    <div x-show="activeTab === 'audit'" x-cloak>
     <section class="rounded-2xl bg-white border border-slate-200 shadow-sm p-5 mb-6">
         <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-4">
             <div>
@@ -193,7 +210,11 @@
             </aside>
         </div>
     </section>
+    </div>
+    <!-- /AUDIT TAB -->
 
+    <!-- ────────────────── REQUESTS TAB ────────────────── -->
+    <div x-show="activeTab === 'requests'" x-cloak>
     <section class="rounded-2xl bg-white border border-slate-200 shadow-sm p-5 mb-6">
         <div class="flex items-center justify-between gap-3 mb-4">
             <h2 class="text-lg font-bold text-slate-900">Заявки на подключение</h2>
@@ -238,7 +259,11 @@
             </table>
         </div>
     </section>
+    </div>
+    <!-- /REQUESTS TAB -->
 
+    <!-- ────────────────── ORGS TAB ────────────────── -->
+    <div x-show="activeTab === 'orgs'" x-cloak>
     <section class="rounded-2xl bg-white border border-slate-200 shadow-sm p-5 mb-6">
         <h2 class="text-lg font-bold text-slate-900 mb-4">Создать ресторан вручную</h2>
         <form class="grid grid-cols-1 md:grid-cols-4 gap-3" @submit.prevent="createOrganization()">
@@ -330,6 +355,8 @@
             </table>
         </div>
     </section>
+    </div>
+    <!-- /ORGS TAB -->
 
     <div x-show="passwordModal.open" x-cloak class="fixed inset-0 z-[130] bg-black/50 backdrop-blur-sm p-4 flex items-center justify-center" @click.self="passwordModal.copied ? closePasswordModal() : null">
         <div class="w-full max-w-lg rounded-2xl bg-white border border-slate-200 shadow-2xl overflow-hidden" role="dialog" aria-modal="true" aria-labelledby="superadmin-password-modal-title">
@@ -371,7 +398,9 @@
         </div>
     </div>
 
-    <section class="rounded-2xl bg-white border border-slate-200 shadow-sm p-5 mt-6">
+    <!-- ────────────────── ANALYTICS TAB ────────────────── -->
+    <div x-show="activeTab === 'analytics'" x-cloak>
+    <section class="rounded-2xl bg-white border border-slate-200 shadow-sm p-5 mb-6">
         <div class="flex items-center justify-between gap-3 mb-4">
             <div>
                 <h2 class="text-lg font-bold text-slate-900">Токены ИИ сегодня</h2>
@@ -402,7 +431,7 @@
         </div>
     </section>
 
-    <section class="rounded-2xl bg-white border border-slate-200 shadow-sm p-5 mt-6">
+    <section class="rounded-2xl bg-white border border-slate-200 shadow-sm p-5 mb-6">
         <div class="flex items-center justify-between gap-3 mb-4">
             <h2 class="text-lg font-bold text-slate-900">Сообщения WhatsApp</h2>
             <div class="flex items-center gap-2">
@@ -449,6 +478,8 @@
             </table>
         </div>
     </section>
+    </div>
+    <!-- /ANALYTICS TAB -->
 
     <div x-show="scheduleEditorOpen" x-cloak class="fixed inset-0 z-[120] bg-black/40 backdrop-blur-sm p-4 flex items-center justify-center" @click.self="closeScheduleEditor()">
         <div class="w-full max-w-3xl rounded-2xl bg-white border border-slate-200 shadow-2xl overflow-hidden" role="dialog" aria-modal="true" aria-labelledby="superadmin-schedule-editor-title">
@@ -540,9 +571,19 @@
 
 <script>
 function superAdminPage() {
+    const SUPERADMIN_TAB_STORAGE_KEY = 'restomind:superadmin:tab';
     return {
         error: '',
         toast: '',
+        activeTab: 'orgs',
+        tabs: [
+            { id: 'orgs', label: 'Рестораны' },
+            { id: 'requests', label: 'Заявки' },
+            { id: 'analytics', label: 'Аналитика' },
+            { id: 'audit', label: 'Аудит' },
+        ],
+        loadedTabs: { orgs: false, requests: false, analytics: false, audit: false },
+        pendingRequestsCount: 0,
         organizations: [],
         requests: [],
         aiUsage: [],
@@ -589,7 +630,36 @@ function superAdminPage() {
         async init() {
             const ok = await this.guard();
             if (!ok) return;
-            await Promise.all([this.loadRequests(), this.loadOrganizations(), this.loadWebhookEvents(), this.loadAiUsage(), this.loadMsgAcct(), this.loadAuditLog()]);
+            const hash = (window.location.hash || '').replace(/^#/, '').trim();
+            const stored = (() => { try { return window.localStorage.getItem(SUPERADMIN_TAB_STORAGE_KEY) || ''; } catch (_e) { return ''; } })();
+            const known = this.tabs.map((t) => t.id);
+            if (known.includes(hash)) this.activeTab = hash;
+            else if (known.includes(stored)) this.activeTab = stored;
+            // Pending-badge на табе «Заявки» — лёгкий запрос всегда.
+            this.refreshPendingRequestsBadge();
+            await this.ensureTabLoaded(this.activeTab);
+        },
+        async setTab(id) {
+            if (!this.tabs.some((t) => t.id === id)) return;
+            this.activeTab = id;
+            try { window.localStorage.setItem(SUPERADMIN_TAB_STORAGE_KEY, id); } catch (_e) { /* ignore */ }
+            try { window.history.replaceState({}, '', '#' + id); } catch (_e) { /* ignore */ }
+            await this.ensureTabLoaded(id);
+        },
+        async ensureTabLoaded(id) {
+            if (this.loadedTabs[id]) return;
+            this.loadedTabs[id] = true;
+            if (id === 'orgs') await this.loadOrganizations();
+            else if (id === 'requests') await this.loadRequests();
+            else if (id === 'analytics') await Promise.all([this.loadAiUsage(), this.loadMsgAcct()]);
+            else if (id === 'audit') await Promise.all([this.loadAuditLog(), this.loadWebhookEvents()]);
+        },
+        async refreshPendingRequestsBadge() {
+            try {
+                const data = await this.api('/api/superadmin/registration-requests?status=pending');
+                const rows = Array.isArray(data) ? data : (data?.items || []);
+                this.pendingRequestsCount = rows.length;
+            } catch (_e) { /* badge — best-effort */ }
         },
         formatAuditDetails(v) {
             if (v == null || v === '') return '—';
@@ -686,6 +756,7 @@ function superAdminPage() {
         async loadRequests() {
             try {
                 this.requests = (await this.api('/api/superadmin/registration-requests?status=pending')).items || [];
+                this.pendingRequestsCount = this.requests.length;
             } catch (e) {
                 this.error = e.message || 'Не удалось загрузить заявки';
             }
