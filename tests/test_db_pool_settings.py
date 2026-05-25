@@ -60,3 +60,13 @@ def test_settings_supabase_prefer_transaction_pooler(monkeypatch):
     monkeypatch.setenv("SUPABASE_PREFER_TRANSACTION_POOLER", "true")
     s = Settings()
     assert ":6543/" in s.database_url
+
+
+def test_settings_production_pool_defaults_on_render(monkeypatch):
+    from app.core.config import Settings
+
+    monkeypatch.setenv("RENDER", "true")
+    monkeypatch.setenv("APP_ENV", "production")
+    s = Settings()
+    assert s.db_pool_size == 3
+    assert s.db_max_overflow == 2

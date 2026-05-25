@@ -122,6 +122,16 @@ async def get_open_draft_order(
     return q.scalar_one_or_none()
 
 
+def _draft_has_food_items(draft: Order | None) -> bool:
+    if draft is None or not isinstance(draft.items_json, dict):
+        return False
+    raw = draft.items_json.get("items") or []
+    return any(
+        isinstance(x, dict) and str(x.get("name") or "").strip()
+        for x in raw
+    )
+
+
 def _blend_ai_with_stored_order_meta(ai: AIBrainResponse, meta: dict | None) -> AIBrainResponse:
     """
     При дельтах к корзине подставляем из черновика тип получения, оплату, адрес —
@@ -493,6 +503,7 @@ async def _handle_order(
 
     use_merge = bool(ai_response.order_actions) and existing_draft is not None
     new_action_ids_batch: list[str] = []
+    fulfillment_only_update = False
 
     ai_eff: AIBrainResponse
     validated: ValidatedOrder
@@ -554,7 +565,20 @@ async def _handle_order(
                     "или опишите заказ целиком списком в `items`."
                 ),
             )
-        return RouteResult(reply_text=ai_response.reply_text)
+        if _draft_has_food_items(existing_draft):
+            fulfillment_only_update = True
+            meta = (existing_draft.items_json or {}).get("order_meta")
+            ai_eff = _blend_ai_with_stored_order_meta(
+                ai_response, meta if isinstance(meta, dict) else None,
+            )
+            raw_list = (existing_draft.items_json or {}).get("items")
+            current_items = [x for x in (raw_list or []) if isinstance(x, dict)]
+            order_items = draft_food_lines_to_order_items(current_items)
+            validated = await validate_order(
+                order_items, menu_items=menu_items, db=db, organization_id=organization_id,
+            )
+        else:
+            return RouteResult(reply_text=ai_response.reply_text)
 
     if not validated.valid_items:
         if validated.stoplist_items:
@@ -714,7 +738,7 @@ async def _handle_order(
 
     await db.flush()
 
-    if existing_draft and (use_merge or ai_response.items):
+    if existing_draft and (use_merge or ai_response.items or fulfillment_only_update):
         expected_ver = int(existing_draft.row_version)
         new_booking_id = booking_row.id if booking_row is not None else existing_draft.booking_id
         ok_upd = await persist_draft_order_optimistic_update(

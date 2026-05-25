@@ -5,13 +5,13 @@
                     <div class="flex items-center gap-2">
                         {% call segmented(extra_class='flex-1 border border-gray-200 bg-white') %}
                         <div class="contents" role="tablist" aria-label="Вид заказов">
-                            <button type="button" @click="ordersView = 'kanban'; ordersPage = 1; loadOrders()"
+                            <button type="button" @click="setOrdersView('kanban')"
                                 :class="ordersView === 'kanban' ? 'ds-segmented-active' : ''"
                                 class="flex-1 min-h-[44px] px-3 py-2 rounded-lg text-xs font-semibold"
                                 :aria-selected="ordersView === 'kanban' ? 'true' : 'false'" role="tab">
                                 По этапам
                             </button>
-                            <button type="button" @click="ordersView = 'table'; ordersPage = 1; loadOrders()"
+                            <button type="button" @click="setOrdersView('table')"
                                 :class="ordersView === 'table' ? 'ds-segmented-active' : ''"
                                 class="flex-1 min-h-[44px] px-3 py-2 rounded-lg text-xs font-semibold"
                                 :aria-selected="ordersView === 'table' ? 'true' : 'false'" role="tab">
@@ -33,14 +33,14 @@
                 <div class="hidden md:flex flex-wrap items-center justify-between gap-3 mb-5">
                     {% call segmented(extra_class='border border-gray-200 bg-white') %}
                     <div class="contents" role="tablist" aria-label="Вид заказов">
-                        <button type="button" @click="ordersView = 'kanban'"
+                        <button type="button" @click="setOrdersView('kanban')"
                             :class="ordersView === 'kanban' ? 'ds-segmented-active' : ''"
                             class="min-h-[44px] px-4 py-2 rounded-lg text-sm font-medium transition"
                             title="Черновик → Подтверждён → На кухне"
                             :aria-selected="ordersView === 'kanban' ? 'true' : 'false'" role="tab">
                             &#x1F4E6; По этапам
                         </button>
-                        <button type="button" @click="ordersView = 'table'"
+                        <button type="button" @click="setOrdersView('table')"
                             :class="ordersView === 'table' ? 'ds-segmented-active' : ''"
                             class="min-h-[44px] px-4 py-2 rounded-lg text-sm font-medium transition"
                             title="Все заказы списком с фильтром по статусу"
@@ -97,6 +97,18 @@
                     </div>
                 </div>
                 {% endcall %}
+                </div>
+
+                <div x-show="ordersView === 'table' && ordersListHasActiveFilters()" x-cloak
+                    class="hidden md:flex flex-wrap items-center gap-2 mb-4 rounded-xl border border-brand-100 bg-brand-50/60 px-4 py-3 text-sm text-brand-950">
+                    <span class="font-semibold shrink-0">Фильтры:</span>
+                    <span class="min-w-0 truncate text-brand-900/90" x-text="ordersFiltersSummary()"></span>
+                    <span class="text-brand-700/80 tabular-nums shrink-0"
+                        x-text="'· ' + ordersTotal + ' ' + (ordersTotal === 1 ? 'заказ' : (ordersTotal >= 2 && ordersTotal <= 4 ? 'заказа' : 'заказов'))"></span>
+                    <button type="button" @click="resetOrderFilters()"
+                        class="ml-auto shrink-0 min-h-[36px] px-3 rounded-lg text-xs font-semibold bg-white border border-brand-200 text-brand-800 hover:bg-brand-50">
+                        Сбросить
+                    </button>
                 </div>
 
                 <div x-show="ordersMobileFiltersOpen" x-cloak x-transition.opacity
@@ -409,7 +421,19 @@
                                 <tr x-show="ordersLoading && orders.length === 0" x-cloak>
                                     <td colspan="7" class="py-8 px-4">{{ skeleton(kind='table', rows=8, extra_class='!p-2') }}</td>
                                 </tr>
-                                <tr x-show="orders.length === 0 && !ordersLoading">
+                                <tr x-show="orders.length === 0 && !ordersLoading && ordersListHasActiveFilters()">
+                                    <td colspan="7" class="py-12 px-4 text-center text-gray-500">
+                                        <p class="text-sm font-semibold text-gray-800">По фильтрам ничего не найдено</p>
+                                        <p class="text-xs mt-2 max-w-md mx-auto" x-text="ordersFiltersSummary()"></p>
+                                        <div class="mt-4 flex flex-wrap items-center justify-center gap-2">
+                                            <button type="button" @click="resetOrderFilters()"
+                                                class="min-h-[44px] px-4 py-2 rounded-xl text-sm font-semibold bg-white border border-gray-200 text-gray-800 hover:bg-gray-50">Сбросить фильтры</button>
+                                            <button type="button" @click="setOrdersView('kanban')"
+                                                class="min-h-[44px] px-4 py-2 rounded-xl text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700">По этапам</button>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <tr x-show="orders.length === 0 && !ordersLoading && !ordersListHasActiveFilters()">
                                     <td colspan="7" class="py-12 px-4 text-center text-gray-500">
                                         <div class="text-4xl mb-2" aria-hidden="true">&#x1F4E6;</div>
                                         <p class="text-sm font-semibold text-gray-800">Тут будут ваши заказы</p>
@@ -428,7 +452,17 @@
                     <div class="md:hidden px-2 py-6 border-t border-gray-100 bg-gray-50/40" x-show="ordersLoading && orders.length === 0" x-cloak>
                         {{ skeleton(kind='line', rows=8, extra_class='!p-3') }}
                     </div>
-                    <div class="md:hidden px-4 py-12 text-center border-t border-gray-100 bg-gray-50/40" x-show="orders.length === 0 && !ordersLoading" x-cloak>
+                    <div class="md:hidden px-4 py-12 text-center border-t border-gray-100 bg-gray-50/40" x-show="orders.length === 0 && !ordersLoading && ordersListHasActiveFilters()" x-cloak>
+                        <p class="text-sm font-semibold text-gray-800">По фильтрам ничего не найдено</p>
+                        <p class="text-xs text-gray-500 mt-2 max-w-xs mx-auto" x-text="ordersFiltersSummary()"></p>
+                        <div class="mt-4 flex flex-col gap-2 max-w-xs mx-auto">
+                            <button type="button" @click="resetOrderFilters()"
+                                class="min-h-[44px] px-4 py-2.5 rounded-xl text-sm font-semibold bg-white border border-gray-200 text-gray-800">Сбросить фильтры</button>
+                            <button type="button" @click="setOrdersView('kanban')"
+                                class="min-h-[44px] px-4 py-2.5 rounded-xl text-sm font-semibold bg-brand-600 text-white">По этапам</button>
+                        </div>
+                    </div>
+                    <div class="md:hidden px-4 py-12 text-center border-t border-gray-100 bg-gray-50/40" x-show="orders.length === 0 && !ordersLoading && !ordersListHasActiveFilters()" x-cloak>
                         <div class="text-4xl mb-2" aria-hidden="true">&#x1F4E6;</div>
                         <p class="text-sm font-semibold text-gray-800">Тут будут ваши заказы</p>
                         <p class="text-xs text-gray-500 mt-2 max-w-xs mx-auto">Напишите боту в WhatsApp — проверьте сценарий заказа с телефона.</p>

@@ -112,6 +112,27 @@ def test_is_plain_greeting_rejects_menu_intent() -> None:
 
 
 @pytest.mark.asyncio
+async def test_menu_request_uses_human_category_labels(db_with_menu) -> None:
+    from app.db.models import MenuItem
+    from app.services.quick_replies import build_menu_quick_reply_text
+
+    db_with_menu.add(
+        MenuItem(
+            organization_id=1,
+            name="Тестовая самса",
+            price=400,
+            category="Выпечка-1",
+            is_available=True,
+        ),
+    )
+    await db_with_menu.flush()
+
+    preview = await build_menu_quick_reply_text(db_with_menu, 1)
+    assert "Выпечка-1" not in preview
+    assert "• Выпечка:" in preview or "• Горячие блюда:" in preview
+
+
+@pytest.mark.asyncio
 async def test_menu_request(db_with_menu) -> None:
     from app.services.quick_replies import build_menu_quick_reply_text
 

@@ -823,6 +823,35 @@ async def calculate_total_and_fees(
     return validated, payload, grand_total
 
 
+_IIKO_CATEGORY_NUM_SUFFIX = re.compile(r"[-_]\s*\d+$", re.UNICODE)
+
+# iiko-разделы → формулировки для гостя (WhatsApp / промпт), не для админки.
+_GUEST_MENU_CATEGORY_ALIASES: dict[str, str] = {
+    "акция": "Акции",
+    "акции": "Акции",
+    "горячее блюдо": "Горячие блюда",
+    "горячие блюдо": "Горячие блюда",
+    "холодное блюдо": "Закуски",
+    "холодные блюда": "Закуски",
+    "гарнир": "Гарниры",
+    "блюдо на компанию": "На компанию",
+    "блюда на компанию": "На компанию",
+    "салат": "Салаты",
+    "суп": "Супы",
+    "напиток": "Напитки",
+    "десерт": "Десерты",
+}
+
+
+def format_menu_category_for_guest(raw: str) -> str:
+    """Человекочитаемое имя раздела меню для гостя (без iiko-суффиксов вроде «Выпечка-1»)."""
+    cat = (raw or "").strip()
+    if not cat:
+        return "Другое"
+    cat = _IIKO_CATEGORY_NUM_SUFFIX.sub("", cat).strip() or cat
+    return _GUEST_MENU_CATEGORY_ALIASES.get(cat.lower(), cat)
+
+
 def build_menu_context(db_items: list[MenuItem]) -> str:
     """
     Формирует текстовое описание меню для System Prompt.
@@ -836,9 +865,10 @@ def build_menu_context(db_items: list[MenuItem]) -> str:
     current_category = ""
     lines: list[str] = []
     for item in db_items:
-        if item.category != current_category:
-            current_category = item.category
-            lines.append(f"\n## {current_category}")
+        display_cat = format_menu_category_for_guest(item.category or "")
+        if display_cat != current_category:
+            current_category = display_cat
+            lines.append(f"\n## {display_cat}")
         iiko_tag = f" [id: {item.iiko_id}]" if item.iiko_id else ""
         stop_tag = " [СТОП — временно недоступно, нельзя добавить в заказ]" if not item.is_available else ""
         tags_s = (getattr(item, "tags", None) or "").strip()
@@ -960,9 +990,10 @@ def build_menu_context_filtered(db_items: list[MenuItem], category_hint: str) ->
         current_cat = ""
         compact_lines: list[str] = []
         for item in compact_items:
-            if item.category != current_cat:
-                current_cat = item.category
-                compact_lines.append(f"\n## {current_cat}")
+            display_cat = format_menu_category_for_guest(item.category or "")
+            if display_cat != current_cat:
+                current_cat = display_cat
+                compact_lines.append(f"\n## {display_cat}")
             stop_tag = " [СТОП]" if not item.is_available else ""
             compact_lines.append(f"- {item.name}: {float(item.price):.0f} ₸{stop_tag}")
         compact_str = "\n".join(compact_lines)

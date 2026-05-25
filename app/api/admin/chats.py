@@ -735,11 +735,20 @@ async def get_chat_state(
             ai_snoozed_until = u.ai_snoozed_until.isoformat()
     from app.services.trace_timeline import latest_trace_for_phone
 
-    latest_trace_id, _conversation_id = await latest_trace_for_phone(
-        db,
-        org_id=org_id,
-        phone=phone,
-    )
+    latest_trace_id: str | None = None
+    try:
+        latest_trace_id, _conversation_id = await latest_trace_for_phone(
+            db,
+            org_id=org_id,
+            phone=phone,
+        )
+    except Exception as exc:
+        logger.warning(
+            "get_chat_state: latest_trace_for_phone failed org=%s phone=%s: %s",
+            org_id,
+            phone,
+            exc,
+        )
     return {
         "phone": phone,
         "state": state.value,

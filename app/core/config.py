@@ -824,6 +824,17 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
+    def _production_db_pool_defaults(self) -> Self:
+        """На Render без DB_POOL_SIZE auto-pool = 1 conn/process → TimeoutError при параллельных API."""
+        is_prod = self.is_prod_like or bool((os.environ.get("RENDER") or "").strip())
+        if is_prod:
+            if self.db_pool_size == 0:
+                object.__setattr__(self, "db_pool_size", 3)
+            if self.db_max_overflow < 0:
+                object.__setattr__(self, "db_max_overflow", 2)
+        return self
+
+    @model_validator(mode="after")
     def _require_strong_admin_secrets_in_prod(self) -> Self:
         """
         В продакшене SessionMiddleware и WS-токены должны подписываться настоящим секретом,

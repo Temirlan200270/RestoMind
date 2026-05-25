@@ -88,7 +88,7 @@ class DecisionEngine:
         if v := self._check_force_closed(proposal, org):
             violations.append(v)
 
-        if v := self._check_empty_order(proposal):
+        if v := self._check_empty_order(proposal, context):
             violations.append(v)
 
         if v := self._check_all_items_hallucinated(proposal, context):
@@ -271,12 +271,16 @@ class DecisionEngine:
     def _check_empty_order(
         self,
         proposal: "AIBrainResponse",
+        context: "AIReadContext",
     ) -> PolicyViolation | None:
         """Блокирует intent=order с пустым списком позиций.
 
         LLM иногда генерирует «заказ принят» без items — это баг парсинга или
         неполный ответ. Создавать пустой черновик смысла нет: клиент думает, что
         заказал, а в БД — пустая запись.
+
+        Исключение: активный черновик с позициями — клиент уточняет доставку,
+        время самовывоза или оплату («самовывоз через полчаса»), а не добавляет блюда.
         """
         if proposal.intent != "order":
             return None
@@ -285,6 +289,8 @@ class DecisionEngine:
         has_actions = bool(proposal.order_actions)
         if has_items or has_actions:
             return None
+        if self._draft_has_cart_items(context):
+            return None
         return PolicyViolation(
             rule="empty_order",
             severity="block",
@@ -292,6 +298,17 @@ class DecisionEngine:
                 "Уточните, пожалуйста, что именно вы хотите заказать — "
                 "я не смог разобрать позиции из вашего сообщения."
             ),
+        )
+
+    @staticmethod
+    def _draft_has_cart_items(context: "AIReadContext") -> bool:
+        draft = getattr(context, "draft_row", None)
+        if draft is None or not isinstance(getattr(draft, "items_json", None), dict):
+            return False
+        raw = draft.items_json.get("items") or []
+        return any(
+            isinstance(x, dict) and str(x.get("name") or "").strip()
+            for x in raw
         )
 
     def _check_delivery_no_address(

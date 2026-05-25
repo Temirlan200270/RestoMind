@@ -649,7 +649,19 @@ function adminTabsForMode(mode) {
 /** Role-first IA (Sprint 5 pivot): sidebar visibility by staff role. */
 const ADMIN_ANALYTICS_DENSITY_STORAGE_KEY = 'restomind_analytics_density';
 const ADMIN_OPERATIONS_DENSITY_STORAGE_KEY = 'restomind_density:operations';
+const ADMIN_ORDERS_VIEW_STORAGE_KEY = 'rm_orders_view_v1';
 const ADMIN_UI_HINTS_STORAGE_KEY = 'restomind_ui_hints_v1';
+
+function adminReadOrdersViewPreference() {
+    try {
+        const saved = typeof localStorage !== 'undefined'
+            ? localStorage.getItem(ADMIN_ORDERS_VIEW_STORAGE_KEY)
+            : null;
+        return saved === 'table' ? 'table' : 'kanban';
+    } catch (_e) {
+        return 'kanban';
+    }
+}
 const ADMIN_OPERATIONS_TABS = Object.freeze(['shift', 'inbox', 'orders', 'chats', 'bookings']);
 
 function adminReadUiHintsDismissed() {
@@ -1307,9 +1319,8 @@ function adminMixinState() {
         ],
         menuItems: [],
 
-        // Заказы
-        ordersView: 'kanban',
-        _ordersViewAutoSet: false,
+        // Заказы — по умолчанию «По этапам»; выбор сохраняется в localStorage
+        ordersView: adminReadOrdersViewPreference(),
         kanbanLateStagesOpen: false,
         kanbanDensity: 'normal',
         operationsDensity: 'normal',
@@ -2125,8 +2136,7 @@ function adminMixinMenuOrdersUi() {
                 const m = window.matchMedia('(min-width: 768px)').matches;
                 this.menuCategoryChipsOpen = false;
                 this.menuToolbarExpanded = m;
-                // Mobile-first: заказы без горизонтального скролла (канбан — для больших экранов).
-                this.ordersView = m ? (this.ordersView || 'kanban') : 'table';
+                this.ordersView = adminReadOrdersViewPreference();
                 const savedOpsDensity = localStorage.getItem(ADMIN_OPERATIONS_DENSITY_STORAGE_KEY);
                 const savedKanbanDensity = localStorage.getItem('rm_kanban_density_v1');
                 const density =
@@ -3639,6 +3649,36 @@ function adminMixinSearchBookings() {
             if (this.orderSumMin !== '' && this.orderSumMin != null) n += 1;
             if (this.orderSumMax !== '' && this.orderSumMax != null) n += 1;
             return n;
+        },
+
+        ordersListHasActiveFilters() {
+            return this.activeOrderFiltersCount() > 0;
+        },
+
+        ordersFiltersSummary() {
+            const parts = [];
+            const q = (this.orderSearchQ || '').trim();
+            if (q) parts.push(`«${q.length > 24 ? `${q.slice(0, 24)}…` : q}»`);
+            if ((this.orderFilter || '').trim()) {
+                parts.push(this.statusConfig?.[this.orderFilter]?.label || this.orderFilter);
+            }
+            if (this.orderSumMin !== '' && this.orderSumMin != null) {
+                parts.push(`от ${this.fmt.money(Number(this.orderSumMin))}`);
+            }
+            if (this.orderSumMax !== '' && this.orderSumMax != null) {
+                parts.push(`до ${this.fmt.money(Number(this.orderSumMax))}`);
+            }
+            return parts.join(' · ');
+        },
+
+        setOrdersView(view) {
+            const next = view === 'table' ? 'table' : 'kanban';
+            this.ordersView = next;
+            try {
+                localStorage.setItem(ADMIN_ORDERS_VIEW_STORAGE_KEY, next);
+            } catch (_e) { /* ignore */ }
+            if (next === 'table') this.ordersPage = 1;
+            void this.loadOrders();
         },
 
         resetOrderFilters() {
@@ -11193,10 +11233,6 @@ function adminMixinDataChartsSettings() {
                     }
                 }
                 this.orders = Array.from(merged.values());
-                if (!this._ordersViewAutoSet && this.ordersView === 'kanban' && this.ordersTotal === 0 && incoming.length === 0) {
-                    this.ordersView = 'table';
-                    this._ordersViewAutoSet = true;
-                }
             } catch (e) {
                 if (reqId !== this._ordersLoadSeq) return;
                 adminLogger.error('[admin] loadOrders', e);

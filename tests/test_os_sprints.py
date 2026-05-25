@@ -523,6 +523,25 @@ class TestDecisionEngineNewRules:
         assert result.corrected_response.intent == "faq"
 
     @pytest.mark.asyncio
+    async def test_empty_order_allowed_when_draft_has_items(self):
+        """intent=order без items, но с активным черновиком — не блокируем (fulfillment turn)."""
+        from app.services.decision_engine import decision_engine
+
+        proposal = _make_ai_response("order")
+        proposal.items = []
+        proposal.order_actions = []
+        ctx = _make_context()
+        draft = MagicMock()
+        draft.items_json = {"items": [{"name": "Салат с баклажанами", "quantity": 1}]}
+        ctx.draft_row = draft
+        org = _make_org()
+
+        result = await decision_engine.validate(proposal, ctx, org)
+
+        assert result.is_valid
+        assert not any(v.rule == "empty_order" for v in result.violations)
+
+    @pytest.mark.asyncio
     async def test_order_with_actions_not_blocked(self):
         """intent=order с непустым order_actions — не пустой заказ, блока нет."""
         from app.services.decision_engine import decision_engine

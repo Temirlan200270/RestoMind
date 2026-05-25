@@ -18,6 +18,7 @@ from app.services.order_logic import (
     enrich_merged_items_from_menu,
     filter_order_actions_idempotent,
     format_draft_order_context_for_prompt,
+    format_menu_category_for_guest,
     format_whatsapp_order_card,
     load_available_menu,
     merge_applied_order_action_ids_into_items_json,
@@ -424,3 +425,44 @@ def test_merge_remove_plov_line_packaging_field_preserved_until_revalidate() -> 
     ]
     out = merge_cart_actions(base, [OrderAction(item_id="Плов 1кг баранина", action="remove", quantity=1)])
     assert out == []
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("Выпечка-1", "Выпечка"),
+        ("Горячее блюдо", "Горячие блюда"),
+        ("Гарнир", "Гарниры"),
+        ("Акция", "Акции"),
+        ("Блюдо на компанию", "На компанию"),
+        ("Горячие напитки", "Горячие напитки"),
+        ("", "Другое"),
+    ],
+)
+def test_format_menu_category_for_guest(raw: str, expected: str) -> None:
+    assert format_menu_category_for_guest(raw) == expected
+
+
+def test_build_menu_context_uses_guest_category_labels() -> None:
+    items = [
+        MenuItem(
+            organization_id=1,
+            name="Самса",
+            price=500,
+            category="Выпечка-1",
+            is_available=True,
+        ),
+        MenuItem(
+            organization_id=1,
+            name="Плов",
+            price=3000,
+            category="Горячее блюдо",
+            is_available=True,
+        ),
+    ]
+    ctx = build_menu_context(items)
+    assert "## Выпечка" in ctx
+    assert "## Горячие блюда" in ctx
+    assert "Выпечка-1" not in ctx
+    assert "Горячее блюдо" not in ctx
+

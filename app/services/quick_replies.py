@@ -15,7 +15,7 @@ from app.core.config import settings
 from app.db.models import Order, OrderStatus, Organization, User
 from app.db.session import redis_client
 from app.services.dialog_mgr import UserState
-from app.services.order_logic import load_available_menu
+from app.services.order_logic import format_menu_category_for_guest, load_available_menu
 from app.services.time_context import (
     _WEEKDAY_KEYS,
     check_operational_status,
@@ -207,15 +207,18 @@ async def build_menu_quick_reply_text(db: AsyncSession, organization_id: int) ->
         include_unavailable=False,
     )
     by_cat: dict[str, list[str]] = defaultdict(list)
+    cat_order: list[str] = []
     for item in items:
         if not item.is_available:
             continue
-        cat = (item.category or "Другое").strip() or "Другое"
-        if len(by_cat[cat]) < 3:
-            by_cat[cat].append(str(item.name or "").strip())
+        display_cat = format_menu_category_for_guest(item.category or "")
+        if display_cat not in by_cat:
+            cat_order.append(display_cat)
+        if len(by_cat[display_cat]) < 3:
+            by_cat[display_cat].append(str(item.name or "").strip())
 
     lines: list[str] = []
-    for cat in sorted(by_cat.keys())[:6]:
+    for cat in cat_order[:6]:
         sample = ", ".join(by_cat[cat][:3])
         if sample:
             lines.append(f"• {cat}: {sample}")
