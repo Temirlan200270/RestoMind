@@ -33,6 +33,11 @@ from app.api.admin.orders import router as admin_orders_router
 from app.api.admin.organization import router as admin_organization_router
 from app.api.admin.rules import router as admin_rules_router
 from app.api.admin.intelligence import router as admin_intelligence_router
+from app.api.admin.owner_intelligence import router as admin_owner_intelligence_router
+from app.api.admin.owner_intelligence_analytics import router as admin_owner_intelligence_analytics_router
+from app.api.admin.owner_intelligence_audits import router as admin_owner_intelligence_audits_router
+from app.api.admin.owner_intelligence_ops import owner_intelligence_ops_router as admin_owner_intelligence_ops_router
+from app.api.admin.owner_intelligence_upsell import router as admin_owner_intelligence_upsell_router
 from app.api.admin.inventory_sync import router as admin_inventory_sync_router
 from app.api.admin.waiter_kpi import router as admin_waiter_kpi_router
 from app.api.admin.network import network_router as admin_network_router
@@ -739,6 +744,11 @@ app.include_router(admin_orders_router, prefix="/api")
 app.include_router(admin_organization_router, prefix="/api")
 app.include_router(admin_rules_router, prefix="/api")
 app.include_router(admin_intelligence_router, prefix="/api")
+app.include_router(admin_owner_intelligence_router, prefix="/api")
+app.include_router(admin_owner_intelligence_audits_router, prefix="/api")
+app.include_router(admin_owner_intelligence_upsell_router, prefix="/api")
+app.include_router(admin_owner_intelligence_analytics_router, prefix="/api")
+app.include_router(admin_owner_intelligence_ops_router, prefix="/api")
 app.include_router(admin_inventory_sync_router, prefix="/api")
 app.include_router(admin_waiter_kpi_router, prefix="/api")
 app.include_router(admin_network_router, prefix="/api")

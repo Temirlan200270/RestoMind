@@ -1,0 +1,171 @@
+<!-- Network Benchmark v2 — только для сетей (is_network) -->
+<div x-show="currentTab === 'ai_center' && aiCenterTab === 'network_benchmark' && userData?.is_network" x-cloak class="fade-in space-y-6 pb-16">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+            <h2 class="text-lg font-bold text-slate-900">Бенчмарк сети</h2>
+            <p class="text-sm text-slate-500 mt-1">Сравнение филиалов по выручке, потерям и операционным рискам.</p>
+        </div>
+        <div class="flex items-center gap-2">
+            {% call segmented(extra_class='border border-slate-200 bg-white shrink-0 inline-flex') %}
+            <button type="button" class="min-h-[40px] px-3 py-2 rounded-lg text-sm font-semibold transition"
+                :class="networkBenchmarkPeriod === '7d' ? 'ds-segmented-active' : ''"
+                @click="setNetworkBenchmarkPeriod('7d')">7 дней</button>
+            <button type="button" class="min-h-[40px] px-3 py-2 rounded-lg text-sm font-semibold transition"
+                :class="networkBenchmarkPeriod === '30d' ? 'ds-segmented-active' : ''"
+                @click="setNetworkBenchmarkPeriod('30d')">30 дней</button>
+            {% endcall %}
+            <button type="button" @click="loadNetworkBenchmark()" :disabled="networkBenchmarkLoading"
+                class="min-h-[40px] px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                Обновить
+            </button>
+        </div>
+    </div>
+
+    <div x-show="networkBenchmarkLoading" x-cloak class="text-sm text-slate-500">Загрузка бенчмарка…</div>
+
+    <template x-if="networkBenchmarkData && networkBenchmarkData.enabled === false">
+        <div class="rounded-2xl border border-amber-100 bg-amber-50/70 p-5 text-sm text-amber-900">
+            Бенчмарк недоступен для одиночной точки. Нужна сеть с флагом <code class="font-mono text-xs">is_network</code> и минимум два филиала.
+        </div>
+    </template>
+
+    <template x-if="networkBenchmarkData && networkBenchmarkData.enabled !== false">
+        <div class="space-y-5">
+            <div class="rounded-2xl border border-indigo-100 bg-indigo-50/60 p-5">
+                <div class="text-xs font-semibold uppercase tracking-wide text-indigo-700">Недельный срез</div>
+                <div class="mt-2 text-lg font-bold text-indigo-950" x-text="networkBenchmarkData.headline || '—'"></div>
+            </div>
+
+            <div x-show="(networkBenchmarkData.narratives || networkBenchmarkData.highlights || []).length" x-cloak
+                class="rounded-2xl border border-indigo-100 bg-white p-5">
+                <div class="text-sm font-semibold text-slate-900 mb-3">Недельный отчёт</div>
+                <ul class="space-y-2">
+                    <template x-for="(line, idx) in (networkBenchmarkData.narratives || networkBenchmarkData.highlights || [])" :key="'nb-narrative-' + idx">
+                        <li class="text-sm text-slate-700 flex items-start gap-2">
+                            <span class="text-indigo-500 shrink-0">→</span>
+                            <span x-text="line"></span>
+                        </li>
+                    </template>
+                </ul>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div class="rounded-xl bg-indigo-50 p-4">
+                    <div class="text-xs text-indigo-700">Ваша точка</div>
+                    <div class="mt-1 text-lg font-bold tabular-nums" x-text="fmt.money(networkBenchmarkData.org_revenue_kzt ?? 0)"></div>
+                </div>
+                <div class="rounded-xl bg-slate-50 p-4">
+                    <div class="text-xs ds-text-muted">Среднее по сети</div>
+                    <div class="mt-1 text-lg font-bold tabular-nums" x-text="fmt.money(networkBenchmarkData.network_avg_kzt ?? 0)"></div>
+                </div>
+                <div class="rounded-xl bg-slate-50 p-4">
+                    <div class="text-xs ds-text-muted">Позиция</div>
+                    <div class="mt-1 text-lg font-bold" x-text="networkBenchmarkData.rank_label || '—'"></div>
+                </div>
+            </div>
+
+            <div x-show="networkBenchmarkData.top_decline_reason || (networkBenchmarkData.decline_reasons || []).length" x-cloak class="rounded-2xl border border-amber-100 bg-amber-50/50 p-5">
+                <div class="text-sm font-semibold text-amber-900 mb-2">Главный фактор отставания вашей точки</div>
+                <div class="text-sm text-amber-950" x-text="networkBenchmarkData.top_decline_reason || (networkBenchmarkData.decline_reasons || [])[0] || '—'"></div>
+            </div>
+
+            <div x-show="(networkBenchmarkData.location_decline_reasons || []).length" x-cloak class="rounded-2xl border border-slate-200 bg-white p-5">
+                <div class="text-sm font-semibold text-slate-900 mb-3">Факторы по филиалам</div>
+                <div class="space-y-3">
+                    <template x-for="(loc, idx) in (networkBenchmarkData.location_decline_reasons || [])" :key="'nb-loc-reason-' + (loc.organization_id || idx)">
+                        <div class="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+                            <div class="text-sm font-semibold text-slate-900" x-text="loc.name || 'Филиал'"></div>
+                            <ul class="mt-2 space-y-1">
+                                <template x-for="(reason, ri) in (loc.reasons || [])" :key="'nb-loc-reason-item-' + idx + '-' + ri">
+                                    <li class="text-xs text-slate-600" x-text="'• ' + reason"></li>
+                                </template>
+                            </ul>
+                        </div>
+                    </template>
+                </div>
+            </div>
+
+            <div x-show="networkBenchmarkData.network_averages" x-cloak class="rounded-2xl border border-slate-200 bg-white p-5">
+                <div class="text-sm font-semibold text-slate-900 mb-3">Средние по сети</div>
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+                    <div class="rounded-xl bg-slate-50 p-3">
+                        <div class="text-[11px] uppercase tracking-wide text-slate-500">Upsell</div>
+                        <div class="mt-1 font-bold tabular-nums" x-text="fmt.money(networkBenchmarkData.network_averages?.upsell_revenue ?? 0)"></div>
+                    </div>
+                    <div class="rounded-xl bg-slate-50 p-3">
+                        <div class="text-[11px] uppercase tracking-wide text-slate-500">Recovery</div>
+                        <div class="mt-1 font-bold tabular-nums" x-text="fmt.money(networkBenchmarkData.network_averages?.recovered_revenue ?? 0)"></div>
+                    </div>
+                    <div class="rounded-xl bg-slate-50 p-3">
+                        <div class="text-[11px] uppercase tracking-wide text-slate-500">Стоп-листы</div>
+                        <div class="mt-1 font-bold tabular-nums" x-text="networkBenchmarkData.network_averages?.stoplist_incidents ?? 0"></div>
+                    </div>
+                    <div class="rounded-xl bg-slate-50 p-3">
+                        <div class="text-[11px] uppercase tracking-wide text-slate-500">AI QA риски</div>
+                        <div class="mt-1 font-bold tabular-nums" x-text="networkBenchmarkData.network_averages?.qa_risk_count ?? 0"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="rounded-2xl border border-slate-200 bg-white overflow-hidden">
+                <div class="px-5 py-4 border-b border-slate-100 text-sm font-semibold text-slate-900">Сравнение филиалов</div>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full text-sm">
+                        <thead class="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                            <tr>
+                                <th class="px-4 py-3">#</th>
+                                <th class="px-4 py-3">Филиал</th>
+                                <th class="px-4 py-3">Выручка</th>
+                                <th class="px-4 py-3">Δ vs сеть</th>
+                                <th class="px-4 py-3">Потери</th>
+                                <th class="px-4 py-3">Upsell</th>
+                                <th class="px-4 py-3">Recovery</th>
+                                <th class="px-4 py-3">Стоп</th>
+                                <th class="px-4 py-3">QA</th>
+                                <th class="px-4 py-3">Главная проблема</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="loc in (networkBenchmarkData.locations || [])" :key="'nb-loc-' + loc.organization_id">
+                                <tr class="border-t border-slate-100" :class="loc.organization_id === userData?.organization_id ? 'bg-indigo-50/40' : ''">
+                                    <td class="px-4 py-3 tabular-nums font-semibold" x-text="loc.rank"></td>
+                                    <td class="px-4 py-3 font-medium" x-text="loc.name"></td>
+                                    <td class="px-4 py-3 tabular-nums" x-text="fmt.money(loc.org_revenue_kzt ?? loc.revenue ?? 0)"></td>
+                                    <td class="px-4 py-3 tabular-nums text-xs" :class="networkBenchmarkDeltaClass(loc.delta_vs_avg?.revenue?.delta_kzt)"
+                                        x-text="networkBenchmarkFormatDelta(loc.delta_vs_avg?.revenue)"></td>
+                                    <td class="px-4 py-3 tabular-nums text-red-600" x-text="fmt.money(loc.lost_revenue || 0)"></td>
+                                    <td class="px-4 py-3 tabular-nums text-emerald-700" x-text="fmt.money(loc.upsell_revenue || 0)"></td>
+                                    <td class="px-4 py-3 tabular-nums text-sky-700" x-text="fmt.money(loc.recovery ?? loc.recovered_revenue ?? 0)"></td>
+                                    <td class="px-4 py-3 tabular-nums" x-text="loc.stoplist_incidents ?? 0"></td>
+                                    <td class="px-4 py-3 tabular-nums" x-text="loc.qa_risk_count ?? 0"></td>
+                                    <td class="px-4 py-3 text-slate-600 text-xs" x-text="loc.top_decline_reason || loc.main_issue || '—'"></td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div x-show="(networkBenchmarkData.practice_transfers || []).length" x-cloak class="rounded-2xl border border-violet-100 bg-violet-50/50 p-5">
+                <div class="text-sm font-semibold text-violet-900 mb-3">Перенос практик между филиалами</div>
+                <ul class="space-y-2">
+                    <template x-for="(transfer, idx) in (networkBenchmarkData.practice_transfers || [])" :key="'nb-transfer-' + idx">
+                        <li class="text-sm text-violet-900 flex items-start gap-2">
+                            <span class="shrink-0">↔</span>
+                            <span x-text="transfer.text || transfer"></span>
+                        </li>
+                    </template>
+                </ul>
+            </div>
+
+            <div x-show="(networkBenchmarkData.recommended_actions || []).length" x-cloak class="rounded-2xl border border-emerald-100 bg-emerald-50/50 p-5">
+                <div class="text-sm font-semibold text-emerald-900 mb-3">Рекомендации</div>
+                <ul class="space-y-2">
+                    <template x-for="(action, idx) in (networkBenchmarkData.recommended_actions || [])" :key="'nb-action-' + idx">
+                        <li class="text-sm text-emerald-900" x-text="action"></li>
+                    </template>
+                </ul>
+            </div>
+        </div>
+    </template>
+</div>

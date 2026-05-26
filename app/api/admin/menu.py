@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import delete as sql_delete
 from sqlalchemy import func, or_, select
@@ -23,10 +23,11 @@ from app.services.integration_health import (
 from app.services.iiko_onboarding import setup_organization_iiko, verify_iiko_api_login
 from app.services.iiko_sync_tasks import run_full_iiko_sync_for_org
 from app.services.menu_embeddings import reindex_organization_menu_embeddings
-from .cache_utils import json_with_etag, weak_etag_from_parts
-from app.services.menu_sync import sync_menu_from_iiko, sync_stop_lists
+from app.services.menu_cost_import import import_menu_costs_from_csv, preview_menu_costs_from_csv
+from app.services.menu_sync import sync_stop_lists
 from app.services.integration_config import iiko_effective_configured, whatsapp_effective_configured
 from app.services.order_logic import invalidate_menu_context_cache
+from .cache_utils import json_with_etag, weak_etag_from_parts
 from .deps import (
     _iiko_login_org_for_tenant,
     _menu_item_in_org,
@@ -200,6 +201,14 @@ async def integrations_status(
     base["auto_send_to_iiko_after_payment"] = bool(
         getattr(org_row, "auto_send_to_iiko_after_payment", False),
     ) if org_row is not None else False
+    from app.services.pos.adapters.base import VALID_POS_PROVIDERS
+
+    base["pos_provider"] = (
+        (getattr(org_row, "pos_provider", None) or "iiko").strip().lower()
+        if org_row is not None
+        else "iiko"
+    )
+    base["pos_providers_available"] = sorted(VALID_POS_PROVIDERS)
 
     # Payment providers: per-org config + env-var availability
     _pcj: dict = getattr(org_row, "payment_config_json", None) if org_row else None  # type: ignore[assignment]
@@ -432,16 +441,24 @@ async def integrations_sync_now(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """
-    Запуск полной синхронизации меню + стоп-листов iiko в фоне (не блокирует HTTP-запрос).
+    Запуск полной синхронизации меню + стоп-листов POS в фоне (не блокирует HTTP-запрос).
 
     Результат пишется в слоты last_* и журнал интеграций; UI обновляет статус опросом / WS.
     """
     org_id = admin_org_from_session(request)
-    creds = await resolve_org_iiko_credentials(db, org_id)
-    if creds is None:
+    import app.services.pos.adapters  # noqa: F401 — register adapters
+    from app.services.pos.adapters.base import get_pos_adapter
+
+    try:
+        adapter = await get_pos_adapter(db, org_id)
+        health = await adapter.health(db, org_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not health.get("ok"):
+        slug = getattr(adapter, "provider_slug", "pos")
         raise HTTPException(
             status_code=400,
-            detail="Настройте iiko для филиала (ключ и организация) или задайте IIKO_* в .env",
+            detail=f"Настройте {slug} для филиала",
         )
 
     background_tasks.add_task(run_full_iiko_sync_for_org, int(org_id))
@@ -536,6 +553,7 @@ async def create_menu_item(
         dietary_tags=(body.dietary_tags or "").strip(),
         upsell_pairs=(body.upsell_pairs or "").strip(),
         price=body.price,
+        cost_price=body.cost_price,
         is_available=body.is_available,
         image_url=(body.image_url or "").strip() or None,
     )
@@ -583,6 +601,8 @@ async def patch_menu_item(
     if "image_url" in data:
         url = (data["image_url"] or "").strip()
         data["image_url"] = url if url else None
+    if "cost_price" in data and data["cost_price"] is not None:
+        data["cost_price"] = max(0.0, float(data["cost_price"]))
 
     for key, value in data.items():
         setattr(item, key, value)
@@ -593,6 +613,58 @@ async def patch_menu_item(
     await db.flush()
     invalidate_menu_context_cache(org_id)
     return {"ok": True, "item": _menu_item_dict(item)}
+
+
+async def _read_menu_cost_csv(file: UploadFile) -> str:
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Файл пуст")
+    try:
+        return raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return raw.decode("cp1251", errors="replace")
+
+
+@router.post("/menu/cost-import/preview")
+async def preview_menu_costs(
+    request: Request,
+    file: UploadFile = File(..., description="CSV: iiko_id или name + cost_price"),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Предпросмотр импорта себестоимости из CSV без записи в БД."""
+    org_id = admin_org_from_session(request)
+    text = await _read_menu_cost_csv(file)
+    result = await preview_menu_costs_from_csv(db, org_id, text)
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("errors") or "Некорректный CSV")
+    return {"ok": True, "preview": True, **result}
+
+
+@router.post("/menu/cost-import/apply")
+async def apply_menu_costs(
+    request: Request,
+    file: UploadFile = File(..., description="CSV: iiko_id или name + cost_price"),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Применить импорт себестоимости позиций меню из CSV."""
+    org_id = admin_org_from_session(request)
+    text = await _read_menu_cost_csv(file)
+    result = await import_menu_costs_from_csv(db, org_id, text)
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("errors") or "Некорректный CSV")
+    invalidate_menu_context_cache(org_id)
+    await db.flush()
+    return {"ok": True, "applied": True, **result}
+
+
+@router.post("/menu/cost-import")
+async def import_menu_costs(
+    request: Request,
+    file: UploadFile = File(..., description="CSV: iiko_id или name + cost_price"),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Импорт себестоимости позиций меню из CSV (alias apply)."""
+    return await apply_menu_costs(request, file, db)
 
 
 @router.post("/menu/clear")
@@ -657,11 +729,12 @@ async def sync_menu(
     Учётные данные из query, из настроек филиала или из .env. Совпадение по ``iiko_id``.
     """
     org_id = admin_org_from_session(request)
-    login, org, _tg = await _iiko_login_org_for_tenant(db, org_id, api_login, organization_id)
+    import app.services.pos.adapters  # noqa: F401 — register adapters
+    from app.services.pos.adapters.base import get_pos_adapter
+
     try:
-        stats = await sync_menu_from_iiko(
-            db, login, org, restomind_organization_id=org_id,
-        )
+        adapter = await get_pos_adapter(db, org_id)
+        stats = await adapter.sync_menu(db, org_id)
         invalidate_menu_context_cache(org_id)
         sk = stats.get("skipped")
         detail_m = (
@@ -712,11 +785,12 @@ async def sync_stop_lists_endpoint(
     Раньше принимались произвольные api_login/organization_id (риск cross-tenant).
     """
     org_id = admin_org_from_session(request)
-    login, org, tg = await _iiko_login_org_for_tenant(db, org_id, None, None)
+    import app.services.pos.adapters  # noqa: F401 — register adapters
+    from app.services.pos.adapters.base import get_pos_adapter
+
     try:
-        stats = await sync_stop_lists(
-            db, login, org, terminal_group_id=tg, menu_organization_id=org_id,
-        )
+        adapter = await get_pos_adapter(db, org_id)
+        stats = await adapter.sync_stoplist(db, org_id)
         detail_s = (
             f"Стоп-листы: успешно "
             f"(в стопе: {stats.get('stopped', 0)}, восстановлено: {stats.get('restored', 0)})"

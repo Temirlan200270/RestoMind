@@ -131,9 +131,29 @@
   - **Auto-recommendations (~95%):** 6 типов + `autopilot_pricing`. `POST /apply-pricing/{rec_id}` и **`POST /apply-pricing/bulk`** (все `new` за org).
   - **Self-healing (~95%):** 4 детектора + **Self-Healing 2.0** — WA-напоминание гостям с `prepayment_status=pending` при spike failed payments ([`healing_actions.py`](app/services/healing_actions.py)). `AuditLog` + `GET /audit-log`. `stock_alerts[]` на `/os-dashboard` (inventory snapshots или прокси из DailyOrgStats).
 
+### Owner Intelligence (продуктовый слой для владельца)
+
+- [x] **Этап 1 — Summary:** `build_owner_intelligence_summary`, `GET /api/admin/owner-intelligence/summary`, вкладка **Owner Intelligence** в AI Center.
+- [x] **Этап 2 — QA Auto-Audit:** таблица `ai_order_audits`, `order_ai_audit.py`, API review/dismiss, событие `ai_order.audit_risk_detected`.
+- [x] **Этап 3 — Upsell attribution:** `upsell_offer_events`, `upsell_attribution.py`, `GET /upsell-impact`; Revenue Copilot scoring + anti-repeat + A/B experiments + Smart Sales UI.
+- [x] **Revenue Copilot (Wave 1):** `upsell_scoring_engine.py`, `get_copilot_candidate_lists`, `upsell_experiments` + migration, coordinator в `intent_router` / `context_engine`.
+- [x] **OI hardening (Wave 2):** cron audit backfill, `kitchen_gate.order_blocked`, QA audit v2 + badge, Kitchen Gate expires presets.
+- [x] **Analytics v2 (Wave 3):** Menu Profit `cost_price` UI/CSV; Network Benchmark full screen + v2 DTO.
+- [x] **Channels (Wave 4):** Telegram customer channel foundation; POS `IikoAdapter` + `pos_provider`.
+- [x] **Этап 4 — Kitchen Gate v2:** `operational_mode_states`, GET/PATCH `/kitchen-gate`, интеграция в `decision_engine` + AI context; toggles на **Смена** и Owner Intelligence (`_kitchen_gate_panel.html`).
+- [x] **Этап 5 — Menu Profit Lab:** `menu_profit_lab.py`, `GET /menu-profit`, preview в summary.
+- [x] **Этап 6 — Network Benchmark:** `network_benchmark.py`, `GET /network-benchmark` (disabled для одиночной точки).
+- [x] **Hot-path hooks:** upsell offers в `apply_db_upsell_rules` + LLM upsell; audit после `confirm_order`; backfill `POST /order-audits/backfill`.
+- [x] **Stop-list replacements:** категорийные альтернативы в `compose_stoplist_notice`, событие `kitchen_gate.replacement_suggested`.
+- [x] **Sales-ready (P0–P6):** deploy smoke §8 в [`DEPLOY_RUNBOOK.md`](docs/DEPLOY_RUNBOOK.md); Revenue Copilot v3 (`upsell_pair_mining`); Telegram production; r_keeper adapter; weekly digest; QA polish; Menu/Network sales UI.
+- [x] **Digest habit (§5):** `owner_digest_delivery.py`, preview + manual send в OI, `SystemEvent` audit log, Monday cron по TZ org.
+- [x] **Menu Profit sales (§6):** price recommendations (`recommended_price`, `expected_margin_lift`), missing cost checklist, promote today для Copilot.
+- [x] **Network Benchmark sales (§7):** per-location metrics table, weekly narratives + practice transfer.
+- [x] **QA workflow (§8):** chat badge, filters (high/unreviewed/stoplist/address), outcome calibration loop.
+
 ## 🔵 P5: OS Decision Feed (Visibility — выполнен)
 
-> Цель: владелец «чувствует» работу ОС. **Статус: Launch Window** — код P0–P5 закрыт; выкатка и натурные тесты — [`docs/DEPLOY_RUNBOOK.md`](docs/DEPLOY_RUNBOOK.md), sign-off [`docs/FINAL_MILE_OPS_SIGNOFF.md`](docs/FINAL_MILE_OPS_SIGNOFF.md) §A–§B.
+> Цель: владелец «чувствует» работу ОС. **Статус: Launch Window** — код P0–P6 (Owner Intelligence sales-ready) закрыт; выкатка и натурные тесты — [`docs/DEPLOY_RUNBOOK.md`](docs/DEPLOY_RUNBOOK.md) §8, sign-off [`docs/FINAL_MILE_OPS_SIGNOFF.md`](docs/FINAL_MILE_OPS_SIGNOFF.md) §A–§B.
 
 ### Focus-Driven OS (Admin Shell) — целевая UI-модель G10.4+
 

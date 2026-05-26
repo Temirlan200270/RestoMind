@@ -1,4 +1,5 @@
 {% from "components/_card.html" import card %}
+{% from "components/_order_qa_audit_badge.html" import order_qa_audit_badge %}
 {# Context Dock — slow_chat / pulse red|amber (Sprint 2) #}
 {% call card(padding_class='p-0', extra_class='ds-shift-dock-card overflow-hidden h-full') %}
     <div class="px-4 py-3 border-b border-slate-100 bg-slate-50 flex items-center justify-between gap-2">
@@ -34,6 +35,8 @@
                     class="ds-btn ds-btn-secondary ds-btn-sm min-h-[44px] w-full mt-3">Открыть заказ</button>
             </div>
         </template>
+
+        {{ order_qa_audit_badge() }}
 
         <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
             <button type="button" @click="shiftDockOpenChat()"

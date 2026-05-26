@@ -1,0 +1,398 @@
+{# Owner Intelligence — STAGE 1 (AI Center sub-tab) #}
+{% from "components/_kitchen_gate_panel.html" import kitchen_gate_panel %}
+<div x-show="currentTab === 'ai_center' && aiCenterTab === 'owner_intel'" x-cloak class="fade-in space-y-6 pb-16">
+    <div class="flex flex-col gap-4">
+        {{ section_header('Owner Intelligence', subtitle='Потери, восстановления, допродажи и контроль смены за выбранный период.', extra_class='!mb-0') }}
+        <div class="flex flex-wrap items-center gap-3">
+            {% call segmented(extra_class='border border-slate-200 bg-white shrink-0') %}
+            <div class="contents" role="tablist" aria-label="Период Owner Intelligence">
+                <template x-for="p in [{id:'today', label:'Сегодня'}, {id:'7d', label:'7д'}, {id:'30d', label:'30д'}]" :key="p.id">
+                    <button type="button" @click="setOwnerIntelPeriod(p.id)"
+                        :class="ownerIntelPeriod === p.id ? 'ds-segmented-active' : ''"
+                        class="px-3 py-2 rounded-lg text-sm font-semibold transition"
+                        x-text="p.label"></button>
+                </template>
+            </div>
+            {% endcall %}
+            <button type="button" @click="loadOwnerIntelligence()" class="ds-btn ds-btn-secondary ds-btn-sm"
+                :disabled="ownerIntelLoading">
+                <span x-show="!ownerIntelLoading">Обновить</span>
+                <span x-show="ownerIntelLoading">Загрузка…</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Weekly digest -->
+    {% call card(title='Еженедельный отчёт владельцу', padding_class='p-5') %}
+        <div class="flex flex-col gap-4">
+            <p class="text-sm ds-text-muted">
+                Telegram-дайджест за прошлую неделю: ROI, допродажи, QA и Kitchen Gate.
+                Автоотправка — понедельник 10:00 по часовому поясу заведения.
+            </p>
+            <div x-show="ownerIntelDigestLastSent?.created_at" class="text-xs ds-text-muted">
+                Последняя отправка:
+                <span class="font-semibold text-slate-700">
+                    <span x-text="ownerIntelDigestLastSent?.created_at ? fmt.date(ownerIntelDigestLastSent.created_at) : '—'"></span>
+                    <span x-show="ownerIntelDigestLastSent?.created_at" x-text="', ' + fmt.time(ownerIntelDigestLastSent.created_at)"></span>
+                </span>
+            </div>
+            <div x-show="ownerIntelDigestLoading" class="h-24 rounded-xl bg-slate-100 animate-pulse"></div>
+            <div x-show="!ownerIntelDigestLoading && ownerIntelDigestPreview?.text" x-cloak
+                class="rounded-xl bg-slate-50 border border-slate-100 p-4">
+                <pre class="text-xs text-slate-700 whitespace-pre-wrap font-sans leading-relaxed"
+                    x-text="ownerIntelDigestPreview?.text || ''"></pre>
+            </div>
+            <template x-if="!ownerIntelDigestLoading && !ownerIntelDigestPreview?.text">
+                {{ empty_state('Нет данных за прошлую неделю', 'Когда накопятся заказы и метрики, превью появится здесь.', extra_class='!py-6') }}
+            </template>
+            <div class="flex flex-wrap gap-2">
+                <button type="button" class="ds-btn ds-btn-primary ds-btn-sm"
+                    :disabled="ownerIntelDigestSending || ownerIntelDigestLoading || !ownerIntelDigestPreview?.text"
+                    @click="sendOwnerIntelDigest(false)">
+                    <span x-show="!ownerIntelDigestSending">Отправить отчёт сейчас</span>
+                    <span x-show="ownerIntelDigestSending">Отправка…</span>
+                </button>
+                <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm"
+                    :disabled="ownerIntelDigestSending"
+                    @click="loadOwnerIntelDigestPreview()">
+                    Обновить превью
+                </button>
+            </div>
+        </div>
+    {% endcall %}
+
+    <div x-show="ownerIntelLoading && !ownerIntelData" class="h-32 rounded-2xl bg-slate-100 animate-pulse"></div>
+
+    <!-- KPI -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+        {% set oi_kpi_accepted %}
+            <div class="mt-2 text-3xl font-black tabular-nums" style="color: var(--color-text);"
+                x-text="ownerIntelData?.kpi?.accepted ?? 0"></div>
+            <p class="mt-1 text-xs ds-text-muted">Заказов принято ИИ</p>
+        {% endset %}
+        {{ kpi_card('Принято', value_html=oi_kpi_accepted, extra_class='!p-5') }}
+
+        {% set oi_kpi_lost %}
+            <div class="mt-2 text-3xl font-black tabular-nums text-rose-600"
+                x-text="ownerIntelData?.kpi?.lost ?? 0"></div>
+            <p class="mt-1 text-xs ds-text-muted">Потерянных возможностей</p>
+        {% endset %}
+        {{ kpi_card('Потери', value_html=oi_kpi_lost, extra_class='!p-5') }}
+
+        {% set oi_kpi_recovered %}
+            <div class="mt-2 text-3xl font-black tabular-nums text-emerald-600"
+                x-text="ownerIntelData?.kpi?.recovered ?? 0"></div>
+            <p class="mt-1 text-xs ds-text-muted">Восстановлено</p>
+        {% endset %}
+        {{ kpi_card('Восстановлено', value_html=oi_kpi_recovered, extra_class='!p-5') }}
+
+        {% set oi_kpi_upsell %}
+            <div class="mt-2 text-3xl font-black tabular-nums" style="color: var(--color-text);"
+                x-text="fmt.money(ownerIntelData?.kpi?.upsell ?? 0)"></div>
+            <p class="mt-1 text-xs ds-text-muted">Выручка допродаж</p>
+        {% endset %}
+        {{ kpi_card('Допродажи', value_html=oi_kpi_upsell, extra_class='!p-5') }}
+
+        {% set oi_kpi_cost %}
+            <div class="mt-2 text-3xl font-black tabular-nums" style="color: var(--color-text);"
+                x-text="fmt.money(ownerIntelData?.kpi?.ai_cost ?? 0)"></div>
+            <p class="mt-1 text-xs ds-text-muted">Расход на ИИ за период</p>
+        {% endset %}
+        {{ kpi_card('Стоимость ИИ', value_html=oi_kpi_cost, extra_class='!p-5') }}
+
+        {% set oi_kpi_roi %}
+            <div class="mt-2 text-3xl font-black tabular-nums"
+                :class="(ownerIntelData?.kpi?.roi ?? 0) >= 1 ? 'text-emerald-600' : 'text-slate-900'"
+                x-text="ownerIntelData?.kpi?.roi == null ? '—' : (Number(ownerIntelData.kpi.roi).toFixed(1) + '×')"></div>
+            <p class="mt-1 text-xs ds-text-muted">ROI (выручка / cost)</p>
+        {% endset %}
+        {{ kpi_card('ROI', value_html=oi_kpi_roi, extra_class='!p-5') }}
+    </div>
+
+    {{ kitchen_gate_panel(
+        title='Kitchen Gate — контроль смены',
+        subtitle='Те же переключатели доступны на вкладке «Смена».',
+    ) }}
+
+    {% call card(title='Надёжность ИИ-оператора', padding_class='p-5') %}
+        <p class="text-sm ds-text-muted mb-4">
+            Технические сбои и эскалации по ответам ассистента за период — для контроля регрессий LLM.
+        </p>
+        <div x-show="ownerIntelData?.llm_reliability" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+            <div class="rounded-xl bg-slate-50 px-4 py-3">
+                <div class="text-xs ds-text-muted">Сообщений ассистента</div>
+                <div class="mt-1 text-2xl font-black tabular-nums"
+                    x-text="ownerIntelData?.llm_reliability?.assistant_messages ?? 0"></div>
+            </div>
+            <div class="rounded-xl bg-slate-50 px-4 py-3">
+                <div class="text-xs ds-text-muted">Тех. fallback</div>
+                <div class="mt-1 text-2xl font-black tabular-nums text-amber-600"
+                    x-text="(ownerIntelData?.llm_reliability?.pct_technical_fallback ?? 0) + '%'"></div>
+                <div class="text-xs ds-text-muted tabular-nums"
+                    x-text="(ownerIntelData?.llm_reliability?.technical_fallback_count ?? 0) + ' шт.'"></div>
+            </div>
+            <div class="rounded-xl bg-slate-50 px-4 py-3">
+                <div class="text-xs ds-text-muted">Эскалации</div>
+                <div class="mt-1 text-2xl font-black tabular-nums text-rose-600"
+                    x-text="(ownerIntelData?.llm_reliability?.pct_escalated ?? 0) + '%'"></div>
+                <div class="text-xs ds-text-muted tabular-nums"
+                    x-text="(ownerIntelData?.llm_reliability?.escalated_count ?? 0) + ' шт.'"></div>
+            </div>
+            <div class="rounded-xl bg-slate-50 px-4 py-3">
+                <div class="text-xs ds-text-muted">Период</div>
+                <div class="mt-1 text-2xl font-black tabular-nums"
+                    x-text="(ownerIntelData?.llm_reliability?.period_days ?? 7) + ' дн.'"></div>
+            </div>
+        </div>
+        <template x-if="!ownerIntelData?.llm_reliability && !ownerIntelLoading">
+            {{ empty_state('Метрик пока нет', 'Когда накопятся ответы ИИ, здесь появятся проценты fallback и эскалаций.', extra_class='!py-6') }}
+        </template>
+    {% endcall %}
+
+    <div class="grid grid-cols-1 xl:grid-cols-2 gap-5">
+        <!-- Top losses -->
+        {% call card(title='Топ потерь', padding_class='p-5') %}
+            <template x-if="(ownerIntelData?.top_losses || []).length">
+                <div class="space-y-2">
+                    <template x-for="(row, idx) in (ownerIntelData.top_losses || [])" :key="row.id || idx">
+                        <div class="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2.5">
+                            <div class="min-w-0">
+                                <div class="text-sm font-semibold text-slate-900 truncate" x-text="row.label || row.title || '—'"></div>
+                                <div class="text-xs ds-text-muted truncate" x-text="row.detail || row.reason || ''"></div>
+                            </div>
+                            <div class="text-sm font-bold tabular-nums text-rose-600 shrink-0"
+                                x-text="row.amount_kzt != null ? fmt.money(row.amount_kzt) : (row.count ?? '')"></div>
+                        </div>
+                    </template>
+                </div>
+            </template>
+            <template x-if="!(ownerIntelData?.top_losses || []).length && !ownerIntelLoading">
+                {{ empty_state('Потерь за период нет', 'ИИ не зафиксировал критичных отказов или отмен.', extra_class='!py-8') }}
+            </template>
+        {% endcall %}
+
+        <!-- Top actions -->
+        {% call card(title='5 действий на неделю', padding_class='p-5') %}
+            <template x-if="(ownerIntelData?.top_actions || []).length">
+                <div class="space-y-2">
+                    <template x-for="(row, idx) in (ownerIntelData.top_actions || [])" :key="row.id || idx">
+                        <div class="flex items-start justify-between gap-3 rounded-xl border border-slate-100 px-3 py-2.5">
+                            <div class="min-w-0">
+                                <div class="text-sm font-semibold text-slate-900" x-text="row.title || row.label || '—'"></div>
+                                <div class="text-xs ds-text-muted line-clamp-2" x-text="row.body || row.detail || ''"></div>
+                            </div>
+                            <div x-show="row.impact_kzt != null" class="text-xs font-bold text-emerald-700 shrink-0"
+                                x-text="'+' + fmt.money(row.impact_kzt)"></div>
+                        </div>
+                    </template>
+                </div>
+            </template>
+            <template x-if="!(ownerIntelData?.top_actions || []).length && !ownerIntelLoading">
+                {{ empty_state('Рекомендаций пока нет', 'Когда появятся инсайты с ROI, они отобразятся здесь.', extra_class='!py-8') }}
+            </template>
+        {% endcall %}
+    </div>
+
+    <!-- QA Audits -->
+    {% call card(title='Проверьте рискованные AI-заказы', padding_class='p-5') %}
+        <div class="flex flex-wrap items-center gap-2 mb-4">
+            <button type="button" class="ds-btn ds-btn-sm"
+                :class="ownerIntelAuditFilters.riskHighCritical ? 'ds-btn-primary' : 'ds-btn-secondary'"
+                @click="toggleOwnerIntelAuditFilter('riskHighCritical')">High / Critical</button>
+            <button type="button" class="ds-btn ds-btn-sm"
+                :class="ownerIntelAuditFilters.unreviewedOnly ? 'ds-btn-primary' : 'ds-btn-secondary'"
+                @click="toggleOwnerIntelAuditFilter('unreviewedOnly')">Непроверенные</button>
+            <button type="button" class="ds-btn ds-btn-sm"
+                :class="ownerIntelAuditFilters.stoplist ? 'ds-btn-primary' : 'ds-btn-secondary'"
+                @click="toggleOwnerIntelAuditFilter('stoplist')">Стоп-лист</button>
+            <button type="button" class="ds-btn ds-btn-sm"
+                :class="ownerIntelAuditFilters.wrongAddress ? 'ds-btn-primary' : 'ds-btn-secondary'"
+                @click="toggleOwnerIntelAuditFilter('wrongAddress')">Адрес</button>
+            <span class="text-xs ds-text-muted ml-auto tabular-nums"
+                x-show="ownerIntelAuditSummary?.total != null"
+                x-text="'Всего: ' + (ownerIntelAuditSummary?.total ?? 0) + ' · открытых: ' + (ownerIntelAuditSummary?.open_count ?? 0)"></span>
+        </div>
+        <div x-show="ownerIntelAuditsLoading" class="text-sm ds-text-muted">Загрузка аудитов…</div>
+        <template x-if="(ownerIntelAudits || []).length && !ownerIntelAuditsLoading">
+            <div class="space-y-3">
+                <template x-for="audit in ownerIntelAudits" :key="audit.id">
+                    <div class="rounded-xl border border-slate-100 px-3 py-3 space-y-2">
+                        <div class="flex items-start justify-between gap-3">
+                            <div class="min-w-0">
+                                <div class="text-sm font-semibold text-slate-900">
+                                    Заказ <span x-text="'#' + (audit.order_id || audit.id)"></span>
+                                    <span class="ml-2 text-xs uppercase font-bold"
+                                        :class="audit.risk_level === 'critical' || audit.risk_level === 'high' ? 'text-rose-600' : (audit.risk_level === 'medium' ? 'text-amber-600' : 'text-slate-500')"
+                                        x-text="audit.risk_level || 'low'"></span>
+                                </div>
+                                <div class="text-xs ds-text-muted mt-0.5"
+                                    x-text="'Сумма ~ ' + fmt.money(audit.order_total || audit.prevented_value || 0) + ' · risk ' + (audit.risk_score ?? 0)"></div>
+                            </div>
+                            <span class="text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-full bg-slate-100 text-slate-600"
+                                x-text="audit.status || 'open'"></span>
+                        </div>
+                        <ul class="text-xs text-slate-600 list-disc pl-4 space-y-0.5"
+                            x-show="(audit.reasons || audit.reasons_json || []).length">
+                            <template x-for="(reason, ri) in (audit.reasons || audit.reasons_json || []).slice(0, 3)" :key="ri">
+                                <li x-text="typeof reason === 'string' ? reason : (reason.detail || reason.message || '')"></li>
+                            </template>
+                        </ul>
+                        <div class="flex flex-wrap gap-2 pt-1">
+                            <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm"
+                                x-show="audit.order_id"
+                                @click="navigateToTab('orders'); $nextTick(() => { ordersSearchQ = String(audit.order_id); loadOrders(true); })">
+                                Открыть заказ
+                            </button>
+                            <button type="button" class="ds-btn ds-btn-primary ds-btn-sm"
+                                x-show="audit.status === 'open'"
+                                @click="reviewOwnerIntelAudit(audit.id)">Проверен</button>
+                            <button type="button" class="ds-btn ds-btn-secondary ds-btn-sm"
+                                x-show="audit.status === 'open'"
+                                @click="dismissOwnerIntelAudit(audit.id)">Скрыть</button>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </template>
+        <template x-if="!(ownerIntelAudits || []).length && !ownerIntelAuditsLoading">
+            {{ empty_state('Рисковых заказов нет', 'После подтверждения заказов аудиты появятся здесь автоматически.', extra_class='!py-8') }}
+        </template>
+    {% endcall %}
+
+    <div class="grid grid-cols-1 xl:grid-cols-2 gap-5">
+        <!-- Upsell impact -->
+        {% call card(title='Влияние допродаж', padding_class='p-5') %}
+            <template x-if="ownerIntelData?.upsell_impact">
+                <div class="space-y-4">
+                    <div class="grid grid-cols-2 gap-3">
+                        <div class="rounded-xl bg-slate-50 p-4">
+                            <div class="text-xs ds-text-muted">Показано</div>
+                            <div class="mt-1 text-xl font-bold" x-text="ownerIntelData.upsell_impact.offered ?? 0"></div>
+                        </div>
+                        <div class="rounded-xl bg-slate-50 p-4">
+                            <div class="text-xs ds-text-muted">Принято</div>
+                            <div class="mt-1 text-xl font-bold text-emerald-700" x-text="ownerIntelData.upsell_impact.accepted ?? 0"></div>
+                        </div>
+                        <div class="rounded-xl bg-slate-50 p-4 col-span-2">
+                            <div class="text-xs ds-text-muted">Доп. выручка</div>
+                            <div class="mt-1 text-xl font-bold tabular-nums" x-text="fmt.money(ownerIntelData.upsell_impact.revenue_kzt ?? ownerIntelData.upsell_impact.added_revenue ?? 0)"></div>
+                        </div>
+                    </div>
+                    <template x-if="(ownerIntelData.upsell_impact.best_variants || []).length">
+                        <div>
+                            <div class="text-xs font-semibold uppercase ds-text-muted mb-2">Лучшие фразы</div>
+                            <template x-for="(v, vi) in (ownerIntelData.upsell_impact.best_variants || []).slice(0, 3)" :key="vi">
+                                <div class="flex justify-between gap-2 text-sm py-1">
+                                    <span class="truncate" x-text="v.variant || v.variant_key"></span>
+                                    <span class="shrink-0 font-semibold tabular-nums text-emerald-700"
+                                        x-text="v.conversion_rate != null ? (Number(v.conversion_rate * 100).toFixed(0) + '% CR') : ''"></span>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+                    <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" @click="setSettingsTab('smart_sales'); navigateToTab('settings')">
+                        Настроить умные продажи →
+                    </button>
+                </div>
+            </template>
+            <template x-if="!ownerIntelData?.upsell_impact && !ownerIntelLoading">
+                {{ empty_state('Нет данных по допродажам', 'За выбранный период события upsell ещё не накоплены.', extra_class='!py-8') }}
+            </template>
+        {% endcall %}
+
+        <!-- Menu Profit Lab -->
+        {% call card(title='Menu Profit Lab', padding_class='p-5') %}
+            <template x-if="ownerIntelData?.menu_preview?.missing_cost_checklist && !ownerIntelData.menu_preview.missing_cost_checklist.onboarding_complete">
+                <div class="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 flex flex-wrap items-center justify-between gap-3">
+                    <div class="text-sm text-amber-900">
+                        <span class="font-semibold" x-text="ownerIntelData.menu_preview.missing_cost_checklist.missing_count + ' из ' + ownerIntelData.menu_preview.missing_cost_checklist.total_items"></span>
+                        <span> позиций без себестоимости (</span>
+                        <span class="font-semibold tabular-nums" x-text="(ownerIntelData.menu_preview.missing_cost_checklist.missing_pct || 0) + '%'"></span>
+                        <span>). Маржа и рекомендации по цене будут точнее после заполнения.</span>
+                    </div>
+                    <button type="button" class="ds-btn ds-btn-secondary ds-btn-sm shrink-0" @click="navigateToTab('menu')">
+                        Заполнить в меню →
+                    </button>
+                </div>
+            </template>
+            <template x-if="(ownerIntelData?.menu_preview?.price_recommendations || ownerIntelData?.menu_preview?.price_increase_candidates || []).length">
+                <div class="mb-4 overflow-x-auto">
+                    <div class="text-xs font-semibold uppercase ds-text-muted mb-2">Рекомендации по цене</div>
+                    <table class="w-full text-sm min-w-[420px]">
+                        <thead>
+                            <tr class="text-left text-xs ds-text-muted border-b border-slate-100">
+                                <th class="pb-2 pr-2 font-semibold">Позиция</th>
+                                <th class="pb-2 pr-2 font-semibold text-right">Цена</th>
+                                <th class="pb-2 pr-2 font-semibold text-right">→</th>
+                                <th class="pb-2 pr-2 font-semibold text-right">Маржа</th>
+                                <th class="pb-2 font-semibold text-right">Эффект</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="(item, idx) in (ownerIntelData.menu_preview.price_recommendations || ownerIntelData.menu_preview.price_increase_candidates || []).slice(0, 5)" :key="'oi-rec-' + (item.menu_item_id || idx)">
+                                <tr class="border-b border-slate-50 last:border-0">
+                                    <td class="py-2 pr-2 font-medium text-slate-800 truncate max-w-[140px]" x-text="item.name || '—'"></td>
+                                    <td class="py-2 pr-2 text-right tabular-nums text-slate-600" x-text="fmt.money(item.current_price ?? item.price ?? 0)"></td>
+                                    <td class="py-2 pr-2 text-right tabular-nums font-semibold text-amber-700">
+                                        <span x-text="fmt.money(item.recommended_price ?? 0)"></span>
+                                        <span class="text-xs ml-1" x-text="item.recommended_increase_pct != null ? ('+' + item.recommended_increase_pct + '%') : ''"></span>
+                                    </td>
+                                    <td class="py-2 pr-2 text-right tabular-nums" x-text="item.margin_pct != null ? (item.margin_pct + '%') : '—'"></td>
+                                    <td class="py-2 text-right tabular-nums text-emerald-700 font-semibold"
+                                        x-text="item.expected_margin_lift > 0 ? ('+' + fmt.money(item.expected_margin_lift)) : '—'"></td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </template>
+            <template x-if="(ownerIntelData?.menu_preview?.promote_today_copilot || ownerIntelData?.menu_preview?.promote_today || []).length">
+                <div class="space-y-2 mb-4">
+                    <div class="text-xs font-semibold uppercase ds-text-muted mb-2">Продвигать сегодня (Revenue Copilot)</div>
+                    <template x-for="(item, idx) in (ownerIntelData.menu_preview.promote_today_copilot || ownerIntelData.menu_preview.promote_today || []).slice(0, 5)" :key="'oi-promote-' + (item.menu_item_id || item.iiko_id || idx)">
+                        <div class="flex items-center justify-between gap-3 text-sm rounded-lg bg-slate-50 px-3 py-2">
+                            <span class="truncate font-medium text-slate-800" x-text="item.name || '—'"></span>
+                            <span class="shrink-0 text-xs font-semibold text-emerald-700 tabular-nums"
+                                x-text="(item.score != null ? ('score ' + Number(item.score).toFixed(1)) : '') + (item.reason ? (' · ' + item.reason) : '')"></span>
+                        </div>
+                    </template>
+                </div>
+            </template>
+            <template x-if="!(ownerIntelData?.menu_preview?.promote_today || []).length && !(ownerIntelData?.menu_preview?.price_increase_candidates || []).length && !(ownerIntelData?.menu_preview?.price_recommendations || []).length && !ownerIntelLoading">
+                {{ empty_state('Превью меню пусто', 'Заполните себестоимость в каталоге для расчёта маржи.', extra_class='!py-8') }}
+            </template>
+            <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm mt-2" @click="navigateToTab('menu')">
+                Открыть каталог меню →
+            </button>
+        {% endcall %}
+    </div>
+
+    <!-- Network benchmark -->
+    <div x-show="userData?.is_network && ownerIntelData?.network_benchmark?.enabled !== false" x-cloak>
+        {% call card(title='Бенчмарк сети', padding_class='p-5') %}
+            <template x-if="ownerIntelData?.network_benchmark">
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div class="rounded-xl bg-indigo-50 p-4">
+                        <div class="text-xs text-indigo-700">Ваша точка</div>
+                        <div class="mt-1 text-lg font-bold tabular-nums" x-text="fmt.money(ownerIntelData.network_benchmark.org_revenue_kzt ?? 0)"></div>
+                    </div>
+                    <div class="rounded-xl bg-slate-50 p-4">
+                        <div class="text-xs ds-text-muted">Среднее по сети</div>
+                        <div class="mt-1 text-lg font-bold tabular-nums" x-text="fmt.money(ownerIntelData.network_benchmark.network_avg_kzt ?? 0)"></div>
+                    </div>
+                    <div class="rounded-xl bg-slate-50 p-4">
+                        <div class="text-xs ds-text-muted">Позиция</div>
+                        <div class="mt-1 text-lg font-bold" x-text="ownerIntelData.network_benchmark.rank_label || '—'"></div>
+                    </div>
+                </div>
+                <div x-show="ownerIntelData.network_benchmark.top_decline_reason || (ownerIntelData.network_benchmark.decline_reasons || []).length" x-cloak class="mt-4">
+                    <div class="text-xs font-semibold uppercase tracking-wide text-amber-700 mb-1">Главный фактор отставания</div>
+                    <div class="text-sm text-slate-700" x-text="ownerIntelData.network_benchmark.top_decline_reason || (ownerIntelData.network_benchmark.decline_reasons || [])[0] || '—'"></div>
+                </div>
+            </template>
+            <template x-if="!ownerIntelData?.network_benchmark && !ownerIntelLoading">
+                {{ empty_state('Бенчмарк недоступен', 'Для сети включите is_network и дождитесь агрегации.', extra_class='!py-8') }}
+            </template>
+        {% endcall %}
+    </div>
+</div>

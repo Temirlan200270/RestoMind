@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import MenuItem, UpsellRule
 from app.schemas.ai_schemas import AIBrainResponse
+from app.services.upsell_scoring_engine import pick_best_candidate
 from app.services.upsell_utils import (
     cart_iiko_ids,
     collect_cart_tag_profile,
@@ -100,11 +101,32 @@ async def apply_db_upsell_rules(
     grand_total: float,
     menu_items: list[MenuItem],
     ai_eff: AIBrainResponse,
+    order_id: int | None = None,
+    user_id: int | None = None,
+    location_id: int | None = None,
+    copilot_feed: dict | None = None,
+    recent_rejections: list[Any] | None = None,
+    pair_scores: dict[str, dict[str, float]] | None = None,
+    offer_frequency_penalties: dict[str, float] | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """
     Если подходит правило — добавляет одну фразу и событие в ``recommendation_trace``.
     Возвращает (новый reply, новый items_json).
     """
+    from app.services.upsell_safety_gate import UpsellSafetyContext, should_suppress_upsell
+
+    meta_pre = dict(items_json.get("order_meta") or {}) if isinstance(items_json.get("order_meta"), dict) else {}
+    if should_suppress_upsell(
+        UpsellSafetyContext(order_meta=meta_pre, intent=getattr(ai_eff, "intent", "order")),
+    ):
+        return reply_text, items_json
+
+    if order_id is not None:
+        from app.services.upsell_utils import max_one_upsell_per_order
+
+        if await max_one_upsell_per_order(db, int(order_id)):
+            return reply_text, items_json
+
     if (
         ai_eff.is_recommendation
         or (ai_eff.upsell_offered or "").strip()
@@ -188,14 +210,37 @@ async def apply_db_upsell_rules(
         )
         if not candidates:
             continue
-        pick = candidates[0]
+        pick, score_explain = pick_best_candidate(
+            candidates,
+            context={
+                "cart_items": items,
+                "order_meta": meta,
+                "user_meta": None,
+                "copilot_feed": copilot_feed,
+                "rule": rule,
+                "org_tz": await _get_org_tz(),
+                "menu_items": menu_items,
+                "recent_rejections": recent_rejections,
+                "pair_scores": pair_scores,
+                "offer_frequency_penalties": offer_frequency_penalties,
+            },
+        )
+        if pick is None:
+            continue
         iid = (pick.iiko_id or "").strip()
         if not iid:
             continue
         if _offered_recently(meta, iid):
             continue
 
-        tmpl = (rule.phrase_template or "").strip() or "К заказу отлично подойдёт {item_name} ({price} ₸). Добавить?"
+        from app.services.upsell_attribution import assign_variant_at_offer
+
+        variant_key, tmpl = await assign_variant_at_offer(
+            db,
+            organization_id=organization_id,
+            rule_id=int(rule.id),
+            fallback_template=(rule.phrase_template or "").strip(),
+        )
         try:
             extra = tmpl.format(
                 item_name=pick.name,
@@ -217,6 +262,33 @@ async def apply_db_upsell_rules(
         meta["recommendation_trace"] = trace[-15:]
         new_ij = dict(items_json)
         new_ij["order_meta"] = meta
+        try:
+            from app.services.upsell_attribution import record_upsell_offer
+
+            base_name = ""
+            if items:
+                base_name = str(items[0].get("name") or "").strip()
+            await record_upsell_offer(
+                db,
+                organization_id=organization_id,
+                location_id=location_id,
+                order_id=order_id,
+                user_id=user_id,
+                source_rule_id=int(rule.id),
+                base_item_id=str(items[0].get("iiko_id") or items[0].get("iiko_item_id") or "").strip() or None if items else None,
+                offered_item_id=iid,
+                base_item_name=base_name,
+                offered_item_name=pick.name,
+                variant=variant_key,
+                offered_price=float(pick.price or 0),
+                meta_json={
+                    "trigger_mode": mode,
+                    "trigger_category": trig,
+                    **score_explain,
+                },
+            )
+        except Exception as exc:
+            logger.debug("upsell offer record skipped rule=%s: %s", rule.id, exc)
         return f"{reply_text}\n\n💡 {extra}", new_ij
 
     return reply_text, items_json

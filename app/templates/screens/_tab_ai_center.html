@@ -11,6 +11,15 @@
                                 @click="navigateToTab('ai_center', { aiCenterTab: 'value' })">Вклад ИИ</button>
                             <button type="button"
                                 class="min-h-[44px] px-3 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap"
+                                :class="aiCenterTab === 'owner_intel' ? 'ds-segmented-active' : ''"
+                                @click="navigateOwnerIntelligence()">Owner Intelligence</button>
+                            <button type="button"
+                                class="min-h-[44px] px-3 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap"
+                                x-show="userData?.is_network"
+                                :class="aiCenterTab === 'network_benchmark' ? 'ds-segmented-active' : ''"
+                                @click="navigateNetworkBenchmark()">Бенчмарк сети</button>
+                            <button type="button"
+                                class="min-h-[44px] px-3 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap"
                                 :class="aiCenterTab === 'insights' ? 'ds-segmented-active' : ''"
                                 @click="navigateToTab('ai_center', { aiCenterTab: 'insights' })">Инсайты</button>
                             <button type="button"
@@ -59,6 +68,9 @@
                     </div>
                 </div>
             </div>
+
+            {% include "screens/_tab_owner_intelligence.html" %}
+            {% include "screens/_tab_network_benchmark.html" %}
 
             <!-- Phase 5 OS: OS Autopilot tab -->
             <div x-show="currentTab === 'ai_center' && aiCenterTab === 'os'" x-cloak class="fade-in space-y-4">

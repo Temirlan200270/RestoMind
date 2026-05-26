@@ -24,10 +24,12 @@ def normalize_phone_e164(phone: str) -> str:
 
 
 def canonical_user_phone(phone: str) -> str:
-    """Ключ пользователя в БД/Redis — E.164 с «+»."""
+    """Ключ пользователя в БД/Redis — E.164 с «+» или ``tg:{id}`` для Telegram."""
     raw = (phone or "").strip()
     if not raw:
         return ""
+    if raw.lower().startswith("tg:"):
+        return raw.lower()
     normalized = normalize_phone_e164(raw)
     return normalized if normalized else raw
 

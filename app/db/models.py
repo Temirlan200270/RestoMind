@@ -8,6 +8,7 @@ from enum import StrEnum
 from typing import Any
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     Date,
     DateTime,
@@ -119,6 +120,12 @@ class Organization(Base):
         String(255), default="", server_default="", comment="UUID терминальной группы (стоп-лист, deliveries)",
     )
     whatsapp_phone_number_id: Mapped[str] = mapped_column(String(100), default="", comment="ID номера WhatsApp")
+    pos_provider: Mapped[str] = mapped_column(
+        String(32),
+        default="iiko",
+        server_default="iiko",
+        comment="POS adapter slug (iiko, …)",
+    )
     prepayment_enforced: Mapped[bool] = mapped_column(
         Boolean,
         default=True,
@@ -148,6 +155,17 @@ class Organization(Base):
     )
     telegram_ops_chat_id: Mapped[str] = mapped_column(
         String(32), default="", server_default="", comment="Telegram chat_id для алертов персоналу (приоритет над глобальным env)",
+    )
+    telegram_bot_username: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        comment="@username Telegram-бота клиентского канала",
+    )
+    telegram_webhook_secret: Mapped[str | None] = mapped_column(
+        String(128),
+        nullable=True,
+        index=True,
+        comment="X-Telegram-Bot-Api-Secret-Token / fingerprint bot token для маршрутизации webhook",
     )
     schedule_json: Mapped[dict[str, Any] | None] = mapped_column(
         JSON,
@@ -328,6 +346,11 @@ class User(Base):
     __tablename__ = "users"
     __table_args__ = (
         UniqueConstraint("organization_id", "phone", name="uq_users_organization_phone"),
+        UniqueConstraint(
+            "organization_id",
+            "telegram_user_id",
+            name="uq_users_organization_telegram_user_id",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -337,6 +360,12 @@ class User(Base):
     )
     phone: Mapped[str] = mapped_column(
         String(20), nullable=False, index=True, comment="Номер телефона в формате E.164 (уникален в пределах организации)"
+    )
+    telegram_user_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        nullable=True,
+        index=True,
+        comment="Telegram user id клиента (customer channel)",
     )
     name: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="Имя клиента")
     operator_note: Mapped[str] = mapped_column(
@@ -544,6 +573,12 @@ class ChatLog(Base):
         String(20), nullable=False,
         comment="Роль отправителя: user / assistant / system"
     )
+    channel: Mapped[str] = mapped_column(
+        String(16),
+        default="whatsapp",
+        server_default="whatsapp",
+        comment="whatsapp | telegram | operator",
+    )
     content: Mapped[str] = mapped_column(Text, nullable=False, comment="Текст сообщения")
     meta_json: Mapped[dict[str, Any] | None] = mapped_column(
         JSON,
@@ -717,6 +752,9 @@ class MenuItem(Base):
         comment="Пары допродаж: iiko UUID или названия через запятую, как в меню",
     )
     price: Mapped[float] = mapped_column(Numeric(10, 2), default=0, comment="Цена в тенге")
+    cost_price: Mapped[float | None] = mapped_column(
+        Numeric(10, 2), nullable=True, comment="Себестоимость для Menu Profit Lab",
+    )
     is_available: Mapped[bool] = mapped_column(Boolean, default=True, comment="Есть ли в наличии")
     image_url: Mapped[str | None] = mapped_column(String(500), nullable=True, comment="Ссылка на фото")
     embedding: Mapped[bytes | None] = mapped_column(
@@ -1951,3 +1989,159 @@ class IikoSyncRun(Base):
 
     def __repr__(self) -> str:
         return f"<IikoSyncRun org={self.organization_id} kind={self.sync_kind} status={self.status}>"
+
+
+class AiOrderAudit(Base):
+    """QA auto-audit: рискованные AI-заказы для проверки менеджером."""
+
+    __tablename__ = "ai_order_audits"
+    __table_args__ = (
+        Index("ix_ai_order_audits_org_status", "organization_id", "status"),
+        Index("ix_ai_order_audits_org_created", "organization_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    location_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("locations.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    order_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("orders.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True,
+    )
+    trace_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    risk_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    risk_level: Mapped[str] = mapped_column(String(16), nullable=False, default="low", server_default="low")
+    tags_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    reasons_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="open", server_default="open")
+    prevented_value: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(),
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reviewed_by_staff_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("staff_users.id", ondelete="SET NULL"), nullable=True,
+    )
+    review_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<AiOrderAudit id={self.id} org={self.organization_id} risk={self.risk_level}>"
+
+
+class UpsellOfferEvent(Base):
+    """Attribution: показ / принятие / отказ upsell-предложения."""
+
+    __tablename__ = "upsell_offer_events"
+    __table_args__ = (
+        Index("ix_upsell_offer_events_org_status", "organization_id", "status"),
+        Index("ix_upsell_offer_events_org_created", "organization_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    location_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("locations.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    order_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("orders.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True,
+    )
+    chat_log_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("chat_logs.id", ondelete="SET NULL"), nullable=True,
+    )
+    source_rule_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("upsell_rules.id", ondelete="SET NULL"), nullable=True,
+    )
+    base_item_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    offered_item_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    base_item_name: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default="")
+    offered_item_name: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default="")
+    variant: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="shown", server_default="shown")
+    offered_price: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0, server_default="0")
+    added_revenue: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0, server_default="0")
+    meta_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(),
+    )
+
+    def __repr__(self) -> str:
+        return f"<UpsellOfferEvent id={self.id} status={self.status} revenue={self.added_revenue}>"
+
+
+class UpsellPhraseVariant(Base):
+    """A/B-варианты фраз upsell для правила (Revenue Copilot RC-C)."""
+
+    __tablename__ = "upsell_phrase_variants"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "rule_id",
+            "variant_key",
+            name="uq_upsell_phrase_variant_org_rule_key",
+        ),
+        Index("ix_upsell_phrase_variants_org_rule", "organization_id", "rule_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    rule_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("upsell_rules.id", ondelete="SET NULL"), nullable=True,
+    )
+    variant_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    template: Mapped[str] = mapped_column(Text, nullable=False)
+    weight: Mapped[int] = mapped_column(Integer, nullable=False, default=100, server_default="100")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    stats_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(),
+    )
+
+    def __repr__(self) -> str:
+        return f"<UpsellPhraseVariant id={self.id} key={self.variant_key!r} rule={self.rule_id}>"
+
+
+class OperationalModeState(Base):
+    """Kitchen Gate v2: операционный режим смены (нагрузка, доставка, +N минут)."""
+
+    __tablename__ = "operational_mode_states"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "location_id", name="uq_operational_mode_org_location"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    location_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("locations.id", ondelete="CASCADE"), nullable=True, index=True,
+    )
+    kitchen_load: Mapped[str] = mapped_column(String(16), nullable=False, default="normal", server_default="normal")
+    prep_time_extra_min: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    delivery_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="normal", server_default="normal")
+    force_pickup_only: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_by_staff_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("staff_users.id", ondelete="SET NULL"), nullable=True,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(),
+    )
+
+    def __repr__(self) -> str:
+        return f"<OperationalModeState org={self.organization_id} loc={self.location_id} load={self.kitchen_load}>"

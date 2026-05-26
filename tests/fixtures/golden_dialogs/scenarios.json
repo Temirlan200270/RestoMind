@@ -1,0 +1,54 @@
+[
+  {
+    "id": "order_start_no_items",
+    "user_message": "Хочу сделать заказ",
+    "ai_response": {"intent": "order", "reply_text": "Ок", "items": []},
+    "order_start": true,
+    "decision_engine_block": true,
+    "expect_friendly_start": true
+  },
+  {
+    "id": "pickup_half_hour_with_draft",
+    "user_message": "Самовывоз через полчаса",
+    "has_draft": true,
+    "ai_response": {"intent": "order", "reply_text": "Принял", "items": []},
+    "fulfillment_infer": {"order_type": "pickup", "pickup_time_note_contains": "30"}
+  },
+  {
+    "id": "complaint_no_upsell",
+    "user_message": "Вы так долго отвечаете",
+    "ai_response": {
+      "intent": "order",
+      "reply_text": "Добавить колу?",
+      "items": [{"name": "Плов", "quantity": 1}],
+      "is_recommendation": true,
+      "upsell_offered": "Кола"
+    },
+    "order_meta": {"order_type": "delivery", "payment_method": "cash"},
+    "upsell_suppressed": true
+  },
+  {
+    "id": "short_yes_no_upsell",
+    "user_message": "Да",
+    "ai_response": {
+      "intent": "order",
+      "reply_text": "К плову салат?",
+      "items": [],
+      "is_recommendation": true
+    },
+    "order_meta": {"order_type": "pickup", "pickup_time_note": "13:00", "payment_method": "cash"},
+    "upsell_suppressed": true
+  },
+  {
+    "id": "delivery_without_address_blocks_upsell",
+    "user_message": "Наличными",
+    "ai_response": {
+      "intent": "order",
+      "reply_text": "Компот?",
+      "items": [{"name": "Плов", "quantity": 1}],
+      "is_recommendation": true
+    },
+    "order_meta": {"order_type": "delivery", "payment_method": "cash"},
+    "upsell_suppressed": true
+  }
+]

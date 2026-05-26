@@ -21,6 +21,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+KITCHEN_GATE_BLOCK_RULES = frozenset({
+    "delivery_paused",
+    "pickup_only",
+    "force_closed",
+    "billing_suspended",
+})
+
 
 @dataclass
 class PolicyViolation:
@@ -79,6 +86,7 @@ class DecisionEngine:
         *,
         tenant: "Tenant | None" = None,
         billing_suspended: bool = False,
+        user_message: str = "",
     ) -> ValidationResult:
         violations: list[PolicyViolation] = []
 
@@ -88,7 +96,7 @@ class DecisionEngine:
         if v := self._check_force_closed(proposal, org):
             violations.append(v)
 
-        if v := self._check_empty_order(proposal, context):
+        if v := self._check_empty_order(proposal, context, user_message=user_message):
             violations.append(v)
 
         if v := self._check_all_items_hallucinated(proposal, context):
@@ -98,6 +106,9 @@ class DecisionEngine:
             violations.append(v)
 
         if v := self._check_delivery_no_address(proposal):
+            violations.append(v)
+
+        if v := await self._check_operational_delivery_mode(proposal, org, context):
             violations.append(v)
 
         if v := self._check_max_order_items(proposal):
@@ -272,6 +283,8 @@ class DecisionEngine:
         self,
         proposal: "AIBrainResponse",
         context: "AIReadContext",
+        *,
+        user_message: str = "",
     ) -> PolicyViolation | None:
         """Блокирует intent=order с пустым списком позиций.
 
@@ -291,6 +304,19 @@ class DecisionEngine:
             return None
         if self._draft_has_cart_items(context):
             return None
+
+        from app.services.upsell_safety_gate import is_order_start_without_items
+
+        if is_order_start_without_items(user_message):
+            return PolicyViolation(
+                rule="empty_order",
+                severity="block",
+                detail=(
+                    "С радостью помогу оформить заказ! Напишите, что хотите — "
+                    "например: «плов на двоих и салат», или спросите «что посоветуете?»."
+                ),
+            )
+
         return PolicyViolation(
             rule="empty_order",
             severity="block",
@@ -309,6 +335,53 @@ class DecisionEngine:
         return any(
             isinstance(x, dict) and str(x.get("name") or "").strip()
             for x in raw
+        )
+
+    async def _check_operational_delivery_mode(
+        self,
+        proposal: "AIBrainResponse",
+        org: "Organization | None",
+        context: "AIReadContext",
+    ) -> PolicyViolation | None:
+        """Блок: доставка при паузе / режиме «только самовывоз» (Kitchen Gate v2)."""
+        if proposal.intent != "order" or org is None:
+            return None
+        if proposal.order_type != "delivery":
+            return None
+
+        from app.db.session import async_session_factory
+        from app.services.operational_mode import get_operational_mode
+
+        location_id = getattr(context, "location_id", None)
+        location_id = int(location_id) if isinstance(location_id, int) else None
+        async with async_session_factory() as db:
+            try:
+                mode = await get_operational_mode(db, int(org.id), location_id=location_id)
+            except Exception as exc:
+                if "operational_mode_states" not in str(exc):
+                    raise
+                logger.debug("Kitchen Gate skipped: operational_mode_states table is not available")
+                return None
+
+        if not mode.is_delivery_blocked:
+            return None
+
+        if mode.force_pickup_only:
+            detail = "Сейчас принимаем только самовывоз — доставка временно недоступна."
+            rule = "pickup_only"
+        else:
+            detail = "Доставка временно приостановлена — предложите самовывоз или заказ в зале."
+            rule = "delivery_paused"
+
+        return PolicyViolation(
+            rule=rule,
+            severity="block",
+            detail=detail,
+            meta={
+                "delivery_mode": mode.delivery_mode,
+                "force_pickup_only": mode.force_pickup_only,
+                "kitchen_load": mode.kitchen_load,
+            },
         )
 
     def _check_delivery_no_address(
@@ -411,6 +484,50 @@ class DecisionEngine:
             # Меняем intent чтобы route_intent не создавал черновик/бронь
             updates["intent"] = "faq"
         return original.model_copy(update=updates)
+
+
+async def emit_kitchen_gate_order_blocked_events(
+    db: "AsyncSession",
+    *,
+    org_id: int,
+    violations: list[PolicyViolation],
+    proposal: "AIBrainResponse",
+    location_id: int | None = None,
+    phone: str | None = None,
+    trace_id: str | None = None,
+) -> int:
+    """Emit kitchen_gate.order_blocked for delivery / force_closed / billing blocks."""
+    from app.services.system_events import BusinessEvent, emit_event
+
+    emitted = 0
+    blocks = [
+        v for v in violations
+        if v.severity == "block" and v.rule in KITCHEN_GATE_BLOCK_RULES
+    ]
+    for violation in blocks:
+        dedupe_key = trace_id or phone or "anon"
+        await emit_event(
+            db,
+            BusinessEvent(
+                org_id=int(org_id),
+                type="kitchen_gate.order_blocked",
+                actor="decision_engine",
+                entity_type="user" if phone else None,
+                entity_id=str(phone) if phone else None,
+                id=f"kitchen_gate.order_blocked:{org_id}:{violation.rule}:{dedupe_key}",
+                payload={
+                    "block_rule": violation.rule,
+                    "detail": (violation.detail or "")[:500],
+                    "intent": proposal.intent,
+                    "order_type": proposal.order_type,
+                    "location_id": location_id,
+                    "trace_id": trace_id,
+                    **(violation.meta or {}),
+                },
+            ),
+        )
+        emitted += 1
+    return emitted
 
 
 # Singleton — используется в webhooks.py без создания нового объекта на каждый запрос

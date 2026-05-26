@@ -1,0 +1,45 @@
+{# QA Auto-Audit badge for shift focus order dock #}
+{% macro order_qa_audit_badge() %}
+<div x-show="orderAuditForFocus" x-cloak class="rounded-lg border px-3 py-2 text-sm"
+    :class="{
+        'border-red-200 bg-red-50 text-red-950': orderAuditForFocus?.risk_level === 'critical',
+        'border-amber-200 bg-amber-50 text-amber-950': orderAuditForFocus?.risk_level === 'high',
+        'border-slate-200 bg-slate-50 text-slate-800': orderAuditForFocus?.risk_level !== 'critical' && orderAuditForFocus?.risk_level !== 'high',
+    }">
+    <div class="flex flex-wrap items-start justify-between gap-2">
+        <div class="min-w-0">
+            <div class="text-[10px] font-bold uppercase tracking-wide opacity-70">QA Auto-Audit</div>
+            <div class="font-semibold tabular-nums"
+                x-text="'Риск: ' + (orderAuditForFocus?.risk_level || '—') + ' · ' + (orderAuditForFocus?.risk_score ?? 0)"></div>
+            <div class="text-xs mt-0.5 opacity-80 tabular-nums"
+                x-show="orderAuditForFocus?.prevented_value > 0"
+                x-text="'Предотвращённый ущерб ~ ' + fmt.money(orderAuditForFocus?.prevented_value || 0)"></div>
+            <div class="text-[10px] font-bold uppercase tracking-wide opacity-60 mt-2 mb-1">Почему риск</div>
+            <ul class="text-xs opacity-90 list-disc pl-4 space-y-0.5"
+                x-show="(orderAuditForFocus?.reasons || []).length">
+                <template x-for="(reason, ri) in (orderAuditForFocus?.reasons || [])" :key="'oar-' + ri">
+                    <li x-text="reason"></li>
+                </template>
+            </ul>
+            <p class="text-xs mt-1 opacity-70 line-clamp-2"
+                x-show="!(orderAuditForFocus?.reasons || []).length"
+                x-text="'Теги: ' + ((orderAuditForFocus?.tags || []).join(', ') || '—')"></p>
+        </div>
+        <div class="flex flex-col gap-1 shrink-0" x-show="orderAuditForFocus?.status === 'open'">
+            <select class="ds-input ds-input-sm text-xs"
+                x-model="orderAuditReviewReason">
+                <option value="no_error">Без ошибки</option>
+                <option value="fixed">Исправлено</option>
+                <option value="escalated_to_manager">Эскалация</option>
+            </select>
+            <button type="button" class="ds-btn ds-btn-sm ds-btn-primary"
+                :disabled="orderAuditLoading"
+                @click="orderAuditReview(orderAuditForFocus.id, orderAuditReviewReason)">Проверено</button>
+            <button type="button" class="ds-btn ds-btn-sm ds-btn-secondary"
+                :disabled="orderAuditLoading"
+                @click="orderAuditDismiss(orderAuditForFocus.id)">Скрыть</button>
+        </div>
+    </div>
+</div>
+<div x-show="orderAuditLoading && shiftState.focus?.order_id" class="text-xs ds-text-muted">QA audit…</div>
+{% endmacro %}

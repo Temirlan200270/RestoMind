@@ -1,6 +1,6 @@
 # RestoMind — обзор кодовой базы
 
-Документ для быстрой ориентации (люди и ИИ): **что за проект**, **как устроен репозиторий**, **куда смотреть за логикой**. Детали API — OpenAPI `/docs`; инварианты разработки — [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md); история изменений — [CHANGELOG.md](CHANGELOG.md).
+Документ для быстрой ориентации (люди и ИИ): **что за проект**, **как устроен репозиторий**, **куда смотреть за логикой**. Детали API — OpenAPI `/docs`; инварианты — [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md); релизы — [CHANGELOG.md](CHANGELOG.md), архив эпиков — [docs/releases/README.md](docs/releases/README.md).
 
 ---
 
@@ -112,7 +112,19 @@ RestoMind/
 │   │   ├── trace_context.py       # trace_id contextvars, WS publish helpers
 │   │   ├── trace_timeline.py      # GET /trace-timeline: merge SystemEvent + ChatLog by trace_id
 │   │   ├── superadmin_audit.py    # SuperadminAuditLog write/list
-│   │   ├── daily_os_digest.py     # owner digest payload + Telegram send + ARQ tick
+│   │   ├── daily_os_digest.py     # legacy daily OS digest (Final Mile)
+│   │   ├── owner_intelligence.py  # OI summary KPI, menu/network preview
+│   │   ├── owner_intelligence_digest.py  # weekly digest text builder
+│   │   ├── owner_digest_delivery.py      # preview/send pipeline, SystemEvent audit
+│   │   ├── owner_weekly_digest.py        # ARQ cron Mon 10:00 org TZ
+│   │   ├── order_ai_audit.py      # QA auto-audit risk scoring + calibration
+│   │   ├── upsell_scoring_engine.py / upsell_pair_mining.py / upsell_attribution.py
+│   │   ├── upsell_experiments.py  # A/B phrase variants
+│   │   ├── menu_profit_lab.py     # cost_price analytics, price recommendations
+│   │   ├── network_benchmark.py / network_weekly_report.py
+│   │   ├── operational_mode.py    # Kitchen Gate v2
+│   │   ├── telegram_customer.py   # Telegram guest channel
+│   │   ├── pos/adapters/          # POSAdapter registry (iiko, rkeeper)
 │   │   ├── healing_actions.py     # self-healing + WA payment nudges 2.0
 │   │   ├── integration_health.py / readiness.py
 │   │   ├── tenant_scope.py        # organization_id + Location RBAC
@@ -128,7 +140,8 @@ RestoMind/
 ├── alembic/                       # миграции PostgreSQL (Alembic)
 ├── tests/                         # pytest-asyncio; интеграционные и модульные тесты
 ├── scripts/                       # sync_menu_from_iiko, grant_superadmin, diag_duplicate_phones,
-│                                  # diag_whatsapp_latency, merge_duplicate_users, …
+│                                  # diag_whatsapp_latency, merge_duplicate_users,
+│                                  # verify_owner_intel_schema.py (post-migration smoke), …
 │
 ├── .github/workflows/
 │   ├── ci.yml                     # push: pytest + импорт приложения
@@ -145,7 +158,7 @@ RestoMind/
 ├── CHANGELOG.md
 ├── DEPLOY_RENDER.md
 ├── DEPLOY_GUIDE.md
-├── docs/                          # ROADMAP, CONVENTIONS, UI_DESIGN_SYSTEM, UI_MAP, AI_OPERATIONS, EVENT_ARCHITECTURE, …
+├── docs/                          # ROADMAP, CONVENTIONS, releases/ (архив эпиков), UI_MAP, …
 ├── requirements.txt
 ├── pytest.ini
 ├── seed.py                        # локальный полный сброс/демо-данные (осторожно)
@@ -158,12 +171,16 @@ RestoMind/
 
 | Направление | Где вход | Куда логика |
 |-------------|----------|-------------|
-| WhatsApp → бот | `api/webhooks.py` | E.164 (`phone_normalize`); ARQ или BackgroundTasks → `process_with_retry`; `wa_queue_metrics` (`queue_wait_ms`); preflight, stoplist_session; `dialog_mgr`, `intent_router`, `ai_brain`; quick_replies / faq_cache bypass LLM |
-| Админ UI | `templates/` + `static/js/admin-app.js` | `api/admin/` → сервисы, БД; чаты: E.164 dedupe в списке (`adminNormalizePhone`), FSM-бейдж, takeover/release |
-| Live-обновления | WS `/api/admin/ws` | `services/events` + `trace_context`; `os.audit`, business events, `new_message`, `state_changed`, … |
-| Voice (Twilio) | `api/webhooks.py` voice routes | `voice_ai.py` → STT/Realtime → `process_message`; `GET /voice/calls` journal |
-| Control Plane trace | WhatsApp webhook, ARQ, admin chats | `trace_context.py`, `trace_timeline.py`, `GET /intelligence/trace-timeline` |
-| Daily digest | ARQ `daily_os_digest_scheduled_tick` | `daily_os_digest.py` → Telegram ops chat |
+| WhatsApp → бот | `api/webhooks.py` | E.164; `process_inbound_message(channel=whatsapp)`; ARQ → intent_router, Revenue Copilot hooks |
+| Telegram guest | `api/telegram_webhook.py` | `process_inbound_message(channel=telegram)`; org resolve by webhook secret |
+| Owner Intelligence | `api/admin/owner_intelligence*.py` | summary, QA audits, upsell, menu-profit, network, kitchen-gate, digest |
+| Weekly digest | ARQ `owner_digest_scheduled_tick` | `owner_digest_delivery.py` → Telegram ops; dedupe Redis + `owner_digest.sent` event |
+| Daily digest (Final Mile) | ARQ `daily_os_digest_scheduled_tick` | `daily_os_digest.py` → Telegram ops chat |
+| Админ UI | `templates/` + `static/js/admin-app.js` | `api/admin/` → сервисы, БД; чаты: channel badge WA/TG, E.164 dedupe, FSM-бейдж |
+| Live-обновления | WS `/api/admin/ws` | `services/events` + `trace_context`; `os.audit`, business events |
+| Voice (Twilio) | `api/webhooks.py` voice routes | `voice_ai.py` → STT/Realtime → `process_message` |
+| Control Plane trace | webhook, ARQ, admin chats | `trace_timeline.py`, `GET /intelligence/trace-timeline` |
+| POS sync | `api/admin/menu.py`, `iiko_sync_tasks.py` | `get_pos_adapter(org)` → iiko or rkeeper |
 | Оплата провайдера | `api/payment_webhook.py` | заказ, `PaymentEvent`, фон: автопечать iiko при флаге org |
 | Superadmin | `api/superadmin.py` | организации, заявки, credentials, `GET /audit`, message accounting, AI-токены |
 
@@ -175,7 +192,9 @@ RestoMind/
 python -m pytest tests/ -v
 ```
 
-В репозитории — **800+** тестов в `tests/`; точное число растёт. GitHub Actions: [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (`push` на `main` / `develop`, PR в `main`).
+В репозитории — **965+** тестов в `tests/` (на 2026-05: `pytest -q` → 965 passed). GitHub Actions: [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (`push` на `main` / `develop`, PR в `main`).
+
+**Alembic head (Owner Intelligence OS):** `20260604_telegram_org_mapping` — см. [`docs/DEPLOY_RUNBOOK.md`](docs/DEPLOY_RUNBOOK.md) §8.
 
 ---
 
@@ -185,12 +204,14 @@ python -m pytest tests/ -v
 |------|------------|
 | [README.md](README.md) | Установка, `.env`, запуск, краткая структура |
 | [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md) | Правила разработки (инварианты/контракт) |
-| [CHANGELOG.md](CHANGELOG.md) | История версий |
-| [DEPLOY_RENDER.md](DEPLOY_RENDER.md) / [DEPLOY_GUIDE.md](DEPLOY_GUIDE.md) | Продакшен |
+| [CHANGELOG.md](CHANGELOG.md) | Краткие релизы |
+| [docs/releases/README.md](docs/releases/README.md) | Архив эпиков (детали) |
+| [DEPLOY_RENDER.md](DEPLOY_RENDER.md) / [DEPLOY_GUIDE.md](DEPLOY_GUIDE.md) | Продакшен (Render / VPS) |
+| [docs/DEPLOY_RUNBOOK.md](docs/DEPLOY_RUNBOOK.md) | Staging/prod чеклист; §8 Owner Intelligence smoke |
 | [docs/SUPERADMIN_GUIDE.md](docs/SUPERADMIN_GUIDE.md) | Super Admin (владелец платформы): заявки/регистрация, управление ресторанами, аудит webhook, идеи улучшений |
 | [docs/UI_MAP.md](docs/UI_MAP.md) | Карта админ UI: `admin.html`, `screens/*`, компоненты, `admin-app.js` |
 | [docs/AI_TOOLS_SETUP.md](docs/AI_TOOLS_SETUP.md) | Настройка Cursor / Claude Code / MCP для работы над репо |
-| [docs/AI_OPERATIONS.md](docs/AI_OPERATIONS.md) | Restaurant Intelligence, события, инсайты, Final Mile API |
+| [docs/AI_OPERATIONS.md](docs/AI_OPERATIONS.md) | Restaurant Intelligence, **Owner Intelligence**, инсайты, Final Mile API |
 | [docs/FINAL_MILE_IMPLEMENTED.md](docs/FINAL_MILE_IMPLEMENTED.md) | SupplyMind, StaffMind, Voice, Digest — backend MVP |
 | [docs/REMAINING_UPDATES.md](docs/REMAINING_UPDATES.md) | UI gaps и staging checks после Final Mile |
 | [docs/EVENT_ARCHITECTURE.md](docs/EVENT_ARCHITECTURE.md) | Durable `SystemEvent`, пайплайн аналитики |

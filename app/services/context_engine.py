@@ -36,10 +36,12 @@ class AIReadContext:
     draft_row: Order | None
     customer_ctx: str
     user_preferences: dict
+    copilot_feed: dict | None = None
     tenant: Tenant | None = None
+    location_id: int | None = None
 
 
-async def fetch_ai_read_context(phone: str, organization_id: int) -> AIReadContext:
+async def fetch_ai_read_context(phone: str, organization_id: int, location_id: int | None = None) -> AIReadContext:
     """Собирает контекст одной короткой DB-сессией (sequential queries)."""
 
     phone_s = (phone or "").strip()
@@ -84,6 +86,18 @@ async def fetch_ai_read_context(phone: str, organization_id: int) -> AIReadConte
             .join(Organization, Organization.tenant_id == Tenant.id)
             .where(Organization.id == organization_id),
         )
+        copilot_feed: dict | None = None
+        try:
+            from app.services.menu_profit_lab import get_copilot_candidate_lists
+
+            copilot_feed = await get_copilot_candidate_lists(
+                db,
+                organization_id,
+                period="7d",
+                location_id=int(location_id) if location_id is not None else None,
+            )
+        except Exception:
+            copilot_feed = None
 
     return AIReadContext(
         menu_items=menu_items,
@@ -93,7 +107,9 @@ async def fetch_ai_read_context(phone: str, organization_id: int) -> AIReadConte
         draft_row=draft,
         customer_ctx=customer_ctx,
         user_preferences=user_preferences,
+        copilot_feed=copilot_feed,
         tenant=tenant_row,
+        location_id=int(location_id) if location_id is not None else None,
     )
 
 
@@ -378,6 +394,7 @@ async def build_llm_prompt_bundle(
                 menu_items,
                 u_row.meta_json if u_row is not None else None,
                 user_preferences=read_ctx.user_preferences,
+                copilot_feed=read_ctx.copilot_feed,
             )
             return (
                 format_strategy_for_prompt(decision),
@@ -395,6 +412,17 @@ async def build_llm_prompt_bundle(
         getattr(org_ent, "timezone", None) if org_ent is not None else "Etc/GMT-5",
         getattr(org_ent, "schedule_json", None) if org_ent is not None else None,
     )
+    try:
+        from app.services.operational_mode import fetch_operational_mode_prompt_block
+
+        op_block = await fetch_operational_mode_prompt_block(
+            organization_id,
+            location_id=read_ctx.location_id,
+        )
+        if op_block:
+            current_time_ctx = f"{current_time_ctx}\n{op_block}"
+    except Exception:
+        logger.debug("operational_mode prompt block skipped", exc_info=True)
     draft_ctx = format_draft_order_context_for_prompt(
         draft_row.items_json if draft_row else None,
     )

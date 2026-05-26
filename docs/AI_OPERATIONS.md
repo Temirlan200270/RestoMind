@@ -13,6 +13,25 @@ Intelligence не дублирует Analytics — он отвечает на в
 
 ---
 
+## Owner Intelligence (продуктовый слой для владельца)
+
+Отдельный API-пакет `/api/admin/owner-intelligence/*` — KPI, QA audit, Revenue Copilot impact, Menu Profit, Network Benchmark, Kitchen Gate, weekly digest.
+
+| Область | Сервисы | UI |
+|---|---|---|
+| Summary KPI | `owner_intelligence.py` | AI Center → **Owner Intelligence** |
+| QA Auto-Audit | `order_ai_audit.py` | OI + badge на **Смена** / чат (`_order_qa_audit_badge.html`) |
+| Revenue Copilot | `upsell_scoring_engine.py`, `upsell_pair_mining.py`, `upsell_attribution.py` | **Настройки → Умные продажи** |
+| Menu Profit | `menu_profit_lab.py`, CSV import | OI preview + вкладка **Меню** |
+| Network Benchmark | `network_benchmark.py`, `network_weekly_report.py` | AI Center → **Network Benchmark** (только сети) |
+| Kitchen Gate v2 | `operational_mode.py` | **Смена** + OI (`_kitchen_gate_panel.html`) |
+| Weekly digest | `owner_digest_delivery.py`, `owner_weekly_digest.py` | OI preview + cron Mon 10:00 org TZ |
+
+Deploy smoke: [`docs/DEPLOY_RUNBOOK.md`](DEPLOY_RUNBOOK.md) §8, `scripts/verify_owner_intel_schema.py`.  
+Alembic head: `20260604_telegram_org_mapping`.
+
+---
+
 ## API
 
 ```http

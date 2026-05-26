@@ -12,7 +12,7 @@
 - **docs/CONVENTIONS.md** — инварианты разработки (контракт): async-first, idempotency, versioning, “Redis ≠ source of truth”; **Rules 9–11** — Tenant Isolation, Event-First, AI Context через ContextBuilder
 - **docs/OS_TRANSITION_PLAN.md** — стратегический план перехода SaaS → OS (5 фаз); текущее состояние каждой фазы; читать перед любой архитектурной правкой
 - **docs/ROADMAP.md** — **единственный** трекер задач/статусов (P0–P4); по завершению: `[x]` в ROADMAP + запись в `CHANGELOG.md`
-- **CHANGELOG.md** — история изменений (дописывать в `## [Unreleased]`)
+- **CHANGELOG.md** — краткие релизы (`## [Unreleased]` + секции эпиков); детали — [`docs/releases/README.md`](docs/releases/README.md)
 - **docs/sprints/** — временные мини‑родмапы/чеклисты на 1–2 недели (оперативка; после спринта удалять/вплавлять; статусы задач всё равно только в `docs/ROADMAP.md`)
 - **docs/UI_DESIGN_SYSTEM.md** — при правке UI: компоненты `ds-*`, токены, a11y, Lighthouse
 - **docs/UI_MAP.md** — карта `admin.html` / `screens/*` / макросов и `admin-app.js`

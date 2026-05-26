@@ -26,6 +26,7 @@ def menu_item_dict(item: MenuItem) -> dict:
         "dietary_tags": getattr(item, "dietary_tags", None) or "",
         "upsell_pairs": getattr(item, "upsell_pairs", None) or "",
         "price": float(item.price),
+        "cost_price": float(item.cost_price) if item.cost_price is not None else None,
         "is_available": item.is_available,
         "image_url": item.image_url,
     }
@@ -46,6 +47,7 @@ class MenuItemPatchBody(BaseModel):
     dietary_tags: str | None = None
     upsell_pairs: str | None = None
     price: float | None = Field(None, ge=0)
+    cost_price: float | None = Field(None, ge=0, description="Себестоимость для Menu Profit Lab")
     is_available: bool | None = None
     image_url: str | None = Field(None, max_length=500)
 
@@ -71,6 +73,7 @@ class MenuItemCreateBody(BaseModel):
     dietary_tags: str = ""
     upsell_pairs: str = ""
     price: float = Field(0, ge=0)
+    cost_price: float | None = Field(None, ge=0, description="Себестоимость для Menu Profit Lab")
     is_available: bool = True
     image_url: str | None = Field(None, max_length=500)
 

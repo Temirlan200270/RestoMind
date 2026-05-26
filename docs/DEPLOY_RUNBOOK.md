@@ -1,7 +1,7 @@
 # Launch Runbook — staging / production (Render + Supabase + Upstash)
 
 Операционный чеклист перед первым выкатом RestoMind OS на **staging** или **production**.  
-Код ядра P0–P5 готов (**Launch Window**); этот документ — **что настроить снаружи** и как проверить, что всё живо.
+Код ядра P0–P6 (Owner Intelligence sales-ready) готов (**Launch Window**); этот документ — **что настроить снаружи** и как проверить, что всё живо.
 
 **См. также:**
 
@@ -108,7 +108,7 @@ Worker не слушает HTTP; healthcheck Render для него — по л�
 | `REDIS_MEMORY_ONLY` | `false` | **`true` отключает внешний Redis** (дефолт blueprint!) |
 | `ARQ_ENABLED` | `true` | |
 | `ARQ_QUEUE_NAME` | `restomind` | Должен совпадать у web и worker |
-| `DB_POOL_SIZE` | `3` | Пул SQLAlchemy на процесс (blueprint); при `EMAXCONNSESSION` на Supabase — см. [`SUPABASE_MIGRATION.md`](SUPABASE_MIGRATION.md) |
+| `DB_POOL_SIZE` | `3`–`5` | Пул SQLAlchemy на процесс; `5` допустимо при лимите Supabase session pooler (~15 conn на web+worker) |
 | `DB_MAX_OVERFLOW` | `2` | |
 | `SESSION_SECRET` | 64+ hex chars | Cookie-сессия + `ws_token` |
 | `ADMIN_PASSWORD` | сильный пароль | Не `restomind` |
@@ -345,3 +345,83 @@ python scripts/diag_whatsapp_latency.py --org-id 1 --phone +77051310837
 - [ ] Browser smoke §4.3 пройден
 
 **Sign-off owner:** _______________ **Дата:** __________ **URL:** _______________
+
+---
+
+## 8. Owner Intelligence OS — deploy smoke (post-migration)
+
+После `alembic upgrade head` (ожидаемый head: **`20260604_telegram_org_mapping`**, один head).
+
+### 8.1 Миграции и схема
+
+```bash
+alembic upgrade head
+alembic heads          # один head
+PYTHONPATH=. python scripts/verify_owner_intel_schema.py
+python -m compileall -q app
+```
+
+Проверяемые объекты БД:
+
+| Объект | Назначение |
+|--------|------------|
+| `ai_order_audits` + `review_reason` | QA Auto-Audit v2 |
+| `upsell_offer_events` | Revenue Copilot attribution |
+| `operational_mode_states` | Kitchen Gate v2 |
+| `upsell_phrase_variants` | A/B phrase experiments |
+| `users.telegram_user_id` | Telegram customer |
+| `chat_logs.channel` | WA / Telegram / operator |
+| `organizations.pos_provider` | iiko / rkeeper |
+| `organizations.telegram_*` | per-org Telegram webhook |
+| `menu_items.cost_price` | Menu Profit Lab |
+
+### 8.2 API smoke (авторизованная admin-сессия)
+
+Замените `{BASE}` и cookie/session после логина в `/admin`.
+
+| Endpoint | Ожидание |
+|----------|----------|
+| `GET {BASE}/api/admin/owner-intelligence/summary?period=7d` | `200`, блоки `kpi`, `upsell_impact` |
+| `GET {BASE}/api/admin/owner-intelligence/order-audits?limit=10` | `200`, `items[]` |
+| `GET {BASE}/api/admin/owner-intelligence/upsell-impact?period=week` | `200`, `best_pairs`, `worst_offers` |
+| `GET {BASE}/api/admin/owner-intelligence/menu-profit?period=7d` | `200`, `promote_today_candidates` |
+| `GET {BASE}/api/admin/owner-intelligence/network-benchmark?period=7d` | `200` (или `disabled` для одиночной точки) |
+| `GET {BASE}/api/admin/owner-intelligence/kitchen-gate` | `200`, режимы load/delivery |
+| `GET {BASE}/api/admin/owner-intelligence/digest/preview?period=prev_week` | `200`, `text`, `metrics`, `last_sent` |
+| `POST {BASE}/api/admin/owner-intelligence/digest/send` | `200` или `429` (manual cooldown 30 мин; `{force:true}` обходит) |
+| `GET {BASE}/api/admin/owner-intelligence/digest/history` | `200`, события `owner_digest.sent` |
+
+Быстрая проверка импорта приложения:
+
+```bash
+python -c "from app.main import app; print('app ok', app.title)"
+```
+
+### 8.3 Admin UI smoke (браузер)
+
+- [ ] **AI Center → Owner Intelligence** — KPI, Kitchen Gate, upsell impact, QA audits, digest preview + «Отправить сейчас»
+- [ ] **AI Center → Network Benchmark** — только для `is_network`
+- [ ] **Settings → Smart Sales** — правила + панель эффекта (pairs, worst offers, promote today)
+- [ ] **Menu** — колонка себестоимости, preview CSV import
+- [ ] **Shift** — Kitchen Gate presets (+30m / +1h / сброс)
+- [ ] **Диалоги** — badge канала WA / TG / Voice
+- [ ] Консоль браузера без ошибок на перечисленных экранах
+
+### 8.4 Post-deploy checks
+
+```bash
+npm run check:admin-js
+python -m pytest -q
+```
+
+Ожидаемо: **все тесты зелёные**, `alembic heads` → один head.
+
+### 8.5 Worker / digest
+
+- [ ] Worker live — cron `owner_digest_scheduled_tick` (weekly digest, Monday 10:00–10:44 **local org TZ**)
+- [ ] `TELEGRAM_BOT_TOKEN` + org `telegram_ops_chat_id` / `TELEGRAM_ADMIN_CHAT_ID` для digest
+- [ ] Admin smoke: **Owner Intelligence → «Отправить отчёт сейчас»** → Telegram получен
+- [ ] `GET /api/admin/owner-intelligence/digest/preview` → `200` с `text` и `metrics`
+- [ ] `GET /api/admin/owner-intelligence/digest/history` — последняя отправка в `owner_digest.sent` events
+
+**Sign-off OI smoke:** _______________ **Дата:** __________

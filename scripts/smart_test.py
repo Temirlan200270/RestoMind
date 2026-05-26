@@ -117,6 +117,9 @@ GROUPS: dict[str, list[str]] = {
         "tests/test_pricing.py",
         "tests/test_order_confidence.py",
         "tests/test_kitchen_gate.py",
+        "tests/test_dialog_session_fixes.py",
+        "tests/test_operator_reliability_guards.py",
+        "tests/test_golden_dialogs.py",
     ],
     "app/services/quick_replies.py": [
         "tests/test_quick_replies.py",
@@ -132,6 +135,9 @@ GROUPS: dict[str, list[str]] = {
         "tests/test_faq_cache.py",
         "tests/test_prompt_metrics.py",
         "tests/test_pipeline_timing.py",
+        "tests/test_dialog_session_fixes.py",
+        "tests/test_operator_reliability_guards.py",
+        "tests/test_golden_dialogs.py",
     ],
     "app/services/order_logic.py": [
         "tests/test_order_logic.py",

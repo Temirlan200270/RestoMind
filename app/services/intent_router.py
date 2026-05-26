@@ -39,7 +39,7 @@ from app.services.upsell_utils import record_upsell_rejections_on_user
 from app.services.prepayment_legal import append_prepayment_legal_disclaimer
 from app.services.system_events import BusinessEvent, emit_event, emit_system_event
 from app.services.trace_context import stamp_order_meta_trace, trace_payload
-from app.services.stoplist_session import compose_stoplist_notice
+from app.services.stoplist_session import compose_stoplist_notice, suggest_stoplist_replacements
 from app.services.order_logic import (
     ValidatedOrder,
     applied_order_action_ids_from_items_json,
@@ -459,6 +459,38 @@ async def get_or_create_user(
     return user
 
 
+async def _emit_stoplist_replacement_events(
+    db: AsyncSession,
+    *,
+    organization_id: int,
+    stoplist_items: list[str],
+    menu_items: list | None,
+    location_id: int | None = None,
+) -> int:
+    """Считает и эмитит события kitchen_gate.replacement_suggested при наличии альтернатив."""
+    if not stoplist_items or not menu_items:
+        return 0
+    replacements = suggest_stoplist_replacements(stoplist_items, menu_items)
+    if not replacements:
+        return 0
+    from app.services.system_events import emit_system_event
+
+    for stopped, alts in replacements.items():
+        await emit_system_event(
+            db,
+            organization_id=int(organization_id),
+            event_type="kitchen_gate.replacement_suggested",
+            payload={
+                "stopped_item": stopped,
+                "alternatives": alts,
+                "location_id": location_id,
+            },
+            entity_type="menu_item",
+            source="ai",
+        )
+    return sum(len(v) for v in replacements.values())
+
+
 async def _handle_order(
     db: AsyncSession,
     phone: str,
@@ -476,6 +508,7 @@ async def _handle_order(
     draft_order: Order | None = None,
     user: User | None = None,
     org: Organization | None = None,
+    user_message: str = "",
 ) -> RouteResult:
     """
     Обработка intent='order':
@@ -545,7 +578,15 @@ async def _handle_order(
         if not validated.valid_items:
             if validated.stoplist_items:
                 notice = compose_stoplist_notice(
-                    validated.stoplist_items, fresh_stopped, draft_item_names=draft_item_names,
+                    validated.stoplist_items, fresh_stopped,
+                    draft_item_names=draft_item_names, menu_items=menu_items,
+                )
+                await _emit_stoplist_replacement_events(
+                    db,
+                    organization_id=organization_id,
+                    stoplist_items=validated.stoplist_items,
+                    menu_items=menu_items,
+                    location_id=location_id,
                 )
                 return RouteResult(reply_text=f"{ai_response.reply_text}\n\n{notice}")
             unknown_list = ", ".join(validated.unknown_items) if validated.unknown_items else "—"
@@ -583,7 +624,15 @@ async def _handle_order(
     if not validated.valid_items:
         if validated.stoplist_items:
             notice = compose_stoplist_notice(
-                validated.stoplist_items, fresh_stopped, draft_item_names=draft_item_names,
+                validated.stoplist_items, fresh_stopped,
+                draft_item_names=draft_item_names, menu_items=menu_items,
+            )
+            await _emit_stoplist_replacement_events(
+                db,
+                organization_id=organization_id,
+                stoplist_items=validated.stoplist_items,
+                menu_items=menu_items,
+                location_id=location_id,
             )
             return RouteResult(reply_text=f"{ai_response.reply_text}\n\n{notice}")
         unknown_list = ", ".join(validated.unknown_items) if validated.unknown_items else "—"
@@ -678,7 +727,9 @@ async def _handle_order(
         )
 
     prev_items_list: list[dict] = []
+    prev_items_json_snapshot: dict | None = None
     if existing_draft and isinstance(existing_draft.items_json, dict):
+        prev_items_json_snapshot = dict(existing_draft.items_json)
         raw_prev = existing_draft.items_json.get("items")
         if isinstance(raw_prev, list):
             prev_items_list = [x for x in raw_prev if isinstance(x, dict)]
@@ -797,6 +848,16 @@ async def _handle_order(
             ),
         )
 
+    if prev_items_json_snapshot is not None and order.id is not None:
+        try:
+            from app.services.upsell_attribution import infer_upsell_from_draft_update
+
+            await infer_upsell_from_draft_update(
+                db, order, prev_items_json_snapshot, items_json,
+            )
+        except Exception as _infer_exc:
+            logger.debug("upsell draft infer order=%s: %s", order.id, _infer_exc)
+
     # Ночной предзаказ: если ресторан или кухня закрыты — kind='night_preorder' и выход.
     # Исключение: is_preorder + booking_details (бронь на конкретное время).
     if org_row is not None and not bool(ai_eff.is_preorder) and booking_row is None:
@@ -842,9 +903,17 @@ async def _handle_order(
 
     if validated.stoplist_items:
         notice = compose_stoplist_notice(
-            validated.stoplist_items, fresh_stopped, draft_item_names=draft_item_names,
+            validated.stoplist_items, fresh_stopped,
+            draft_item_names=draft_item_names, menu_items=menu_items,
         )
         if notice:
+            await _emit_stoplist_replacement_events(
+                db,
+                organization_id=organization_id,
+                stoplist_items=validated.stoplist_items,
+                menu_items=menu_items,
+                location_id=location_id,
+            )
             reply += f"\n\n{notice}"
     if validated.unknown_items:
         reply += "\n\nНе нашёл в меню некоторые позиции. Уточните, пожалуйста."
@@ -921,6 +990,67 @@ async def _handle_order(
         log_hint = "ждём подтверждение"
 
     from app.services.strategy_engine import apply_db_upsell_rules, apply_guest_meal_guidance_reply
+    from app.services.upsell_safety_gate import UpsellSafetyContext, should_suppress_upsell
+
+    upsell_ctx = UpsellSafetyContext(
+        user_message=user_message,
+        dialog_state=next_state,
+        order_meta=items_json.get("order_meta") if isinstance(items_json.get("order_meta"), dict) else {},
+        intent=ai_eff.intent,
+    )
+    skip_db_upsell = should_suppress_upsell(upsell_ctx) or (
+        ot == "delivery" and not delivery_addr
+    ) or (
+        ot == "pickup" and not pickup_note
+    ) or (
+        not is_mixed and not pm
+    )
+
+    copilot_feed: dict | None = None
+    recent_rejections: list[Any] | None = None
+    pair_scores: dict[str, dict[str, float]] | None = None
+    offer_frequency_penalties: dict[str, float] | None = None
+    try:
+        from app.services.menu_profit_lab import get_copilot_candidate_lists
+
+        copilot_feed = await get_copilot_candidate_lists(
+            db,
+            organization_id,
+            period="7d",
+            location_id=location_id,
+        )
+    except Exception as _feed_exc:
+        logger.debug("copilot feed skipped org=%s: %s", organization_id, _feed_exc)
+    try:
+        from app.services.upsell_pair_mining import (
+            build_offer_rejection_penalties,
+            build_upsell_pair_scores,
+        )
+
+        pair_scores = await build_upsell_pair_scores(
+            db,
+            organization_id,
+            period="30d",
+            location_id=location_id,
+        )
+        offer_frequency_penalties = await build_offer_rejection_penalties(
+            db,
+            organization_id,
+            period="30d",
+            location_id=location_id,
+        )
+    except Exception as _pair_exc:
+        logger.debug("upsell pair mining skipped org=%s: %s", organization_id, _pair_exc)
+    if user.id is not None:
+        try:
+            from app.services.upsell_attribution import recently_rejected_iiko_ids
+
+            rej_ids = await recently_rejected_iiko_ids(
+                db, organization_id, int(user.id), days=7,
+            )
+            recent_rejections = [{"offered_item_id": iid, "status": "rejected"} for iid in rej_ids]
+        except Exception as _rej_exc:
+            logger.debug("recent rejections skipped user=%s: %s", user.id, _rej_exc)
 
     reply, items_json = await apply_db_upsell_rules(
         db,
@@ -930,10 +1060,40 @@ async def _handle_order(
         grand_total=float(grand_total),
         menu_items=menu_items,
         ai_eff=ai_eff,
-    )
+        order_id=int(order.id) if order.id is not None else None,
+        user_id=int(user.id) if user.id is not None else None,
+        location_id=location_id,
+        copilot_feed=copilot_feed,
+        recent_rejections=recent_rejections,
+        pair_scores=pair_scores,
+        offer_frequency_penalties=offer_frequency_penalties,
+    ) if not skip_db_upsell else (reply, items_json)
     reply = apply_guest_meal_guidance_reply(reply, items_json, menu_items or [])
     order.items_json = items_json
     await db.flush()
+    if order.id is not None:
+        try:
+            from app.services.upsell_attribution import (
+                record_ai_upsell_from_brain_response,
+            )
+
+            await record_ai_upsell_from_brain_response(
+                db,
+                organization_id=organization_id,
+                order_id=int(order.id),
+                user_id=int(user.id) if user.id is not None else None,
+                location_id=location_id,
+                ai_eff=ai_eff,
+                menu_items=menu_items or [],
+            )
+        except Exception as _ups_exc:
+            logger.debug("upsell attribution hook order=%s: %s", order.id, _ups_exc)
+        try:
+            from app.services.order_ai_audit import maybe_audit_risky_draft_update
+
+            await maybe_audit_risky_draft_update(db, order)
+        except Exception as _audit_exc:
+            logger.debug("draft qa audit hook order=%s: %s", order.id, _audit_exc)
 
     if requires_big_order_prepay:
         reply = await append_prepayment_legal_disclaimer(db, organization_id, reply)
@@ -1085,6 +1245,24 @@ async def _handle_escalate(
     Обработка intent='escalate':
     Переводим пользователя в HUMAN_MODE, AI замолкает.
     """
+    try:
+        from app.services.ai_brain import is_openai_fallback_escalation_reply
+
+        if is_openai_fallback_escalation_reply(ai_response.reply_text):
+            logger.warning(
+                "AI technical fallback for %s: keep bot in CHATTING instead of sticky HUMAN_MODE",
+                phone[-4:] if len(phone) >= 4 else "***",
+            )
+            return RouteResult(
+                reply_text=(
+                    "Извините, сейчас не успел обработать сообщение. "
+                    "Напишите ещё раз, пожалуйста, коротко: блюдо, получение и оплату — я продолжу."
+                ),
+                new_state=UserState.CHATTING,
+            )
+    except Exception:
+        logger.debug("technical fallback check skipped", exc_info=True)
+
     reply_tail = (ai_response.reply_text or "").strip().replace("\n", " ")
     if len(reply_tail) > 120:
         reply_tail = reply_tail[:120] + "…"
@@ -1113,6 +1291,17 @@ async def confirm_order(
     order = result.scalar_one_or_none()
 
     if order and order.status == OrderStatus.DRAFT:
+        from app.services.order_confirm_gate import validate_order_ready_to_confirm
+
+        gate = await validate_order_ready_to_confirm(db, order)
+        if not gate.ok:
+            logger.warning(
+                "confirm_order blocked order=%s reason=%s",
+                order_id,
+                gate.reason[:120],
+            )
+            return None
+
         if order.booking_id:
             _bk, err = await confirm_booking(
                 db,
@@ -1146,6 +1335,18 @@ async def confirm_order(
                 ),
             )
         await sync_recommendation_events_for_order(db, order)
+        try:
+            from app.services.upsell_attribution import infer_upsell_acceptance_from_order
+
+            await infer_upsell_acceptance_from_order(db, int(order_id))
+        except Exception as _ups_exc:
+            logger.debug("upsell attribution confirm hook order=%s: %s", order_id, _ups_exc)
+        try:
+            from app.services.order_ai_audit import build_order_ai_audit
+
+            await build_order_ai_audit(db, int(order_id))
+        except Exception as _audit_exc:
+            logger.debug("order ai audit hook order=%s: %s", order_id, _audit_exc)
         logger.info("Заказ #%d подтверждён клиентом", order_id)
     return order
 
@@ -1331,6 +1532,7 @@ async def route_intent(
     draft_order: Order | None = None,
     user: User | None = None,
     org: Organization | None = None,
+    user_message: str = "",
 ) -> RouteResult:
     """
     Главный маршрутизатор — вызывает обработчик в зависимости от intent.
@@ -1359,6 +1561,7 @@ async def route_intent(
             draft_order=draft_order,
             user=user,
             org=org,
+            user_message=user_message,
         )
     elif intent == "book":
         return await _handle_booking(db, phone, ai_response, organization_id=oid, location_id=location_id)

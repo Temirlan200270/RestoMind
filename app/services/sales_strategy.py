@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 
 from app.db.models import MenuItem
 from app.services.sales_strategy_engine import apply_engine_rules_first
+from app.services.upsell_scoring_engine import pick_best_candidate
 from app.services.upsell_utils import (
     cart_iiko_ids,
     collect_cart_tag_profile,
@@ -164,6 +165,7 @@ def build_sales_strategy(
     menu_items: list[MenuItem],
     user_meta: dict | None = None,
     user_preferences: dict | None = None,
+    copilot_feed: dict | None = None,
 ) -> StrategyDecision:
     """
     Мозг продаж: до LLM решаем цель и кандидатов; модель формулирует reply_text и JSON.
@@ -278,7 +280,28 @@ def build_sales_strategy(
             restriction="Нечего предлагать из правил (всё уже в корзине или уже предлагали). Не навязывай допродажу.",
         )
 
-    top = uniq[0]
+    top, _score_explain = pick_best_candidate(
+        uniq,
+        context={
+            "cart_items": cart_items,
+            "order_meta": meta,
+            "user_meta": user_meta,
+            "user_preferences": prefs or None,
+            "copilot_feed": copilot_feed,
+            "menu_items": menu_items,
+            "pair_scores": (copilot_feed or {}).get("pair_scores") if isinstance(copilot_feed, dict) else None,
+            "offer_frequency_penalties": (
+                (copilot_feed or {}).get("offer_frequency_penalties")
+                if isinstance(copilot_feed, dict)
+                else None
+            ),
+        },
+    )
+    if top is None:
+        return StrategyDecision(
+            goal="close_order",
+            restriction="Нечего предлагать из правил (всё уже в корзине или уже предлагали). Не навязывай допродажу.",
+        )
     iid = (top.iiko_id or "").strip()
     restriction = (
         "Максимум **одна** рекомендация в этом сообщении. Объясни коротко «почему к этому заказу». "

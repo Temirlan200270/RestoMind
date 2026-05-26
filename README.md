@@ -2,7 +2,7 @@
 
 **AI-операционная система для ресторанного бизнеса.** Единое ядро управления продажами, маркетингом и операционкой: гость пишет в **WhatsApp**, ответы формирует LLM по структурированной схеме (`AIBrainResponse`); голос — **Whisper**; заказы синхронизируются с **iiko**; аналитика и рекомендации — в Admin-панели владельца.
 
-Подробный список изменений и возможностей — в [CHANGELOG.md](CHANGELOG.md). Правила разработки (инварианты) — в [docs/CONVENTIONS.md](docs/CONVENTIONS.md). **Дерево проекта и суть кодовой базы** — в [codebase.md](codebase.md). Стратегический план перехода → OS — в [docs/OS_TRANSITION_PLAN.md](docs/OS_TRANSITION_PLAN.md).
+Релизы — [CHANGELOG.md](CHANGELOG.md) (кратко); детальная история эпиков — [docs/releases/README.md](docs/releases/README.md). Правила разработки (инварианты) — в [docs/CONVENTIONS.md](docs/CONVENTIONS.md). **Дерево проекта и суть кодовой базы** — в [codebase.md](codebase.md). Стратегический план перехода → OS — в [docs/OS_TRANSITION_PLAN.md](docs/OS_TRANSITION_PLAN.md).
 
 ## Архитектура ядра (OS Layers)
 
@@ -21,17 +21,21 @@
 - **Ordering** — приём заказов, стоп-листы, iiko-интеграция (реализован)
 - **GuestCare** — сбор отзывов, авто-ответы, агрегация из 2GIS/Google (частично)
 - **Marketing** — сегментированные рассылки, лояльность, бонусы (реализован)
-- **Intelligence** — AI-аналитика, инсайты, рекомендации владельцу (реализован)
+- **Intelligence** — AI-аналитика, инсайты, **Owner Intelligence** (ROI, QA audit, Revenue Copilot, Menu Profit, Network Benchmark), weekly digest (реализован)
 - **SupplyMind** — AI-закупки и Foodcost (дорожная карта)
 
 ## Возможности
 
-- **Приём заказов** — распознавание блюд из меню, подтверждение «Да»/«Нет»; тип получения и оплата (v2); контейнеры и доставка считаются автоматически (`PRICING_*` в `.env`); после согласия клиента в WhatsApp заказ подтверждается и ждёт оператора — **в iiko** отправляется только из админки («Подтвердить и печать» / канбан)
+- **Приём заказов** — WhatsApp и **Telegram** (guest channel); распознавание блюд из меню, подтверждение «Да»/«Нет»; тип получения и оплата (v2); контейнеры и доставка считаются автоматически (`PRICING_*` в `.env`); после согласия клиента заказ подтверждается и ждёт оператора — **в iiko** отправляется только из админки («Подтвердить и печать» / канбан)
 - **Бронирование** — дата, время, гости; подтверждение «Да»/«Нет» (`CONFIRMING_BOOKING`)
 - **FAQ** — часы, адрес, состав, аллергены
 - **Human Override** — перехват диалога оператором; в режиме оператора AI не отвечает
 - **Стоп-листы** — фоновая синхронизация из iiko (~15 мин)
-- **Админ-панель** — вход по логину/паролю (cookie-сессия), дашборд, канбан, live-чаты, WebSocket, аналитика, редактирование меню, демо-данные
+- **Owner Intelligence** — вкладка **ИИ-аналитика → Owner Intelligence**: KPI (принято/потери/допродажи/ROI), Kitchen Gate, QA audits, Menu Profit preview, Network Benchmark (сети); **weekly digest** в Telegram (cron + «Отправить сейчас»)
+- **Revenue Copilot** — скоринг допродаж, anti-repeat, A/B фразы; **Settings → Умные продажи** — правила + impact-панель
+- **Menu Profit Lab** — себестоимость в каталоге, CSV import с preview, рекомендации по цене и «продвигать сегодня»
+- **QA Auto-Audit** — рискованные AI-заказы: badge на Смене/в чате, фильтры high/critical, review reasons
+- **POS adapter** — `pos_provider`: `iiko` (default) или `rkeeper` (stub); синхронизация меню через adapter layer
 - **Demo Pitch (G10.8)** — **«Посмотреть демо»** или **`GET /demo`** (zero-friction): 30-сек pitch → read-only осмотр; см. [`docs/DEMO_PITCH.md`](docs/DEMO_PITCH.md)
 - **Надёжность** — rate limiting по телефону, логи в файлы, опционально Sentry
 - **Мультитенантность (фундамент)** — модель `Organization`, поле `organization_id` у сущностей (см. CHANGELOG)
@@ -44,9 +48,9 @@
 | Database | PostgreSQL / SQLite (dev), SQLAlchemy 2.0, **Alembic** |
 | Cache / очередь | Redis; **ARQ worker** обрабатывает входящие WhatsApp и фоновые задачи (см. ниже) |
 | AI | OpenAI (`gpt-4o-mini`, env `OPENAI_MODEL`) или Gemini (`AI_PROVIDER=gemini`, `GEMINI_API_KEY`); structured output + Whisper (`OPENAI_TRANSCRIPTION_MODEL`); опц. `OPENAI_BASE_URL` |
-| Интеграции | Meta WhatsApp API, iiko Cloud API |
+| Интеграции | Meta WhatsApp API, **Telegram** (ops + guest), iiko Cloud API, POS adapter (`iiko` / `rkeeper`) |
 | Админка | Jinja2 + Alpine.js + Tailwind CSS + Chart.js |
-| Тесты | pytest, pytest-asyncio (`tests/`, **800+** тестов — см. CI) |
+| Тесты | pytest, pytest-asyncio (`tests/`, **965+** тестов — см. CI) |
 | Продакшен | Docker; **Render** ([DEPLOY_RENDER.md](DEPLOY_RENDER.md)); либо VPS + [DEPLOY_GUIDE.md](DEPLOY_GUIDE.md) |
 
 ## Быстрый старт
@@ -73,7 +77,7 @@ copy .env.example .env
 **Super Admin (legacy по env, опционально):** `SUPERADMIN_USERNAME`, `SUPERADMIN_PASSWORD` — вход в админку с `is_superadmin=true` без StaffUser (удобно для быстрого доступа к `/superadmin`).
 Остальное — по необходимости (WhatsApp, iiko, Redis, `SENTRY_DSN`, `RATE_LIMIT_PER_MINUTE` — см. [.env.example](.env.example)).
 
-**Telegram — SOS персоналу (опционально):** при запросе оператора (`intent: escalate`) или временном сбое AI в Telegram уходит карточка с номером гостя и кнопкой «Открыть диалог в админке». В `.env` / Render: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ADMIN_CHAT_ID` (id группы или пользователя). Для отдельного чата на филиал — поле **Telegram: чат персонала** в админке (**Настройки → Мой ресторан**), иначе используется глобальный `TELEGRAM_ADMIN_CHAT_ID`. Чтобы ссылка в кнопке была кликабельной, задайте **`PUBLIC_BASE_URL`** (полный `https://…` без `/admin`).
+**Telegram — SOS персоналу и weekly digest (опционально):** при запросе оператора (`intent: escalate`) или временном сбое AI в Telegram уходит карточка с номером гостя и кнопкой «Открыть диалог в админке». **Owner Intelligence digest** — понедельник 10:00 по TZ организации (ARQ worker) + ручная отправка из админки. В `.env` / Render: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ADMIN_CHAT_ID` (id группы или пользователя). Опционально `OWNER_DIGEST_EMAIL` — stub для email-канала (лог). Для отдельного чата на филиал — поле **Telegram: чат персонала** в админке (**Настройки → Мой ресторан**), иначе используется глобальный `TELEGRAM_ADMIN_CHAT_ID`. Per-org Telegram guest bot: `organizations.telegram_webhook_secret` (см. [`docs/DEPLOY_RUNBOOK.md`](docs/DEPLOY_RUNBOOK.md) §8). Чтобы ссылка в кнопке была кликабельной, задайте **`PUBLIC_BASE_URL`** (полный `https://…` без `/admin`).
 
 ### 3. База данных и демо
 
@@ -190,7 +194,8 @@ RestoMind/
 | Документ | Назначение |
 |----------|------------|
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Единый трекер задач и техдолга (P0–P4), индекс wishlist |
-| [CHANGELOG.md](CHANGELOG.md) | Журнал изменений |
+| [CHANGELOG.md](CHANGELOG.md) | Краткие релизы |
+| [docs/releases/README.md](docs/releases/README.md) | Детальная история эпиков |
 | [docs/CONVENTIONS.md](docs/CONVENTIONS.md) | Инварианты разработки + §8 шаблоны Jinja (`_tab_*`) и миграции/SQLite |
 | [docs/UI_DESIGN_SYSTEM.md](docs/UI_DESIGN_SYSTEM.md) | Дизайн-система админки (`ds-*`, a11y, Lighthouse) |
 | [docs/UI_MAP.md](docs/UI_MAP.md) | Карта экранов и компонентов админки |
@@ -202,7 +207,7 @@ RestoMind/
 | [docs/DEMO_PITCH.md](docs/DEMO_PITCH.md) | 30-сек sales demo: pitch / explore, API, smoke |
 | [docs/SUPERADMIN_GUIDE.md](docs/SUPERADMIN_GUIDE.md) | Панель superadmin |
 | [docs/SUPABASE_MIGRATION.md](docs/SUPABASE_MIGRATION.md) | Миграция БД на Supabase |
-| [docs/DEPLOY_RUNBOOK.md](docs/DEPLOY_RUNBOOK.md) | Чеклист Render: web + worker, env-матрица, smoke, troubleshooting |
+| [docs/DEPLOY_RUNBOOK.md](docs/DEPLOY_RUNBOOK.md) | Чеклист Render: web + worker, env-матрица, **Owner Intelligence smoke §8**, troubleshooting |
 | [docs/WHATSAPP_PHASE13_TEMPLATES.md](docs/WHATSAPP_PHASE13_TEMPLATES.md) | Шаблоны WhatsApp (Meta) |
 
 ## API (кратко)
@@ -237,7 +242,26 @@ RestoMind/
 
 ### Защищённый Admin API (после входа)
 
-Включая: заказы, брони, чаты, `GET /api/admin/customers/{phone}/summary`, заметка оператора, меню (CRUD + sync + стоп-листы), `GET /api/admin/stats`, `GET /api/admin/analytics`, `GET /api/admin/ai-value`, демо-данные, takeover/release/send_message, `test-bot`, и т.д.
+Включая: заказы, брони, чаты, `GET /api/admin/customers/{phone}/summary`, заметка оператора, меню (CRUD + sync + стоп-листы + **cost_price** CSV preview/apply), `GET /api/admin/stats`, analytics, демо-данные, takeover/release/send_message, `test-bot`, и т.д.
+
+#### Owner Intelligence API (`/api/admin/owner-intelligence/`)
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| GET | `/summary?period=7d` | KPI, upsell impact, menu preview, network benchmark, QA summary |
+| GET | `/order-audits` | QA audits (`risk_level`, `tags`, `unreviewed_only`) |
+| GET | `/order-audits/summary` | Счётчики по фильтрам |
+| POST | `/order-audits/{id}/review` | Review с `review_reason` |
+| GET | `/upsell-impact?period=week` | Revenue Copilot stats, pairs, worst offers |
+| GET | `/menu-profit?period=7d` | Menu Profit Lab + price recommendations |
+| GET | `/network-benchmark?period=7d` | Сравнение точек сети |
+| GET | `/network-benchmark/weekly` | Weekly narratives + practice transfer |
+| GET/PATCH | `/kitchen-gate` | Kitchen Gate v2 (load/delivery, presets) |
+| GET | `/digest/preview?period=prev_week` | Preview weekly digest |
+| POST | `/digest/send` | Отправить digest сейчас (`{force: bool}`) |
+| GET | `/digest/history` | История отправок (`owner_digest.sent` events) |
+
+Полный smoke — [`docs/DEPLOY_RUNBOOK.md`](docs/DEPLOY_RUNBOOK.md) §8.
 
 ### WebSocket
 
@@ -281,7 +305,8 @@ RestoMind/
 | `ARQ_QUEUE_NAME` | `restomind` | Имя очереди ARQ; web и worker используют одно значение |
 | `WHATSAPP_FAST_ACK_ENABLED` | `true` | Safe fast-path: короткое «спасибо» отвечает без LLM |
 | `PIPELINE_TIMING_ENABLED` | `true` | Логирует `rm_stage_ms` по этапам inbound-пайплайна (в т.ч. `queue_wait` при Redis) |
-| `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` | `3` / `2` | Пул SQLAlchemy на процесс (Render blueprint); при Supabase session pooler см. [`docs/SUPABASE_MIGRATION.md`](docs/SUPABASE_MIGRATION.md) |
+| `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` | `3` / `2` | Пул SQLAlchemy на процесс (Render blueprint); можно `5` при нагрузке — см. [`docs/SUPABASE_MIGRATION.md`](docs/SUPABASE_MIGRATION.md) |
+| `OWNER_DIGEST_EMAIL` | *(пусто)* | Stub email для weekly Owner Intelligence digest (лог; SMTP — позже) |
 | `RESTAURANT_MENU_CTX_REDIS_TTL_SEC` | `90` | TTL Redis-кэша строки меню для AI-контекста |
 
 ## Разработка

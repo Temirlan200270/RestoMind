@@ -23,6 +23,13 @@ from app.db.models import ChatLog, Organization, User
 from app.db.session import get_db, redis_client
 from app.integrations.whatsapp import send_message
 from app.services.chat_delivery import finalize_outbound_delivery
+from app.services.telegram_customer import (
+    customer_channel_context,
+    customer_channel_for_user,
+    normalize_customer_channel,
+    reset_customer_channel_context,
+    telegram_chat_id_for_user,
+)
 from app.services.dialog_mgr import (
     UserState,
     get_user_state,
@@ -161,6 +168,7 @@ async def list_chats_sidebar(
                 ChatLog.created_at.label("last_at"),
                 ChatLog.content.label("content"),
                 ChatLog.role.label("last_role"),
+                ChatLog.channel.label("channel"),
                 User.phone.label("phone"),
                 User.name.label("user_name"),
                 User.meta_json.label("user_meta"),
@@ -252,6 +260,7 @@ async def list_chats_sidebar(
                 "pulse": live["pulse"],
                 "sla_status": live["pulse"],
                 "chat_slow": chat_slow,
+                "channel": (getattr(r, "channel", None) or "whatsapp").strip().lower(),
             }
         )
     chats.sort(
@@ -338,6 +347,7 @@ async def get_chat_log(
                 "delivery_status": log.delivery_status,
                 "error_details": log.error_details if isinstance(log.error_details, dict) else None,
                 "status_updated_at": log.status_updated_at.isoformat() if log.status_updated_at else None,
+                "channel": normalize_customer_channel(getattr(log, "channel", None)),
             }
             for log in reversed(list(logs))
         ],
@@ -583,12 +593,14 @@ async def admin_send_message(
 ) -> dict:
     """
     Отправить сообщение клиенту от имени оператора.
-    Сохраняется в ChatLog и отправляется через WhatsApp.
+    Сохраняется в ChatLog и отправляется через активный канал (WhatsApp / Telegram).
     """
     org_id = admin_org_from_session(request)
     user = await get_or_create_user(db, phone, org_id)
     phone = user.phone
     now = datetime.now(timezone.utc)
+    msg_channel = customer_channel_for_user(user)
+    tg_chat_id = telegram_chat_id_for_user(user)
     from app.services.trace_context import (
         build_trace_id,
         publish_chat_event,
@@ -609,6 +621,7 @@ async def admin_send_message(
         organization_id=org_id,
         role="operator",
         content=body.text,
+        channel=msg_channel,
         delivery_status="sending",
         status_updated_at=now,
         meta_json=trace_payload(trace_id=trace_id, conversation_id=conversation_id),
@@ -628,17 +641,41 @@ async def admin_send_message(
             trace_id=trace_id,
             conversation_id=conversation_id,
         )
-        wa = await send_message(phone, body.text)
+        channel_tokens = customer_channel_context(msg_channel, telegram_chat_id=tg_chat_id)
+        send_ok = False
+        provider_message_id: str | None = None
+        error_details: dict | None = None
+        try:
+            if msg_channel == "telegram":
+                from app.services.telegram_customer import send_telegram_customer_text
 
-    # finalize после внешнего I/O, но в той же сессии (важно для тестов/фикстур)
+                tg_result = await send_telegram_customer_text(tg_chat_id, body.text)
+                send_ok = bool(tg_result.get("ok"))
+                result = tg_result.get("result")
+                if isinstance(result, dict):
+                    provider_message_id = str(result.get("message_id") or "") or None
+                if not send_ok:
+                    error_details = {"channel": "telegram", "detail": tg_result.get("error")}
+            else:
+                wa = await send_message(phone, body.text)
+                send_ok = wa.ok
+                provider_message_id = wa.message_id
+                error_details = wa.error
+        finally:
+            reset_customer_channel_context(channel_tokens)
+
     evt = await finalize_outbound_delivery(
-        db, log_id, wa.ok, provider_message_id=wa.message_id, error_details=wa.error,
+        db,
+        log_id,
+        send_ok,
+        provider_message_id=provider_message_id,
+        error_details=error_details,
     )
     await db.commit()
     if evt is not None:
         await publish_event("message_status_updated", evt)
 
-    if wa.ok:
+    if send_ok:
         from app.services.message_accounting import schedule_log_message
         schedule_log_message(org_id, "outbound", "operator", "text")
 
@@ -649,10 +686,11 @@ async def admin_send_message(
         body.text[:50],
     )
     return {
-        "status": "sent" if wa.ok else "failed",
+        "status": "sent" if send_ok else "failed",
         "phone": phone,
         "chat_log_id": log_id,
         "trace_id": trace_id,
+        "channel": msg_channel,
     }
 
 
@@ -663,7 +701,7 @@ async def resend_failed_chat_message(
     chat_log_id: int,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Повторная отправка текста той же записи ChatLog после статуса failed (WhatsApp)."""
+    """Повторная отправка текста той же записи ChatLog после статуса failed."""
     org_id = admin_org_from_session(request)
     log = await db.get(ChatLog, chat_log_id)
     if log is None:
@@ -680,24 +718,55 @@ async def resend_failed_chat_message(
     if not text:
         raise HTTPException(status_code=400, detail="Пустой текст сообщения")
 
+    msg_channel = normalize_customer_channel(getattr(log, "channel", None) or customer_channel_for_user(user))
+    tg_chat_id = telegram_chat_id_for_user(user)
+
     now = datetime.now(timezone.utc)
     log.delivery_status = "sending"
     log.error_details = None
     log.status_updated_at = now
+    log.channel = msg_channel
     await db.commit()
     from app.services.trace_context import publish_chat_event
     await publish_chat_event(
         phone=phone, role=log.role, content=text,
         organization_id=org_id, chat_log_id=chat_log_id,
     )
-    wa = await send_message(phone, text)
+    channel_tokens = customer_channel_context(msg_channel, telegram_chat_id=tg_chat_id)
+    send_ok = False
+    provider_message_id: str | None = None
+    error_details: dict | None = None
+    try:
+        if msg_channel == "telegram":
+            from app.services.telegram_customer import send_telegram_customer_text
+
+            tg_result = await send_telegram_customer_text(tg_chat_id, text)
+            send_ok = bool(tg_result.get("ok"))
+            result = tg_result.get("result")
+            if isinstance(result, dict):
+                provider_message_id = str(result.get("message_id") or "") or None
+            if not send_ok:
+                error_details = {"channel": "telegram", "detail": tg_result.get("error")}
+        else:
+            wa = await send_message(phone, text)
+            send_ok = wa.ok
+            provider_message_id = wa.message_id
+            error_details = wa.error
+    finally:
+        reset_customer_channel_context(channel_tokens)
+
     evt = await finalize_outbound_delivery(
-        db, chat_log_id, wa.ok, provider_message_id=wa.message_id, error_details=wa.error,
+        db, chat_log_id, send_ok, provider_message_id=provider_message_id, error_details=error_details,
     )
     await db.commit()
     if evt is not None:
         await publish_event("message_status_updated", evt)
-    return {"status": "sent" if wa.ok else "failed", "phone": phone, "chat_log_id": chat_log_id}
+    return {
+        "status": "sent" if send_ok else "failed",
+        "phone": phone,
+        "chat_log_id": chat_log_id,
+        "channel": msg_channel,
+    }
 
 
 @chats_router.get("/chats/{phone}/state")

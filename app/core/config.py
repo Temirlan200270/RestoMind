@@ -325,6 +325,11 @@ class Settings(BaseSettings):
         default="",
         validation_alias=AliasChoices("SUPERADMIN_TELEGRAM_CHAT_ID", "superadmin_telegram_chat_id"),
     )
+    # MVP stub: при отправке weekly digest логируем intent (SMTP не требуется)
+    owner_digest_email: str = Field(
+        default="",
+        validation_alias=AliasChoices("OWNER_DIGEST_EMAIL", "owner_digest_email"),
+    )
     # IANA (например Asia/Almaty) — время в Telegram-алертах эскалации: сначала «заведение», затем UTC
     display_timezone: str = Field(
         default="",

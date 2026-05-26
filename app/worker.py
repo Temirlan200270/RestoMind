@@ -223,6 +223,44 @@ async def external_reviews_sync_scheduled_tick(ctx: dict[str, Any]) -> None:
     await run_external_reviews_scheduled_sync()
 
 
+async def order_ai_audit_backfill_tick(ctx: dict[str, Any]) -> None:
+    """Cron каждые ~15 мин: backfill QA-аудитов и upsell attribution за today."""
+    import logging
+    from sqlalchemy import select
+
+    from app.db.models import Organization
+    from app.db.session import async_session_factory
+    from app.services.order_ai_audit import backfill_order_ai_audits
+    from app.services.upsell_attribution import backfill_upsell_attribution
+
+    logger = logging.getLogger(__name__)
+    async with async_session_factory() as db:
+        org_ids = list(
+            (await db.execute(select(Organization.id).where(Organization.is_active.is_(True)))).scalars().all(),
+        )
+
+    audit_total = 0
+    upsell_total = 0
+    for org_id in org_ids:
+        try:
+            async with async_session_factory() as db:
+                audit_stats = await backfill_order_ai_audits(db, int(org_id), period="today", limit=100)
+                upsell_stats = await backfill_upsell_attribution(db, int(org_id), period="today", limit=100)
+                await db.commit()
+                audit_total += int(audit_stats.get("processed") or 0)
+                upsell_total += int(upsell_stats.get("events_updated") or 0)
+        except Exception:
+            logger.exception("order_ai_audit_backfill_tick org=%s", org_id)
+
+    if audit_total or upsell_total:
+        logger.info(
+            "order_ai_audit_backfill_tick: orgs=%d audits=%d upsell_events=%d",
+            len(org_ids),
+            audit_total,
+            upsell_total,
+        )
+
+
 async def iiko_inventory_sync_scheduled_tick(ctx: dict[str, Any]) -> None:
     """Cron каждые 6 часов: остатки iiko Office для всех филиалов с конфигом."""
     import logging
@@ -294,6 +332,7 @@ class WorkerSettings:
         waiter_kpi_sync_scheduled_tick,
         external_reviews_sync,
         external_reviews_sync_scheduled_tick,
+        order_ai_audit_backfill_tick,
         ai_incidents_hourly_tick,
         daily_os_digest_scheduled_tick,
         draft_recovery_scheduled_tick,
@@ -314,6 +353,7 @@ class WorkerSettings:
             cron(waiter_kpi_sync_scheduled_tick, hour=22, minute=30),
             cron(sales_hourly_iiko_scheduled_tick, hour=23, minute=15),
             cron(external_reviews_sync_scheduled_tick, hour={2, 14}, minute=10),
+            cron(order_ai_audit_backfill_tick, minute={5, 20, 35, 50}),
         ]
         if cron is not None
         else [],

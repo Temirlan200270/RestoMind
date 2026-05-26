@@ -8,7 +8,7 @@ alwaysApply: true
 ## Ориентация по докам
 
 Когда читать какой файл — см. **restomind-onboarding** (lean, без загрузки всего репо в контекст).  
-Трекер задач: только [`docs/ROADMAP.md`](mdc:docs/ROADMAP.md). История: [`CHANGELOG.md`](mdc:CHANGELOG.md) `## [Unreleased]`.
+Трекер задач: только [`docs/ROADMAP.md`](mdc:docs/ROADMAP.md). Релизы (кратко): [`CHANGELOG.md`](mdc:CHANGELOG.md) `## [Unreleased]`. Детали эпиков: [`docs/releases/README.md`](mdc:docs/releases/README.md).
 
 ## Жёсткие запреты
 

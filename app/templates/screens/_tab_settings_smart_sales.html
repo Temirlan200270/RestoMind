@@ -1,16 +1,149 @@
-            <!-- ========== ДОПРОДАЖИ (Strategy Engine) ========== -->
+            <!-- ========== ДОПРОДАЖИ (Revenue Copilot) ========== -->
             <template x-if="currentTab === 'settings' && settingsTab === 'smart_sales'">
             <div class="fade-in w-full max-w-6xl mx-auto lg:flex lg:gap-8 lg:items-start pb-16">
                 {{ settings_tabs() }}
                 <div class="flex-1 min-w-0 space-y-6">
+                <!-- RC-E: Revenue Copilot impact -->
+                <div class="rm-card-surface p-6">
+                    <div class="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                            <h3 class="text-lg font-bold text-gray-900">Умные продажи — эффект</h3>
+                            <p class="text-sm text-gray-500 mt-1">Скоринг, anti-repeat и A/B фраз за последние 7 дней.</p>
+                        </div>
+                        <button type="button" @click="loadSmartSalesImpact()" class="px-4 py-2 rounded-xl border border-gray-200 text-sm font-semibold hover:bg-gray-50"
+                            :disabled="smartSalesLoading">
+                            <span x-show="!smartSalesLoading">Обновить</span>
+                            <span x-show="smartSalesLoading">Загрузка…</span>
+                        </button>
+                    </div>
+                    <div x-show="smartSalesLoading && !smartSalesImpact" class="mt-4 h-20 rounded-xl bg-gray-100 animate-pulse"></div>
+                    <template x-if="smartSalesImpact && !smartSalesLoading">
+                        <div class="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3">
+                            <div class="rounded-xl bg-slate-50 p-4">
+                                <div class="text-xs text-gray-500 uppercase font-semibold">Показано</div>
+                                <div class="mt-1 text-2xl font-black tabular-nums" x-text="smartSalesImpact.offered ?? smartSalesImpact.shown ?? 0"></div>
+                            </div>
+                            <div class="rounded-xl bg-emerald-50 p-4">
+                                <div class="text-xs text-emerald-700 uppercase font-semibold">Принято</div>
+                                <div class="mt-1 text-2xl font-black tabular-nums text-emerald-800" x-text="smartSalesImpact.accepted ?? 0"></div>
+                            </div>
+                            <div class="rounded-xl bg-rose-50 p-4">
+                                <div class="text-xs text-rose-700 uppercase font-semibold">Отказ</div>
+                                <div class="mt-1 text-2xl font-black tabular-nums text-rose-800" x-text="smartSalesImpact.rejected ?? 0"></div>
+                            </div>
+                            <div class="rounded-xl bg-brand-50 p-4 col-span-2 md:col-span-1">
+                                <div class="text-xs text-brand-700 uppercase font-semibold">Доп. выручка</div>
+                                <div class="mt-1 text-2xl font-black tabular-nums text-brand-800"
+                                    x-text="fmt.money(smartSalesImpact.added_revenue ?? smartSalesImpact.revenue_kzt ?? 0)"></div>
+                            </div>
+                        </div>
+                    </template>
+                    <div class="mt-5 grid grid-cols-1 lg:grid-cols-2 gap-4" x-show="smartSalesImpact">
+                        <div class="rounded-xl border border-gray-100 p-4">
+                            <h4 class="text-sm font-bold text-gray-900">Лучшие связки (заказы)</h4>
+                            <template x-if="(smartSalesImpact.best_pairs || []).length">
+                                <ul class="mt-2 space-y-1.5 text-sm">
+                                    <template x-for="(row, idx) in (smartSalesImpact.best_pairs || []).slice(0, 5)" :key="'bp-' + idx">
+                                        <li class="flex justify-between gap-2">
+                                            <span class="truncate text-gray-700" x-text="(row.base_item_name || '—') + ' → ' + (row.offered_item_name || '—')"></span>
+                                            <span class="shrink-0 font-semibold text-brand-700 tabular-nums" x-text="row.score != null ? (Number(row.score).toFixed(0) + '%') : '—'"></span>
+                                        </li>
+                                    </template>
+                                </ul>
+                            </template>
+                            <p x-show="!(smartSalesImpact.best_pairs || []).length" class="mt-2 text-xs text-gray-400">Недостаточно подтверждённых заказов для co-occurrence.</p>
+                        </div>
+                        <div class="rounded-xl border border-gray-100 p-4">
+                            <h4 class="text-sm font-bold text-gray-900">Топ связок (upsell)</h4>
+                            <template x-if="(smartSalesImpact.top_pairs || []).length">
+                                <ul class="mt-2 space-y-1.5 text-sm">
+                                    <template x-for="(row, idx) in (smartSalesImpact.top_pairs || []).slice(0, 5)" :key="idx">
+                                        <li class="flex justify-between gap-2">
+                                            <span class="truncate text-gray-700" x-text="(row.base_item_name || '—') + ' → ' + (row.offered_item_name || '—')"></span>
+                                            <span class="shrink-0 font-semibold text-emerald-700" x-text="row.accepted ?? 0"></span>
+                                        </li>
+                                    </template>
+                                </ul>
+                            </template>
+                            <p x-show="!(smartSalesImpact.top_pairs || []).length" class="mt-2 text-xs text-gray-400">Пока нет принятых связок.</p>
+                        </div>
+                        <div class="rounded-xl border border-gray-100 p-4">
+                            <h4 class="text-sm font-bold text-gray-900">Худшие предложения</h4>
+                            <template x-if="(smartSalesImpact.worst_offers || []).length">
+                                <ul class="mt-2 space-y-1.5 text-sm">
+                                    <template x-for="(row, wi) in (smartSalesImpact.worst_offers || []).slice(0, 5)" :key="'wo-' + wi">
+                                        <li class="flex justify-between gap-2">
+                                            <span class="truncate text-gray-700" x-text="row.offered_item_name || '—'"></span>
+                                            <span class="shrink-0 font-semibold text-rose-700 tabular-nums"
+                                                x-text="row.negative_rate != null ? (Number(row.negative_rate).toFixed(0) + '% отказ') : '—'"></span>
+                                        </li>
+                                    </template>
+                                </ul>
+                            </template>
+                            <p x-show="!(smartSalesImpact.worst_offers || []).length" class="mt-2 text-xs text-gray-400">Нет статистики по отказам.</p>
+                        </div>
+                        <div class="rounded-xl border border-gray-100 p-4">
+                            <h4 class="text-sm font-bold text-gray-900">Отказы / игнор</h4>
+                            <template x-if="(smartSalesImpact.rejected_items || []).length">
+                                <ul class="mt-2 space-y-1.5 text-sm">
+                                    <template x-for="(row, ri) in (smartSalesImpact.rejected_items || []).slice(0, 5)" :key="'rj-' + ri">
+                                        <li class="flex justify-between gap-2">
+                                            <span class="truncate text-gray-700" x-text="row.offered_item_name || '—'"></span>
+                                            <span class="shrink-0 font-semibold text-rose-700" x-text="row.count ?? 0"></span>
+                                        </li>
+                                    </template>
+                                </ul>
+                            </template>
+                            <p x-show="!(smartSalesImpact.rejected_items || []).length" class="mt-2 text-xs text-gray-400">Отказов за период нет.</p>
+                        </div>
+                        <div class="rounded-xl border border-gray-100 p-4">
+                            <h4 class="text-sm font-bold text-gray-900">Лучшие фразы (A/B CR)</h4>
+                            <template x-if="(smartSalesImpact.best_variants || []).length">
+                                <ul class="mt-2 space-y-1.5 text-sm">
+                                    <template x-for="(v, vi) in (smartSalesImpact.best_variants || []).slice(0, 5)" :key="vi">
+                                        <li class="flex justify-between gap-2">
+                                            <span class="truncate text-gray-700" x-text="v.variant || v.variant_key || '—'"></span>
+                                            <span class="shrink-0 font-semibold tabular-nums"
+                                                x-text="v.conversion_rate != null ? (Number(v.conversion_rate).toFixed(0) + '%') : '—'"></span>
+                                        </li>
+                                    </template>
+                                </ul>
+                            </template>
+                            <p x-show="!(smartSalesImpact.best_variants || []).length" class="mt-2 text-xs text-gray-400">Эксперименты появятся после первых показов.</p>
+                        </div>
+                        <div class="rounded-xl border border-gray-100 p-4 lg:col-span-2">
+                            <h4 class="text-sm font-bold text-gray-900">Promote today (copilot)</h4>
+                            <template x-if="(smartSalesImpact.promote_today_candidates || []).length">
+                                <ul class="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-sm">
+                                    <template x-for="(row, pi) in (smartSalesImpact.promote_today_candidates || []).slice(0, 6)" :key="'pt-' + pi">
+                                        <li class="flex justify-between gap-2 rounded-lg bg-brand-50/60 px-3 py-2">
+                                            <span class="truncate text-gray-800" x-text="row.name || '—'"></span>
+                                            <span class="shrink-0 text-xs font-semibold text-brand-700" x-text="row.reason || 'promote'"></span>
+                                        </li>
+                                    </template>
+                                </ul>
+                            </template>
+                            <p x-show="!(smartSalesImpact.promote_today_candidates || []).length" class="mt-2 text-xs text-gray-400">Список promote today пуст.</p>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="rm-card-surface p-6">
                     <h3 class="text-lg font-bold text-gray-900">Правила допродаж</h3>
-                    <p class="text-sm text-gray-500 mt-1">Режим «нет категории в корзине» → предложить позицию из другой категории. Работает после ответа AI.</p>
+                    <p class="text-sm text-gray-500 mt-1">Режим срабатывания → предложить позицию из категории. После ответа AI применяется скоринг.</p>
                     <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
                         <div>
+                            <label class="text-[11px] font-semibold text-gray-500 uppercase">Режим триггера</label>
+                            <select x-model="upsellNew.trigger_mode" class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
+                                <option value="missing_category">Нет категории в корзине</option>
+                                <option value="item_present">Категория уже есть</option>
+                                <option value="time_of_day">Время суток (HH-HH в триггере)</option>
+                            </select>
+                        </div>
+                        <div>
                             <label class="flex items-center gap-1.5 text-[11px] font-semibold text-gray-500 uppercase">
-                                <span>Если нет категории (подстрока)</span>
-                                <span class="ds-field-help" title="Ищется подстрока в поле category позиций меню в корзине. Регистр не важен. Пример: «напит» сработает для категории «Напитки».">?</span>
+                                <span>Триггер (категория или HH-HH)</span>
+                                <span class="ds-field-help" title="missing_category/item_present: подстрока category. time_of_day: диапазон часов, напр. 17-22.">?</span>
                             </label>
                             <input type="text" x-model="upsellNew.trigger_category" placeholder="напит"
                                 class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
@@ -18,6 +151,11 @@
                         <div>
                             <label class="text-[11px] font-semibold text-gray-500 uppercase">Предложить из категории</label>
                             <input type="text" x-model="upsellNew.suggest_category" placeholder="напит"
+                                class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
+                        </div>
+                        <div>
+                            <label class="text-[11px] font-semibold text-gray-500 uppercase">Порядок (sort_order)</label>
+                            <input type="number" x-model.number="upsellNew.sort_order" min="0" step="1"
                                 class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
                         </div>
                         <div>
@@ -33,7 +171,7 @@
                         <div class="md:col-span-2">
                             <label class="flex items-center gap-1.5 text-[11px] font-semibold text-gray-500 uppercase">
                                 <span>Шаблон фразы ({item_name}, {price})</span>
-                                <span class="ds-field-help" title="Текст подсказки для ИИ; подставляются имя позиции и цена. Пусто — используется шаблон по умолчанию на сервере.">?</span>
+                                <span class="ds-field-help" title="A/B варианты задаются отдельно в экспериментах; здесь — fallback.">?</span>
                             </label>
                             <input type="text" x-model="upsellNew.phrase_template" placeholder="по умолчанию из сервера"
                                 class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm">
@@ -49,7 +187,8 @@
                         <div class="bg-white rounded-xl border border-gray-100 p-4 flex flex-wrap items-center justify-between gap-3">
                             <div class="min-w-0">
                                 <div class="text-sm font-semibold text-gray-900">
-                                    Нет «<span x-text="r.trigger_category"></span>» → из «<span x-text="r.suggest_category"></span>»
+                                    <span class="text-xs uppercase text-gray-400 mr-1" x-text="r.trigger_mode || 'missing_category'"></span>
+                                    «<span x-text="r.trigger_category"></span>» → «<span x-text="r.suggest_category"></span>»
                                 </div>
                                 <div class="text-xs text-gray-500 mt-1">
                                     сумма <span x-text="r.min_order_sum"></span>–<span x-text="r.max_order_sum != null ? r.max_order_sum : '∞'"></span> ₸
@@ -71,4 +210,3 @@
                 </div>
             </div>
             </template>
-

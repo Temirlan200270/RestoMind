@@ -102,6 +102,10 @@ async def get_user_preferences(
         cat for cat, count in cat_order_counts.items()
         if cat and (count / total_orders) < 0.05
     }
+    favorite_categories: set[str] = {
+        cat for cat, count in cat_order_counts.items()
+        if cat and (count / total_orders) >= 0.25
+    }
     avg_total = sum(totals) / len(totals) if totals else 0.0
     drinks_frequency = drinks_orders / total_orders
 
@@ -137,8 +141,36 @@ async def get_user_preferences(
 
     return {
         "never_categories": never_categories,
+        "favorite_categories": favorite_categories,
         "avg_total": avg_total,
         "drinks_frequency": drinks_frequency,
         "top_items": top_items,
         "disliked": disliked,
     }
+
+
+def guest_preference_weights(
+    user_preferences: dict | None,
+    *,
+    favorite_weight: float = 0.25,
+    never_weight: float = -0.5,
+) -> dict[str, float]:
+    """
+    Веса категорий для upsell scoring (RC-B).
+
+    favorite_categories → положительный буст, never_categories → штраф.
+    Пустой dict, если профиль гостя не задан.
+    """
+    if not isinstance(user_preferences, dict) or not user_preferences:
+        return {}
+
+    weights: dict[str, float] = {}
+    for cat in user_preferences.get("favorite_categories") or set():
+        key = str(cat).strip().lower()
+        if key:
+            weights[key] = float(favorite_weight)
+    for cat in user_preferences.get("never_categories") or set():
+        key = str(cat).strip().lower()
+        if key:
+            weights[key] = float(never_weight)
+    return weights

@@ -74,7 +74,9 @@ async def send_customer_text(
     outbound_chat_log_id: int | None = None,
 ) -> None:
     """
-    Если открыт контекст Twilio-звонка — озвучить через REST; иначе WhatsApp.
+    Если открыт контекст Twilio-звонка — озвучить через REST;
+    если активен Telegram customer channel — sendMessage;
+    иначе WhatsApp.
     При outbound_chat_log_id обновляет chat_logs асинхронно (fire-and-forget),
     не блокируя pipeline бота.
     """
@@ -87,6 +89,27 @@ async def send_customer_text(
             logger.warning("Не удалось озвучить ответ в Twilio (CallSid=%s)", sid[:8])
         if outbound_chat_log_id is not None:
             asyncio.ensure_future(_bg_finalize_twilio(outbound_chat_log_id, ok))
+        return
+
+    from app.services.telegram_customer import current_customer_channel, current_telegram_chat_id, send_telegram_customer_text
+
+    if current_customer_channel() == "telegram":
+        tg_chat_id = current_telegram_chat_id()
+        tg_result = await send_telegram_customer_text(tg_chat_id, text) if tg_chat_id else {"ok": False}
+        tg_ok = bool(tg_result.get("ok"))
+        if outbound_chat_log_id is not None:
+            msg_id = None
+            result = tg_result.get("result")
+            if isinstance(result, dict):
+                msg_id = str(result.get("message_id") or "") or None
+            asyncio.ensure_future(
+                _bg_finalize_whatsapp(
+                    outbound_chat_log_id,
+                    tg_ok,
+                    msg_id,
+                    None if tg_ok else {"channel": "telegram", "detail": tg_result.get("error")},
+                )
+            )
         return
 
     wa = await send_message(phone, text)

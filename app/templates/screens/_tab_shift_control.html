@@ -1,3 +1,4 @@
+            {% from "components/_kitchen_gate_panel.html" import kitchen_gate_panel %}
             {% from "components/_skeleton.html" import skeleton %}
             {% from "components/_card.html" import card %}
             {% from "components/_section_header.html" import section_header %}
@@ -51,8 +52,15 @@
                                 x-text="shiftStatusHeadline()"></p>
                         </div>
                     </div>
-                    <button type="button" @click="loadShiftState(true, { soft: true })" :disabled="shiftStateRefreshing"
+                    <button type="button" @click="loadShiftState(true, { soft: true }); loadKitchenGate()" :disabled="shiftStateRefreshing"
                         class="ds-btn ds-btn-secondary ds-btn-md min-h-[44px]">Обновить</button>
+                </div>
+
+                <div data-demo-hide>
+                    {{ kitchen_gate_panel(
+                        title='Kitchen Gate',
+                        subtitle='Быстрые переключатели: нагрузка кухни, доставка и +мин к готовности. ИИ учитывает режим в диалогах.',
+                    ) }}
                 </div>
 
                 <!-- Predictive tension — before action (probability → inevitability) -->

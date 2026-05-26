@@ -49,18 +49,20 @@
   - `value` — вклад ИИ (ROI, метрики);
   - `insights` — operational insights + рекомендации;
   - `load` — Digital Twin / нагрузка;
+  - **`owner_intel`** — **Owner Intelligence** (`_tab_owner_intelligence.html`): KPI, Kitchen Gate, QA audits (фильтры `ownerIntelAuditFilters`), upsell impact, Menu Profit preview, weekly digest preview + «Отправить сейчас» (`loadOwnerIntelligence`, `loadOwnerIntelDigestPreview`, `sendOwnerIntelDigestNow`);
+  - **`network_benchmark`** — **Бенчмарк сети** (только `userData.is_network`): сравнение точек, decline reasons, weekly report (`_tab_network_benchmark.html`, `loadNetworkBenchmark`);
   - `os` — **Автопилот** (`GET /intelligence/os-dashboard`, лента решений `loadAuditLog()`, bulk pricing);
-  - `guestcare` — **Отзывы** (внешние 2GIS/Google: `GET/POST /reviews/external*`).
+  - `guestcare` — **Отзывы** (внешние 2GIS/Google: `GET/POST /reviews/external*`);
   - `final_mile` — **Финал:** предпросмотр ежедневной сводки ОС, Закупки (предупреждения по запасам, черновики, чеклисты), голосовой ИИ + **журнал звонков** с playback (`loadVoiceCallLogs` → `GET /voice/calls`, пагинация, `location_id`).
   Legacy-файлы `_tab_ai_value.html`, `_tab_intelligence.html`, `_tab_digital_twin.html` остаются для редиректов hash.
-- `_tab_menu.html` — меню и стоп-лист.
+- `_tab_menu.html` — меню и стоп-лист; колонка **себестоимость** (`cost_price`), CSV import preview/apply, панель Menu Profit (`loadMenuProfitLab`).
 
 ### Настройки (`currentTab === 'settings'` + `settingsTab`)
 
 - `_tab_settings_restaurant.html` — профиль, расписание, база знаний, force-close, упаковка.
 - `_tab_settings_branding.html` — брендинг шапки.
 - `_tab_settings_connections.html` — интеграции (iiko, WhatsApp, Telegram). **E5:** бейджи очереди задач (`taskQueueHealth` ← `GET /api/admin/system/task-queue-health`; вызов `refreshTaskQueueHealth()` при входе на dashboard и при открытии connections).
-- `_tab_settings_smart_sales.html` — правила допродаж.
+- `_tab_settings_smart_sales.html` — **Умные продажи (Revenue Copilot)**: правила допродаж (`trigger_mode`), impact-панель (pairs, worst offers, A/B CR, promote today); `loadSmartSalesImpact()`.
 - `_tab_settings_team.html` — команда и роли. **StaffMind:** onboarding-сессии, Q&A (`loadStaffMindOnboarding`, …) и **step tracker** (`staffMindTrackerMeta()` — часть метрик на эвристиках до backend).
 - `_tab_settings_health.html` — проверки окружения (`loadReadiness()` → `GET /api/admin/settings/environment` или readiness API). FAQ cache metrics **здесь не выводятся** — только API `GET /api/admin/system/faq-cache-metrics`.
 - `_tab_settings_technical.html` — экспорт, retention, опасные действия.
@@ -83,6 +85,8 @@
 - `_segmented.html`, `_tabs.html`, `_settings_tabs.html` — переключатели и вкладки.
 - `_modal.html`, `_drawer.html` — оверлеи и мобильные bottom-sheet/drawer паттерны.
 - `_order_card.html` — карточки заказов: row/mobile/kanban + status badge.
+- `_order_qa_audit_badge.html` — QA audit badge (Shift order dock + chat context): risk, reasons, review reason select.
+- `_kitchen_gate_panel.html` — Kitchen Gate toggles + expires presets (Shift + Owner Intelligence).
 - `_input.html`, `_select.html`, `_textarea.html`, `_toggle.html` — form controls.
 - `_badge.html`, `_status_badge.html` — бейджи и статусы.
 - `_empty_state.html`, `_skeleton.html` — пустые состояния и загрузка.
@@ -92,6 +96,7 @@
 ## Client Logic
 
 - `app/static/js/admin-app.js` — большой Alpine `adminApp()` и миксины. Следующая крупная цель для раскола.
+- **Owner Intelligence (JS):** `loadOwnerIntelligence`, `loadOwnerIntelAudits`, `loadOwnerIntelDigestPreview`, `sendOwnerIntelDigestNow`, `loadNetworkBenchmark`, `loadSmartSalesImpact`, `loadMenuProfitLab`, `loadOrderAuditForFocus`, `orderAuditReview` / `orderAuditDismiss`.
 - Location UI state: `userData.available_locations`, `selectedLocationId` / `activeLocationId`, `locationQueryParams()`, `onLocationFilterChanged()`. Прокидывается в `loadOrders`, `loadChatList`, dashboard loaders, Intelligence/Digital Twin/OS Dashboard.
 - **System diagnostics (JS):** `refreshTaskQueueHealth()` → `/api/admin/system/task-queue-health`; FAQ metrics endpoint есть на бэкенде, UI-панели пока нет.
 - `app/static/js/admin-brand-tokens.js` — CSS-токены бренда.
@@ -130,6 +135,7 @@
 
 ## Known Follow-Ups
 
+- **Owner Intelligence OS:** вкладки `owner_intel` / `network_benchmark`, Smart Sales impact, Menu Profit, QA badge, weekly digest — ✅ (smoke: [`DEPLOY_RUNBOOK.md`](DEPLOY_RUNBOOK.md) §8).
 - **Финал UI:** `aiCenterTab=final_mile` — чеклисты закупок ✅, голосовой ИИ + журнал звонков ✅; обучение сотрудников — **Настройки → Команда** (StaffMind).
 - **KPI официантов:** блок «Официанты» в `analyticsDensity=advanced` ✅ — [`waiter_kpi.py`](app/api/admin/waiter_kpi.py).
 - **Control Plane:** `GET /trace-timeline?trace_id=` + панель «Цепочка trace_id» в AI Center → OS (`loadTraceTimeline()`).

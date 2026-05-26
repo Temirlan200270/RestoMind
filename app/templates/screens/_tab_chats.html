@@ -43,6 +43,10 @@
                                         <p class="ds-chat-list-phone text-xs text-gray-500 font-mono truncate opacity-80" x-text="chat.phone"></p>
                                         <p class="ds-chat-list-preview text-xs text-gray-500 truncate mt-0.5" x-text="chat.lastMessage || 'Нет сообщений'"></p>
                                         <div class="flex items-center gap-2 mt-1.5">
+                                            <span class="text-[10px] px-1.5 py-0.5 rounded font-semibold shrink-0"
+                                                :class="chatChannelBadgeClass(chat.channel)"
+                                                :title="chatChannelBadgeTitle(chat.channel)"
+                                                x-text="chatChannelBadgeLabel(chat.channel)"></span>
                                             <span class="text-[10px] text-slate-500 shrink-0 tabular-nums"
                                                 x-show="String(chat.lastRole||'').toLowerCase()==='user' && chatWaitSeconds(chat)>=120"
                                                 x-text="Math.max(1, Math.floor(chatWaitSeconds(chat)/60)) + 'м'"></span>
@@ -123,6 +127,10 @@
                                         <div class="min-w-0 flex-1">
                                             <div class="flex items-center gap-2 min-w-0 flex-wrap">
                                                 <h3 class="font-semibold text-gray-900 truncate text-sm md:text-[15px] leading-tight" x-text="activeChatTitle()"></h3>
+                                                <span class="text-[10px] px-1.5 py-0.5 rounded font-semibold shrink-0"
+                                                    :class="chatChannelBadgeClass(activeChatChannel())"
+                                                    :title="chatChannelBadgeTitle(activeChatChannel())"
+                                                    x-text="chatChannelBadgeLabel(activeChatChannel())"></span>
                                                 <span class="inline-flex px-2 py-0.5 text-[11px] font-semibold rounded-md border shrink-0"
                                                     :class="chatModeToneClass()"
                                                     x-text="chatModeSummary().label"></span>

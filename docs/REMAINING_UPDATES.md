@@ -4,8 +4,8 @@ This file tracks what is still needed outside the backend MVP that is already im
 
 ## Must Update Before Production
 
-- **Database:** run `alembic upgrade head`; expected head is `20260521_superadmin_audit` (chain: … → `20260522_iiko_office_inventory` → `20260521_superadmin_audit`).
-- **Workers:** restart ARQ workers so `daily_os_digest_scheduled_tick`, `iiko_inventory_sync`, and `external_reviews_sync_scheduled_tick` are registered.
+- **Database:** run `alembic upgrade head`; expected head is **`20260604_telegram_org_mapping`** (Owner Intelligence OS chain: `20260525_owner_intel_foundation` → … → `20260604_telegram_org_mapping`).
+- **Workers:** restart ARQ workers so `daily_os_digest_scheduled_tick`, **`owner_digest_scheduled_tick`** (weekly OI digest, Mon 10:00 org TZ), `iiko_inventory_sync`, and `external_reviews_sync_scheduled_tick` are registered.
 - **Frontend (wired):** `aiCenterTab=final_mile` (вкладка **Финал**) — предпросмотр ежедневной сводки ОС, предупреждения по запасам/чеклисты закупок, голосовой ИИ + журнал звонков (`GET /voice/calls` ✅). `_tab_settings_team.html` — обучение сотрудников + step tracker (метрики частично на эвристиках UI). `/superadmin` — tech fields + audit journal ✅ (нужен `alembic upgrade head` на env).
 - **Permissions:** decide which staff roles can create supply drafts and change checklist status; StaffMind POST onboarding — `require_staff_manager_or_admin`; Voice toggle — `require_staff_admin` on `POST /voice/config`.
 - **Operations:** confirm every organization has a valid `timezone`, especially for the 09:00 Daily OS Digest.
@@ -58,7 +58,8 @@ This file tracks what is still needed outside the backend MVP that is already im
 
 - **GuestCare 2GIS:** ✅ auto-sync — **product 100% = 2GIS** ([`guestcare_parser.py`](app/services/guestcare_parser.py), cron, UI). Sign-off не требуется.
 - **GuestCare Google:** опционально; без Places API — best-effort / ручной import (не блокер Final Mile).
-- **Telegram delivery check:** verify `TELEGRAM_BOT_TOKEN` and ops chat IDs for Daily OS Digest in staging ([`docs/TELEGRAM_DIGEST_STAGING.md`](TELEGRAM_DIGEST_STAGING.md)).
+- **Telegram delivery check:** verify `TELEGRAM_BOT_TOKEN` and ops chat IDs for Daily OS Digest **and** Owner Intelligence weekly digest in staging ([`docs/TELEGRAM_DIGEST_STAGING.md`](TELEGRAM_DIGEST_STAGING.md), [`docs/DEPLOY_RUNBOOK.md`](DEPLOY_RUNBOOK.md) §8.5).
+- **Owner Intelligence smoke:** after migration — [`docs/DEPLOY_RUNBOOK.md`](DEPLOY_RUNBOOK.md) §8 (`verify_owner_intel_schema.py`, API + UI checklist).
 
 ## Docs That Should Be Cleaned Later
 
@@ -68,5 +69,5 @@ This file tracks what is still needed outside the backend MVP that is already im
 ## Suggested Next Engineering Sprint
 
 - **Ops (закрыть ROADMAP Voice `[ ]` + iiko smoke):** заполнить [`docs/FINAL_MILE_OPS_SIGNOFF.md`](FINAL_MILE_OPS_SIGNOFF.md), затем `[x]` в ROADMAP.
-- Run `alembic upgrade head` (`20260521_superadmin_audit`); restart workers.
+- Run `alembic upgrade head` (`20260604_telegram_org_mapping`); restart workers.
 - Browser smoke: [`docs/FINAL_MILE_BROWSER_SMOKE.md`](FINAL_MILE_BROWSER_SMOKE.md); optional PNG via `scripts/capture_admin_u0_baseline.py`.

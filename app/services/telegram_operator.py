@@ -94,7 +94,7 @@ async def _clear_operator_state(telegram_user_id: int) -> None:
 # ──────────────────────── Handlers ────────────────────────
 
 
-async def handle_telegram_update(update: dict) -> None:
+async def handle_telegram_update(update: dict, *, organization_id: int | None = None) -> None:
     """Точка входа: разбирает тип Update и делегирует обработчику."""
     if "callback_query" in update:
         await handle_callback_query(update["callback_query"])
@@ -109,7 +109,16 @@ async def handle_telegram_update(update: dict) -> None:
                 await _clear_operator_state(int(uid))
                 await _send_to_operator(msg["chat"]["id"], "Режим ответа отменён.")
         else:
-            await handle_operator_message(msg)
+            uid = msg.get("from", {}).get("id")
+            op_state = await _get_operator_state(int(uid)) if uid else None
+            if op_state and op_state.get("state") == "awaiting_reply":
+                await handle_operator_message(msg)
+            else:
+                from app.services.telegram_customer import handle_telegram_customer_message
+
+                handled = await handle_telegram_customer_message(msg, organization_id=organization_id)
+                if not handled:
+                    await handle_operator_message(msg)
 
 
 async def handle_callback_query(callback: dict) -> None:
@@ -193,6 +202,13 @@ async def handle_operator_message(msg: dict) -> None:
         from app.db.session import async_session_factory
         from app.db.models import ChatLog, User
         from app.services.customer_reply import send_customer_text
+        from app.services.telegram_customer import (
+            customer_channel_context,
+            customer_channel_for_user,
+            normalize_customer_channel,
+            reset_customer_channel_context,
+            telegram_chat_id_for_user,
+        )
         from datetime import datetime, timezone
         from sqlalchemy import select
 
@@ -204,12 +220,15 @@ async def handle_operator_message(msg: dict) -> None:
                 ).limit(1)
             )
             user_id = user_row.id if user_row else None
+            msg_channel = customer_channel_for_user(user_row)
+            tg_chat_id = telegram_chat_id_for_user(user_row)
 
             log = ChatLog(
                 organization_id=org_id,
                 user_id=user_id,
                 role="assistant",
                 content=text,
+                channel=normalize_customer_channel(msg_channel),
                 meta_json={"source": "telegram_operator", "tg_user_id": telegram_user_id},
                 delivery_status="sending",
                 status_updated_at=datetime.now(timezone.utc),
@@ -219,7 +238,11 @@ async def handle_operator_message(msg: dict) -> None:
             await db.refresh(log)
             log_id = int(log.id)
 
-        await send_customer_text(phone, text, outbound_chat_log_id=log_id)
+        channel_tokens = customer_channel_context(msg_channel, telegram_chat_id=tg_chat_id)
+        try:
+            await send_customer_text(phone, text, outbound_chat_log_id=log_id)
+        finally:
+            reset_customer_channel_context(channel_tokens)
 
         await _clear_operator_state(int(telegram_user_id))
         await _send_to_operator(chat_id, f"✅ Отправлено гостю <code>{phone}</code>.")

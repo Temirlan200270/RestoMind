@@ -11,7 +11,7 @@ import hmac
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import re
@@ -78,7 +78,7 @@ from app.services.pipeline_latency import schedule_log_pipeline_latency
 from app.services.events import publish_event
 from app.services.billing_guard import tenant_billing_blocks_inbound
 from app.services.system_events import BusinessEvent, emit_event
-from app.services.decision_engine import decision_engine
+from app.services.decision_engine import decision_engine, emit_kitchen_gate_order_blocked_events
 from app.services.faq_cache import (
     get_cached_faq_reply,
     kb_fingerprint_from_text,
@@ -352,6 +352,7 @@ async def _save_chat_log(
     *,
     organization_id: int,
     outbound_whatsapp: bool = True,
+    channel: str | None = None,
     trace_id: str | None = None,
     conversation_id: str | None = None,
     known_user_id: int | None = None,
@@ -362,6 +363,9 @@ async def _save_chat_log(
     Для исходящего ответа в WhatsApp — assistant со статусом sending; возвращает id строки assistant.
     known_user_id: если передан — пропускает get_or_create_user (уже загружен в preflight).
     """
+    from app.services.telegram_customer import current_customer_channel, normalize_customer_channel
+
+    msg_channel = normalize_customer_channel(channel or current_customer_channel())
     if known_user_id is not None:
         uid = known_user_id
     else:
@@ -374,6 +378,7 @@ async def _save_chat_log(
             user_id=uid,
             role="user",
             content=user_text,
+            channel=msg_channel,
             meta_json=(
                 trace_payload(
                     trace_id=trace_id,
@@ -390,6 +395,7 @@ async def _save_chat_log(
         "user_id": uid,
         "role": "assistant",
         "content": reply_text,
+        "channel": msg_channel,
         "meta_json": (
             merge_trace_meta(
                 assistant_meta,
@@ -606,7 +612,45 @@ async def handle_confirmation(
             order_row = await db.get(Order, order_id)
             if order_row and order_row.items_json:
                 om = (order_row.items_json.get("order_meta") or {})
-                if om.get("requires_order_prepayment"):
+                if isinstance(om, dict):
+                    summary_core = build_summary_text_from_stored_items(order_row.items_json)
+                    body = format_whatsapp_order_card(order_row.items_json, summary_core)
+                    pay_key = str(om.get("payment_method") or "").strip().lower()
+                    pay_human = _PAYMENT_LABEL_RU.get(pay_key, pay_key or "не указан")
+                    fulfillment_reply = _missing_fulfillment_after_payment_reply(
+                        om,
+                        pay_human=pay_human,
+                        body=body,
+                    )
+                    if fulfillment_reply:
+                        await db.commit()
+                        await sync_user_dialog_state_to_db_then_redis(
+                            redis_client,
+                            phone=phone,
+                            organization_id=organization_id,
+                            new_state=UserState.CHATTING,
+                        )
+                        return fulfillment_reply
+
+                from app.services.order_confirm_gate import validate_order_ready_to_confirm
+
+                gate = await validate_order_ready_to_confirm(
+                    db, order_row, check_fulfillment=True, order_meta=om if isinstance(om, dict) else {},
+                )
+                if not gate.ok:
+                    await db.commit()
+                    await sync_user_dialog_state_to_db_then_redis(
+                        redis_client,
+                        phone=phone,
+                        organization_id=organization_id,
+                        new_state=UserState.CHATTING,
+                    )
+                    return (
+                        f"⚠️ {gate.reason}\n\n"
+                        "Исправьте детали заказа — напишите, что изменить, или уточните адрес/время."
+                    )
+
+                if isinstance(om, dict) and om.get("requires_order_prepayment"):
                     org_ent = await db.get(Organization, organization_id)
                     prepay_enf = bool(org_ent.prepayment_enforced) if org_ent else True
                     if prepay_enf:
@@ -690,7 +734,7 @@ async def handle_confirmation(
             "Заказ отменён. Вы можете:\n"
             "  • Назвать новые блюда — я оформлю новый заказ\n"
             "  • Написать что изменить — например «уберите лагман, добавьте плов»\n"
-            "  • Или просто продолжить общение 😊"
+            "  • Или просто продолжить общение"
         )
 
     return None  # не «Да» и не «Нет» — вернём None, process_message пропустит через LLM
@@ -760,7 +804,7 @@ async def handle_booking_confirmation(
         return (
             "Бронирование отменено. Вы можете:\n"
             "  • Назвать другую дату и время\n"
-            "  • Или просто продолжить общение 😊"
+            "  • Или просто продолжить общение"
         )
 
     return "Пожалуйста, ответьте «Да» для подтверждения или «Нет» для отмены бронирования."
@@ -771,6 +815,30 @@ _PAYMENT_LABEL_RU = {
     "card": "Карта при получении",
     "remote": "Удалённая оплата (перевод / ссылка)",
 }
+
+
+def _missing_fulfillment_after_payment_reply(
+    order_meta: dict[str, object],
+    *,
+    pay_human: str,
+    body: str,
+) -> str:
+    ot = str(order_meta.get("order_type") or "").strip().lower()
+    delivery_address = str(order_meta.get("delivery_address") or "").strip()
+    pickup_note = str(order_meta.get("pickup_time_note") or "").strip()
+    if ot == "delivery" and not delivery_address:
+        return (
+            f"Принял способ оплаты: {pay_human}.\n\n"
+            f"{body}\n\n"
+            "Перед подтверждением нужен адрес доставки: улица, дом и квартира/подъезд, если есть."
+        )
+    if ot == "pickup" and not pickup_note:
+        return (
+            f"Принял способ оплаты: {pay_human}.\n\n"
+            f"{body}\n\n"
+            "Перед подтверждением уточните, пожалуйста, к какому времени подготовить самовывоз."
+        )
+    return ""
 
 
 async def handle_order_payment_choice(
@@ -821,7 +889,7 @@ async def handle_order_payment_choice(
             "Заказ отменён. Вы можете:\n"
             "  • Назвать новые блюда — я оформлю новый заказ\n"
             "  • Написать что изменить\n"
-            "  • Или просто продолжить общение 😊"
+            "  • Или просто продолжить общение"
         )
 
     pm = detect_payment_method_from_text(message_text)
@@ -847,6 +915,20 @@ async def handle_order_payment_choice(
         summary_core = build_summary_text_from_stored_items(items_json)
         body = format_whatsapp_order_card(items_json, summary_core)
         pay_human = _PAYMENT_LABEL_RU.get(pm, pm)
+        fulfillment_reply = _missing_fulfillment_after_payment_reply(
+            order_meta,
+            pay_human=pay_human,
+            body=body,
+        )
+        if fulfillment_reply:
+            await db.commit()
+            await sync_user_dialog_state_to_db_then_redis(
+                redis_client,
+                phone=phone,
+                organization_id=organization_id,
+                new_state=UserState.CHATTING,
+            )
+            return fulfillment_reply
         reply = (
             f"Принял способ оплаты: {pay_human}.\n\n"
             f"{body}\n\n"
@@ -940,37 +1022,43 @@ async def _save_failed_task(
         logger.error("Не удалось сохранить FailedTask для %s: %s", phone, exc)
 
 
-async def process_with_retry(
+async def process_inbound_message(
     phone: str,
     message_text: str = "",
     *,
-    whatsapp_message_id: str = "",
+    organization_id: int | None = None,
+    channel: str = "whatsapp",
+    inbound_message_id: str = "",
     voice_audio: tuple[bytes, str] | None = None,
     webhook_value: dict[str, Any] | None = None,
-    organization_id: int | None = None,
     trace_id: str | None = None,
 ) -> None:
     """
-    Обёртка с retry + exponential backoff.
-    После MAX_RETRIES неудач → сохраняет в FailedTask и извиняется перед клиентом.
+    Shared inbound pipeline for customer channels (WhatsApp, Telegram, …).
+    WhatsApp-only: dedupe by ``inbound_message_id``, org resolve from webhook payload.
     """
+    from app.services.telegram_customer import current_telegram_chat_id, normalize_customer_channel
+
+    msg_channel = normalize_customer_channel(channel)
     org_id = int(organization_id) if organization_id is not None else int(settings.default_organization_id)
     org_active = True
     pipeline_sw = PipelineStopwatch()
     from app.services.wa_queue_metrics import pop_queue_wait_ms
 
-    queue_wait_ms = await pop_queue_wait_ms(
-        trace_id=trace_id,
-        whatsapp_message_id=whatsapp_message_id,
-    )
-    if queue_wait_ms is not None:
-        pipeline_sw.rm_stage_ms["queue_wait"] = queue_wait_ms
-        logger.info(
-            "[trace_id=%s] WhatsApp queue_wait_ms=%.0f wmid=%s",
-            trace_id or "-",
-            queue_wait_ms,
-            (whatsapp_message_id or "")[:24],
+    wmid = (inbound_message_id or "").strip() if msg_channel == "whatsapp" else ""
+    if msg_channel == "whatsapp":
+        queue_wait_ms = await pop_queue_wait_ms(
+            trace_id=trace_id,
+            whatsapp_message_id=wmid,
         )
+        if queue_wait_ms is not None:
+            pipeline_sw.rm_stage_ms["queue_wait"] = queue_wait_ms
+            logger.info(
+                "[trace_id=%s] WhatsApp queue_wait_ms=%.0f wmid=%s",
+                trace_id or "-",
+                queue_wait_ms,
+                wmid[:24],
+            )
     if webhook_value is not None and organization_id is None:
         try:
             async with async_session_factory() as db:
@@ -987,10 +1075,9 @@ async def process_with_retry(
         except Exception as exc:
             logger.warning("organization activity check failed (org=%s): %s", org_id, exc)
     if not org_active:
-        logger.info("org=%s inactive: webhook message ignored", org_id)
+        logger.info("org=%s inactive: inbound message ignored", org_id)
         return
-    wmid = (whatsapp_message_id or "").strip()
-    if wmid:
+    if msg_channel == "whatsapp" and wmid:
         try:
             async with async_session_factory() as db:
                 can = await try_start_whatsapp_inbound_in_db(db, message_id=wmid, phone=phone)
@@ -998,7 +1085,6 @@ async def process_with_retry(
             if not can:
                 return
         except Exception as exc:
-            # Если дедуп-таблица недоступна, лучше не терять сообщение: продолжаем без БД-идемпотентности.
             logger.warning("WhatsApp dedupe start failed (mid=%s): %s", wmid[:24], exc)
 
     if settings.pipeline_timing_enabled:
@@ -1006,56 +1092,66 @@ async def process_with_retry(
 
     async def _process_payload_item(item: ChatMessagePayload) -> None:
         nonlocal last_exc
-        wmid_item = (item.whatsapp_message_id or "").strip()
-        for attempt in range(MAX_RETRIES):
-            try:
-                await process_message(
-                    item.phone,
-                    item.message_text,
-                    whatsapp_message_id=wmid_item,
-                    voice_audio=item.voice_audio,
-                    organization_id=int(item.organization_id),
-                    pipeline_sw=pipeline_sw,
-                    trace_id=trace_id,
-                )
-                if wmid_item:
-                    try:
-                        async with async_session_factory() as db:
-                            await mark_whatsapp_inbound_done(db, wmid_item)
-                            await db.commit()
-                    except Exception as exc:
-                        logger.warning("WhatsApp dedupe mark done failed (mid=%s): %s", wmid_item[:24], exc)
-                    else:
-                        await cache_whatsapp_inbound_done_redis(wmid_item)
-                return
-            except Exception as exc:
-                last_exc = exc
-                logger.warning(
-                    "Retry %d/%d для %s: %s", attempt + 1, MAX_RETRIES, item.phone, exc,
-                )
-                if attempt < MAX_RETRIES - 1:
-                    await asyncio.sleep(2 ** attempt)
+        from app.services.telegram_customer import customer_channel_context, reset_customer_channel_context
 
-        logger.error("Все %d попыток исчерпаны для %s: %s", MAX_RETRIES, item.phone, last_exc)
-        log_pipeline_stage(
-            "failed_queue",
-            phone=item.phone,
-            extra={"error": str(last_exc)[:500] if last_exc else "", "attempts": MAX_RETRIES},
+        item_channel = normalize_customer_channel(getattr(item, "channel", msg_channel))
+        wmid_item = (item.whatsapp_message_id or "").strip() if item_channel == "whatsapp" else ""
+        tokens = customer_channel_context(
+            item_channel,
+            telegram_chat_id=int(getattr(item, "telegram_chat_id", 0) or 0),
         )
-        await _save_failed_task(
-            item.phone, item.message_text, str(last_exc), MAX_RETRIES, organization_id=org_id,
-        )
-        if wmid_item:
-            try:
-                async with async_session_factory() as db:
-                    await mark_whatsapp_inbound_failed(db, wmid_item, str(last_exc or "unknown_error"))
-                    await db.commit()
-            except Exception as exc:
-                logger.warning("WhatsApp dedupe mark failed error (mid=%s): %s", wmid_item[:24], exc)
         try:
-            await send_customer_text(item.phone, "Извините, произошла техническая ошибка. Мы уже работаем над ней — попробуйте написать чуть позже.")
-        except Exception:
-            pass
+            for attempt in range(MAX_RETRIES):
+                try:
+                    await process_message(
+                        item.phone,
+                        item.message_text,
+                        whatsapp_message_id=wmid_item or (inbound_message_id or ""),
+                        voice_audio=item.voice_audio,
+                        organization_id=int(item.organization_id),
+                        pipeline_sw=pipeline_sw,
+                        trace_id=trace_id,
+                    )
+                    if item_channel == "whatsapp" and wmid_item:
+                        try:
+                            async with async_session_factory() as db:
+                                await mark_whatsapp_inbound_done(db, wmid_item)
+                                await db.commit()
+                        except Exception as exc:
+                            logger.warning("WhatsApp dedupe mark done failed (mid=%s): %s", wmid_item[:24], exc)
+                        else:
+                            await cache_whatsapp_inbound_done_redis(wmid_item)
+                    return
+                except Exception as exc:
+                    last_exc = exc
+                    logger.warning(
+                        "Retry %d/%d для %s: %s", attempt + 1, MAX_RETRIES, item.phone, exc,
+                    )
+                    if attempt < MAX_RETRIES - 1:
+                        await asyncio.sleep(2 ** attempt)
+    
+            logger.error("Все %d попыток исчерпаны для %s: %s", MAX_RETRIES, item.phone, last_exc)
+            log_pipeline_stage(
+                "failed_queue",
+                phone=item.phone,
+                extra={"error": str(last_exc)[:500] if last_exc else "", "attempts": MAX_RETRIES},
+            )
+            await _save_failed_task(
+                item.phone, item.message_text, str(last_exc), MAX_RETRIES, organization_id=org_id,
+            )
+            if item_channel == "whatsapp" and wmid_item:
+                try:
+                    async with async_session_factory() as db:
+                        await mark_whatsapp_inbound_failed(db, wmid_item, str(last_exc or "unknown_error"))
+                        await db.commit()
+                except Exception as exc:
+                    logger.warning("WhatsApp dedupe mark failed error (mid=%s): %s", wmid_item[:24], exc)
+            try:
+                await send_customer_text(item.phone, "Извините, произошла техническая ошибка. Мы уже работаем над ней — попробуйте написать чуть позже.")
+            except Exception:
+                pass
+        finally:
+            reset_customer_channel_context(tokens)
 
     initial = ChatMessagePayload(
         phone=phone,
@@ -1063,6 +1159,8 @@ async def process_with_retry(
         whatsapp_message_id=wmid,
         organization_id=org_id,
         voice_audio=voice_audio,
+        channel=msg_channel,
+        telegram_chat_id=current_telegram_chat_id() if msg_channel == "telegram" else 0,
     )
     last_exc: BaseException | None = None
     acquired = await run_serialized_chat_pipeline(
@@ -1075,10 +1173,37 @@ async def process_with_retry(
         return
 
     logger.info(
-        "chat_serializer.deferred org_id=%s phone=%s wmid=%s",
+        "chat_serializer.deferred org_id=%s phone=%s wmid=%s channel=%s",
         org_id,
         _redact_msisdn_for_log(phone),
         wmid[:16] if wmid else "",
+        msg_channel,
+    )
+
+
+async def process_with_retry(
+    phone: str,
+    message_text: str = "",
+    *,
+    whatsapp_message_id: str = "",
+    voice_audio: tuple[bytes, str] | None = None,
+    webhook_value: dict[str, Any] | None = None,
+    organization_id: int | None = None,
+    trace_id: str | None = None,
+) -> None:
+    """
+    Обёртка с retry + exponential backoff.
+    После MAX_RETRIES неудач → сохраняет в FailedTask и извиняется перед клиентом.
+    """
+    await process_inbound_message(
+        phone,
+        message_text,
+        organization_id=organization_id,
+        channel="whatsapp",
+        inbound_message_id=whatsapp_message_id,
+        voice_audio=voice_audio,
+        webhook_value=webhook_value,
+        trace_id=trace_id,
     )
 
 
@@ -1227,6 +1352,7 @@ async def _reset_stale_cart_if_needed(
     phone: str,
     organization_id: int,
     history: list[dict[str, str]],
+    message_text: str = "",
     *,
     trace_id: str = "",
     conversation_id: str = "",
@@ -1234,11 +1360,14 @@ async def _reset_stale_cart_if_needed(
     """
     Если Redis-история пуста (TTL 24 ч), а в БД остался DRAFT — сбрасываем «чужую» корзину.
     """
-    if history:
-        return False
     async with async_session_factory() as db:
         draft = await get_open_draft_order(db, phone, organization_id)
         if draft is None:
+            return False
+        should_reset = not history
+        if not should_reset:
+            should_reset = _should_reset_existing_draft_for_message(draft, message_text)
+        if not should_reset:
             return False
         n = await cancel_all_draft_orders_for_phone(
             db,
@@ -1262,6 +1391,43 @@ async def _reset_stale_cart_if_needed(
             organization_id, phone, n,
         )
     return n > 0
+
+
+_NEW_CONVERSATION_HINTS = (
+    "здравствуйте",
+    "добрый день",
+    "добрый вечер",
+    "доброе утро",
+    "привет",
+    "хочу сделать заказ",
+    "хочу заказать",
+    "можно заказать",
+    "что есть",
+    "что у вас есть",
+    "меню",
+    "скиньте меню",
+    "есть плов",
+    "плов есть",
+)
+
+
+def _should_reset_existing_draft_for_message(draft: Order, message_text: str) -> bool:
+    updated = getattr(draft, "updated_at", None) or getattr(draft, "created_at", None)
+    if updated is None:
+        return False
+    if updated.tzinfo is None:
+        updated = updated.replace(tzinfo=timezone.utc)
+    age = datetime.now(timezone.utc) - updated
+    if age >= timedelta(hours=12):
+        return True
+
+    text = (message_text or "").strip().lower()
+    if not text:
+        return False
+    compact = re.sub(r"\s+", " ", text)
+    if age >= timedelta(minutes=45) and any(h in compact for h in _NEW_CONVERSATION_HINTS):
+        return True
+    return False
 
 
 async def _handle_cancel_all_in_chatting(
@@ -1719,6 +1885,7 @@ async def _process_message_inner(
             phone,
             organization_id,
             history,
+            message_text,
             trace_id=trace_id,
             conversation_id=conversation_id,
         )
@@ -1883,7 +2050,7 @@ async def _process_message_inner(
 
         # 1) Параллельное чтение контекста + Redis stoplist keys
         read_ctx, prev_stopped_keys = await asyncio.gather(
-            fetch_ai_read_context(phone, organization_id),
+            fetch_ai_read_context(phone, organization_id, location_id=active_location_id),
             load_seen_stopped_keys(redis_client, phone, organization_id),
         )
         menu_items = read_ctx.menu_items
@@ -2073,6 +2240,34 @@ async def _process_message_inner(
         if is_openai_fallback_escalation_reply(ai_response.reply_text):
             schedule_log_ai_error(organization_id)
 
+        from app.services.fulfillment_infer import enrich_ai_fulfillment_from_message
+        from app.services.upsell_safety_gate import (
+            UpsellSafetyContext,
+            should_suppress_upsell,
+            strip_upsell_from_ai_response,
+        )
+
+        ai_response = enrich_ai_fulfillment_from_message(
+            ai_response,
+            message_text,
+            has_draft=draft_row is not None,
+        )
+
+        draft_meta: dict = {}
+        if draft_row and isinstance(draft_row.items_json, dict):
+            om = draft_row.items_json.get("order_meta")
+            if isinstance(om, dict):
+                draft_meta = om
+
+        upsell_ctx = UpsellSafetyContext(
+            user_message=message_text,
+            dialog_state=state,
+            order_meta=draft_meta,
+            intent=ai_response.intent,
+        )
+        if should_suppress_upsell(upsell_ctx):
+            ai_response = strip_upsell_from_ai_response(ai_response)
+
         if should_save_faq_reply(ai_response, has_draft=draft_row is not None):
             await save_faq_reply(
                 org_id=organization_id,
@@ -2087,6 +2282,7 @@ async def _process_message_inner(
                 ai_response, read_ctx, read_ctx.org,
                 tenant=read_ctx.tenant,
                 billing_suspended=getattr(read_ctx.org, "is_active", True) is False,
+                user_message=message_text,
             )
             if not de_result.is_valid and de_result.corrected_response is not None:
                 logger.info(
@@ -2119,6 +2315,7 @@ async def _process_message_inner(
                 draft_order=read_ctx.draft_row,
                 user=read_ctx.user,
                 org=read_ctx.org,
+                user_message=message_text,
             )
             log_pipeline_stage(
                 "route_ok",

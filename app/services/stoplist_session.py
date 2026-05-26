@@ -113,11 +113,54 @@ def _norm_name(name: str) -> str:
     return (name or "").lower().strip()
 
 
+def suggest_stoplist_replacements(
+    stopped_names: list[str],
+    menu_items: list,
+    *,
+    limit_per_item: int = 2,
+) -> dict[str, list[str]]:
+    """MVP: похожие доступные позиции из той же категории."""
+    if not stopped_names or not menu_items:
+        return {}
+    by_cat: dict[str, list] = {}
+    for mi in menu_items:
+        if not getattr(mi, "is_available", True):
+            continue
+        cat = (getattr(mi, "category", None) or "").strip().lower()
+        if not cat:
+            continue
+        by_cat.setdefault(cat, []).append(mi)
+
+    out: dict[str, list[str]] = {}
+    for raw in stopped_names:
+        name = str(raw or "").strip()
+        if not name:
+            continue
+        cat = ""
+        for mi in menu_items:
+            if _norm_name(getattr(mi, "name", "")) == _norm_name(name):
+                cat = (getattr(mi, "category", None) or "").strip().lower()
+                break
+        if not cat:
+            continue
+        alts: list[str] = []
+        for cand in by_cat.get(cat, []):
+            cn = str(getattr(cand, "name", "") or "").strip()
+            if cn and _norm_name(cn) != _norm_name(name):
+                alts.append(cn)
+            if len(alts) >= limit_per_item:
+                break
+        if alts:
+            out[name] = alts
+    return out
+
+
 def compose_stoplist_notice(
     stoplist_items: list[str],
     newly_stopped: list[str],
     *,
     draft_item_names: list[str] | None = None,
+    menu_items: list | None = None,
 ) -> str:
     """
     Текст для клиента при отклонении стоп-позиций.
@@ -143,7 +186,10 @@ def compose_stoplist_notice(
             parts.append(f"«{name}» сейчас временно недоступно (на стопе).")
     if not parts:
         return ""
-    tail = " Могу подсказать, чем заменить — напишите, что хотите."
+    replacements = suggest_stoplist_replacements(stoplist_items, menu_items or []) if menu_items else {}
+    for name, alts in replacements.items():
+        parts.append(f"Вместо «{name}» могу предложить: *{', '.join(alts)}*.")
+    tail = " Напишите, что выберете." if replacements else " Могу подсказать, чем заменить — напишите, что хотите."
     return "\n".join(parts) + tail
 
 

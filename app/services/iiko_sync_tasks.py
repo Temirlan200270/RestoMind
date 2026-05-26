@@ -15,33 +15,29 @@ logger = logging.getLogger(__name__)
 
 async def run_stoplist_sync(org_id: int) -> dict[str, Any]:
     """
-    Синхронизирует стоп-лист iiko для одной организации.
+    Синхронизирует стоп-лист POS для одной организации.
     Возвращает dict с результатом: ok, error, stats.
     """
+    import app.services.pos.adapters  # noqa: F401 — register adapters
+
     from app.db.session import async_session_factory
     from app.services.events import publish_event
     from app.services.integration_health import record_stoplist_sync
-    from app.services.menu_sync import sync_stop_lists
     from app.services.order_logic import invalidate_menu_context_cache
-    from app.services.org_iiko import resolve_org_iiko_credentials
+    from app.services.pos.adapters.base import get_pos_adapter
 
     async with async_session_factory() as db:
-        creds = await resolve_org_iiko_credentials(db, org_id)
-        if creds is None:
-            logger.warning("run_stoplist_sync: org_id=%s — iiko credentials not configured", org_id)
-            return {"ok": False, "error": "iiko credentials not configured", "org_id": org_id}
+        try:
+            adapter = await get_pos_adapter(db, org_id)
+        except ValueError as exc:
+            logger.warning("run_stoplist_sync: org_id=%s — %s", org_id, exc)
+            return {"ok": False, "error": str(exc), "org_id": org_id}
 
         ok = False
         error = ""
         stats: dict[str, int] = {}
         try:
-            stats = await sync_stop_lists(
-                db,
-                creds.api_login,
-                creds.iiko_organization_id,
-                terminal_group_id=creds.terminal_group_id or None,
-                menu_organization_id=org_id,
-            )
+            stats = await adapter.sync_stoplist(db, org_id)
             ok = True
         except Exception as exc:
             error = str(exc)
@@ -71,32 +67,29 @@ async def run_stoplist_sync(org_id: int) -> dict[str, Any]:
 
 async def run_menu_sync(org_id: int) -> dict[str, Any]:
     """
-    Синхронизирует меню iiko для одной организации.
+    Синхронизирует меню POS для одной организации.
     Возвращает dict с результатом: ok, error, stats.
     """
+    import app.services.pos.adapters  # noqa: F401 — register adapters
+
     from app.db.session import async_session_factory
     from app.services.events import publish_event
     from app.services.integration_health import record_menu_sync
-    from app.services.menu_sync import sync_menu_from_iiko
     from app.services.order_logic import invalidate_menu_context_cache
-    from app.services.org_iiko import resolve_org_iiko_credentials
+    from app.services.pos.adapters.base import get_pos_adapter
 
     async with async_session_factory() as db:
-        creds = await resolve_org_iiko_credentials(db, org_id)
-        if creds is None:
-            logger.warning("run_menu_sync: org_id=%s — iiko credentials not configured", org_id)
-            return {"ok": False, "error": "iiko credentials not configured", "org_id": org_id}
+        try:
+            adapter = await get_pos_adapter(db, org_id)
+        except ValueError as exc:
+            logger.warning("run_menu_sync: org_id=%s — %s", org_id, exc)
+            return {"ok": False, "error": str(exc), "org_id": org_id}
 
         ok = False
         error = ""
         stats: dict[str, Any] = {}
         try:
-            stats = await sync_menu_from_iiko(
-                db,
-                creds.api_login,
-                creds.iiko_organization_id,
-                restomind_organization_id=org_id,
-            )
+            stats = await adapter.sync_menu(db, org_id)
             ok = True
         except Exception as exc:
             error = str(exc)

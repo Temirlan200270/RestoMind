@@ -1,0 +1,70 @@
+{% from "components/_card.html" import card %}
+
+{% macro kitchen_gate_panel(title='Kitchen Gate', subtitle='') %}
+    {% call card(title=title, padding_class='p-5') %}
+        {% if subtitle %}
+        <p class="text-sm ds-text-muted mb-4">{{ subtitle }}</p>
+        {% endif %}
+        <div x-show="kitchenGateLoading" class="text-sm ds-text-muted">Загрузка режима...</div>
+        <template x-if="kitchenGate && !kitchenGateLoading">
+            <div class="space-y-4">
+                <div class="flex flex-wrap gap-2">
+                    <span class="text-xs font-semibold uppercase tracking-wide text-slate-500 w-full sm:w-auto">Нагрузка</span>
+                    <template x-for="opt in [{id:'normal', label:'Норма'}, {id:'busy', label:'Загрузка'}, {id:'overload', label:'Пик'}]" :key="opt.id">
+                        <button type="button" class="ds-btn ds-btn-sm"
+                            :class="kitchenGate.kitchen_load === opt.id ? 'ds-btn-primary' : 'ds-btn-secondary'"
+                            :disabled="kitchenGateSaving"
+                            @click="patchKitchenGate({ kitchen_load: opt.id })"
+                            x-text="opt.label"></button>
+                    </template>
+                </div>
+                <div class="flex flex-wrap gap-2 items-center">
+                    <span class="text-xs font-semibold uppercase tracking-wide text-slate-500 w-full sm:w-auto">Доставка</span>
+                    <button type="button" class="ds-btn ds-btn-sm"
+                        :class="kitchenGate.delivery_mode === 'normal' && !kitchenGate.force_pickup_only ? 'ds-btn-primary' : 'ds-btn-secondary'"
+                        :disabled="kitchenGateSaving"
+                        @click="patchKitchenGate({ delivery_mode: 'normal', force_pickup_only: false })">Обычный режим</button>
+                    <button type="button" class="ds-btn ds-btn-sm"
+                        :class="kitchenGate.delivery_mode === 'paused' ? 'ds-btn-primary' : 'ds-btn-secondary'"
+                        :disabled="kitchenGateSaving"
+                        @click="patchKitchenGate({ delivery_mode: 'paused', force_pickup_only: false })">Пауза доставки</button>
+                    <button type="button" class="ds-btn ds-btn-sm"
+                        :class="kitchenGate.force_pickup_only ? 'ds-btn-primary' : 'ds-btn-secondary'"
+                        :disabled="kitchenGateSaving"
+                        @click="patchKitchenGate({ force_pickup_only: true, delivery_mode: 'normal' })">Только самовывоз</button>
+                </div>
+                <div class="flex flex-wrap gap-2 items-center">
+                    <label class="text-xs font-semibold uppercase tracking-wide text-slate-500">+ мин к готовности</label>
+                    <button type="button" class="ds-btn ds-btn-secondary ds-btn-sm"
+                        :disabled="kitchenGateSaving"
+                        @click="patchKitchenGate({ prep_time_extra_min: Math.min(180, Number(kitchenGate.prep_time_extra_min || 0) + 20) })">+20 мин</button>
+                    <input type="number" min="0" max="180" step="5" class="ds-input w-24 text-sm"
+                        :value="kitchenGate.prep_time_extra_min || 0"
+                        @change="patchKitchenGate({ prep_time_extra_min: Number($event.target.value || 0) })">
+                </div>
+                <p x-show="kitchenGate.reason" class="text-xs ds-text-muted"
+                    x-text="'Причина: ' + (kitchenGate.reason || '')"></p>
+                <div class="flex flex-wrap gap-2 items-center pt-1 border-t border-slate-100">
+                    <span class="text-xs font-semibold uppercase tracking-wide text-slate-500 w-full sm:w-auto">Авто-сброс</span>
+                    <button type="button" class="ds-btn ds-btn-sm ds-btn-secondary"
+                        :disabled="kitchenGateSaving"
+                        @click="patchKitchenGate({ expires_preset: 'plus_30m' })">+30 мин</button>
+                    <button type="button" class="ds-btn ds-btn-sm ds-btn-secondary"
+                        :disabled="kitchenGateSaving"
+                        @click="patchKitchenGate({ expires_preset: 'plus_1h' })">+1 ч</button>
+                    <button type="button" class="ds-btn ds-btn-sm ds-btn-secondary"
+                        :disabled="kitchenGateSaving"
+                        @click="patchKitchenGate({ expires_preset: 'end_of_shift' })">Конец смены</button>
+                    <button type="button" class="ds-btn ds-btn-sm ds-btn-secondary"
+                        :disabled="kitchenGateSaving"
+                        @click="patchKitchenGate({ expires_preset: 'reset' })">Сбросить</button>
+                    <p x-show="kitchenGate.expires_at" class="text-xs ds-text-muted w-full"
+                        x-text="'До: ' + (kitchenGate.expires_at ? new Date(kitchenGate.expires_at).toLocaleString() : '')"></p>
+                </div>
+            </div>
+        </template>
+        <template x-if="!kitchenGate && !kitchenGateLoading">
+            <p class="text-sm ds-text-muted">Режим не загружен - обновите вкладку.</p>
+        </template>
+    {% endcall %}
+{% endmacro %}

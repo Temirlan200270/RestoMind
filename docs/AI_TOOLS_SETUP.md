@@ -117,7 +117,7 @@ Claude Code использует `~/.claude/.mcp.json` (глобально) ил
 ## 4. Универсальные принципы для любого агента
 
 1. **Перед началом** — читать `docs/ROADMAP.md` (задачи/статусы) и `.cursor/rules/*.mdc` (запреты/стандарты).
-2. **При изменениях** — дописывать в `## [Unreleased]` секцию `CHANGELOG.md`, никогда не переписывать существующие записи.
+2. **При изменениях** — дописывать **кратко** в `## [Unreleased]` (`CHANGELOG.md`); длинные списки — в `docs/releases/`. Политика: [`docs/releases/README.md`](releases/README.md). Не переписывать опубликованные release-секции.
 3. **При закрытии задачи** — обновлять статус в `docs/ROADMAP.md`.
 4. **Для UI** — опираться на `docs/UI_DESIGN_SYSTEM.md`; новые блоки только через макросы из `app/templates/components/`.
 5. **Не трогать платежи** (`app/api/payment_webhook.py`, `app/services/payment_*`) без явного согласования.
@@ -141,4 +141,4 @@ Background Agent работает в облаке Cursor (Linux-контейне
 MCP-серверы можно установить глобально (`npm i -g chrome-devtools-mcp`) и заменить команды в `mcp.json` на абсолютные пути. Но проще поставить Node.js.
 
 **Q: Как запускать задачи по roadmap?**
-Открыть Composer (Cmd/Ctrl+I), сказать: «Открой `docs/ROADMAP.md`, возьми задачу `<название>` и выполни». В конце: отметь `[x]` в `docs/ROADMAP.md` и допиши в `CHANGELOG.md`.
+Открыть Composer (Cmd/Ctrl+I), сказать: «Открой `docs/ROADMAP.md`, возьми задачу `<название>` и выполни». В конце: `[x]` в ROADMAP + краткая строка в `CHANGELOG.md` `[Unreleased]`.

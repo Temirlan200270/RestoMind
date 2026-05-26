@@ -18,7 +18,7 @@ alwaysApply: true
 |----------|----------|
 | Новый чат, scope неясен | `Read` только [`CODEX.md`](mdc:CODEX.md), затем 1–3 файла по задаче |
 | «Где живёт X?» | `grep` по символу → `Read` найденные файлы; при необходимости — раздел в [`codebase.md`](mdc:codebase.md) |
-| Статус задачи / закрытие epic | [`docs/ROADMAP.md`](mdc:docs/ROADMAP.md); при изменениях — [`CHANGELOG.md`](mdc:CHANGELOG.md) `## [Unreleased]` |
+| Статус задачи / закрытие epic | [`docs/ROADMAP.md`](mdc:docs/ROADMAP.md); при изменениях — [`CHANGELOG.md`](mdc:CHANGELOG.md) `## [Unreleased]` (кратко); детали — [`docs/releases/README.md`](mdc:docs/releases/README.md) |
 | OS: события, снапшоты, Decision Engine | [`docs/OS_TRANSITION_PLAN.md`](mdc:docs/OS_TRANSITION_PLAN.md) (не весь — нужный раздел) |
 | Инварианты, контракты API | [`docs/CONVENTIONS.md`](mdc:CONVENTIONS.md) |
 | Админка UI | [`docs/UI_MAP.md`](mdc:docs/UI_MAP.md) + целевой `app/templates/screens/*` |

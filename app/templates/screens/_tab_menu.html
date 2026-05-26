@@ -7,6 +7,84 @@
                     <span x-text="menuLoadError"></span>
                 </div>
 
+                <div x-show="menuProfitData?.missing_cost_checklist && !menuProfitData.missing_cost_checklist.onboarding_complete && menuView === 'catalog'"
+                    x-cloak
+                    class="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                    <div class="flex flex-wrap items-start justify-between gap-3">
+                        <div class="min-w-0">
+                            <div class="text-sm font-semibold text-amber-900">Себестоимость не заполнена</div>
+                            <p class="mt-1 text-xs text-amber-800">
+                                <span x-text="menuProfitData.missing_cost_checklist.missing_count"></span>
+                                <span> из </span>
+                                <span x-text="menuProfitData.missing_cost_checklist.total_items"></span>
+                                <span> позиций (</span>
+                                <span class="font-semibold tabular-nums" x-text="(menuProfitData.missing_cost_checklist.missing_pct || 0) + '%'"></span>
+                                <span>). Menu Profit Lab считает маржу и рекомендации по цене точнее с заполненной с/с.</span>
+                            </p>
+                            <ul class="mt-2 space-y-1" x-show="(menuProfitData.missing_cost_checklist.top_missing || []).length">
+                                <template x-for="(row, mi) in (menuProfitData.missing_cost_checklist.top_missing || []).slice(0, 5)" :key="'mc-' + (row.menu_item_id || mi)">
+                                    <li class="text-xs text-amber-900 flex justify-between gap-2">
+                                        <button type="button" class="truncate text-left font-medium hover:underline"
+                                            @click="openMenuItemById(row.menu_item_id)"
+                                            x-text="row.name || '—'"></button>
+                                        <span class="shrink-0 tabular-nums" x-text="fmt.money(row.price || 0)"></span>
+                                    </li>
+                                </template>
+                            </ul>
+                        </div>
+                        <label class="inline-flex min-h-[36px] items-center rounded-xl border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100 cursor-pointer transition shrink-0"
+                            :class="menuCostImportLoading ? 'opacity-50 pointer-events-none' : ''">
+                            <input type="file" accept=".csv,text/csv" class="sr-only" @change="importMenuCostsCsv($event)" :disabled="menuCostImportLoading">
+                            <span x-text="menuCostImportLoading ? 'Импорт…' : 'CSV себест.'"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <div x-show="(menuProfitData?.price_recommendations || []).length && menuView === 'catalog'" x-cloak
+                    class="mb-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm ring-1 ring-slate-900/5">
+                    <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+                        <div>
+                            <h3 class="text-sm font-bold text-slate-900">Рекомендации по цене</h3>
+                            <p class="text-xs ds-text-muted mt-0.5">Menu Profit Lab · период 7 дней</p>
+                        </div>
+                        <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" @click="navigateOwnerIntelligence()">
+                            Owner Intelligence →
+                        </button>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm min-w-[480px]">
+                            <thead>
+                                <tr class="text-left text-xs ds-text-muted border-b border-slate-100">
+                                    <th class="pb-2 pr-2">Позиция</th>
+                                    <th class="pb-2 pr-2 text-right">Сейчас</th>
+                                    <th class="pb-2 pr-2 text-right">Рекомендуем</th>
+                                    <th class="pb-2 pr-2 text-right">Маржа</th>
+                                    <th class="pb-2 text-right">Эффект за период</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="(rec, ri) in (menuProfitData.price_recommendations || []).slice(0, 8)" :key="'mpr-' + (rec.menu_item_id || ri)">
+                                    <tr class="border-b border-slate-50 last:border-0 hover:bg-slate-50/80">
+                                        <td class="py-2 pr-2">
+                                            <button type="button" class="font-medium text-slate-800 hover:text-brand-700 truncate max-w-[160px] text-left"
+                                                @click="openMenuItemById(rec.menu_item_id)"
+                                                x-text="rec.name || '—'"></button>
+                                        </td>
+                                        <td class="py-2 pr-2 text-right tabular-nums" x-text="fmt.money(rec.current_price ?? 0)"></td>
+                                        <td class="py-2 pr-2 text-right tabular-nums font-semibold text-amber-700">
+                                            <span x-text="fmt.money(rec.recommended_price ?? 0)"></span>
+                                            <span class="block text-[10px] font-normal" x-text="rec.recommended_increase_pct != null ? ('+' + rec.recommended_increase_pct + '%') : ''"></span>
+                                        </td>
+                                        <td class="py-2 pr-2 text-right tabular-nums" x-text="rec.margin_pct != null ? (rec.margin_pct + '%') : '—'"></td>
+                                        <td class="py-2 text-right tabular-nums font-semibold text-emerald-700"
+                                            x-text="rec.expected_margin_lift > 0 ? ('+' + fmt.money(rec.expected_margin_lift)) : '—'"></td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
                 <div x-show="menuView === 'catalog'" x-cloak>
                 <div class="sticky top-0 z-[40] -mx-4 sm:-mx-6 md:-mx-8 px-4 sm:px-6 md:px-8 py-3 mb-5 bg-white backdrop-blur-md border-b border-gray-200/80 min-w-0 max-w-full overflow-x-clip">
                         <div class="flex flex-col gap-2.5 min-w-0">
@@ -46,6 +124,11 @@
                                         class="ds-btn ds-btn-primary ds-btn-md shadow-sm shadow-brand-600/20">
                                         + Добавить позицию
                                     </button>
+                                    <label class="inline-flex min-h-[44px] items-center rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:border-brand-300 hover:bg-slate-50 cursor-pointer transition"
+                                        :class="menuCostImportLoading ? 'opacity-50 pointer-events-none' : ''">
+                                        <input type="file" accept=".csv,text/csv" class="sr-only" @change="importMenuCostsCsv($event)" :disabled="menuCostImportLoading">
+                                        <span x-text="menuCostImportLoading ? 'Импорт…' : 'CSV себест.'"></span>
+                                    </label>
                                     <button type="button" @click="toggleMenuBulkMode()"
                                         :class="menuBulkMode ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-gray-200 hover:border-brand-300 hover:bg-slate-50'"
                                         class="inline-flex min-h-[44px] items-center justify-center rounded-xl border px-4 py-2 text-sm font-semibold transition">
@@ -193,6 +276,8 @@
                                         <span class="shrink-0 font-extrabold tabular-nums text-sm ml-2"
                                             :class="Number(item.price || 0) <= 0 ? 'text-red-600' : 'text-brand-700'"
                                             x-text="fmt.money(item.price)"></span>
+                                        <span class="shrink-0 text-[10px] font-semibold tabular-nums text-slate-500 ml-1"
+                                            x-text="item.cost_price == null ? '—' : ('С/с ' + fmt.money(item.cost_price))"></span>
                                     </div>
 
                                     <!-- ─── ДЕСКТОПНАЯ КАРТОЧКА (скрыта на мобильном) ─── -->
@@ -217,6 +302,12 @@
                                                 <span class="text-lg font-extrabold tabular-nums shrink-0"
                                                     :class="Number(item.price || 0) <= 0 ? 'text-red-600' : 'text-brand-700'"
                                                     x-text="fmt.money(item.price)"></span>
+                                            </div>
+                                            <div class="flex items-center justify-between gap-2 mt-1">
+                                                <span class="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Себест.</span>
+                                                <span class="text-xs font-bold tabular-nums"
+                                                    :class="item.cost_price == null ? 'text-amber-600' : 'text-slate-700'"
+                                                    x-text="item.cost_price == null ? 'не задана' : fmt.money(item.cost_price)"></span>
                                             </div>
                                             <div class="font-semibold text-gray-900 text-sm leading-snug group-hover:text-brand-800 transition mt-1" x-text="item.name"></div>
                                             <span class="text-[10px] text-gray-400 font-medium mt-1 truncate" x-text="item.category"></span>
@@ -342,6 +433,74 @@
 
             </div>
 
+            <!-- Модальное окно: предпросмотр импорта себестоимости -->
+            <div x-show="menuCostImportPreviewOpen" x-cloak x-transition.opacity class="fixed inset-0 z-[85] flex items-center justify-center p-4"
+                @keydown.escape.window="closeMenuCostImportPreview()">
+                <div class="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" @click="closeMenuCostImportPreview()"></div>
+                <div class="relative bg-white rounded-2xl shadow-xl border border-gray-100 w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6" @click.stop role="dialog" aria-modal="true">
+                    <h3 class="text-lg font-bold text-gray-900 mb-1">Импорт себестоимости</h3>
+                    <p class="text-xs text-gray-500 mb-4">Проверьте совпадения перед применением. Обновятся только строки с изменением.</p>
+                    <div class="grid grid-cols-3 gap-3 mb-4 text-sm">
+                        <div class="rounded-xl bg-emerald-50 p-3">
+                            <div class="text-xs text-emerald-700">Обновить</div>
+                            <div class="mt-1 text-lg font-bold tabular-nums" x-text="menuCostImportPreview?.updated ?? 0"></div>
+                        </div>
+                        <div class="rounded-xl bg-slate-50 p-3">
+                            <div class="text-xs text-slate-500">Без изменений</div>
+                            <div class="mt-1 text-lg font-bold tabular-nums" x-text="menuCostImportPreview?.skipped ?? 0"></div>
+                        </div>
+                        <div class="rounded-xl bg-amber-50 p-3">
+                            <div class="text-xs text-amber-700">Ошибки</div>
+                            <div class="mt-1 text-lg font-bold tabular-nums" x-text="(menuCostImportPreview?.errors || []).length"></div>
+                        </div>
+                    </div>
+                    <div x-show="(menuCostImportPreview?.errors || []).length" x-cloak class="mb-4 rounded-xl border border-amber-100 bg-amber-50/70 p-3 text-xs text-amber-900 space-y-1">
+                        <template x-for="(err, idx) in (menuCostImportPreview?.errors || []).slice(0, 8)" :key="'cost-import-err-' + idx">
+                            <div x-text="err"></div>
+                        </template>
+                    </div>
+                    <div class="rounded-xl border border-slate-200 overflow-hidden">
+                        <div class="px-4 py-3 border-b border-slate-100 text-sm font-semibold text-slate-900">Строки CSV</div>
+                        <div class="max-h-72 overflow-y-auto">
+                            <table class="min-w-full text-sm">
+                                <thead class="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                                    <tr>
+                                        <th class="px-4 py-2">Позиция</th>
+                                        <th class="px-4 py-2">Было</th>
+                                        <th class="px-4 py-2">Станет</th>
+                                        <th class="px-4 py-2">Статус</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <template x-for="(row, idx) in (menuCostImportPreview?.rows || [])" :key="'cost-preview-row-' + idx">
+                                        <tr class="border-t border-slate-100">
+                                            <td class="px-4 py-2 font-medium" x-text="row.name || '—'"></td>
+                                            <td class="px-4 py-2 tabular-nums" x-text="row.current_cost_price == null ? '—' : fmt.money(row.current_cost_price)"></td>
+                                            <td class="px-4 py-2 tabular-nums" x-text="fmt.money(row.new_cost_price || 0)"></td>
+                                            <td class="px-4 py-2">
+                                                <span class="text-xs font-semibold"
+                                                    :class="row.changed ? 'text-emerald-700' : 'text-slate-500'"
+                                                    x-text="row.changed ? 'Обновить' : 'Без изменений'"></span>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="mt-6 flex flex-wrap gap-2 justify-end">
+                        <button type="button" @click="closeMenuCostImportPreview()" :disabled="menuCostImportLoading"
+                            class="px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-xl disabled:opacity-50">Отмена</button>
+                        <button type="button" @click="applyMenuCostsImport()"
+                            :disabled="menuCostImportLoading || !(menuCostImportPreview?.updated > 0)"
+                            class="px-5 py-2 text-sm font-semibold bg-brand-600 text-white rounded-xl hover:bg-brand-700 disabled:opacity-40 shadow-sm">
+                            <span x-show="!menuCostImportLoading">Применить</span>
+                            <span x-show="menuCostImportLoading">Импорт…</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
             <!-- Модальное окно: редактирование / новая позиция меню -->
             <div x-show="menuEditOpen" x-cloak x-transition.opacity class="fixed inset-0 z-[80] flex items-center justify-center p-4"
                 @keydown.escape.window="closeMenuEdit()">
@@ -369,6 +528,13 @@
                             <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Цена (₸)</label>
                             <input type="number" min="0" step="1" x-model.number="menuEditForm.price"
                                 class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                        </div>
+                        <div>
+                            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Себестоимость (₸)</label>
+                            <input type="number" min="0" step="1" x-model.number="menuEditForm.cost_price"
+                                class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                                placeholder="Для Menu Profit Lab">
+                            <p class="mt-1 text-[11px] text-gray-400 leading-snug">Нужна для расчёта маржи и рекомендаций Owner Intelligence.</p>
                         </div>
                         <div>
                             <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Описание</label>

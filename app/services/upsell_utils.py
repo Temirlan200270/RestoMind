@@ -5,8 +5,19 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping, Sequence
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import settings
+from app.db.models import UpsellOfferEvent
+
 USER_META_UPSELL_REJECTS_KEY = "upsell_rejections"
 """В User.meta_json: map iiko_id (lower) → ISO-8601 UTC от последнего отказа."""
+
+UPSELL_EVENT_STATUS_REJECTED = "rejected"
+UPSELL_EVENT_STATUS_SHOWN = "shown"
+
+_DEFAULT_CROSS_ORDER_OFFER_DAYS = 7
 
 
 def cart_iiko_ids(items: list[dict[str, Any]]) -> set[str]:
@@ -129,6 +140,88 @@ def upsell_rejection_ids_in_cooldown(
         if ts >= cutoff:
             blocked.add(iid)
     return blocked
+
+
+def _dt_as_utc(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _sql_dt_for_filter(dt: datetime) -> datetime:
+    u = _dt_as_utc(dt)
+    if settings.db_mode == "sqlite":
+        return u.replace(tzinfo=None)
+    return u
+
+
+def _norm_offered_iiko_ids(values: Sequence[Any]) -> set[str]:
+    out: set[str] = set()
+    for raw in values:
+        iid = str(raw or "").strip().lower()
+        if iid:
+            out.add(iid)
+    return out
+
+
+async def recently_rejected_iiko_ids(
+    db: AsyncSession,
+    org_id: int,
+    user_id: int,
+    *,
+    days: float = 7,
+) -> set[str]:
+    """iiko_id, от которых гость отказался в UpsellOfferEvent за последние N дней."""
+    cutoff = _sql_dt_for_filter(datetime.now(timezone.utc) - timedelta(days=float(days)))
+    res = await db.execute(
+        select(UpsellOfferEvent.offered_item_id).where(
+            UpsellOfferEvent.organization_id == int(org_id),
+            UpsellOfferEvent.user_id == int(user_id),
+            UpsellOfferEvent.status == UPSELL_EVENT_STATUS_REJECTED,
+            UpsellOfferEvent.created_at >= cutoff,
+        ),
+    )
+    return _norm_offered_iiko_ids(res.scalars().all())
+
+
+async def recently_offered_iiko_ids(
+    db: AsyncSession,
+    org_id: int,
+    user_id: int,
+    *,
+    order_id: int | None = None,
+    days: float = _DEFAULT_CROSS_ORDER_OFFER_DAYS,
+) -> set[str]:
+    """
+    iiko_id, которые уже предлагали гостю (status=shown и финальные статусы).
+
+    С order_id — только в рамках текущего заказа; без — за последние ``days`` дней.
+    """
+    q = select(UpsellOfferEvent.offered_item_id).where(
+        UpsellOfferEvent.organization_id == int(org_id),
+        UpsellOfferEvent.user_id == int(user_id),
+        UpsellOfferEvent.offered_item_id.is_not(None),
+    )
+    if order_id is not None:
+        q = q.where(UpsellOfferEvent.order_id == int(order_id))
+    else:
+        cutoff = _sql_dt_for_filter(datetime.now(timezone.utc) - timedelta(days=float(days)))
+        q = q.where(UpsellOfferEvent.created_at >= cutoff)
+    res = await db.execute(q)
+    return _norm_offered_iiko_ids(res.scalars().all())
+
+
+async def max_one_upsell_per_order(db: AsyncSession, order_id: int) -> bool:
+    """True, если для заказа уже есть upsell-предложение — новый оффер блокируем."""
+    if not order_id:
+        return False
+    res = await db.execute(
+        select(UpsellOfferEvent.id).where(
+            UpsellOfferEvent.order_id == int(order_id),
+            UpsellOfferEvent.status == UPSELL_EVENT_STATUS_SHOWN,
+        ).limit(1),
+    )
+    return res.scalar_one_or_none() is not None
 
 
 def record_upsell_rejections_on_user(user: Any, rejected_ids: Sequence[str]) -> None:

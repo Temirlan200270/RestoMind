@@ -3,6 +3,7 @@
 """
 
 import pytest
+from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -83,6 +84,64 @@ def test_is_cancel_all_message() -> None:
     assert not is_cancel_all_message("отмени плов")
     assert not is_cancel_all_message("убери плов из заказа")
     assert not is_cancel_all_message("можно без лука")
+
+
+def test_stale_draft_resets_on_new_conversation_hint() -> None:
+    from app.api.webhooks import _should_reset_existing_draft_for_message
+
+    draft = Order(
+        organization_id=1,
+        user_id=1,
+        status=OrderStatus.DRAFT,
+        items_json={"items": [{"name": "Плов", "quantity": 1}]},
+        updated_at=datetime.now(timezone.utc) - timedelta(minutes=50),
+    )
+
+    assert _should_reset_existing_draft_for_message(draft, "Здравствуйте")
+    assert _should_reset_existing_draft_for_message(draft, "Хочу сделать заказ")
+    assert not _should_reset_existing_draft_for_message(draft, "На завтра к 13:00")
+
+
+def test_very_old_draft_resets_even_without_greeting() -> None:
+    from app.api.webhooks import _should_reset_existing_draft_for_message
+
+    draft = Order(
+        organization_id=1,
+        user_id=1,
+        status=OrderStatus.DRAFT,
+        items_json={"items": [{"name": "Плов", "quantity": 1}]},
+        updated_at=datetime.now(timezone.utc) - timedelta(hours=13),
+    )
+
+    assert _should_reset_existing_draft_for_message(draft, "Плов")
+
+
+@pytest.mark.asyncio
+async def test_technical_ai_fallback_does_not_enter_human_mode(db_with_menu: AsyncSession) -> None:
+    from app.services.ai_brain import _FALLBACK_RESPONSE
+
+    result = await route_intent(
+        db_with_menu,
+        "+77001112233",
+        AIBrainResponse(intent="escalate", reply_text=_FALLBACK_RESPONSE.reply_text),
+        organization_id=1,
+    )
+
+    assert result.new_state == UserState.CHATTING
+    assert "Напишите ещё раз" in result.reply_text
+
+
+def test_payment_gate_does_not_request_confirmation_without_delivery_address() -> None:
+    from app.api.webhooks import _missing_fulfillment_after_payment_reply
+
+    reply = _missing_fulfillment_after_payment_reply(
+        {"order_type": "delivery"},
+        pay_human="Наличные",
+        body="Ваш заказ",
+    )
+
+    assert "адрес доставки" in reply.lower()
+    assert "подтверждаете" not in reply.lower()
 
 
 def test_newly_stopped_empty_on_first_snapshot() -> None:

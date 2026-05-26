@@ -549,6 +549,8 @@ function adminParseLocationHash() {
         else if (subTab === 'os') ac = 'os';
         else if (subTab === 'guestcare') ac = 'guestcare';
         else if (subTab === 'final_mile') ac = 'final_mile';
+        else if (subTab === 'owner_intel') ac = 'owner_intel';
+        else if (subTab === 'network_benchmark') ac = 'network_benchmark';
         else if (subTab === 'value') ac = 'value';
         return { ...empty, tab: 'ai_center', phone, aiCenterTab: ac };
     }
@@ -1358,6 +1360,31 @@ function adminMixinState() {
         aiValueLoading: false,
         aiValueData: null,
         aiValueSource: '',
+
+        // ========== Owner Intelligence (STAGE 1) — state ==========
+        ownerIntelPeriod: '7d',
+        ownerIntelLoading: false,
+        ownerIntelData: null,
+        ownerIntelAudits: [],
+        ownerIntelAuditsLoading: false,
+        ownerIntelDigestPreview: null,
+        ownerIntelDigestLoading: false,
+        ownerIntelDigestSending: false,
+        ownerIntelDigestLastSent: null,
+        networkBenchmarkPeriod: '7d',
+        networkBenchmarkLoading: false,
+        networkBenchmarkData: null,
+        kitchenGate: null,
+        kitchenGateLoading: false,
+        kitchenGateSaving: false,
+        // ========== / Owner Intelligence — state ==========
+
+        // ========== Order QA Audit (shift focus) — state ==========
+        orderAuditForFocus: null,
+        orderAuditLoading: false,
+        orderAuditReviewReason: 'no_error',
+        // ========== / Order QA Audit — state ==========
+
         /** Money MVP: Revenue Leak Detector */
         revenueLeak: adminDefaultRevenueLeak(),
         revenueLeakLoading: false,
@@ -1665,6 +1692,7 @@ function adminMixinState() {
         upsellRules: [],
         upsellLoading: false,
         upsellNew: {
+            trigger_mode: 'missing_category',
             trigger_category: 'напит',
             suggest_category: 'напит',
             min_order_sum: 0,
@@ -1672,6 +1700,9 @@ function adminMixinState() {
             phrase_template: '',
             sort_order: 0,
         },
+        // RC-E: Revenue Copilot impact panel
+        smartSalesImpact: null,
+        smartSalesLoading: false,
         sidebarOpen: false,
         globalSearchOpen: false,
         globalSearchQ: '',
@@ -1705,6 +1736,12 @@ function adminMixinState() {
         bookingsLoadError: '',
         menuEditOpen: false,
         menuEditSaving: false,
+        menuCostImportLoading: false,
+        menuCostImportPreviewOpen: false,
+        menuCostImportPreview: null,
+        menuCostImportFile: null,
+        menuProfitLoading: false,
+        menuProfitData: null,
         menuEditForm: {
             id: null,
             name: '',
@@ -1712,6 +1749,7 @@ function adminMixinState() {
             description: '',
             tags: '',
             price: 0,
+            cost_price: null,
             is_available: true,
             image_url: '',
             portion_kind: 'single',
@@ -6001,6 +6039,23 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
             }
         },
 
+        // RC-E: Smart Sales — upsell impact from Owner Intelligence API
+        async loadSmartSalesImpact() {
+            this.smartSalesLoading = true;
+            try {
+                const locQs = this.locationQueryString('&');
+                const { ok, data } = await this.apiJsonResponse(
+                    `/api/admin/owner-intelligence/upsell-impact?period=week${locQs}`,
+                );
+                this.smartSalesImpact = ok && data && typeof data === 'object' ? data : null;
+            } catch (e) {
+                adminLogger.error('[admin] loadSmartSalesImpact', e);
+                this.smartSalesImpact = null;
+            } finally {
+                this.smartSalesLoading = false;
+            }
+        },
+
         async upsellAddRule() {
             const t = this.upsellNew;
             const trig = (t.trigger_category || '').trim();
@@ -6011,7 +6066,7 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
             }
             const mx = t.max_order_sum;
             const body = {
-                trigger_mode: 'missing_category',
+                trigger_mode: (t.trigger_mode || 'missing_category').trim(),
                 trigger_category: trig,
                 suggest_category: sug,
                 min_order_sum: Number(t.min_order_sum) || 0,
@@ -6781,6 +6836,37 @@ function adminMixinWebSocketEvents() {
             return 'ИИ';
         },
 
+        chatChannelBadgeLabel(channel) {
+            const key = String(channel || 'whatsapp').toLowerCase();
+            if (key === 'telegram') return 'TG';
+            if (key === 'voice') return 'Voice';
+            if (key === 'operator') return 'Оп';
+            return 'WA';
+        },
+
+        chatChannelBadgeClass(channel) {
+            const key = String(channel || 'whatsapp').toLowerCase();
+            if (key === 'telegram') return 'bg-sky-100 text-sky-800';
+            if (key === 'voice') return 'bg-indigo-100 text-indigo-800';
+            if (key === 'operator') return 'bg-violet-100 text-violet-800';
+            return 'bg-emerald-100 text-emerald-800';
+        },
+
+        chatChannelBadgeTitle(channel) {
+            const key = String(channel || 'whatsapp').toLowerCase();
+            if (key === 'telegram') return 'Telegram';
+            if (key === 'voice') return 'Голосовой звонок';
+            if (key === 'operator') return 'Оператор';
+            return 'WhatsApp';
+        },
+
+        activeChatChannel() {
+            const phone = String(this.activeChatPhone || '').trim();
+            if (!phone) return 'whatsapp';
+            const row = (this.chatList || []).find((c) => adminPhonesMatch(c.phone, phone));
+            return String(row?.channel || 'whatsapp').toLowerCase();
+        },
+
         chatWaitSeconds(chat) {
             void this._chatPulseAt;
             const role = String(chat?.lastRole || '').toLowerCase();
@@ -6877,6 +6963,7 @@ function adminMixinWebSocketEvents() {
                 this.chatList[chatIdx].lastMessage = data.content?.slice(0, 60) || '';
                 this.chatList[chatIdx].lastAt = data.created_at || new Date().toISOString();
                 this.chatList[chatIdx].lastRole = msgRole;
+                if (data.channel) this.chatList[chatIdx].channel = String(data.channel).toLowerCase();
                 this.chatList[chatIdx].waitSeconds = msgRole === 'user' ? 0 : null;
                 this.chatList[chatIdx].pulse = msgRole === 'user' ? 'green' : 'green';
                 this.chatList[chatIdx].slaStatus = this.chatList[chatIdx].pulse;
@@ -6895,6 +6982,7 @@ function adminMixinWebSocketEvents() {
                     unread: !adminPhonesMatch(msgPhone, this.activeChatPhone),
                     lastAt: data.created_at || new Date().toISOString(),
                     lastRole: msgRole,
+                    channel: (data.channel || 'whatsapp').toLowerCase(),
                     waitSeconds: msgRole === 'user' ? 0 : null,
                     botShortMode: !!this.botSlaStatus?.bot_short_mode,
                     slowChats: Number(this.botSlaStatus?.slow_chats || 0),
@@ -7800,6 +7888,8 @@ function adminMixinLiveChat() {
                 const ac = this.aiCenterTab || 'value';
                 if (ac === 'insights') frag = 'ai_center?tab=insights';
                 else if (ac === 'load') frag = 'ai_center?tab=load';
+                else if (ac === 'owner_intel') frag = 'ai_center?tab=owner_intel';
+                else if (ac === 'network_benchmark') frag = 'ai_center?tab=network_benchmark';
                 else frag = 'ai_center';
             } else if (ADMIN_TOP_TAB_IDS.has(this.currentTab)) {
                 frag = this.currentTab;
@@ -7977,6 +8067,8 @@ function adminMixinLiveChat() {
                     else if (a === 'os') this.aiCenterTab = 'os';
                     else if (a === 'guestcare') this.aiCenterTab = 'guestcare';
                     else if (a === 'final_mile') this.aiCenterTab = 'final_mile';
+                    else if (a === 'owner_intel') this.aiCenterTab = 'owner_intel';
+                    else if (a === 'network_benchmark') this.aiCenterTab = 'network_benchmark';
                     else this.aiCenterTab = 'value';
                 } else {
                     this.aiCenterTab = 'value';
@@ -8220,6 +8312,8 @@ function adminMixinLiveChat() {
                 else if (ac === 'os') this.aiCenterTab = 'os';
                 else if (ac === 'guestcare') this.aiCenterTab = 'guestcare';
                 else if (ac === 'final_mile') this.aiCenterTab = 'final_mile';
+                else if (ac === 'owner_intel') this.aiCenterTab = 'owner_intel';
+                else if (ac === 'network_benchmark') this.aiCenterTab = 'network_benchmark';
                 else this.aiCenterTab = 'value';
             } else {
                 this.aiCenterTab = 'value';
@@ -8324,6 +8418,7 @@ function adminMixinLiveChat() {
                         slaStatus: c.pulse || c.sla_status || 'green',
                         chatSlow: !!c.chat_slow,
                         locationId: c.location_id ?? null,
+                        channel: (c.channel || 'whatsapp').toLowerCase(),
                     };
                 });
 
@@ -8495,7 +8590,7 @@ function adminMixinLiveChat() {
                 this.chatList[chatIdx].unread = false;
                 this.unreadChats = this.chatList.filter(c => c.unread).length;
             } else {
-                this.chatList.unshift({ phone, lastMessage: '', state: 'chatting', unread: false });
+                this.chatList.unshift({ phone, lastMessage: '', state: 'chatting', unread: false, channel: 'whatsapp' });
             }
 
             // Показываем кэш мгновенно — пока грузятся свежие данные
@@ -9070,11 +9165,18 @@ function adminMixinDataChartsSettings() {
                         await this.loadGuestCareReviews();
                     } else if (this.aiCenterTab === 'final_mile') {
                         await this.loadFinalMileUi();
+                    } else if (this.aiCenterTab === 'owner_intel') {
+                        await this.loadOwnerIntelligence();
+                    } else if (this.aiCenterTab === 'network_benchmark') {
+                        await this.loadNetworkBenchmark();
                     } else {
                         await this.loadAiValue();
                     }
                 } else if (this.currentTab === 'shift') {
-                    await this.loadShiftState(false);
+                    await Promise.all([
+                        this.loadShiftState(false),
+                        this.loadKitchenGate(),
+                    ]);
                     this._startShiftStateAutoRefresh();
                 } else if (this.currentTab === 'inbox') {
                     if (this.effectiveStaffRole() === 'operator') {
@@ -9096,7 +9198,7 @@ function adminMixinDataChartsSettings() {
                         // Двойной вызов loadMenu() создаёт гонки и лишнюю нагрузку.
                         await Promise.all([this.loadStopList(), this.loadIntegrationStatus()]);
                     } else {
-                        await this.loadMenu();
+                        await Promise.all([this.loadMenu(), this.loadMenuProfitLab()]);
                     }
                 } else if (this.currentTab === 'settings') {
                     if (this.settingsTab === 'connections') {
@@ -9106,7 +9208,7 @@ function adminMixinDataChartsSettings() {
                         ]);
                         void this.refreshTaskQueueHealth();
                     } else if (this.settingsTab === 'smart_sales') {
-                        await this.loadUpsellRules();
+                        await Promise.all([this.loadUpsellRules(), this.loadSmartSalesImpact()]);
                     } else if (this.settingsTab === 'team') {
                         await Promise.all([this.loadTeam(), this.loadStaffMindOnboarding()]);
                     } else if (this.settingsTab === 'health') {
@@ -9326,6 +9428,7 @@ function adminMixinDataChartsSettings() {
                     if (data.focus?.id && data.focus.id !== prevFocusId) {
                         this.shiftFocusEnterKey += 1;
                     }
+                    void this.loadOrderAuditForFocus(data.focus?.order_id || null);
                     if (this.currentTab === 'shift' && data.focus?.id && !this.isDemoSession) {
                         this._startShiftHeartbeat();
                     }
@@ -10239,6 +10342,439 @@ function adminMixinDataChartsSettings() {
             this.aiValueCustom = false;
             await this.loadAiValue();
         },
+
+        // ========== Owner Intelligence (STAGE 1) — methods ==========
+        navigateOwnerIntelligence() {
+            this.navigateToTab('ai_center', { aiCenterTab: 'owner_intel' });
+            void this.loadOwnerIntelligence();
+        },
+
+        navigateNetworkBenchmark() {
+            this.navigateToTab('ai_center', { aiCenterTab: 'network_benchmark' });
+            void this.loadNetworkBenchmark();
+        },
+
+        normalizeNetworkBenchmarkPayload(raw) {
+            const root = raw && typeof raw === 'object' ? raw : {};
+            const bench = root.benchmark && typeof root.benchmark === 'object' ? root.benchmark : root;
+            const enabled = Boolean(root.enabled ?? bench.enabled);
+            const declineReasons = Array.isArray(root.decline_reasons)
+                ? root.decline_reasons
+                : (Array.isArray(bench.decline_reasons) ? bench.decline_reasons : []);
+            return {
+                enabled,
+                reason: root.reason || bench.reason || null,
+                period: root.period || bench.period || this.networkBenchmarkPeriod,
+                headline: root.headline || '',
+                highlights: Array.isArray(root.highlights) ? root.highlights : [],
+                narratives: Array.isArray(root.narratives) ? root.narratives : [],
+                org_revenue_kzt: Number(root.org_revenue_kzt ?? bench.org_revenue_kzt ?? 0),
+                network_avg_kzt: Number(root.network_avg_kzt ?? bench.network_avg_kzt ?? 0),
+                rank_label: root.rank_label || bench.rank_label || '—',
+                decline_reasons: declineReasons,
+                top_decline_reason: root.top_decline_reason || bench.top_decline_reason || declineReasons[0] || null,
+                location_decline_reasons: Array.isArray(root.location_decline_reasons)
+                    ? root.location_decline_reasons
+                    : (Array.isArray(bench.location_decline_reasons) ? bench.location_decline_reasons : []),
+                network_averages: root.network_averages && typeof root.network_averages === 'object'
+                    ? root.network_averages
+                    : (bench.network_averages && typeof bench.network_averages === 'object' ? bench.network_averages : {}),
+                locations: Array.isArray(root.locations)
+                    ? root.locations
+                    : (Array.isArray(bench.locations) ? bench.locations : []),
+                practice_transfers: Array.isArray(root.practice_transfers)
+                    ? root.practice_transfers
+                    : (Array.isArray(bench.practice_transfers) ? bench.practice_transfers : []),
+                recommended_actions: Array.isArray(root.recommended_actions)
+                    ? root.recommended_actions
+                    : (Array.isArray(bench.recommended_actions) ? bench.recommended_actions : []),
+            };
+        },
+
+        networkBenchmarkFormatDelta(deltaObj) {
+            if (!deltaObj || deltaObj.delta_kzt == null) return '—';
+            const kzt = Number(deltaObj.delta_kzt);
+            const pct = deltaObj.delta_pct != null ? Number(deltaObj.delta_pct) : null;
+            const sign = kzt >= 0 ? '+' : '';
+            const money = this.fmt && this.fmt.money ? this.fmt.money(Math.abs(kzt)) : `${Math.abs(kzt)} ₸`;
+            const prefix = kzt >= 0 ? '+' : '−';
+            if (pct != null) return `${prefix}${money} (${sign}${pct}%)`;
+            return `${prefix}${money}`;
+        },
+
+        networkBenchmarkDeltaClass(deltaKzt) {
+            const v = Number(deltaKzt);
+            if (Number.isNaN(v) || v === 0) return 'text-slate-500';
+            return v > 0 ? 'text-emerald-700 font-semibold' : 'text-red-600 font-semibold';
+        },
+
+        setNetworkBenchmarkPeriod(period) {
+            this.networkBenchmarkPeriod = String(period || '7d');
+            void this.loadNetworkBenchmark();
+        },
+
+        async loadNetworkBenchmark() {
+            this.networkBenchmarkLoading = true;
+            try {
+                const period = encodeURIComponent(this.networkBenchmarkPeriod || '7d');
+                const locQs = this.locationQueryString('&');
+                const { ok, data } = await this.apiJsonResponse(
+                    `/api/admin/owner-intelligence/network-benchmark/weekly?period=${period}${locQs}`,
+                );
+                this.networkBenchmarkData = ok && data
+                    ? this.normalizeNetworkBenchmarkPayload(data)
+                    : this.normalizeNetworkBenchmarkPayload({ enabled: false });
+            } catch (e) {
+                adminLogger.error('[admin] loadNetworkBenchmark', e);
+                this.networkBenchmarkData = this.normalizeNetworkBenchmarkPayload({ enabled: false });
+            } finally {
+                this.networkBenchmarkLoading = false;
+            }
+        },
+
+        normalizeOwnerIntelPayload(raw) {
+            const root = raw && typeof raw === 'object' ? raw : {};
+            const kpi = root.kpi && typeof root.kpi === 'object' ? root.kpi : {};
+            const aiCost = Number(kpi.ai_cost ?? kpi.ai_cost_kzt ?? root.ai_cost ?? 0);
+            const roiValue = kpi.roi == null
+                ? (aiCost > 0
+                    ? Number(((Number(root.recovered_revenue || 0) + Number(root.upsell_revenue || 0) + Number(root.prevented_risk_value || 0)) / aiCost).toFixed(1))
+                    : null)
+                : Number(kpi.roi);
+            return {
+                period: root.period || this.ownerIntelPeriod,
+                kpi: {
+                    accepted: Number(kpi.accepted ?? root.accepted_revenue ?? 0),
+                    lost: Number(kpi.lost ?? root.lost_revenue ?? 0),
+                    recovered: Number(kpi.recovered ?? root.recovered_revenue ?? 0),
+                    upsell: Number(kpi.upsell ?? kpi.upsell_revenue_kzt ?? root.upsell_revenue ?? 0),
+                    ai_cost: aiCost,
+                    roi: roiValue,
+                },
+                qa_risk_summary: root.qa_risk_summary && typeof root.qa_risk_summary === 'object'
+                    ? root.qa_risk_summary
+                    : null,
+                kitchen_gate_impact: root.kitchen_gate_impact && typeof root.kitchen_gate_impact === 'object'
+                    ? root.kitchen_gate_impact
+                    : null,
+                top_losses: Array.isArray(root.top_losses) ? root.top_losses : [],
+                top_actions: Array.isArray(root.top_actions) ? root.top_actions : [],
+                upsell_impact: root.upsell_impact && typeof root.upsell_impact === 'object' ? root.upsell_impact : null,
+                menu_preview: (() => {
+                    const preview = root.menu_profit_preview && typeof root.menu_profit_preview === 'object'
+                        ? root.menu_profit_preview
+                        : (root.menu_preview && typeof root.menu_preview === 'object' ? root.menu_preview : null);
+                    if (preview) {
+                        const checklist = preview.missing_cost_checklist && typeof preview.missing_cost_checklist === 'object'
+                            ? preview.missing_cost_checklist
+                            : null;
+                        return {
+                            promote_today: Array.isArray(preview.promote_today) ? preview.promote_today : [],
+                            price_increase_candidates: Array.isArray(preview.price_increase_candidates)
+                                ? preview.price_increase_candidates
+                                : [],
+                            price_recommendations: Array.isArray(preview.price_recommendations)
+                                ? preview.price_recommendations
+                                : [],
+                            missing_cost_checklist: checklist || {
+                                total_items: 0,
+                                missing_count: 0,
+                                missing_pct: 0,
+                                has_cost_count: 0,
+                                onboarding_complete: true,
+                                top_missing: [],
+                            },
+                            promote_today_copilot: Array.isArray(preview.promote_today_copilot)
+                                ? preview.promote_today_copilot
+                                : [],
+                        };
+                    }
+                    if (Array.isArray(root.menu_profit_preview)) {
+                        return { promote_today: root.menu_profit_preview, price_increase_candidates: [] };
+                    }
+                    if (Array.isArray(root.menu_preview)) {
+                        return { promote_today: root.menu_preview, price_increase_candidates: [] };
+                    }
+                    return { promote_today: [], price_increase_candidates: [] };
+                })(),
+                network_benchmark: root.network_benchmark && typeof root.network_benchmark === 'object'
+                    ? root.network_benchmark
+                    : (root.location_benchmark_preview && typeof root.location_benchmark_preview === 'object'
+                        ? root.location_benchmark_preview
+                        : null),
+                llm_reliability: root.llm_reliability && typeof root.llm_reliability === 'object'
+                    ? root.llm_reliability
+                    : null,
+            };
+        },
+
+        async loadOwnerIntelligence() {
+            this.ownerIntelLoading = true;
+            try {
+                const period = encodeURIComponent(this.ownerIntelPeriod || '7d');
+                const locQs = this.locationQueryString('&');
+                const overviewUrl = `/api/admin/owner-intelligence/summary?period=${period}${locQs}`;
+                const [overviewRes] = await Promise.all([
+                    this.apiJsonResponse(overviewUrl),
+                    this.loadOwnerIntelAudits(),
+                    this.loadKitchenGate(),
+                ]);
+                if (overviewRes.ok && overviewRes.data) {
+                    this.ownerIntelData = this.normalizeOwnerIntelPayload(overviewRes.data);
+                } else {
+                    this.ownerIntelData = this.normalizeOwnerIntelPayload({});
+                }
+                await this.loadOwnerIntelDigestPreview();
+            } catch (e) {
+                adminLogger.error('[admin] loadOwnerIntelligence', e);
+                this.ownerIntelData = this.normalizeOwnerIntelPayload({});
+                this.ownerIntelAudits = [];
+                this.ownerIntelDigestPreview = null;
+            } finally {
+                this.ownerIntelLoading = false;
+            }
+        },
+
+        ownerIntelAuditQueryString(prefix = '&') {
+            const qs = [];
+            const filters = this.ownerIntelAuditFilters || {};
+            if (filters.riskHighCritical) qs.push('risk_level=high,critical');
+            if (filters.unreviewedOnly) qs.push('unreviewed_only=true');
+            const tags = [];
+            if (filters.stoplist) tags.push('stoplist_conflict');
+            if (filters.wrongAddress) tags.push('wrong_address_risk');
+            if (tags.length) qs.push(`tags=${encodeURIComponent(tags.join(','))}`);
+            if (!filters.unreviewedOnly) qs.push('status=all');
+            qs.push(`period=${encodeURIComponent(this.ownerIntelPeriod || '7d')}`);
+            const locQs = this.locationQueryString('&');
+            if (locQs) qs.push(locQs.replace(/^&/, ''));
+            return qs.length ? `${prefix}${qs.join('&')}` : '';
+        },
+
+        async loadOwnerIntelAudits() {
+            this.ownerIntelAuditsLoading = true;
+            try {
+                const filterQs = this.ownerIntelAuditQueryString('?');
+                const listUrl = `/api/admin/owner-intelligence/order-audits${filterQs}${filterQs.includes('?') ? '&' : '?'}limit=20`;
+                const summaryUrl = `/api/admin/owner-intelligence/order-audits/summary${filterQs}`;
+                const [auditsRes, summaryRes] = await Promise.all([
+                    this.apiJsonResponse(listUrl),
+                    this.apiJsonResponse(summaryUrl),
+                ]);
+                if (auditsRes.ok && Array.isArray(auditsRes.data?.items)) {
+                    this.ownerIntelAudits = auditsRes.data.items;
+                } else if (auditsRes.ok && Array.isArray(auditsRes.data)) {
+                    this.ownerIntelAudits = auditsRes.data;
+                } else {
+                    this.ownerIntelAudits = [];
+                }
+                this.ownerIntelAuditSummary = summaryRes.ok && summaryRes.data ? summaryRes.data : null;
+            } catch (e) {
+                adminLogger.error('[admin] loadOwnerIntelAudits', e);
+                this.ownerIntelAudits = [];
+                this.ownerIntelAuditSummary = null;
+            } finally {
+                this.ownerIntelAuditsLoading = false;
+            }
+        },
+
+        async toggleOwnerIntelAuditFilter(key) {
+            if (!this.ownerIntelAuditFilters || !(key in this.ownerIntelAuditFilters)) return;
+            this.ownerIntelAuditFilters[key] = !this.ownerIntelAuditFilters[key];
+            await this.loadOwnerIntelAudits();
+        },
+
+        async loadOwnerIntelDigestPreview() {
+            this.ownerIntelDigestLoading = true;
+            try {
+                const { ok, data } = await this.apiJsonResponse(
+                    '/api/admin/owner-intelligence/digest/preview?period=prev_week',
+                );
+                if (ok && data) {
+                    this.ownerIntelDigestPreview = data;
+                    this.ownerIntelDigestLastSent = data.last_sent || null;
+                } else {
+                    this.ownerIntelDigestPreview = null;
+                }
+            } catch (e) {
+                adminLogger.error('[admin] loadOwnerIntelDigestPreview', e);
+                this.ownerIntelDigestPreview = null;
+            } finally {
+                this.ownerIntelDigestLoading = false;
+            }
+        },
+
+        async sendOwnerIntelDigest(force = false) {
+            if (this.ownerIntelDigestSending) return;
+            this.ownerIntelDigestSending = true;
+            try {
+                const { ok, data, status } = await this.apiJsonResponse(
+                    '/api/admin/owner-intelligence/digest/send',
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ force: !!force }),
+                    },
+                );
+                if (ok && data?.sent) {
+                    this.showToast?.('Отчёт отправлен в Telegram', 'success');
+                    await this.loadOwnerIntelDigestPreview();
+                } else if (status === 429) {
+                    this.showToast?.('Подождите 30 минут или отправьте с принудительным режимом', 'warning');
+                } else {
+                    this.showToast?.('Не удалось отправить отчёт', 'error');
+                }
+            } catch (e) {
+                adminLogger.error('[admin] sendOwnerIntelDigest', e);
+                this.showToast?.('Ошибка отправки отчёта', 'error');
+            } finally {
+                this.ownerIntelDigestSending = false;
+            }
+        },
+
+        async setOwnerIntelPeriod(period) {
+            this.ownerIntelPeriod = String(period || '7d');
+            await this.loadOwnerIntelligence();
+        },
+
+        async loadKitchenGate() {
+            this.kitchenGateLoading = true;
+            try {
+                const { ok, data } = await this.apiJsonResponse(
+                    `/api/admin/owner-intelligence/kitchen-gate${this.locationQueryString('?')}`,
+                );
+                if (ok && data?.mode) {
+                    this.kitchenGate = data.mode;
+                } else {
+                    this.kitchenGate = null;
+                }
+            } catch (e) {
+                adminLogger.error('[admin] loadKitchenGate', e);
+                this.kitchenGate = null;
+            } finally {
+                this.kitchenGateLoading = false;
+            }
+        },
+
+        async patchKitchenGate(patch) {
+            if (!patch || typeof patch !== 'object') return;
+            this.kitchenGateSaving = true;
+            try {
+                const { ok, data } = await this.apiJsonResponse(
+                    `/api/admin/owner-intelligence/kitchen-gate${this.locationQueryString('?')}`,
+                    {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(patch),
+                    },
+                );
+                if (ok && data?.mode) {
+                    this.kitchenGate = data.mode;
+                }
+            } catch (e) {
+                adminLogger.error('[admin] patchKitchenGate', e);
+            } finally {
+                this.kitchenGateSaving = false;
+            }
+        },
+
+        async reviewOwnerIntelAudit(auditId, reviewReason = 'no_error') {
+            if (!auditId) return;
+            try {
+                const { ok } = await this.apiJsonResponse(
+                    `/api/admin/owner-intelligence/order-audits/${auditId}/review`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ review_reason: reviewReason || 'no_error' }),
+                    },
+                );
+                if (ok) await this.loadOwnerIntelAudits();
+            } catch (e) {
+                adminLogger.error('[admin] reviewOwnerIntelAudit', e);
+            }
+        },
+
+        async dismissOwnerIntelAudit(auditId) {
+            if (!auditId) return;
+            try {
+                const { ok } = await this.apiJsonResponse(
+                    `/api/admin/owner-intelligence/order-audits/${auditId}/dismiss`,
+                    { method: 'POST' },
+                );
+                if (ok) await this.loadOwnerIntelAudits();
+            } catch (e) {
+                adminLogger.error('[admin] dismissOwnerIntelAudit', e);
+            }
+        },
+
+        async loadOrderAuditForFocus(orderId) {
+            if (!orderId) {
+                this.orderAuditForFocus = null;
+                return;
+            }
+            this.orderAuditLoading = true;
+            try {
+                const { ok, data } = await this.apiJsonResponse(
+                    `/api/admin/owner-intelligence/order-audits?order_id=${encodeURIComponent(orderId)}&status=all&period=week&limit=5${this.locationQueryString('&')}`,
+                );
+                const items = ok && Array.isArray(data?.items) ? data.items : [];
+                this.orderAuditForFocus = items.length ? items[0] : null;
+                if (this.orderAuditForFocus) {
+                    this.orderAuditReviewReason = 'no_error';
+                }
+            } catch (e) {
+                adminLogger.error('[admin] loadOrderAuditForFocus', e);
+                this.orderAuditForFocus = null;
+            } finally {
+                this.orderAuditLoading = false;
+            }
+        },
+
+        async orderAuditReview(auditId, reviewReason) {
+            if (!auditId || this.orderAuditLoading) return;
+            this.orderAuditLoading = true;
+            try {
+                const { ok } = await this.apiJsonResponse(
+                    `/api/admin/owner-intelligence/order-audits/${auditId}/review`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ review_reason: reviewReason || this.orderAuditReviewReason || 'no_error' }),
+                    },
+                );
+                if (ok) {
+                    const orderId = this.shiftState?.focus?.order_id;
+                    await this.loadOrderAuditForFocus(orderId || null);
+                    void this.flashToast('QA audit отмечен', 'success');
+                }
+            } catch (e) {
+                adminLogger.error('[admin] orderAuditReview', e);
+            } finally {
+                this.orderAuditLoading = false;
+            }
+        },
+
+        async orderAuditDismiss(auditId) {
+            if (!auditId || this.orderAuditLoading) return;
+            this.orderAuditLoading = true;
+            try {
+                const { ok } = await this.apiJsonResponse(
+                    `/api/admin/owner-intelligence/order-audits/${auditId}/dismiss`,
+                    { method: 'POST' },
+                );
+                if (ok) {
+                    this.orderAuditForFocus = null;
+                    void this.flashToast('QA audit скрыт', 'success');
+                }
+            } catch (e) {
+                adminLogger.error('[admin] orderAuditDismiss', e);
+            } finally {
+                this.orderAuditLoading = false;
+            }
+        },
+        // ========== / Order QA Audit — methods ==========
+        // ========== / Owner Intelligence — methods ==========
 
         async loadDashActivity() {
             this.dashActivityLoading = true;
@@ -11686,6 +12222,71 @@ function adminMixinDataChartsSettings() {
             this.menuViewRevision += 1;
         },
 
+        closeMenuCostImportPreview() {
+            this.menuCostImportPreviewOpen = false;
+            this.menuCostImportPreview = null;
+            this.menuCostImportFile = null;
+        },
+
+        async importMenuCostsCsv(event) {
+            const input = event?.target;
+            const file = input?.files?.[0];
+            if (!file || this.menuCostImportLoading) return;
+            this.menuCostImportLoading = true;
+            try {
+                const form = new FormData();
+                form.append('file', file);
+                const res = await this.apiFetch('/api/admin/menu/cost-import/preview', {
+                    method: 'POST',
+                    body: form,
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    void this.showUiAlert(this.formatApiError(data) || 'Не удалось разобрать CSV', 'Ошибка');
+                    return;
+                }
+                this.menuCostImportPreview = data;
+                this.menuCostImportFile = file;
+                this.menuCostImportPreviewOpen = true;
+            } catch (e) {
+                adminLogger.error('[admin] importMenuCostsCsv', e);
+                void this.showUiAlert('Ошибка сети. Проверьте соединение.', 'Ошибка');
+            } finally {
+                this.menuCostImportLoading = false;
+                if (input) input.value = '';
+            }
+        },
+
+        async applyMenuCostsImport() {
+            if (!this.menuCostImportFile || this.menuCostImportLoading) return;
+            this.menuCostImportLoading = true;
+            try {
+                const form = new FormData();
+                form.append('file', this.menuCostImportFile);
+                const res = await this.apiFetch('/api/admin/menu/cost-import/apply', {
+                    method: 'POST',
+                    body: form,
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    void this.showUiAlert(this.formatApiError(data) || 'Не удалось применить CSV', 'Ошибка');
+                    return;
+                }
+                this.flashToast(
+                    `Себестоимость обновлена: ${data.updated ?? 0} поз.`,
+                    'success',
+                    4000,
+                );
+                this.closeMenuCostImportPreview();
+                await Promise.all([this.loadMenu(), this.loadMenuProfitLab()]);
+            } catch (e) {
+                adminLogger.error('[admin] applyMenuCostsImport', e);
+                void this.showUiAlert('Ошибка сети. Проверьте соединение.', 'Ошибка');
+            } finally {
+                this.menuCostImportLoading = false;
+            }
+        },
+
         /** Список заказов для вкладки «Настройки» (до 100 шт.). */
         async loadSettingsOrders() {
             this.settingsOrdersLoading = true;
@@ -12035,6 +12636,7 @@ function adminMixinDataChartsSettings() {
                 description: '',
                 tags: '',
                 price: 0,
+                cost_price: null,
                 is_available: true,
                 image_url: '',
                 portion_kind: 'single',
@@ -12061,6 +12663,7 @@ function adminMixinDataChartsSettings() {
                 description: item.description || '',
                 tags: item.tags || '',
                 price: Number(item.price) || 0,
+                cost_price: item.cost_price == null ? null : Number(item.cost_price),
                 is_available: !!item.is_available,
                 image_url: item.image_url || '',
                 portion_kind: (item.portion_kind === 'shareable' ? 'shareable' : 'single'),

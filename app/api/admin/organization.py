@@ -53,6 +53,10 @@ class OrganizationPrefsPatchBody(BaseModel):
         default=None,
         description="После оплаты (вебхук) автоматически подтвердить заказ и отправить в iiko",
     )
+    pos_provider: str | None = Field(
+        default=None,
+        description="POS adapter slug: iiko | rkeeper",
+    )
 
 
 class IikoOfficeConfigPatchBody(BaseModel):
@@ -294,12 +298,23 @@ async def patch_organization_prefs(
         org.prepayment_enforced = bool(body.prepayment_enforced)
     if body.auto_send_to_iiko_after_payment is not None:
         org.auto_send_to_iiko_after_payment = bool(body.auto_send_to_iiko_after_payment)
+    if body.pos_provider is not None:
+        from app.services.pos.adapters.base import VALID_POS_PROVIDERS
+
+        slug = (body.pos_provider or "").strip().lower()
+        if slug not in VALID_POS_PROVIDERS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown POS provider '{slug}'. Allowed: {', '.join(sorted(VALID_POS_PROVIDERS))}",
+            )
+        org.pos_provider = slug
     await db.commit()
     await db.refresh(org)
     return {
         "ok": True,
         "prepayment_enforced": bool(getattr(org, "prepayment_enforced", True)),
         "auto_send_to_iiko_after_payment": bool(getattr(org, "auto_send_to_iiko_after_payment", False)),
+        "pos_provider": (getattr(org, "pos_provider", None) or "iiko").strip().lower(),
     }
 
 
