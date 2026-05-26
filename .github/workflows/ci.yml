@@ -6,14 +6,30 @@ on:
   pull_request:
     branches: [main]
 
+# Явные права: checkout только читает репо (избегает generic 403).
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      # Shallow checkout + точечный fetch main — меньше RPC-сбоев, чем fetch-depth: 0.
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # нужна история для git diff origin/main...HEAD
+          fetch-depth: 1
+
+      - name: Fetch comparison ref (for smart_test)
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "push" ] && [ -n "${{ github.event.before }}" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            git fetch --no-tags --depth=1 origin "${{ github.event.before }}"
+          else
+            git fetch --no-tags --depth=50 origin main:refs/remotes/origin/main || \
+            git fetch --no-tags --depth=50 origin "${{ github.event.pull_request.base.ref || 'main' }}:refs/remotes/origin/main"
+          fi
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -28,7 +44,12 @@ jobs:
         run: python -c "from app.main import app; print('Import OK')"
 
       - name: Smart tests (only affected by changed files)
-        run: python scripts/smart_test.py --base origin/main
+        run: |
+          if [ "${{ github.event_name }}" = "push" ] && [ -n "${{ github.event.before }}" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            python scripts/smart_test.py --base "${{ github.event.before }}"
+          else
+            python scripts/smart_test.py --base origin/main
+          fi
 
       - name: Full suite on main branch push
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
