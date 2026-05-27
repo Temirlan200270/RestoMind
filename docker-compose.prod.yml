@@ -34,6 +34,7 @@ services:
       POSTGRES_HOST: db
       REDIS_ENABLED: "true"
       REDIS_HOST: redis
+      ARQ_ENABLED: "true"
     depends_on:
       db:
         condition: service_healthy
@@ -50,6 +51,24 @@ services:
     restart: unless-stopped
 
   # ─── PostgreSQL ──────────────────────────────────────
+  worker:
+    build: .
+    env_file: .env
+    command: python -m arq app.worker.WorkerSettings
+    environment:
+      APP_DEBUG: "false"
+      DB_MODE: postgres
+      POSTGRES_HOST: db
+      REDIS_ENABLED: "true"
+      REDIS_HOST: redis
+      ARQ_ENABLED: "true"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
   db:
     image: postgres:16-alpine
     environment:

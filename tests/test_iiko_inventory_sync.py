@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 
 import httpx
@@ -11,7 +12,11 @@ from sqlalchemy import select
 
 from app.core.passwords import hash_password
 from app.db.models import InventoryStockSnapshot, Organization, StaffUser
-from app.integrations.iiko_office_client import IikoOfficeClient, parse_stock_balances_payload
+from app.integrations.iiko_office_client import (
+    IikoOfficeClient,
+    parse_stock_balances_payload,
+    parse_waiter_sales_olap_payload,
+)
 from app.services.iiko_inventory_sync import SOURCE_IIKO_OFFICE, sync_inventory_from_iiko_office
 from app.db.models import Location
 from app.services.org_iiko_office import (
@@ -152,6 +157,30 @@ async def test_sync_inventory_from_fixture(db_session) -> None:
     assert rice.external_id == "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 
 
+def test_parse_waiter_sales_olap_payload() -> None:
+    rows = parse_waiter_sales_olap_payload(
+        {
+            "data": [
+                {
+                    "Waiter.Id": "w-1",
+                    "Waiter.Name": "Aigerim",
+                    "DishSumInt": 12500,
+                    "UniqOrderId": 5,
+                    "GuestNum": 9,
+                },
+            ],
+            "summary": [],
+        },
+    )
+
+    assert len(rows) == 1
+    assert rows[0].waiter_id == "w-1"
+    assert rows[0].waiter_name == "Aigerim"
+    assert rows[0].orders_count == 5
+    assert rows[0].total_revenue == 12500
+    assert rows[0].guests_count == 9
+
+
 @pytest.mark.asyncio
 async def test_iiko_office_client_prefers_sha1_auth_password() -> None:
     creds = OrgIikoOfficeCredentials(
@@ -249,6 +278,66 @@ async def test_iiko_office_client_falls_back_to_json_auth_shape() -> None:
     assert rows == []
     assert len(auth_attempts) == 3
     assert auth_attempts[-1].content == b'{"login":"user","pass":"e5e9fa1ba31ecd1ae84f75caaa474f3a663f05f4"}'
+
+
+@pytest.mark.asyncio
+async def test_iiko_office_client_uses_olap_waiter_report_on_legacy_404() -> None:
+    creds = OrgIikoOfficeCredentials(
+        host="https://office.test.local",
+        login="user",
+        password="secret",
+        store_id="store-uuid",
+        department_id="dep-uuid",
+    )
+    requests: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/resto/api/auth":
+            return httpx.Response(200, text="session-key")
+        if request.url.path == "/resto/api/v2/reports/sales/waiters":
+            return httpx.Response(404, text="not found")
+        if request.url.path == "/resto/api/v2/reports/olap/columns":
+            return httpx.Response(
+                200,
+                json={
+                    "Waiter.Id": {"groupingAllowed": True},
+                    "Waiter.Name": {"groupingAllowed": True},
+                    "DishSumInt": {"aggregationAllowed": True},
+                    "UniqOrderId": {"aggregationAllowed": True},
+                    "GuestNum": {"aggregationAllowed": True},
+                },
+            )
+        if request.url.path == "/resto/api/v2/reports/olap":
+            payload = json.loads(request.content.decode("utf-8"))
+            assert payload["reportType"] == "SALES"
+            assert payload["groupByRowFields"] == ["Waiter.Id", "Waiter.Name"]
+            assert payload["filters"]["Department.Id"]["values"] == ["dep-uuid"]
+            return httpx.Response(
+                200,
+                json={
+                    "data": [
+                        {
+                            "Waiter.Id": "w-1",
+                            "Waiter.Name": "Aigerim",
+                            "DishSumInt": 12500,
+                            "UniqOrderId": 5,
+                            "GuestNum": 9,
+                        },
+                    ],
+                    "summary": [],
+                },
+            )
+        return httpx.Response(500)
+
+    async with IikoOfficeClient(creds, transport=httpx.MockTransport(handler)) as client:
+        rows = await client.fetch_waiter_sales_report(
+            date_from="2026-05-27T00:00:00.000",
+            date_to="2026-05-27T23:59:59.999",
+        )
+
+    assert [r.waiter_name for r in rows] == ["Aigerim"]
+    assert any(r.url.path == "/resto/api/v2/reports/olap" for r in requests)
 
 
 @pytest.mark.asyncio

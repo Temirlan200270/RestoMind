@@ -255,6 +255,25 @@ class Settings(BaseSettings):
         ),
     )
     # Разбивка rm_stage_ms по этапам inbound WhatsApp (dedupe → … → reply).
+    whatsapp_text_background_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "WHATSAPP_TEXT_BACKGROUND_ENABLED",
+            "whatsapp_text_background_enabled",
+        ),
+    )
+    whatsapp_send_timeout_sec: float = Field(
+        default=5.0,
+        ge=1.0,
+        le=30.0,
+        validation_alias=AliasChoices("WHATSAPP_SEND_TIMEOUT_SEC", "whatsapp_send_timeout_sec"),
+    )
+    whatsapp_send_max_retries: int = Field(
+        default=2,
+        ge=1,
+        le=5,
+        validation_alias=AliasChoices("WHATSAPP_SEND_MAX_RETRIES", "whatsapp_send_max_retries"),
+    )
     pipeline_timing_enabled: bool = Field(
         default=True,
         validation_alias=AliasChoices(
@@ -527,6 +546,12 @@ class Settings(BaseSettings):
             "ORDER_PREPAYMENT_THRESHOLD_KZT",
             "order_prepayment_threshold_kzt",
         ),
+    )
+
+    # Слоты открытия казанов для плова (локальное время заведения).
+    plov_kazan_batch_times: str = Field(
+        default="12:00,16:00,19:00",
+        validation_alias=AliasChoices("PLOV_KAZAN_BATCH_TIMES", "plov_kazan_batch_times"),
     )
 
     # --- Упаковка (спец. номенклатура): цены в ₸ и UUID товаров iiko для строк заказа ---

@@ -98,6 +98,7 @@ BACKOFF_CAP_SECONDS = 8.0
 
 _http_client: httpx.AsyncClient | None = None
 _http_lock: asyncio.Lock | None = None
+_successful_to_candidate: dict[str, str] = {}
 
 
 def _retry_delay_seconds(attempt_index: int) -> float:
@@ -158,6 +159,10 @@ def _whatsapp_to_candidates(phone: str) -> list[str]:
         alt = "78" + d[1:]
         if alt not in out:
             out.append(alt)
+    cached = _successful_to_candidate.get(d)
+    if cached and cached in out:
+        out.remove(cached)
+        out.insert(0, cached)
     return out
 
 
@@ -185,6 +190,13 @@ def _recipient_not_allowed(response: httpx.Response) -> bool:
     return response.status_code == 400 and _is_recipient_not_allowed(response)
 
 
+def _send_timeout_seconds() -> float:
+    try:
+        return max(1.0, min(30.0, float(getattr(settings, "whatsapp_send_timeout_sec", SEND_TIMEOUT))))
+    except (TypeError, ValueError):
+        return SEND_TIMEOUT
+
+
 async def _post_whatsapp_messages(
     *,
     candidates: list[str],
@@ -200,9 +212,13 @@ async def _post_whatsapp_messages(
     """
     last_err: dict[str, Any] | None = None
     client = await _ensure_http_client()
+    max_retries = max(
+        1,
+        min(5, int(getattr(settings, "whatsapp_send_max_retries", MAX_RETRIES) or MAX_RETRIES)),
+    )
 
     for to in candidates:
-        for attempt in range(1, MAX_RETRIES + 1):
+        for attempt in range(1, max_retries + 1):
             try:
                 response = await client.post(
                     _messages_url(),
@@ -217,9 +233,9 @@ async def _post_whatsapp_messages(
                     log_prefix,
                     to,
                     attempt,
-                    MAX_RETRIES,
+                    max_retries,
                 )
-                if attempt < MAX_RETRIES:
+                if attempt < max_retries:
                     await asyncio.sleep(_retry_delay_seconds(attempt))
                 continue
             except httpx.HTTPError as exc:
@@ -229,14 +245,16 @@ async def _post_whatsapp_messages(
                     log_prefix,
                     to,
                     attempt,
-                    MAX_RETRIES,
+                    max_retries,
                     exc,
                 )
-                if attempt < MAX_RETRIES:
+                if attempt < max_retries:
                     await asyncio.sleep(_retry_delay_seconds(attempt))
                 continue
 
             if response.status_code == 200:
+                source = candidates[0] if candidates else to
+                _successful_to_candidate[source] = to
                 wamid: str | None = None
                 if extract_wamid:
                     try:
@@ -258,12 +276,12 @@ async def _post_whatsapp_messages(
                 response.status_code,
                 to,
                 attempt,
-                MAX_RETRIES,
+                max_retries,
                 response.text[:200],
             )
             if _recipient_not_allowed(response):
                 break
-            if response.status_code == 429 and attempt < MAX_RETRIES:
+            if response.status_code == 429 and attempt < max_retries:
                 retry_after = (response.headers.get("Retry-After") or "").strip()
                 try:
                     ra_s = float(retry_after) if retry_after else 0.0
@@ -272,13 +290,13 @@ async def _post_whatsapp_messages(
                 sleep_s = max(ra_s, _retry_delay_seconds(attempt) * 2)
                 await asyncio.sleep(min(sleep_s, BACKOFF_CAP_SECONDS * 2))
                 continue
-            if attempt < MAX_RETRIES:
+            if attempt < max_retries:
                 await asyncio.sleep(_retry_delay_seconds(attempt))
 
     logger.error(
         "%s: не удалось отправить после %d попыток на номер(а)",
         log_prefix,
-        MAX_RETRIES,
+        max_retries,
     )
     return WhatsAppSendResult(ok=False, error=last_err or {"code": "unknown"})
 
@@ -313,7 +331,7 @@ async def send_typing_indicator(phone: str, whatsapp_message_id: str) -> WhatsAp
             _messages_url(),
             headers=headers,
             json=payload,
-            timeout=SEND_TIMEOUT,
+            timeout=_send_timeout_seconds(),
         )
     except httpx.HTTPError as exc:
         logger.warning("WhatsApp typing: network error mid=%s: %s", wmid[:24], exc)
@@ -367,7 +385,7 @@ async def send_message(phone: str, text: str) -> WhatsAppSendResult:
         candidates=candidates,
         headers=headers,
         build_json=_body,
-        timeout=SEND_TIMEOUT,
+        timeout=_send_timeout_seconds(),
         extract_wamid=True,
         log_prefix="WhatsApp",
     )
@@ -419,7 +437,7 @@ async def send_interactive_buttons(
         candidates=candidates,
         headers=headers,
         build_json=_body,
-        timeout=SEND_TIMEOUT,
+        timeout=_send_timeout_seconds(),
         extract_wamid=True,
         log_prefix="WhatsApp Interactive",
     )
@@ -471,7 +489,7 @@ async def send_cta_url_button(
         candidates=candidates,
         headers=headers,
         build_json=_body,
-        timeout=SEND_TIMEOUT,
+        timeout=_send_timeout_seconds(),
         extract_wamid=True,
         log_prefix="WhatsApp CTA",
     )
@@ -535,7 +553,7 @@ async def send_template(
         candidates=candidates,
         headers=headers,
         build_json=_body,
-        timeout=SEND_TIMEOUT,
+        timeout=_send_timeout_seconds(),
         extract_wamid=False,
         log_prefix=f"WhatsApp template '{template_name}'",
     )
@@ -699,7 +717,7 @@ async def send_voice_message(phone: str, audio_mp3: bytes) -> bool:
         candidates=candidates,
         headers=headers,
         build_json=_body,
-        timeout=SEND_TIMEOUT,
+        timeout=_send_timeout_seconds(),
         extract_wamid=False,
         log_prefix="WhatsApp audio",
     )

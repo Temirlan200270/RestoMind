@@ -116,6 +116,22 @@ services:
         sync: false
       - key: OPENAI_API_KEY
         sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: AI_PROVIDER
+        sync: false
+      - key: WHATSAPP_API_TOKEN
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_VERIFY_TOKEN
+        sync: false
+      - key: IIKO_API_LOGIN
+        sync: false
+      - key: IIKO_ORGANIZATION_ID
+        sync: false
+      - key: IIKO_API_BASE_URL
+        sync: false
       - key: SESSION_SECRET
         fromService:
           type: web

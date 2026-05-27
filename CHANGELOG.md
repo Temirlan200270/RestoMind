@@ -23,6 +23,7 @@
 
 - Guard-слои: `fulfillment_infer`, `upsell_safety_gate`, `order_confirm_gate`, stale draft reset, fulfillment gate на «Да», technical fallback без sticky `HUMAN_MODE`.
 - Evals: golden dialogs (starter), prompt snapshot tests; метрики `llm_reliability` в Owner Intelligence API + UI.
+- **Плов на стопе:** `plov_kazan_schedule.py` — для любой позиции с пловом на стопе: слоты казанов (12:00/16:00/19:00), ближайшее время в промпт + fallback в ответе.
 - Подробнее: [`docs/releases/2026.06-owner-intelligence.md`](docs/releases/2026.06-owner-intelligence.md) (блок reliability).
 
 ### Menu Profit Lab — management value

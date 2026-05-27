@@ -330,7 +330,7 @@ def _start_slow_processing_feedback(
 
 
 _POLITE_ACK_RE = re.compile(
-    r"^(спасибо|благодарю|thanks|thank\s*you|мерси)\s*[!.\s]*$",
+    r"^(?:нет[,.\s]+)?(?:спасибо|благодарю|thanks|thank\s*you|мерси|рахмет|no\s*thanks)\s*[!.\s]*$",
     re.IGNORECASE | re.UNICODE,
 )
 
@@ -357,6 +357,7 @@ async def _save_chat_log(
     conversation_id: str | None = None,
     known_user_id: int | None = None,
     location_id: int | None = None,
+    save_user: bool = True,
 ) -> int | None:
     """
     Сохраняет пару сообщений (user + assistant) в ChatLog.
@@ -371,23 +372,24 @@ async def _save_chat_log(
     else:
         user = await get_or_create_user(db, phone, organization_id)
         uid = user.id
-    db.add(
-        ChatLog(
-            organization_id=organization_id,
-            location_id=location_id,
-            user_id=uid,
-            role="user",
-            content=user_text,
-            channel=msg_channel,
-            meta_json=(
-                trace_payload(
-                    trace_id=trace_id,
-                    conversation_id=conversation_id,
-                )
-                if trace_id and conversation_id else None
+    if save_user:
+        db.add(
+            ChatLog(
+                organization_id=organization_id,
+                location_id=location_id,
+                user_id=uid,
+                role="user",
+                content=user_text,
+                channel=msg_channel,
+                meta_json=(
+                    trace_payload(
+                        trace_id=trace_id,
+                        conversation_id=conversation_id,
+                    )
+                    if trace_id and conversation_id else None
+                ),
             ),
-        ),
-    )
+        )
     now = datetime.now(timezone.utc)
     assistant_kwargs: dict[str, Any] = {
         "organization_id": organization_id,
@@ -412,6 +414,37 @@ async def _save_chat_log(
     db.add(assistant_log)
     await db.flush()
     return int(assistant_log.id) if outbound_whatsapp else None
+
+
+async def _save_inbound_chat_log(
+    db: AsyncSession,
+    phone: str,
+    user_text: str,
+    *,
+    organization_id: int,
+    channel: str | None = None,
+    trace_id: str | None = None,
+    conversation_id: str | None = None,
+    location_id: int | None = None,
+) -> tuple[int, int]:
+    from app.services.telegram_customer import current_customer_channel, normalize_customer_channel
+
+    user = await get_or_create_user(db, phone, organization_id)
+    log = ChatLog(
+        organization_id=organization_id,
+        location_id=location_id,
+        user_id=user.id,
+        role="user",
+        content=user_text,
+        channel=normalize_customer_channel(channel or current_customer_channel()),
+        meta_json=(
+            trace_payload(trace_id=trace_id, conversation_id=conversation_id)
+            if trace_id and conversation_id else None
+        ),
+    )
+    db.add(log)
+    await db.flush()
+    return int(user.id), int(log.id)
 
 
 async def _process_whatsapp_status_batch(statuses: list[Any]) -> None:
@@ -1280,6 +1313,7 @@ async def _dispatch_bypass_assistant_reply(
             conversation_id=conversation_id,
             location_id=active_location_id,
             known_user_id=int(u_row.id) if u_row is not None and u_row.id is not None else None,
+            save_user=False,
         )
         await db.commit()
 
@@ -1670,14 +1704,40 @@ async def _process_message_inner(
         user_evt = message_text if message_text.strip() else (
             "🎤 голосовое сообщение" if voice_bytes is not None else ""
         )
-        await publish_event("new_message", {
-            "phone": phone,
-            "role": "user",
-            "content": user_evt,
-            "organization_id": organization_id,
-            "trace_id": trace_id,
-            "conversation_id": conversation_id,
-        })
+        inbound_user_id: int | None = None
+        inbound_log_id: int | None = None
+        if user_evt:
+            try:
+                async with async_session_factory() as db_in:
+                    inbound_user_id, inbound_log_id = await _save_inbound_chat_log(
+                        db_in,
+                        phone,
+                        user_evt,
+                        organization_id=organization_id,
+                        trace_id=trace_id,
+                        conversation_id=conversation_id,
+                        location_id=active_location_id,
+                    )
+                    await db_in.commit()
+                await publish_chat_event(
+                    phone=phone,
+                    role="user",
+                    content=user_evt,
+                    organization_id=organization_id,
+                    chat_log_id=inbound_log_id,
+                    trace_id=trace_id,
+                    conversation_id=conversation_id,
+                )
+            except Exception:
+                logger.exception("inbound ChatLog early save failed org=%s phone=%s", organization_id, phone[-4:])
+                await publish_event("new_message", {
+                    "phone": phone,
+                    "role": "user",
+                    "content": user_evt,
+                    "organization_id": organization_id,
+                    "trace_id": trace_id,
+                    "conversation_id": conversation_id,
+                })
 
         # ─── HUMAN_MODE / ai_paused / ai_snooze: AI молчит ─────────
         operator_only = (
@@ -1699,6 +1759,8 @@ async def _process_message_inner(
                     organization_id=organization_id,
                     trace_id=trace_id,
                     conversation_id=conversation_id,
+                    known_user_id=inbound_user_id,
+                    save_user=False,
                 )
                 await db.commit()
             await append_to_history(
@@ -1752,6 +1814,7 @@ async def _process_message_inner(
                     outbound_id = await _save_chat_log(
                         db, phone, message_text, final_reply, organization_id=organization_id,
                         trace_id=trace_id, conversation_id=conversation_id,
+                        known_user_id=inbound_user_id, save_user=False,
                     )
                     await db.commit()
 
@@ -1803,6 +1866,7 @@ async def _process_message_inner(
                     outbound_id_o = await _save_chat_log(
                         db, phone, message_text, final_reply, organization_id=organization_id,
                         trace_id=trace_id, conversation_id=conversation_id,
+                        known_user_id=inbound_user_id, save_user=False,
                     )
                     await db.commit()
 
@@ -1853,6 +1917,7 @@ async def _process_message_inner(
                 outbound_id_b = await _save_chat_log(
                     db, phone, message_text, final_reply, organization_id=organization_id,
                     trace_id=trace_id, conversation_id=conversation_id,
+                    known_user_id=inbound_user_id, save_user=False,
                 )
                 await db.commit()
 
@@ -1912,6 +1977,8 @@ async def _process_message_inner(
                     organization_id=organization_id,
                     trace_id=trace_id,
                     conversation_id=conversation_id,
+                    known_user_id=inbound_user_id,
+                    save_user=False,
                 )
                 await db_cancel.commit()
             await append_to_history(
@@ -1976,6 +2043,8 @@ async def _process_message_inner(
                     organization_id=organization_id,
                     trace_id=trace_id,
                     conversation_id=conversation_id,
+                    known_user_id=inbound_user_id,
+                    save_user=False,
                 )
                 await db_ack.commit()
             await append_to_history(
@@ -2268,6 +2337,16 @@ async def _process_message_inner(
         if should_suppress_upsell(upsell_ctx):
             ai_response = strip_upsell_from_ai_response(ai_response)
 
+        from app.services.plov_kazan_schedule import enrich_plov_kazan_reply_if_needed
+
+        ai_response = enrich_plov_kazan_reply_if_needed(
+            ai_response,
+            message_text,
+            menu_items,
+            timezone_name=getattr(read_ctx.org, "timezone", None) if read_ctx.org else None,
+            org_meta_json=getattr(read_ctx.org, "meta_json", None) if read_ctx.org else None,
+        )
+
         if should_save_faq_reply(ai_response, has_draft=draft_row is not None):
             await save_faq_reply(
                 org_id=organization_id,
@@ -2371,6 +2450,7 @@ async def _process_message_inner(
                 conversation_id=conversation_id,
                 known_user_id=u_row.id if u_row is not None else None,
                 location_id=active_location_id,
+                save_user=False,
             )
             # Phase 5 OS: счётчик AI-ответов для event-driven аналитики
             _usage = getattr(ai_response, "_usage", None)

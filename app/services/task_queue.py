@@ -189,6 +189,22 @@ async def dispatch_arq_or_background(
             trace_id=kwargs.get("trace_id"),
             whatsapp_message_id=kwargs.get("whatsapp_message_id"),
         )
+    if job_name == "whatsapp_process_text" and settings.whatsapp_text_background_enabled:
+        fn = _get_background_fn(job_name)
+        if fn is None:
+            logger.error("dispatch_arq_or_background: no fallback for job=%s", job_name)
+            return
+        background_tasks.add_task(fn, **kwargs)
+        logger.info(
+            "BackgroundTasks realtime: task %s scheduled",
+            job_name,
+            extra={
+                "event": "task_queue_realtime_background",
+                "job": job_name,
+                "trace_id": str(kwargs.get("trace_id") or ""),
+            },
+        )
+        return
 
     if arq_can_run():
         await enqueue_job(job_name, **kwargs)

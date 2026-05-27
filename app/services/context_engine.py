@@ -443,6 +443,17 @@ async def build_llm_prompt_bundle(
     if stoplist_change_ctx:
         menu_context = f"{menu_context}\n\n{stoplist_change_ctx}"
 
+    from app.services.plov_kazan_schedule import format_plov_kazan_schedule_prompt_block
+
+    plov_kazan_ctx = format_plov_kazan_schedule_prompt_block(
+        menu_items,
+        timezone_name=getattr(org_ent, "timezone", None) if org_ent is not None else None,
+        org_meta_json=getattr(org_ent, "meta_json", None) if org_ent is not None else None,
+        schedule_json=getattr(org_ent, "schedule_json", None) if org_ent is not None else None,
+    )
+    if plov_kazan_ctx:
+        menu_context = f"{menu_context}\n\n{plov_kazan_ctx}"
+
     prefs = read_ctx.user_preferences or {}
     top = prefs.get("top_items") or []
     disliked = prefs.get("disliked") or []

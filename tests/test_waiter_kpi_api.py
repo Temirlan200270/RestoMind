@@ -65,7 +65,7 @@ async def test_waiter_kpi_api_ranking_and_export(asgi_memory_client, monkeypatch
     )
     assert login.status_code == 200
 
-    list_res = await client.get("/api/admin/analytics/waiter-kpi")
+    list_res = await client.get("/api/admin/analytics/waiter-kpi?date_from=2026-05-20&date_to=2026-05-20")
     assert list_res.status_code == 200
     body = list_res.json()
     assert body["ok"] is True
@@ -77,7 +77,7 @@ async def test_waiter_kpi_api_ranking_and_export(asgi_memory_client, monkeypatch
     assert status_res.status_code == 200
     assert status_res.json()["ok"] is True
 
-    csv_res = await client.get("/api/admin/analytics/waiter-kpi/export.csv")
+    csv_res = await client.get("/api/admin/analytics/waiter-kpi/export.csv?date_from=2026-05-20&date_to=2026-05-20")
     assert csv_res.status_code == 200
     assert "Тест Официант" in csv_res.text
 

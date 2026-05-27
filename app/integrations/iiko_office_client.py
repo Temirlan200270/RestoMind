@@ -38,7 +38,7 @@ import json
 import logging
 import hashlib
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +52,8 @@ REQUEST_TIMEOUT = 30.0
 AUTH_PATH = "/resto/api/auth"
 BALANCE_PATH = "/resto/api/v2/reports/balance/stores"
 WAITER_SALES_PATH = "/resto/api/v2/reports/sales/waiters"
+OLAP_COLUMNS_PATH = "/resto/api/v2/reports/olap/columns"
+OLAP_REPORT_PATH = "/resto/api/v2/reports/olap"
 
 
 @dataclass(frozen=True)
@@ -190,6 +192,113 @@ def parse_waiter_sales_payload(data: dict[str, Any] | list[Any]) -> list[IikoOff
     return rows
 
 
+def _first_present(entry: dict[str, Any], keys: tuple[str, ...]) -> Any:
+    for key in keys:
+        if key in entry and entry.get(key) not in (None, ""):
+            return entry.get(key)
+    return None
+
+
+def parse_waiter_sales_olap_payload(data: dict[str, Any]) -> list[IikoOfficeWaiterSalesRow]:
+    items = data.get("data") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        return []
+
+    rows: list[IikoOfficeWaiterSalesRow] = []
+    for entry in items:
+        if not isinstance(entry, dict):
+            continue
+        waiter_name = str(
+            _first_present(
+                entry,
+                (
+                    "Waiter.Name",
+                    "WaiterName",
+                    "Waiter",
+                    "Employee.Name",
+                    "EmployeeName",
+                    "User.Name",
+                    "UserName",
+                ),
+            )
+            or "",
+        ).strip()
+        waiter_id = str(
+            _first_present(
+                entry,
+                (
+                    "Waiter.Id",
+                    "WaiterName.ID",
+                    "OrderWaiter.Id",
+                    "Waiter",
+                    "Employee.Id",
+                    "User.Id",
+                    "WaiterName",
+                    "Waiter.Name",
+                ),
+            )
+            or waiter_name,
+        ).strip()
+        if not waiter_id and not waiter_name:
+            continue
+        if not waiter_name:
+            waiter_name = waiter_id
+        orders_count = int(
+            _coerce_float(_first_present(entry, ("UniqOrderId", "OrderNum", "OrderCount", "OrdersCount"))),
+        )
+        total_revenue = _coerce_float(
+            _first_present(entry, ("DishSumInt", "DishDiscountSumInt", "fullSum", "FullSum", "Revenue")),
+        )
+        guests_count = int(_coerce_float(_first_present(entry, ("GuestNum", "GuestsCount", "GuestCount"))))
+        cancelled_orders = int(_coerce_float(_first_present(entry, ("DeletedOrders", "CancelledOrders"))))
+        rows.append(
+            IikoOfficeWaiterSalesRow(
+                waiter_id=waiter_id,
+                waiter_name=waiter_name,
+                orders_count=orders_count,
+                total_revenue=total_revenue,
+                guests_count=guests_count,
+                cancelled_orders=cancelled_orders,
+                avg_service_time_min=None,
+                raw=entry,
+            ),
+        )
+    return rows
+
+
+def _pick_olap_field(
+    columns: dict[str, Any],
+    candidates: tuple[str, ...],
+    *,
+    capability: str,
+) -> str | None:
+    for key in candidates:
+        meta = columns.get(key)
+        if isinstance(meta, dict) and meta.get(capability) is True:
+            return key
+    for key, meta in columns.items():
+        if not isinstance(meta, dict) or meta.get(capability) is not True:
+            continue
+        name = str(meta.get("name") or key).lower()
+        key_l = str(key).lower()
+        if any(token in key_l or token in name for token in ("waiter", "официант")):
+            return str(key)
+    return None
+
+
+def _normalize_olap_datetime(value: str, *, end: bool = False) -> str:
+    raw = str(value or "").strip()
+    date_part = raw.split("T", 1)[0]
+    if not date_part:
+        return raw
+    if not end:
+        return date_part
+    try:
+        return (datetime.strptime(date_part, "%Y-%m-%d") + timedelta(days=1)).date().isoformat()
+    except ValueError:
+        return date_part
+
+
 def _session_key_from_auth_response(response: httpx.Response) -> str:
     content_type = response.headers.get("content-type", "").lower()
     if "json" in content_type:
@@ -319,6 +428,90 @@ class IikoOfficeClient:
             raise ValueError("iiko Office balance: ожидался JSON object")
         return parse_stock_balances_payload(data)
 
+    async def fetch_olap_columns(self, *, report_type: str = "SALES") -> dict[str, Any]:
+        if not self._http:
+            raise RuntimeError("HTTP client not initialized")
+        response = await self._http.get(
+            OLAP_COLUMNS_PATH,
+            params={**self._auth_params(), "reportType": report_type},
+        )
+        response.raise_for_status()
+        data = response.json()
+        return data if isinstance(data, dict) else {}
+
+    async def fetch_waiter_sales_report_olap(
+        self,
+        *,
+        date_from: str,
+        date_to: str,
+    ) -> list[IikoOfficeWaiterSalesRow]:
+        if not self._http:
+            raise RuntimeError("HTTP client not initialized")
+
+        columns = await self.fetch_olap_columns(report_type="SALES")
+        waiter_name_field = _pick_olap_field(
+            columns,
+            ("WaiterName", "OrderWaiter.Name", "Waiter.Name", "Employee.Name", "User.Name"),
+            capability="groupingAllowed",
+        ) or "Waiter.Name"
+        waiter_id_field = _pick_olap_field(
+            columns,
+            ("WaiterName.ID", "OrderWaiter.Id", "Waiter.Id", "Employee.Id", "User.Id"),
+            capability="groupingAllowed",
+        )
+
+        group_fields = [waiter_name_field]
+        if waiter_id_field and waiter_id_field != waiter_name_field:
+            group_fields.insert(0, waiter_id_field)
+
+        aggregate_fields: list[str] = []
+        for key in ("DishSumInt", "DishDiscountSumInt", "UniqOrderId", "OrderNum", "GuestNum"):
+            meta = columns.get(key)
+            if not columns or (isinstance(meta, dict) and meta.get("aggregationAllowed") is True):
+                aggregate_fields.append(key)
+        if not aggregate_fields:
+            aggregate_fields = ["DishSumInt", "UniqOrderId"]
+
+        filters: dict[str, Any] = {
+            "OpenDate.Typed": {
+                "filterType": "DateRange",
+                "periodType": "CUSTOM",
+                "from": _normalize_olap_datetime(date_from),
+                "to": _normalize_olap_datetime(date_to, end=True),
+            },
+            "DeletedWithWriteoff": {
+                "filterType": "IncludeValues",
+                "values": ["NOT_DELETED"],
+            },
+            "OrderDeleted": {
+                "filterType": "IncludeValues",
+                "values": ["NOT_DELETED"],
+            },
+        }
+        if self._creds.department_id:
+            filters["Department.Id"] = {
+                "filterType": "IncludeValues",
+                "values": [self._creds.department_id],
+            }
+
+        payload = {
+            "reportType": "SALES",
+            "buildSummary": False,
+            "groupByRowFields": group_fields,
+            "aggregateFields": aggregate_fields,
+            "filters": filters,
+        }
+        response = await self._http.post(
+            OLAP_REPORT_PATH,
+            params=self._auth_params(),
+            json=payload,
+        )
+        response.raise_for_status()
+        data = response.json()
+        if not isinstance(data, dict):
+            raise ValueError("iiko Office OLAP waiter sales: expected JSON object")
+        return parse_waiter_sales_olap_payload(data)
+
     async def fetch_waiter_sales_report(
         self,
         *,
@@ -344,6 +537,11 @@ class IikoOfficeClient:
         if self._creds.department_id:
             params["department"] = self._creds.department_id
         response = await self._http.get(WAITER_SALES_PATH, params=params)
+        if response.status_code in {404, 405}:
+            return await self.fetch_waiter_sales_report_olap(
+                date_from=date_from,
+                date_to=date_to,
+            )
         response.raise_for_status()
         data = response.json()
         if isinstance(data, dict):
