@@ -747,14 +747,14 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("PROMPT_SIZE_METRIC_ENABLED", "prompt_size_metric_enabled"),
     )
     prompt_max_tokens_soft: int = Field(
-        default=8000,
+        default=10000,
         ge=2000,
         le=64000,
         validation_alias=AliasChoices("PROMPT_MAX_TOKENS_SOFT", "prompt_max_tokens_soft"),
         description="Превышение → обрезка chat_history перед LLM",
     )
     prompt_max_tokens_hard: int = Field(
-        default=12000,
+        default=14000,
         ge=4000,
         le=128000,
         validation_alias=AliasChoices("PROMPT_MAX_TOKENS_HARD", "prompt_max_tokens_hard"),
