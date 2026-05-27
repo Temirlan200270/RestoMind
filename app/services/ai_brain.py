@@ -269,18 +269,121 @@ def resolve_model_tier(
     return "fast"
 
 
+_STRONG_RERUN_ALWAYS = frozenset({
+    "payment",
+    "confirm",
+    "confirm_order",
+    "confirm_booking",
+    "cancel",
+})
+
+
 def _needs_strong_model_rerun(response: AIBrainResponse) -> bool:
-    """Fast model → retry на strong при order/book/complex intents."""
-    intent = (response.intent or "").strip().lower()
-    if intent in _STRONG_INTENTS:
-        return True
+    """Fast model → strong только когда нужна структура или ответ пустой / high-stakes."""
     if response.items:
         return True
     if response.booking_details is not None:
         return True
     if response.order_actions:
         return True
-    return False
+    intent = (response.intent or "").strip().lower()
+    if intent not in _STRONG_INTENTS:
+        return False
+    if intent in _STRONG_RERUN_ALWAYS:
+        return True
+    reply = (response.reply_text or "").strip()
+    # intent=order/book с нормальным текстом — fast достаточно (экономим 2-й вызов).
+    return not reply
+
+
+def _estimate_prompt_tokens(
+    *,
+    menu_context: str,
+    kb_context: str,
+    draft_order_context: str,
+    sales_strategy_context: str,
+    customer_context: str,
+    current_time_context: str,
+    history: list[dict[str, str]],
+    user_text: str,
+) -> int:
+    from app.services.prompt_metrics import measure_prompt
+
+    return measure_prompt(
+        menu_context=menu_context,
+        kb_context=kb_context,
+        draft_ctx=draft_order_context,
+        strategy_ctx=sales_strategy_context,
+        customer_ctx=customer_context,
+        current_time_ctx=current_time_context,
+        history=history,
+        user_text=user_text,
+    ).estimated_tokens
+
+
+async def _maybe_strong_rerun(
+    provider: BaseAIProvider,
+    fast_result: AIBrainResponse,
+    *,
+    history: list[dict[str, str]],
+    user_text: str,
+    menu_context: str,
+    kb_context: str,
+    draft_order_context: str,
+    sales_strategy_context: str,
+    customer_context: str,
+    current_time_context: str,
+    trace_prefix: str,
+) -> AIBrainResponse:
+    if not settings.ai_model_routing_enabled or not _needs_strong_model_rerun(fast_result):
+        return fast_result
+
+    est_tokens = _estimate_prompt_tokens(
+        menu_context=menu_context,
+        kb_context=kb_context,
+        draft_order_context=draft_order_context,
+        sales_strategy_context=sales_strategy_context,
+        customer_context=customer_context,
+        current_time_context=current_time_context,
+        history=history,
+        user_text=user_text,
+    )
+    if est_tokens > settings.prompt_max_tokens_soft:
+        logger.info(
+            "%s[AI] skip fast→strong: prompt oversize tokens=%d soft=%d intent=%s",
+            trace_prefix,
+            est_tokens,
+            settings.prompt_max_tokens_soft,
+            fast_result.intent,
+        )
+        return fast_result
+
+    logger.info(
+        "%s[AI] fast→strong rerun intent=%s items=%d",
+        trace_prefix,
+        fast_result.intent,
+        len(fast_result.items or []),
+    )
+    try:
+        return await provider.generate_response(
+            history=history,
+            user_text=user_text,
+            menu_context=menu_context,
+            kb_context=kb_context,
+            draft_order_context=draft_order_context,
+            sales_strategy_context=sales_strategy_context,
+            customer_context=customer_context,
+            current_time_context=current_time_context,
+            model_tier="strong",
+        )
+    except TransientAiError as exc:
+        logger.warning(
+            "%s[AI] fast→strong failed (%s), keeping fast result intent=%s",
+            trace_prefix,
+            exc,
+            fast_result.intent,
+        )
+        return fast_result
 
 
 async def call_ai(
@@ -323,14 +426,10 @@ async def call_ai(
             current_time_context=current_time_context,
             model_tier=tier,
         )
-        if tier == "fast" and settings.ai_model_routing_enabled and _needs_strong_model_rerun(result):
-            logger.info(
-                "%s[AI] fast→strong rerun intent=%s items=%d",
-                prefix,
-                result.intent,
-                len(result.items or []),
-            )
-            result = await provider.generate_response(
+        if tier == "fast":
+            result = await _maybe_strong_rerun(
+                provider,
+                result,
                 history=history,
                 user_text=user_text,
                 menu_context=menu_context,
@@ -339,7 +438,7 @@ async def call_ai(
                 sales_strategy_context=sales_strategy_context,
                 customer_context=customer_context,
                 current_time_context=current_time_context,
-                model_tier="strong",
+                trace_prefix=prefix,
             )
         logger.info(
             "%s[AI] dispatch provider=%s status=SUCCESS latency_ms=%d intent=%s tier=%s",

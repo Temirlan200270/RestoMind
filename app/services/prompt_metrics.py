@@ -83,6 +83,40 @@ def trim_history_to_budget(
     return list(reversed(out))
 
 
+def trim_menu_context_to_budget(menu_context: str, *, budget_tokens: int) -> str:
+    """Обрезает меню по строкам (или по символам для одной длинной строки)."""
+    text = (menu_context or "").strip()
+    if not text or budget_tokens <= 0:
+        return text
+    if estimate_tokens(text) <= budget_tokens:
+        return text
+
+    max_chars = max(200, int(budget_tokens * 3.5))
+    if len(text) <= max_chars and "\n" not in text:
+        return text
+
+    lines = text.split("\n")
+    if len(lines) == 1 and len(text) > max_chars:
+        return (
+            text[:max_chars]
+            + "\n... [меню сокращено; уточните блюдо или категорию — подскажу точнее]"
+        )
+
+    out: list[str] = []
+    used = 0
+    for line in lines:
+        cost = estimate_tokens(line + "\n")
+        if used + cost > budget_tokens and out:
+            out.append(
+                f"... [меню сокращено: {len(out)} из {len(lines)} строк; "
+                "уточните блюдо или категорию — подскажу точнее]",
+            )
+            break
+        out.append(line)
+        used += cost
+    return "\n".join(out)
+
+
 def apply_prompt_size_controls(
     history: list[dict[str, str]],
     *,
@@ -96,15 +130,16 @@ def apply_prompt_size_controls(
     soft_limit: int,
     hard_limit: int,
     min_keep: int,
-) -> tuple[list[dict[str, str]], PromptSize, PromptSize | None, bool]:
+) -> tuple[list[dict[str, str]], str, PromptSize, PromptSize | None, bool]:
     """
-    Замер промпта и обрезка history при превышении soft_limit.
+    Замер промпта, обрезка history и при необходимости menu_context.
 
     Returns:
-        (history, size_before, size_after_or_none, trimmed)
+        (history, menu_context, size_before, size_after_or_none, trimmed)
     """
+    menu_out = menu_context
     size_before = measure_prompt(
-        menu_context=menu_context,
+        menu_context=menu_out,
         kb_context=kb_context,
         draft_ctx=draft_ctx,
         strategy_ctx=strategy_ctx,
@@ -114,7 +149,7 @@ def apply_prompt_size_controls(
         user_text=user_text,
     )
     if size_before.estimated_tokens <= soft_limit:
-        return history, size_before, None, False
+        return history, menu_out, size_before, None, False
 
     history_budget = max(
         500,
@@ -126,7 +161,7 @@ def apply_prompt_size_controls(
         min_keep=min_keep,
     )
     size_after = measure_prompt(
-        menu_context=menu_context,
+        menu_context=menu_out,
         kb_context=kb_context,
         draft_ctx=draft_ctx,
         strategy_ctx=strategy_ctx,
@@ -135,8 +170,24 @@ def apply_prompt_size_controls(
         history=trimmed_history,
         user_text=user_text,
     )
+    trimmed = True
+
+    if size_after.estimated_tokens > soft_limit:
+        non_menu = size_after.estimated_tokens - size_after.parts["menu"]
+        menu_budget = max(800, soft_limit - non_menu)
+        menu_out = trim_menu_context_to_budget(menu_out, budget_tokens=menu_budget)
+        size_after = measure_prompt(
+            menu_context=menu_out,
+            kb_context=kb_context,
+            draft_ctx=draft_ctx,
+            strategy_ctx=strategy_ctx,
+            customer_ctx=customer_ctx,
+            current_time_ctx=current_time_ctx,
+            history=trimmed_history,
+            user_text=user_text,
+        )
+
     if size_after.estimated_tokens > hard_limit:
-        # TODO: агрессивный фильтр menu_context по категориям из user_text
         # TODO: warning в Telegram админу org при регулярном превышении hard_limit
         pass
-    return trimmed_history, size_before, size_after, True
+    return trimmed_history, menu_out, size_before, size_after, trimmed

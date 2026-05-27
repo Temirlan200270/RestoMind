@@ -163,6 +163,18 @@ class Settings(BaseSettings):
         default="gemini-2.5-flash",
         validation_alias=AliasChoices("AI_FAST_MODEL_GEMINI", "ai_fast_model_gemini"),
     )
+    ai_strong_model_gemini: str = Field(
+        default="",
+        validation_alias=AliasChoices("AI_STRONG_MODEL_GEMINI", "ai_strong_model_gemini"),
+        description="Override strong-tier Gemini (пусто = cascade из AI_PRESETS)",
+    )
+    ai_llm_timeout_sec: float = Field(
+        default=45.0,
+        ge=10.0,
+        le=120.0,
+        validation_alias=AliasChoices("AI_LLM_TIMEOUT_SEC", "ai_llm_timeout_sec"),
+        description="Таймаут одного LLM-вызова (OpenAI/Gemini); при strong rerun — fallback на fast-ответ",
+    )
     # WhatsApp UX: typing indicator / fast ack after N секунд обработки (не блокирует LLM).
     bot_slow_ack_enabled: bool = Field(
         default=True,

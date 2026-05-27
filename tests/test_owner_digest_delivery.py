@@ -63,6 +63,9 @@ async def test_send_weekly_digest_admin_success_emits_event(db_session) -> None:
     ), patch(
         "app.services.owner_digest_delivery._redis_set_once",
         mock_redis,
+    ), patch(
+        "app.services.owner_digest_delivery.settings.telegram_bot_token",
+        "test:owner-digest",
     ):
         result = await send_weekly_digest(
             db_session,
@@ -125,6 +128,9 @@ async def test_send_weekly_digest_manual_force_bypasses_cooldown(db_session) -> 
     ), patch(
         "app.services.owner_digest_delivery._redis_set_once",
         mock_redis,
+    ), patch(
+        "app.services.owner_digest_delivery.settings.telegram_bot_token",
+        "test:owner-digest",
     ):
         result = await send_weekly_digest(
             db_session,
@@ -158,6 +164,9 @@ async def test_cron_dedupe_and_monday_window(db_session) -> None:
     ), patch(
         "app.services.owner_digest_delivery._redis_set_once",
         mock_redis,
+    ), patch(
+        "app.services.owner_digest_delivery.settings.telegram_bot_token",
+        "test:owner-digest",
     ), patch(
         "app.services.owner_digest_delivery.org_local_now",
         return_value=monday_10,

@@ -2211,7 +2211,7 @@ async def _process_message_inner(
                 return
 
         if settings.prompt_size_metric_enabled:
-            history, size_before, size_after, trimmed = apply_prompt_size_controls(
+            history, menu_context, size_before, size_after, trimmed = apply_prompt_size_controls(
                 history,
                 menu_context=menu_context,
                 kb_context=kb_context,

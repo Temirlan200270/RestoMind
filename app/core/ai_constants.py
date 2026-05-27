@@ -23,12 +23,9 @@ class ProviderPreset:
 
 AI_PRESETS: dict[ProviderKey, ProviderPreset] = {
     "gemini": ProviderPreset(
-        # Primary: Gemini 3 Flash (preview) — флагманский Flash с reasoning уровня Pro,
-        # поддерживает большое окно контекста (1M) и длинный output (≈66K токенов).
-        # Fallback: Gemini 2.5 Flash (GA, стабильная) — страхует, если preview временно
-        # недоступен / разлогинен / Google снёс preview-алиас. GA-модель гарантированно
-        # жива до ≥2026-10-16, поэтому это безопасная страховка.
-        models=("gemini-3-flash-preview", "gemini-2.5-flash"),
+        # Primary: Gemini 2.5 Flash (GA) — стабильная latency для prod WhatsApp.
+        # Fallback: Gemini 3 Flash preview — только если GA недоступна.
+        models=("gemini-2.5-flash", "gemini-3-flash-preview"),
         strategy="cascade",
     ),
     "openai": ProviderPreset(

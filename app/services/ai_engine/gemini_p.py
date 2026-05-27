@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import time
@@ -224,9 +225,10 @@ class GeminiProvider(BaseAIProvider):
         preset = AI_PRESETS["gemini"]
         if model_tier == "fast" and settings.ai_model_routing_enabled:
             fast = (settings.ai_fast_model_gemini or "").strip()
-            model_names: tuple[str, ...] = (fast,) if fast else (preset.models[-1],)
+            model_names: tuple[str, ...] = (fast,) if fast else (preset.models[0],)
         else:
-            model_names = preset.models
+            strong_override = (getattr(settings, "ai_strong_model_gemini", "") or "").strip()
+            model_names = (strong_override,) if strong_override else preset.models
         system_prompt = build_system_prompt(
             menu_context=menu_context,
             kb_context=kb_context,
@@ -264,12 +266,15 @@ class GeminiProvider(BaseAIProvider):
                 # слишком сложна (nullable Unions, nested Pydantic) — SDK-конвертер
                 # в JSON Schema может упасть на InvalidArgument для некоторых preview
                 # моделей. Валидируем через Pydantic на нашей стороне — это надёжнее.
-                resp = await model.generate_content_async(
-                    prompt,
-                    generation_config=genai.types.GenerationConfig(
-                        temperature=0.3,
-                        response_mime_type="application/json",
+                resp = await asyncio.wait_for(
+                    model.generate_content_async(
+                        prompt,
+                        generation_config=genai.types.GenerationConfig(
+                            temperature=0.3,
+                            response_mime_type="application/json",
+                        ),
                     ),
+                    timeout=float(settings.ai_llm_timeout_sec),
                 )
                 text = (getattr(resp, "text", None) or "").strip()
                 raw_text_for_log = text
@@ -290,6 +295,18 @@ class GeminiProvider(BaseAIProvider):
                     parsed.intent,
                 )
                 return parsed
+
+            except asyncio.TimeoutError as exc:
+                last_error = exc
+                logger.warning(
+                    "[AI] provider=gemini model=%s attempt=%d/%d status=TIMEOUT latency_ms=%d limit_sec=%.0f",
+                    model_name,
+                    idx,
+                    len(model_names),
+                    int((time.perf_counter() - t0) * 1000),
+                    float(settings.ai_llm_timeout_sec),
+                )
+                break
 
             except ValidationError as exc:
                 last_error = exc

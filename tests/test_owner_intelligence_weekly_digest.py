@@ -74,6 +74,9 @@ async def test_weekly_digest_send_dedupes_and_respects_monday_window(db_session)
         "app.services.owner_digest_delivery._redis_set_once",
         mock_redis,
     ), patch(
+        "app.services.owner_digest_delivery.settings.telegram_bot_token",
+        "test:owner-digest",
+    ), patch(
         "app.services.owner_digest_delivery.org_local_now",
         return_value=monday_10,
     ):

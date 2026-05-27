@@ -8,6 +8,8 @@ import os
 os.environ.setdefault("APP_DEBUG", "true")
 # Тесты ожидают синхронные consumers в той же транзакции (DailyOrgStats и т.д.).
 os.environ.setdefault("EVENT_CONSUMERS_ASYNC", "false")
+# Owner digest send_* тесты: send_weekly_digest требует непустой TELEGRAM_BOT_TOKEN (CI без .env).
+os.environ.setdefault("TELEGRAM_BOT_TOKEN", "000000000:TEST_CI_BOT_TOKEN")
 
 import asyncio
 from collections.abc import AsyncGenerator

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
 import time
@@ -162,12 +163,15 @@ class OpenAIProvider(BaseAIProvider):
                     prompt_chars,
                     max_out,
                 )
-                completion = await client.beta.chat.completions.parse(
-                    model=model,
-                    messages=messages,
-                    response_format=AIBrainResponse,
-                    temperature=0.3,
-                    max_completion_tokens=max_out,
+                completion = await asyncio.wait_for(
+                    client.beta.chat.completions.parse(
+                        model=model,
+                        messages=messages,
+                        response_format=AIBrainResponse,
+                        temperature=0.3,
+                        max_completion_tokens=max_out,
+                    ),
+                    timeout=float(settings.ai_llm_timeout_sec),
                 )
                 msg = completion.choices[0].message
                 if getattr(msg, "refusal", None):
@@ -235,6 +239,17 @@ class OpenAIProvider(BaseAIProvider):
                     model,
                     attempt,
                     int((time.perf_counter() - t0) * 1000),
+                )
+                break
+
+            except asyncio.TimeoutError as exc:
+                last_error = exc
+                logger.warning(
+                    "[AI] provider=openai model=%s attempt=%d status=TIMEOUT latency_ms=%d limit_sec=%.0f",
+                    model,
+                    attempt,
+                    int((time.perf_counter() - t0) * 1000),
+                    float(settings.ai_llm_timeout_sec),
                 )
                 break
 
