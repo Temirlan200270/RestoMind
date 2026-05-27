@@ -74,9 +74,9 @@ async def test_call_openai_fast_reruns_on_order_intent() -> None:
     mock_provider.generate_response = AsyncMock(side_effect=[fast_parsed, strong_parsed])
 
     with patch("app.services.ai_brain.get_ai_client", return_value=mock_provider), patch(
-        "app.services.ai_brain.settings"
-    ) as mock_settings:
-        mock_settings.ai_model_routing_enabled = True
+        "app.services.ai_brain.settings.ai_model_routing_enabled",
+        True,
+    ):
         result = await call_openai([], "Когда вы работаете?")
 
     assert result.reply_text == "Записал заказ"
