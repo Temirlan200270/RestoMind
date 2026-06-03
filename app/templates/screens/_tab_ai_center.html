@@ -20,6 +20,10 @@
                                 @click="navigateNetworkBenchmark()">Бенчмарк сети</button>
                             <button type="button"
                                 class="min-h-[44px] px-3 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap"
+                                :class="aiCenterTab === 'sales_data' ? 'ds-segmented-active' : ''"
+                                @click="navigateToTab('ai_center', { aiCenterTab: 'sales_data' }); loadSalesDataLayer()">Продажи</button>
+                            <button type="button"
+                                class="min-h-[44px] px-3 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap"
                                 :class="aiCenterTab === 'insights' ? 'ds-segmented-active' : ''"
                                 @click="navigateToTab('ai_center', { aiCenterTab: 'insights' })">Инсайты</button>
                             <button type="button"
@@ -54,6 +58,8 @@
                                 </summary>
                                 <div class="absolute right-0 top-full mt-1 z-20 min-w-[10rem] rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
                                     <button type="button" class="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-slate-50"
+                                        @click="navigateToTab('ai_center', { aiCenterTab: 'sales_data' }); loadSalesDataLayer(); $el.closest('details').open = false">Продажи</button>
+                                    <button type="button" class="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-slate-50"
                                         @click="navigateToTab('ai_center', { aiCenterTab: 'load' }); $el.closest('details').open = false">Нагрузка</button>
                                     <button type="button" class="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-slate-50"
                                         @click="navigateToTab('ai_center', { aiCenterTab: 'os' }); loadOsDashboard(); $el.closest('details').open = false">Автопилот</button>
@@ -71,6 +77,91 @@
 
             {% include "screens/_tab_owner_intelligence.html" %}
             {% include "screens/_tab_network_benchmark.html" %}
+
+            <div x-show="currentTab === 'ai_center' && aiCenterTab === 'sales_data'" x-cloak class="fade-in space-y-4">
+                <div class="flex items-center justify-between gap-3">
+                    {{ section_header('Единый слой продаж', subtitle='iiko OLAP: зал, доставка, блюда, категории и baseline.', extra_class='!mb-0') }}
+                    <button type="button" class="ds-btn-secondary text-sm" @click="loadSalesDataLayer()" :disabled="salesDataLoading">
+                        Обновить
+                    </button>
+                </div>
+
+                <div x-show="salesDataLoading && !salesDataOverview" class="h-32 rounded-2xl bg-slate-100 animate-pulse"></div>
+
+                <template x-if="salesDataOverview">
+                    <div class="space-y-4">
+                        <div x-show="salesDataOverview.data_quality && salesDataOverview.data_quality.status !== 'ok'"
+                             class="ds-card p-4 border-amber-200 bg-amber-50/80">
+                            <div class="flex items-start justify-between gap-3">
+                                <div>
+                                    <div class="text-sm font-bold text-amber-900">Качество данных требует внимания</div>
+                                    <div class="text-sm text-amber-800 mt-1">
+                                        <span x-text="'Уверенность: ' + Math.round((salesDataOverview.data_quality?.confidence_score || 0) * 100) + '%'"></span>
+                                        <span x-show="salesDataOverview.data_quality?.issue_count">
+                                            · проблем: <span x-text="salesDataOverview.data_quality?.issue_count || 0"></span>
+                                        </span>
+                                    </div>
+                                </div>
+                                <span class="inline-flex items-center rounded-full bg-white px-2.5 py-1 text-xs font-bold text-amber-800 ring-1 ring-amber-200"
+                                      x-text="salesDataOverview.data_quality?.status || 'unknown'"></span>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                            <div class="ds-card p-4">
+                                <div class="text-[11px] font-bold uppercase text-slate-500">Выручка</div>
+                                <div class="text-2xl font-black text-slate-900 tabular-nums mt-1" x-text="fmt.money(salesDataOverview.total_revenue || 0)"></div>
+                                <div class="text-xs text-slate-400 mt-0.5">OLAP за период</div>
+                            </div>
+                            <div class="ds-card p-4">
+                                <div class="text-[11px] font-bold uppercase text-slate-500">Чеки</div>
+                                <div class="text-2xl font-black text-slate-900 tabular-nums mt-1" x-text="salesDataOverview.order_count || 0"></div>
+                            </div>
+                            <div class="ds-card p-4">
+                                <div class="text-[11px] font-bold uppercase text-slate-500">Средний чек</div>
+                                <div class="text-2xl font-black text-slate-900 tabular-nums mt-1" x-text="fmt.money(salesDataOverview.avg_check || 0)"></div>
+                            </div>
+                            <div class="ds-card p-4">
+                                <div class="text-[11px] font-bold uppercase text-slate-500">Гости</div>
+                                <div class="text-2xl font-black text-slate-900 tabular-nums mt-1" x-text="salesDataOverview.guest_count || 0"></div>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                            <div class="ds-card p-4">
+                                <div class="text-sm font-bold text-slate-800 mb-3">Топ блюд</div>
+                                <div class="space-y-2">
+                                    <template x-for="item in (salesDataTopDishes?.items || []).slice(0, 8)" :key="item.product_id || item.name">
+                                        <div class="flex items-center justify-between gap-3 text-sm">
+                                            <div class="min-w-0">
+                                                <div class="font-semibold text-slate-800 truncate" x-text="item.name"></div>
+                                                <div class="text-xs text-slate-500" x-text="(item.quantity || 0) + ' шт.'"></div>
+                                            </div>
+                                            <div class="text-right font-bold tabular-nums" x-text="fmt.money(item.revenue || 0)"></div>
+                                        </div>
+                                    </template>
+                                    <div x-show="!(salesDataTopDishes?.items || []).length" class="text-sm text-slate-500">
+                                        Нет OLAP-данных. Запустите backfill или проверьте права iiko.
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="ds-card p-4">
+                                <div class="text-sm font-bold text-slate-800 mb-3">Категории</div>
+                                <div class="space-y-2">
+                                    <template x-for="item in (salesDataCategories?.items || []).slice(0, 8)" :key="item.category">
+                                        <div class="flex items-center justify-between gap-3 text-sm">
+                                            <div class="font-semibold text-slate-800 truncate" x-text="item.category"></div>
+                                            <div class="text-right font-bold tabular-nums" x-text="fmt.money(item.revenue || 0)"></div>
+                                        </div>
+                                    </template>
+                                    <div x-show="!(salesDataCategories?.items || []).length" class="text-sm text-slate-500">
+                                        Категории появятся после OLAP-синхронизации.
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+            </div>
 
             <!-- Phase 5 OS: OS Autopilot tab -->
             <div x-show="currentTab === 'ai_center' && aiCenterTab === 'os'" x-cloak class="fade-in space-y-4">

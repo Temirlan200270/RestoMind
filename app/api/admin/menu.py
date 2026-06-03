@@ -573,6 +573,8 @@ async def patch_menu_item(
     """Изменить поля позиции меню (цена, стоп-лист, название и т.д.)."""
     org_id = admin_org_from_session(request)
     item = await _menu_item_in_org(db, item_id, org_id)
+    old_price = float(item.price or 0)
+    old_cost_price = float(item.cost_price) if item.cost_price is not None else None
 
     data = body.model_dump(exclude_unset=True)
     if "name" in data and data["name"] is not None:
@@ -611,6 +613,50 @@ async def patch_menu_item(
             item.serves_max = int(item.serves_min or 1)
 
     await db.flush()
+    memory_events: list[tuple[str, dict]] = []
+    if "price" in data and round(float(item.price or 0), 2) != round(old_price, 2):
+        memory_events.append(
+            (
+                "price_change",
+                {
+                    "old_price": old_price,
+                    "new_price": float(item.price or 0),
+                    "menu_item_id": int(item.id),
+                    "name": item.name,
+                    "iiko_id": item.iiko_id,
+                },
+            ),
+        )
+    if "cost_price" in data:
+        new_cost = float(item.cost_price) if item.cost_price is not None else None
+        if new_cost != old_cost_price:
+            memory_events.append(
+                (
+                    "cost_change",
+                    {
+                        "old_cost_price": old_cost_price,
+                        "new_cost_price": new_cost,
+                        "menu_item_id": int(item.id),
+                        "name": item.name,
+                        "iiko_id": item.iiko_id,
+                    },
+                ),
+            )
+    if memory_events:
+        from app.services.organization_memory import record_memory_event
+
+        for event_type, payload in memory_events:
+            await record_memory_event(
+                db,
+                org_id,
+                event_type=event_type,
+                entity_type="menu_item",
+                entity_id=str(item.id),
+                summary=f"{event_type}: {item.name}",
+                payload=payload,
+                source="admin_menu",
+                confidence_score=1.0,
+            )
     invalidate_menu_context_cache(org_id)
     return {"ok": True, "item": _menu_item_dict(item)}
 

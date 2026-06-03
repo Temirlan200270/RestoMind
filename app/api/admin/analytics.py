@@ -25,10 +25,14 @@ from app.db.models import (
     OrderStatus,
     Organization,
     PaymentEvent,
+    SalesDailyAgg,
+    SalesFactItem,
+    SalesFactOrder,
     User,
 )
 from app.db.session import get_db
 from app.services.integration_health import build_status_payload
+from app.services.data_quality import latest_quality_status
 from app.services.intelligence_analytics import (
     menu_engineering_rows,
     order_meta_from_items_json,
@@ -2557,7 +2561,7 @@ async def analytics(
 async def analytics_sales_heatmap(
     request: Request,
     days: Annotated[int, Query(ge=1, le=90)] = 7,
-    source: Annotated[str, Query(pattern="^(iiko|order)$")] = "iiko",
+    source: Annotated[str, Query(pattern="^(iiko|order|iiko_olap)$")] = "iiko",
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Money Layer: почасовой heatmap продаж (iiko ETL)."""
@@ -2565,6 +2569,204 @@ async def analytics_sales_heatmap(
 
     org_id = admin_org_from_session(request)
     payload = await load_sales_heatmap(db, org_id, days=days, source=source)
+    return {"ok": True, "organization_id": org_id, **payload}
+
+
+def _sales_period_dates(days: int) -> tuple[date, date]:
+    today = datetime.now(tz=timezone.utc).date()
+    return today - timedelta(days=max(1, days) - 1), today
+
+
+@router.get("/analytics/sales/overview")
+async def analytics_sales_overview(
+    request: Request,
+    days: Annotated[int, Query(ge=1, le=365)] = 30,
+    source: Annotated[str, Query(pattern="^(iiko_olap)$")] = "iiko_olap",
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    org_id = admin_org_from_session(request)
+    start, end = _sales_period_dates(days)
+    rows = (
+        await db.execute(
+            select(SalesDailyAgg)
+            .where(
+                SalesDailyAgg.organization_id == org_id,
+                SalesDailyAgg.source == source,
+                SalesDailyAgg.date >= start,
+                SalesDailyAgg.date <= end,
+            )
+            .order_by(SalesDailyAgg.date.asc()),
+        )
+    ).scalars().all()
+    total_revenue = sum(float(row.total_revenue or 0) for row in rows)
+    order_count = sum(int(row.order_count or 0) for row in rows)
+    guest_count = sum(int(row.guest_count or 0) for row in rows)
+    data_quality = await latest_quality_status(db, org_id, source=source, entity_type="sales")
+    return {
+        "ok": True,
+        "organization_id": org_id,
+        "source": source,
+        "date_from": start.isoformat(),
+        "date_to": end.isoformat(),
+        "total_revenue": round(total_revenue, 2),
+        "order_count": order_count,
+        "guest_count": guest_count,
+        "avg_check": round(total_revenue / order_count, 2) if order_count else 0,
+        "data_quality": data_quality,
+        "daily": [
+            {
+                "date": row.date.isoformat(),
+                "revenue": round(float(row.total_revenue or 0), 2),
+                "orders": int(row.order_count or 0),
+                "guests": int(row.guest_count or 0),
+                "avg_check": round(float(row.avg_check or 0), 2),
+                "baseline_revenue": round(float(row.baseline_revenue), 2) if row.baseline_revenue is not None else None,
+                "delta_pct": round(float(row.delta_pct), 2) if row.delta_pct is not None else None,
+            }
+            for row in rows
+        ],
+    }
+
+
+@router.get("/analytics/sales/live-preview")
+async def analytics_sales_live_preview(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    org_id = admin_org_from_session(request)
+    live_statuses = [
+        OrderStatus.DRAFT.value,
+        OrderStatus.CONFIRMED.value,
+        OrderStatus.SENT_TO_IIKO.value,
+        OrderStatus.IN_TRANSIT.value,
+        OrderStatus.WAITING_PICKUP.value,
+    ]
+    rows = (
+        await db.execute(
+            select(Order.status, func.count(Order.id), func.coalesce(func.sum(Order.total_price), 0))
+            .where(
+                Order.organization_id == org_id,
+                Order.status.in_(live_statuses),
+            )
+            .group_by(Order.status),
+        )
+    ).all()
+    total_orders = sum(int(count or 0) for _status, count, _revenue in rows)
+    total_revenue = sum(float(revenue or 0) for _status, _count, revenue in rows)
+    return {
+        "ok": True,
+        "organization_id": org_id,
+        "preliminary": True,
+        "source": "orders_live_preview",
+        "message": "Live preview uses open/internal orders and is not mixed with closed OLAP facts.",
+        "order_count": total_orders,
+        "expected_revenue": round(total_revenue, 2),
+        "by_status": [
+            {"status": status, "orders": int(count or 0), "expected_revenue": round(float(revenue or 0), 2)}
+            for status, count, revenue in rows
+        ],
+    }
+
+
+@router.get("/analytics/sales/top-dishes")
+async def analytics_sales_top_dishes(
+    request: Request,
+    days: Annotated[int, Query(ge=1, le=365)] = 30,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    org_id = admin_org_from_session(request)
+    start, end = _sales_period_dates(days)
+    rows = (
+        await db.execute(
+            select(
+                SalesFactItem.product_id,
+                SalesFactItem.product_name,
+                func.coalesce(func.sum(SalesFactItem.quantity), 0),
+                func.coalesce(func.sum(SalesFactItem.revenue), 0),
+                func.coalesce(func.sum(SalesFactItem.cost), 0),
+            )
+            .join(SalesFactOrder, SalesFactOrder.id == SalesFactItem.order_id)
+            .where(
+                SalesFactItem.organization_id == org_id,
+                SalesFactOrder.order_date >= start,
+                SalesFactOrder.order_date <= end,
+            )
+            .group_by(SalesFactItem.product_id, SalesFactItem.product_name)
+            .order_by(func.coalesce(func.sum(SalesFactItem.revenue), 0).desc())
+            .limit(limit),
+        )
+    ).all()
+    return {
+        "ok": True,
+        "organization_id": org_id,
+        "date_from": start.isoformat(),
+        "date_to": end.isoformat(),
+        "items": [
+            {
+                "product_id": product_id,
+                "name": name,
+                "quantity": round(float(qty or 0), 3),
+                "revenue": round(float(revenue or 0), 2),
+                "cost": round(float(cost or 0), 2),
+                "margin": round(float(revenue or 0) - float(cost or 0), 2),
+            }
+            for product_id, name, qty, revenue, cost in rows
+        ],
+    }
+
+
+@router.get("/analytics/sales/by-category")
+async def analytics_sales_by_category(
+    request: Request,
+    days: Annotated[int, Query(ge=1, le=365)] = 30,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    org_id = admin_org_from_session(request)
+    start, end = _sales_period_dates(days)
+    rows = (
+        await db.execute(
+            select(
+                SalesFactItem.category,
+                func.coalesce(func.sum(SalesFactItem.quantity), 0),
+                func.coalesce(func.sum(SalesFactItem.revenue), 0),
+            )
+            .join(SalesFactOrder, SalesFactOrder.id == SalesFactItem.order_id)
+            .where(
+                SalesFactItem.organization_id == org_id,
+                SalesFactOrder.order_date >= start,
+                SalesFactOrder.order_date <= end,
+            )
+            .group_by(SalesFactItem.category)
+            .order_by(func.coalesce(func.sum(SalesFactItem.revenue), 0).desc()),
+        )
+    ).all()
+    return {
+        "ok": True,
+        "organization_id": org_id,
+        "date_from": start.isoformat(),
+        "date_to": end.isoformat(),
+        "items": [
+            {
+                "category": category or "Без категории",
+                "quantity": round(float(qty or 0), 3),
+                "revenue": round(float(revenue or 0), 2),
+            }
+            for category, qty, revenue in rows
+        ],
+    }
+
+
+@router.get("/analytics/sales/by-hour")
+async def analytics_sales_by_hour(
+    request: Request,
+    days: Annotated[int, Query(ge=1, le=90)] = 30,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    from app.services.iiko_sales_hourly_sync import load_sales_heatmap
+
+    org_id = admin_org_from_session(request)
+    payload = await load_sales_heatmap(db, org_id, days=days, source="iiko_olap")
     return {"ok": True, "organization_id": org_id, **payload}
 
 

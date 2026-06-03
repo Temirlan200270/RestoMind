@@ -119,6 +119,25 @@ class Organization(Base):
     iiko_terminal_group_id: Mapped[str] = mapped_column(
         String(255), default="", server_default="", comment="UUID терминальной группы (стоп-лист, deliveries)",
     )
+    iiko_data_source: Mapped[str] = mapped_column(
+        String(16),
+        default="cloud",
+        server_default="cloud",
+        comment="Источник OLAP продаж: cloud | server",
+    )
+    iiko_server_host: Mapped[str] = mapped_column(
+        String(255), default="", server_default="", comment="Хост iiko Server /resto без схемы",
+    )
+    iiko_server_port: Mapped[int] = mapped_column(Integer, default=443, server_default="443")
+    iiko_server_login: Mapped[str] = mapped_column(
+        String(255), default="", server_default="", comment="Логин iiko Server для read-only OLAP",
+    )
+    iiko_server_password_enc: Mapped[str | None] = mapped_column(
+        Text, nullable=True, comment="Fernet-токен пароля iiko Server",
+    )
+    iiko_server_department_id: Mapped[str] = mapped_column(
+        String(255), default="", server_default="", comment="Опциональный Department.Id для Server OLAP",
+    )
     whatsapp_phone_number_id: Mapped[str] = mapped_column(String(100), default="", comment="ID номера WhatsApp")
     pos_provider: Mapped[str] = mapped_column(
         String(32),
@@ -1225,6 +1244,9 @@ class OperationalInsight(Base):
     title: Mapped[str] = mapped_column(String(240), nullable=False)
     summary: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
     payload_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    confidence_score: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
+    evidence_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    drilldown_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="new", server_default="new", index=True)
     was_useful: Mapped[bool | None] = mapped_column(Boolean, nullable=True, comment="Оператор отметил инсайт полезным/бесполезным")
     notes: Mapped[str | None] = mapped_column(String(500), nullable=True, comment="Заметка оператора при закрытии инсайта")
@@ -1844,6 +1866,442 @@ class SalesHourlyDaily(Base):
 
     def __repr__(self) -> str:
         return f"<SalesHourlyDaily org={self.organization_id} day={self.day} h={self.hour} src={self.source}>"
+
+
+class SalesFactOrder(Base):
+    """Order-level sales fact imported from iiko OLAP."""
+
+    __tablename__ = "sales_fact_orders"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "iiko_order_id", name="uq_sales_fact_orders_org_iiko_order"),
+        Index("ix_sales_fact_orders_org_date", "organization_id", "order_date"),
+        Index("ix_sales_fact_orders_org_closed", "organization_id", "closed_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    location_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("locations.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    snapshot_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("source_data_snapshots.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    canonical_order_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("canonical_sales_orders.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    iiko_order_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    order_date: Mapped[date] = mapped_column(Date, nullable=False)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revenue: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0, server_default="0")
+    guest_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    waiter_name: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    order_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    source: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    data_source: Mapped[str] = mapped_column(String(32), nullable=False, default="iiko_olap", server_default="iiko_olap")
+    raw_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class SalesFactItem(Base):
+    """Dish-level sales fact imported from iiko OLAP."""
+
+    __tablename__ = "sales_fact_items"
+    __table_args__ = (
+        Index("ix_sales_fact_items_org_product", "organization_id", "product_id"),
+        Index("ix_sales_fact_items_order", "order_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    order_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("sales_fact_orders.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    snapshot_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("source_data_snapshots.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    canonical_item_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("canonical_sales_items.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    product_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    product_name: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default="")
+    category: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    quantity: Mapped[float] = mapped_column(Numeric(14, 3), nullable=False, default=0, server_default="0")
+    revenue: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0, server_default="0")
+    cost: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    raw_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+
+
+class SourceDataSnapshot(Base):
+    """Raw source payload checkpoint before canonicalization."""
+
+    __tablename__ = "source_data_snapshots"
+    __table_args__ = (
+        Index("ix_source_data_snapshots_org_created", "organization_id", "created_at"),
+        Index("ix_source_data_snapshots_org_source_entity", "organization_id", "source", "entity_type"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    source: Mapped[str] = mapped_column(String(40), nullable=False, default="iiko_olap", server_default="iiko_olap")
+    entity_type: Mapped[str] = mapped_column(String(80), nullable=False, default="sales", server_default="sales")
+    date_from: Mapped[date | None] = mapped_column(Date, nullable=True)
+    date_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+    row_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    checksum: Mapped[str] = mapped_column(String(128), nullable=False, default="", server_default="")
+    payload_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class CanonicalProduct(Base):
+    """Canonical product identity resolved from source systems."""
+
+    __tablename__ = "canonical_products"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "source", "source_product_id", name="uq_canonical_products_org_source_id"),
+        Index("ix_canonical_products_org_name", "organization_id", "name"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    source: Mapped[str] = mapped_column(String(40), nullable=False, default="iiko_olap", server_default="iiko_olap")
+    source_product_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default="")
+    category: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    confidence_score: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
+    payload_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class CanonicalSalesOrder(Base):
+    """Canonical order row between raw snapshots and fact tables."""
+
+    __tablename__ = "canonical_sales_orders"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "source", "source_order_id", name="uq_canonical_sales_orders_org_source_id"),
+        Index("ix_canonical_sales_orders_org_date", "organization_id", "order_date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    snapshot_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("source_data_snapshots.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    source: Mapped[str] = mapped_column(String(40), nullable=False, default="iiko_olap", server_default="iiko_olap")
+    source_order_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    order_date: Mapped[date] = mapped_column(Date, nullable=False)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revenue: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0, server_default="0")
+    guest_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    waiter_name: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    order_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    origin_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    confidence_score: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
+    payload_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class CanonicalSalesItem(Base):
+    """Canonical sales item row between raw snapshots and fact tables."""
+
+    __tablename__ = "canonical_sales_items"
+    __table_args__ = (
+        Index("ix_canonical_sales_items_org_product", "organization_id", "source_product_id"),
+        Index("ix_canonical_sales_items_order", "canonical_order_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    snapshot_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("source_data_snapshots.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    canonical_order_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("canonical_sales_orders.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    source: Mapped[str] = mapped_column(String(40), nullable=False, default="iiko_olap", server_default="iiko_olap")
+    source_product_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    product_name: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default="")
+    category: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    quantity: Mapped[float] = mapped_column(Numeric(14, 3), nullable=False, default=0, server_default="0")
+    revenue: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0, server_default="0")
+    cost: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    confidence_score: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
+    payload_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+
+
+class DataQualityReport(Base):
+    """Validation summary for source/canonical data used by Copilot confidence."""
+
+    __tablename__ = "data_quality_reports"
+    __table_args__ = (
+        Index("ix_data_quality_reports_org_created", "organization_id", "created_at"),
+        Index("ix_data_quality_reports_org_source_entity", "organization_id", "source", "entity_type"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    snapshot_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("source_data_snapshots.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    source: Mapped[str] = mapped_column(String(40), nullable=False, default="iiko_olap", server_default="iiko_olap")
+    entity_type: Mapped[str] = mapped_column(String(80), nullable=False, default="sales", server_default="sales")
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="ok", server_default="ok")
+    confidence_score: Mapped[float] = mapped_column(Numeric(5, 4), nullable=False, default=1, server_default="1")
+    row_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    issue_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    required_missing: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    duplicate_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    invalid_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    payload_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class SalesDailyAgg(Base):
+    """Daily sales aggregate from the unified sales fact layer."""
+
+    __tablename__ = "sales_daily_agg"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "date", "source", name="uq_sales_daily_agg_org_date_source"),
+        Index("ix_sales_daily_agg_org_date", "organization_id", "date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    location_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("locations.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    date: Mapped[date] = mapped_column(Date, nullable=False)
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="iiko_olap", server_default="iiko_olap")
+    total_revenue: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0, server_default="0")
+    order_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    guest_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    avg_check: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0, server_default="0")
+    baseline_revenue: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    delta_pct: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class RecommendationOutcome(Base):
+    """Measured feedback loop: recommendation -> applied -> realized result."""
+
+    __tablename__ = "recommendation_outcomes"
+    __table_args__ = (
+        Index("ix_recommendation_outcomes_org_status", "organization_id", "status"),
+        Index("ix_recommendation_outcomes_org_due", "organization_id", "measure_after"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    insight_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("operational_insights.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    action_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    recommendation_type: Mapped[str] = mapped_column(String(80), nullable=False, default="", server_default="")
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="proposed", server_default="proposed")
+    metric: Mapped[str] = mapped_column(String(80), nullable=False, default="", server_default="")
+    baseline_value: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    target_value: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    realized_delta: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    realized_money: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    baseline_window_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    measurement_window_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    data_quality_confidence: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
+    payload_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    measure_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    measured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class InsightDelivery(Base):
+    """Delivery history for proactive OperationalInsight notifications."""
+
+    __tablename__ = "insight_deliveries"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "insight_id", "channel", name="uq_insight_deliveries_org_insight_channel"),
+        Index("ix_insight_deliveries_org_status", "organization_id", "status"),
+        Index("ix_insight_deliveries_org_sent", "organization_id", "sent_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    insight_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("operational_insights.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    channel: Mapped[str] = mapped_column(String(40), nullable=False, default="telegram_owner", server_default="telegram_owner")
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="pending", server_default="pending")
+    severity: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    error_text: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    payload_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    dismissed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    action_taken_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class OrganizationMemoryEvent(Base):
+    """Long-lived restaurant memory used by Copilot and ROI explanations."""
+
+    __tablename__ = "organization_memory_events"
+    __table_args__ = (
+        Index("ix_org_memory_org_date", "organization_id", "event_date"),
+        Index("ix_org_memory_org_type", "organization_id", "event_type"),
+        Index("ix_org_memory_org_entity", "organization_id", "entity_type", "entity_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    event_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    entity_type: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    entity_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    summary: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    payload_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    source: Mapped[str] = mapped_column(String(80), nullable=False, default="system", server_default="system")
+    confidence_score: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class DishIngredient(Base):
+    """Dish to ingredient relation for the restaurant knowledge graph."""
+
+    __tablename__ = "dish_ingredients"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "dish_product_id", "ingredient_sku", name="uq_dish_ingredients_org_dish_sku"),
+        Index("ix_dish_ingredients_org_dish", "organization_id", "dish_product_id"),
+        Index("ix_dish_ingredients_org_sku", "organization_id", "ingredient_sku"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    dish_product_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    dish_name: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default="")
+    ingredient_sku: Mapped[str] = mapped_column(String(160), nullable=False)
+    ingredient_name: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default="")
+    quantity: Mapped[float] = mapped_column(Numeric(14, 4), nullable=False, default=0, server_default="0")
+    unit: Mapped[str] = mapped_column(String(32), nullable=False, default="", server_default="")
+    unit_cost: Mapped[float | None] = mapped_column(Numeric(14, 4), nullable=True)
+    payload_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class IngredientSupplier(Base):
+    """Ingredient to supplier relation for exposure analysis."""
+
+    __tablename__ = "ingredient_suppliers"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "ingredient_sku", "supplier_name", name="uq_ingredient_suppliers_org_sku_supplier"),
+        Index("ix_ingredient_suppliers_org_supplier", "organization_id", "supplier_name"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    ingredient_sku: Mapped[str] = mapped_column(String(160), nullable=False)
+    ingredient_name: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default="")
+    supplier_name: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default="")
+    supplier_external_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    lead_time_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    risk_score: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
+    payload_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class DishMarginProfile(Base):
+    """Precomputed dish revenue/cost/margin profile."""
+
+    __tablename__ = "dish_margin_profile"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "dish_product_id", name="uq_dish_margin_profile_org_dish"),
+        Index("ix_dish_margin_profile_org_margin", "organization_id", "margin_pct"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    dish_product_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    dish_name: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default="")
+    category: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    avg_price: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    estimated_cost: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    margin_pct: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
+    revenue_30d: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    confidence_score: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
+    payload_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class DishSeasonalityProfile(Base):
+    """Weekday/month seasonality profile for a dish or category."""
+
+    __tablename__ = "dish_seasonality_profile"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "entity_type", "entity_id", "period_key", name="uq_dish_seasonality_org_entity_period"),
+        Index("ix_dish_seasonality_org_entity", "organization_id", "entity_type", "entity_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    entity_type: Mapped[str] = mapped_column(String(40), nullable=False, default="dish", server_default="dish")
+    entity_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    entity_name: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default="")
+    period_key: Mapped[str] = mapped_column(String(40), nullable=False)
+    expected_quantity: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)
+    expected_revenue: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    confidence_score: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
+    payload_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class DishSubstitutionLink(Base):
+    """Substitution/cannibalization relation between menu items."""
+
+    __tablename__ = "dish_substitution_links"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "source_product_id", "target_product_id", name="uq_dish_substitution_org_pair"),
+        Index("ix_dish_substitution_org_source", "organization_id", "source_product_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    source_product_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    target_product_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    relation_type: Mapped[str] = mapped_column(String(40), nullable=False, default="substitute", server_default="substitute")
+    strength: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
+    payload_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 class AuditLog(Base):

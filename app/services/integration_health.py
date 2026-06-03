@@ -6,13 +6,13 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete as sql_delete, func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import IntegrationEvent, IntegrationHealth, OrganizationIntegrationSync
+from app.db.models import IikoSyncRun, IntegrationEvent, IntegrationHealth, Organization, OrganizationIntegrationSync
 
 logger = logging.getLogger(__name__)
 
@@ -207,8 +207,10 @@ async def build_status_payload(
         )
         return neutral
     if org_row is None:
+        olap_status = await _build_olap_status(db, organization_id=organization_id)
+        neutral["olap"] = olap_status
         return neutral
-    return {
+    payload = {
         "iiko_configured": iiko_configured,
         "whatsapp_configured": whatsapp_configured,
         "last_stoplist": {
@@ -227,6 +229,51 @@ async def build_status_payload(
             "error": getattr(org_row, "last_inventory_sync_error", None) or None,
         },
     }
+    payload["olap"] = await _build_olap_status(db, organization_id=organization_id)
+    return payload
+
+
+async def _build_olap_status(db: AsyncSession, *, organization_id: int) -> dict:
+    org = await db.get(Organization, int(organization_id))
+    latest = (
+        await db.execute(
+            select(IikoSyncRun)
+            .where(
+                IikoSyncRun.organization_id == int(organization_id),
+                IikoSyncRun.sync_kind == "sales_olap_iiko",
+            )
+            .order_by(IikoSyncRun.finished_at.desc(), IikoSyncRun.id.desc())
+            .limit(1),
+        )
+    ).scalar_one_or_none()
+    configured_source = (getattr(org, "iiko_data_source", "") or "cloud").strip().lower()
+    error = (latest.error_text or "") if latest is not None else ""
+    olap_allowed = None
+    if latest is not None:
+        olap_allowed = not ("olap_not_allowed" in error or "reports/olap is not allowed" in error)
+    freshness = "never"
+    if latest is not None and latest.finished_at is not None:
+        age = datetime.now(tz=timezone.utc) - _as_aware_utc(latest.finished_at)
+        freshness = "fresh" if age <= timedelta(hours=3) and latest.status == "ok" else "stale"
+    return {
+        "source": "server" if configured_source == "server" else "cloud",
+        "server": configured_source == "server",
+        "olap_allowed": olap_allowed,
+        "deliveries_fallback": olap_allowed is False,
+        "sync_freshness": freshness,
+        "last_sync": {
+            "at": _iso(latest.finished_at) if latest is not None else None,
+            "ok": latest.status == "ok" if latest is not None else False,
+            "rows": int(latest.rows_upserted or 0) if latest is not None else 0,
+            "error": error or None,
+        },
+    }
+
+
+def _as_aware_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 async def build_inventory_sync_status(

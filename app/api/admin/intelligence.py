@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Annotated
+from datetime import date, datetime, timezone
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
@@ -19,6 +19,7 @@ from app.api.admin.deps import (
     require_staff_manager_or_admin,
 )
 from sqlalchemy import select
+from sqlalchemy.orm.attributes import flag_modified
 from app.db.models import (
     AIContextSnapshot,
     BusinessRecommendation,
@@ -43,6 +44,17 @@ from app.services.owner_dashboard import (
     fetch_daily_revenue_history,
     fetch_daily_revenue_history_from_events,
 )
+from app.services.organization_memory import (
+    list_memory_events,
+    memory_event_public,
+    record_memory_event,
+)
+from app.services.insight_delivery import (
+    delivery_public,
+    list_insight_deliveries,
+    mark_insight_delivery,
+)
+from app.services.copilot.business_questions import questions_for_role
 from app.services.intelligence import (
     SimulationInput,
     answer_intelligence_query,
@@ -54,6 +66,10 @@ from app.services.intelligence import (
 from app.services.inventory_snapshots import (
     InventorySnapshotUpsertItem,
     upsert_inventory_snapshots as upsert_inventory_snapshot_rows,
+)
+from app.services.recommendation_outcomes import (
+    list_recommendation_outcomes,
+    recommendation_outcome_public,
 )
 from app.services.tenant_scope import allowed_location_ids_for_staff
 
@@ -101,6 +117,75 @@ class SimulationBody(BaseModel):
     base_cancel_rate_pct: float = Field(default=5.0, ge=0, le=100)
 
 
+class MemoryNoteBody(BaseModel):
+    summary: str = Field(..., min_length=1, max_length=4000)
+    event_type: str = Field(default="manager_note", max_length=80)
+    entity_type: str | None = Field(default=None, max_length=80)
+    entity_id: str | None = Field(default=None, max_length=120)
+    event_date: date | None = None
+    payload: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def validate_business_memory_type(self) -> "MemoryNoteBody":
+        allowed = {
+            "manager_note",
+            "manual_note",
+            "campaign",
+            "supplier_change",
+            "price_change",
+            "menu_change",
+            "cost_change",
+            "staff_change",
+        }
+        if self.event_type not in allowed:
+            raise ValueError("Unsupported memory event type")
+        return self
+
+
+class InsightDeliveryActionBody(BaseModel):
+    action: str = Field(..., pattern="^(read|dismiss|action_taken)$")
+
+
+class InsightDeliverySettingsBody(BaseModel):
+    telegram_owner_severities: list[str] = Field(default_factory=lambda: ["critical", "warning"])
+    daily_digest_enabled: bool = True
+    weekly_digest_enabled: bool = True
+    inbox_enabled: bool = True
+
+
+def _default_delivery_settings() -> dict[str, Any]:
+    return {
+        "telegram_owner": {"severities": ["critical", "warning"], "enabled": True},
+        "daily_digest": {"enabled": True},
+        "weekly_digest": {"enabled": True},
+        "inbox": {"enabled": True},
+    }
+
+
+def _delivery_settings_public(org: Organization) -> dict[str, Any]:
+    configured = ((org.meta_json or {}).get("insight_delivery") or {})
+    settings = _default_delivery_settings()
+    for key, value in configured.items():
+        if isinstance(value, dict):
+            settings.setdefault(key, {}).update(value)
+    return settings
+
+
+async def _copilot_role_from_request(request: Request, db: AsyncSession, org_id: int) -> str:
+    staff = await _session_staff_user(request, db)
+    raw = str(getattr(staff, "role", "") or "").strip().lower()
+    if raw == "manager":
+        return "manager"
+    if raw == "operator":
+        return "manager"
+    if getattr(request, "session", {}).get("is_network"):
+        return "network"
+    org = await db.get(Organization, int(org_id))
+    if org is not None and getattr(org, "tenant_id", None):
+        return "network"
+    return "owner"
+
+
 def _insight_public(row: OperationalInsight) -> dict:
     payload = row.payload_json or {}
     return {
@@ -110,6 +195,9 @@ def _insight_public(row: OperationalInsight) -> dict:
         "title": row.title,
         "summary": row.summary,
         "payload": payload,
+        "confidence_score": round(float(row.confidence_score or 0), 4) if row.confidence_score is not None else payload.get("confidence_score"),
+        "evidence": row.evidence_json or payload.get("evidence") or {},
+        "drilldown": row.drilldown_json or payload.get("drilldown") or {},
         "cause_hypotheses": payload.get("cause_hypotheses") or [],
         "recommended_actions": payload.get("recommended_actions") or [],
         "weekday_baseline": payload.get("weekday_baseline"),
@@ -181,14 +269,26 @@ async def intelligence_query(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     org_id = admin_org_from_session(request)
+    role = await _copilot_role_from_request(request, db, org_id)
     result = await answer_intelligence_query(
         db,
         org_id=org_id,
         question=body.question,
         conversation_id=body.conversation_id,
+        role=role,
     )
     await db.commit()
     return result
+
+
+@router.get("/business-questions")
+async def intelligence_business_questions(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    org_id = admin_org_from_session(request)
+    role = await _copilot_role_from_request(request, db, org_id)
+    return {"ok": True, "role": role, "items": questions_for_role(role)}
 
 
 @router.get("/insights")
@@ -213,12 +313,139 @@ async def patch_intelligence_insight(
     row.status = body.status
     if body.status == "resolved":
         row.resolved_at = datetime.now(timezone.utc)
+        await record_memory_event(
+            db,
+            org_id,
+            event_type="major_anomaly_resolved",
+            event_date=datetime.now(timezone.utc).date(),
+            entity_type="operational_insight",
+            entity_id=str(row.id),
+            summary=f"Resolved insight: {row.title}",
+            payload={"insight_type": row.insight_type, "severity": row.severity},
+            source="system",
+            confidence_score=float(row.confidence_score or 0.8),
+        )
     if body.was_useful is not None:
         row.was_useful = body.was_useful
     if body.notes is not None:
         row.notes = (body.notes or "").strip() or None
     await db.commit()
     return {"ok": True, "item": _insight_public(row)}
+
+
+@router.get("/insight-deliveries")
+async def intelligence_insight_deliveries(
+    request: Request,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    org_id = admin_org_from_session(request)
+    rows = await list_insight_deliveries(db, org_id, limit=limit)
+    await db.commit()
+    return {"ok": True, "items": [delivery_public(row) for row in rows]}
+
+
+@router.patch("/insight-deliveries/{delivery_id}")
+async def patch_intelligence_insight_delivery(
+    delivery_id: int,
+    body: InsightDeliveryActionBody,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    org_id = admin_org_from_session(request)
+    row = await mark_insight_delivery(db, org_id, delivery_id, action=body.action)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Insight delivery not found")
+    await db.commit()
+    return {"ok": True, "item": delivery_public(row)}
+
+
+@router.get("/insight-delivery-settings")
+async def get_intelligence_insight_delivery_settings(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    org_id = admin_org_from_session(request)
+    org = await db.get(Organization, int(org_id))
+    if org is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    return {"ok": True, "settings": _delivery_settings_public(org)}
+
+
+@router.patch("/insight-delivery-settings")
+async def patch_intelligence_insight_delivery_settings(
+    body: InsightDeliverySettingsBody,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    org_id = admin_org_from_session(request)
+    org = await db.get(Organization, int(org_id))
+    if org is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    allowed = {"critical", "warning", "info"}
+    severities = [s for s in body.telegram_owner_severities if s in allowed]
+    if not severities:
+        severities = ["critical"]
+    meta = dict(org.meta_json or {})
+    meta["insight_delivery"] = {
+        "telegram_owner": {"enabled": True, "severities": severities},
+        "daily_digest": {"enabled": bool(body.daily_digest_enabled)},
+        "weekly_digest": {"enabled": bool(body.weekly_digest_enabled)},
+        "inbox": {"enabled": bool(body.inbox_enabled)},
+    }
+    org.meta_json = meta
+    flag_modified(org, "meta_json")
+    await db.commit()
+    return {"ok": True, "settings": _delivery_settings_public(org)}
+
+
+@router.get("/roi-outcomes")
+async def intelligence_roi_outcomes(
+    request: Request,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    status: Annotated[str | None, Query(pattern="^(proposed|applied|measured)$")] = None,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    org_id = admin_org_from_session(request)
+    rows = await list_recommendation_outcomes(db, org_id, limit=limit, status=status)
+    await db.commit()
+    return {"ok": True, "items": [recommendation_outcome_public(row) for row in rows]}
+
+
+@router.get("/memory")
+async def intelligence_memory(
+    request: Request,
+    days: Annotated[int, Query(ge=1, le=365)] = 90,
+    limit: Annotated[int, Query(ge=1, le=100)] = 30,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    org_id = admin_org_from_session(request)
+    rows = await list_memory_events(db, org_id, days=days, limit=limit)
+    await db.commit()
+    return {"ok": True, "items": [memory_event_public(row) for row in rows]}
+
+
+@router.post("/memory")
+async def create_intelligence_memory(
+    body: MemoryNoteBody,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    org_id = admin_org_from_session(request)
+    row = await record_memory_event(
+        db,
+        org_id,
+        event_type=body.event_type or "manager_note",
+        event_date=body.event_date,
+        entity_type=body.entity_type,
+        entity_id=body.entity_id,
+        summary=body.summary,
+        payload=body.payload or {},
+        source="manual",
+        confidence_score=1.0,
+    )
+    await db.commit()
+    return {"ok": True, "item": memory_event_public(row)}
 
 
 @router.get("/digital-twin")

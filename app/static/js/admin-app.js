@@ -545,6 +545,7 @@ function adminParseLocationHash() {
     if (path === 'ai_center') {
         let ac = 'value';
         if (subTab === 'insights') ac = 'insights';
+        else if (subTab === 'sales_data') ac = 'sales_data';
         else if (subTab === 'load') ac = 'load';
         else if (subTab === 'os') ac = 'os';
         else if (subTab === 'guestcare') ac = 'guestcare';
@@ -1178,6 +1179,10 @@ function adminMixinState() {
         analyticsDensity: 'normal',
         /** Под-табы ИИ-центра: вклад / инсайты / нагрузка (P1.5.0). */
         aiCenterTab: 'value',
+        salesDataLoading: false,
+        salesDataOverview: null,
+        salesDataTopDishes: null,
+        salesDataCategories: null,
         /** Вкладка внутри Settings (Stripe-like). */
         settingsTab: 'restaurant', // restaurant | branding | connections | smart_sales | team | …
         orgProfileDirty: false,
@@ -1367,6 +1372,13 @@ function adminMixinState() {
         ownerIntelData: null,
         ownerIntelAudits: [],
         ownerIntelAuditsLoading: false,
+        ownerIntelAuditFilters: {
+            riskHighCritical: false,
+            unreviewedOnly: false,
+            stoplist: false,
+            wrongAddress: false,
+        },
+        ownerIntelAuditSummary: null,
         ownerIntelDigestPreview: null,
         ownerIntelDigestLoading: false,
         ownerIntelDigestSending: false,
@@ -1488,6 +1500,19 @@ function adminMixinState() {
         intelligenceAnswer: '',
         intelligenceConversationId: null,
         intelligenceData: { summary: null, insights: [], snapshot: null },
+        intelligenceBusinessRole: 'owner',
+        intelligenceBusinessQuestions: [],
+        intelligenceDeliveries: [],
+        intelligenceDeliveriesLoading: false,
+        intelligenceDeliverySettings: {
+            telegram_owner: { enabled: true, severities: ['critical', 'warning'] },
+            daily_digest: { enabled: true },
+            weekly_digest: { enabled: true },
+            inbox: { enabled: true },
+        },
+        intelligenceDeliverySettingsSaving: false,
+        intelligenceRoiOutcomes: [],
+        intelligenceRoiLoading: false,
         opEfficiencyData: null,
         opEfficiencyLoading: false,
         latencyData: null,
@@ -7887,6 +7912,7 @@ function adminMixinLiveChat() {
             } else if (this.currentTab === 'ai_center') {
                 const ac = this.aiCenterTab || 'value';
                 if (ac === 'insights') frag = 'ai_center?tab=insights';
+                else if (ac === 'sales_data') frag = 'ai_center?tab=sales_data';
                 else if (ac === 'load') frag = 'ai_center?tab=load';
                 else if (ac === 'owner_intel') frag = 'ai_center?tab=owner_intel';
                 else if (ac === 'network_benchmark') frag = 'ai_center?tab=network_benchmark';
@@ -8063,6 +8089,7 @@ function adminMixinLiveChat() {
                 if (typeof o.aiCenterTab === 'string' && o.aiCenterTab.trim()) {
                     const a = o.aiCenterTab.trim();
                     if (a === 'insights') this.aiCenterTab = 'insights';
+                    else if (a === 'sales_data') this.aiCenterTab = 'sales_data';
                     else if (a === 'load') this.aiCenterTab = 'load';
                     else if (a === 'os') this.aiCenterTab = 'os';
                     else if (a === 'guestcare') this.aiCenterTab = 'guestcare';
@@ -8308,6 +8335,7 @@ function adminMixinLiveChat() {
             if (tab === 'ai_center') {
                 const ac = parsed?.aiCenterTab;
                 if (ac === 'insights') this.aiCenterTab = 'insights';
+                else if (ac === 'sales_data') this.aiCenterTab = 'sales_data';
                 else if (ac === 'load') this.aiCenterTab = 'load';
                 else if (ac === 'os') this.aiCenterTab = 'os';
                 else if (ac === 'guestcare') this.aiCenterTab = 'guestcare';
@@ -9157,6 +9185,8 @@ function adminMixinDataChartsSettings() {
                 } else if (this.currentTab === 'ai_center') {
                     if (this.aiCenterTab === 'insights') {
                         await this.loadIntelligence();
+                    } else if (this.aiCenterTab === 'sales_data') {
+                        await this.loadSalesDataLayer();
                     } else if (this.aiCenterTab === 'load') {
                         await this.loadDigitalTwin();
                     } else if (this.aiCenterTab === 'os') {
@@ -10228,14 +10258,67 @@ function adminMixinDataChartsSettings() {
             return 'border-blue-100 bg-blue-50';
         },
 
+        insightTrustClass(score) {
+            const n = Number(score || 0);
+            if (n >= 0.8) return 'bg-emerald-100 text-emerald-700 ring-emerald-200';
+            if (n >= 0.55) return 'bg-amber-100 text-amber-700 ring-amber-200';
+            return 'bg-rose-100 text-rose-700 ring-rose-200';
+        },
+
+        insightConfidencePct(insight) {
+            const n = Number(insight?.confidence_score ?? insight?.payload?.confidence_score ?? 0);
+            return Number.isFinite(n) ? Math.round(Math.max(0, Math.min(1, n)) * 100) : 0;
+        },
+
+        insightEvidenceList(insight) {
+            const source = insight?.evidence || insight?.payload?.evidence || {};
+            const out = [];
+            const push = (label, value) => {
+                if (value === null || value === undefined || value === '') return;
+                if (typeof value === 'object') {
+                    if (Array.isArray(value) && value.length) out.push(`${label}: ${value.length}`);
+                    return;
+                }
+                out.push(`${label}: ${value}`);
+            };
+            push('дельта', source.delta_pct != null ? `${source.delta_pct}%` : source.delta);
+            push('норма', source.baseline_revenue);
+            push('факт', source.actual_revenue || source.revenue);
+            push('чеки', source.order_count);
+            push('гости', source.guest_count);
+            push('средний чек', source.avg_check);
+            if (Array.isArray(source.top_categories) && source.top_categories.length) out.push(`категории: ${source.top_categories.slice(0, 3).map((x) => x.category || x.name).filter(Boolean).join(', ')}`);
+            if (Array.isArray(source.top_dishes) && source.top_dishes.length) out.push(`блюда: ${source.top_dishes.slice(0, 3).map((x) => x.name || x.product_name).filter(Boolean).join(', ')}`);
+            if (Array.isArray(source.weak_hours) && source.weak_hours.length) out.push(`часы: ${source.weak_hours.slice(0, 3).map((x) => x.hour ?? x.label).filter((x) => x !== undefined).join(', ')}`);
+            return out.slice(0, 6);
+        },
+
+        insightDrilldownList(insight) {
+            const source = insight?.drilldown || insight?.payload?.drilldown || {};
+            const out = [];
+            const contribution = source.contribution || {};
+            if (contribution.orders != null) out.push(`чеки: ${contribution.orders}`);
+            if (contribution.guests != null) out.push(`гости: ${contribution.guests}`);
+            if (contribution.avg_check != null) out.push(`средний чек: ${contribution.avg_check}`);
+            for (const key of ['category_path', 'dish_path', 'hour_path', 'path']) {
+                const value = source[key];
+                if (Array.isArray(value) && value.length) out.push(`${key.replace('_path', '')}: ${value.slice(0, 3).join(' -> ')}`);
+            }
+            return out.slice(0, 5);
+        },
+
         async loadIntelligence() {
             this.intelligenceLoading = true;
             try {
                 const locQs = this.locationQueryString('&');
-                const [mainRes, opRes, latRes] = await Promise.all([
+                const [mainRes, opRes, latRes, questionsRes, deliveriesRes, settingsRes, roiRes] = await Promise.all([
                     this.apiJsonResponse(`/api/admin/intelligence/overview${this.locationQueryString('?')}`),
                     this.apiJsonResponse('/api/admin/intelligence/operator-efficiency?hours=24'),
                     this.apiJsonResponse(`/api/admin/intelligence/latency?hours=24${locQs}`),
+                    this.apiJsonResponse('/api/admin/intelligence/business-questions'),
+                    this.apiJsonResponse('/api/admin/intelligence/insight-deliveries?limit=10'),
+                    this.apiJsonResponse('/api/admin/intelligence/insight-delivery-settings'),
+                    this.apiJsonResponse('/api/admin/intelligence/roi-outcomes?limit=8'),
                 ]);
                 if (mainRes.ok) {
                     this.intelligenceData = {
@@ -10249,6 +10332,15 @@ function adminMixinDataChartsSettings() {
                 }
                 if (opRes.ok) this.opEfficiencyData = opRes.data;
                 if (latRes.ok) this.latencyData = latRes.data;
+                if (questionsRes.ok) {
+                    const rows = Array.isArray(questionsRes.data?.items) ? questionsRes.data.items : [];
+                    this.intelligenceBusinessRole = questionsRes.data?.role || this.intelligenceBusinessRole || 'owner';
+                    this.intelligenceBusinessQuestions = rows;
+                    if (rows.length) this.intelligenceQuickQuestions = rows.map((x) => x.question).filter(Boolean);
+                }
+                if (deliveriesRes.ok) this.intelligenceDeliveries = Array.isArray(deliveriesRes.data?.items) ? deliveriesRes.data.items : [];
+                if (settingsRes.ok) this.intelligenceDeliverySettings = settingsRes.data?.settings || null;
+                if (roiRes.ok) this.intelligenceRoiOutcomes = Array.isArray(roiRes.data?.items) ? roiRes.data.items : [];
             } catch (e) {
                 adminLogger.error('[admin] loadIntelligence', e);
             } finally {
@@ -10293,6 +10385,79 @@ function adminMixinDataChartsSettings() {
             if (ok) {
                 this.intelligenceData.insights = (this.intelligenceData.insights || []).filter((x) => x.id !== id);
             }
+        },
+
+        async markInsightDelivery(id, action) {
+            if (!id || !action) return;
+            const { ok, data } = await this.apiJsonResponse(`/api/admin/intelligence/insight-deliveries/${id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action }),
+            });
+            if (!ok) return;
+            const updated = data?.item;
+            this.intelligenceDeliveries = (this.intelligenceDeliveries || []).map((row) => (
+                Number(row.id) === Number(id) && updated ? updated : row
+            ));
+        },
+
+        deliveryStatusLabel(row) {
+            if (row?.action_taken_at) return 'Взято в работу';
+            if (row?.dismissed_at) return 'Скрыто';
+            if (row?.read_at) return 'Прочитано';
+            if (row?.sent_at) return 'Отправлено';
+            return row?.status || 'Ожидает';
+        },
+
+        deliverySeverityAllowed(severity) {
+            const values = this.intelligenceDeliverySettings?.telegram_owner?.severities || [];
+            return values.includes(severity);
+        },
+
+        toggleDeliverySeverity(severity) {
+            const current = [...(this.intelligenceDeliverySettings?.telegram_owner?.severities || [])];
+            const idx = current.indexOf(severity);
+            if (idx >= 0) current.splice(idx, 1);
+            else current.push(severity);
+            if (!this.intelligenceDeliverySettings) this.intelligenceDeliverySettings = {};
+            this.intelligenceDeliverySettings.telegram_owner = {
+                ...(this.intelligenceDeliverySettings.telegram_owner || {}),
+                severities: current.length ? current : ['critical'],
+            };
+        },
+
+        async saveInsightDeliverySettings() {
+            if (this.intelligenceDeliverySettingsSaving) return;
+            this.intelligenceDeliverySettingsSaving = true;
+            try {
+                const s = this.intelligenceDeliverySettings || {};
+                const { ok, data } = await this.apiJsonResponse('/api/admin/intelligence/insight-delivery-settings', {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        telegram_owner_severities: s.telegram_owner?.severities || ['critical', 'warning'],
+                        daily_digest_enabled: s.daily_digest?.enabled !== false,
+                        weekly_digest_enabled: s.weekly_digest?.enabled !== false,
+                        inbox_enabled: s.inbox?.enabled !== false,
+                    }),
+                });
+                if (ok) {
+                    this.intelligenceDeliverySettings = data?.settings || this.intelligenceDeliverySettings;
+                    this.showToast?.('Настройки уведомлений сохранены', 'success');
+                }
+            } catch (e) {
+                adminLogger.error('[admin] saveInsightDeliverySettings', e);
+                this.showToast?.('Не удалось сохранить настройки уведомлений', 'error');
+            } finally {
+                this.intelligenceDeliverySettingsSaving = false;
+            }
+        },
+
+        roiOutcomeLabel(row) {
+            const type = row?.recommendation_type || row?.metric || 'recommendation';
+            if (row?.status === 'measured') return `${type}: результат измерен`;
+            if (row?.status === 'applied') return `${type}: ждём окно измерения`;
+            return `${type}: совет создан`;
         },
 
         async loadDigitalTwin() {
@@ -10341,6 +10506,27 @@ function adminMixinDataChartsSettings() {
             this.aiValuePeriod = String(period || '7d');
             this.aiValueCustom = false;
             await this.loadAiValue();
+        },
+
+        async loadSalesDataLayer() {
+            this.salesDataLoading = true;
+            try {
+                const [overviewRes, dishesRes, categoriesRes] = await Promise.all([
+                    this.apiJsonResponse('/api/admin/analytics/sales/overview?days=30'),
+                    this.apiJsonResponse('/api/admin/analytics/sales/top-dishes?days=30&limit=20'),
+                    this.apiJsonResponse('/api/admin/analytics/sales/by-category?days=30'),
+                ]);
+                this.salesDataOverview = overviewRes.ok && overviewRes.data ? overviewRes.data : null;
+                this.salesDataTopDishes = dishesRes.ok && dishesRes.data ? dishesRes.data : { items: [] };
+                this.salesDataCategories = categoriesRes.ok && categoriesRes.data ? categoriesRes.data : { items: [] };
+            } catch (e) {
+                adminLogger.error('[admin] loadSalesDataLayer', e);
+                this.salesDataOverview = null;
+                this.salesDataTopDishes = { items: [] };
+                this.salesDataCategories = { items: [] };
+            } finally {
+                this.salesDataLoading = false;
+            }
         },
 
         // ========== Owner Intelligence (STAGE 1) — methods ==========
@@ -12220,6 +12406,21 @@ function adminMixinDataChartsSettings() {
                 return ia - ib;
             });
             this.menuViewRevision += 1;
+        },
+
+        async loadMenuProfitLab() {
+            this.menuProfitLoading = true;
+            try {
+                const { ok, data } = await this.apiJsonResponse(
+                    `/api/admin/owner-intelligence/menu-profit?period=7d${this.locationQueryString('&')}`,
+                );
+                this.menuProfitData = ok && data ? data : null;
+            } catch (e) {
+                adminLogger.warn('Menu Profit Lab: optional load failed', e);
+                this.menuProfitData = null;
+            } finally {
+                this.menuProfitLoading = false;
+            }
         },
 
         closeMenuCostImportPreview() {

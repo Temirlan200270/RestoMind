@@ -21,7 +21,7 @@
 - **Ordering** — приём заказов, стоп-листы, iiko-интеграция (реализован)
 - **GuestCare** — сбор отзывов, авто-ответы, агрегация из 2GIS/Google (частично)
 - **Marketing** — сегментированные рассылки, лояльность, бонусы (реализован)
-- **Intelligence** — AI-аналитика, инсайты, **Owner Intelligence** (ROI, QA audit, Revenue Copilot, Menu Profit, Network Benchmark), weekly digest (реализован)
+- **Intelligence** — AI-аналитика, инсайты, **Owner Intelligence** (ROI, QA audit, Revenue Copilot, Menu Profit, Network Benchmark), weekly digest, trust-layer данных (D0 quality/canonical/lineage, C1.5 evidence, M1 memory, C2 graph)
 - **SupplyMind** — AI-закупки и Foodcost (дорожная карта)
 
 ## Возможности

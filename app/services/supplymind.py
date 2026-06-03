@@ -10,7 +10,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import InventoryStockSnapshot, SupplyPurchaseDraft
+from app.db.models import InventoryStockSnapshot, SalesDailyAgg, SupplyPurchaseDraft
 from app.services.owner_dashboard import build_stock_alerts_from_inventory
 
 SUPPLY_DRAFT_STATUSES = frozenset({"draft", "approved", "completed", "cancelled"})
@@ -39,6 +39,28 @@ def recommended_order_quantity(alert: dict[str, Any], *, cover_days: int = 7) ->
     return round(max(target - quantity, 0.0), 3)
 
 
+async def demand_cover_multiplier(db: AsyncSession, org_id: int, *, cover_days: int = 7) -> float:
+    """Simple demand signal from OLAP revenue trend; keeps SupplyMind deterministic and testable."""
+    rows = (
+        await db.execute(
+            select(SalesDailyAgg)
+            .where(SalesDailyAgg.organization_id == org_id, SalesDailyAgg.source == "iiko_olap")
+            .order_by(SalesDailyAgg.date.desc())
+            .limit(14),
+        )
+    ).scalars().all()
+    if len(rows) < 7:
+        return 1.0
+    recent = rows[:7]
+    previous = rows[7:14]
+    recent_avg = sum(float(r.total_revenue or 0) for r in recent) / max(len(recent), 1)
+    previous_avg = sum(float(r.total_revenue or 0) for r in previous) / max(len(previous), 1)
+    if previous_avg <= 0:
+        return 1.0
+    ratio = recent_avg / previous_avg
+    return round(min(1.35, max(0.8, ratio)), 2)
+
+
 async def build_supplymind_draft(
     db: AsyncSession,
     org_id: int,
@@ -52,9 +74,11 @@ async def build_supplymind_draft(
         stmt = stmt.where(InventoryStockSnapshot.location_id == location_id)
     rows = (await db.execute(stmt.order_by(InventoryStockSnapshot.updated_at.desc()).limit(300))).scalars().all()
     alerts = build_stock_alerts_from_inventory(rows, limit=50)
+    demand_multiplier = await demand_cover_multiplier(db, org_id, cover_days=cover_days)
+    adjusted_cover_days = max(1, round(float(cover_days) * demand_multiplier))
     items: list[dict[str, Any]] = []
     for alert in alerts:
-        qty = recommended_order_quantity(alert, cover_days=cover_days)
+        qty = recommended_order_quantity(alert, cover_days=adjusted_cover_days)
         if qty <= 0:
             continue
         items.append({
@@ -64,6 +88,8 @@ async def build_supplymind_draft(
             "recommended_quantity": qty,
             "days_until_runout": alert.get("days_until_runout"),
             "source": alert.get("source"),
+            "demand_multiplier": demand_multiplier,
+            "cover_days": adjusted_cover_days,
         })
 
     title_day = (today or date.today()).isoformat()
@@ -74,7 +100,12 @@ async def build_supplymind_draft(
         source="supplymind",
         title=f"Черновик закупки {title_day}",
         items_json=items,
-        payload_json={"cover_days": cover_days, "alerts_count": len(alerts)},
+        payload_json={
+            "cover_days": cover_days,
+            "adjusted_cover_days": adjusted_cover_days,
+            "demand_multiplier": demand_multiplier,
+            "alerts_count": len(alerts),
+        },
     )
     db.add(draft)
     await db.flush()

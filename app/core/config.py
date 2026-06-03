@@ -448,6 +448,31 @@ class Settings(BaseSettings):
         default="",
         validation_alias=AliasChoices("IIKO_TERMINAL_GROUP_ID", "iiko_terminal_group_id"),
     )
+    iiko_data_source: str = Field(
+        default="cloud",
+        validation_alias=AliasChoices("IIKO_DATA_SOURCE", "iiko_data_source"),
+        description="Источник OLAP продаж: cloud | server",
+    )
+    iiko_server_host: str = Field(
+        default="",
+        validation_alias=AliasChoices("IIKO_SERVER_HOST", "iiko_server_host"),
+    )
+    iiko_server_port: int = Field(
+        default=443,
+        validation_alias=AliasChoices("IIKO_SERVER_PORT", "iiko_server_port"),
+    )
+    iiko_server_login: str = Field(
+        default="",
+        validation_alias=AliasChoices("IIKO_SERVER_LOGIN", "iiko_server_login"),
+    )
+    iiko_server_password: str = Field(
+        default="",
+        validation_alias=AliasChoices("IIKO_SERVER_PASSWORD", "iiko_server_password"),
+    )
+    iiko_server_department_id: str = Field(
+        default="",
+        validation_alias=AliasChoices("IIKO_SERVER_DEPARTMENT_ID", "iiko_server_department_id"),
+    )
     # UUID товаров в iiko для автострок (можно один общий контейнер или раздельно по ТЗ)
     iiko_product_id_container: str = Field(
         default="",

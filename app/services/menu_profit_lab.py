@@ -10,8 +10,9 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.db.models import MenuItem, Order, OrderStatus, SystemEvent, UpsellOfferEvent
+from app.db.models import DishMarginProfile, MenuItem, Order, OrderStatus, SystemEvent, UpsellOfferEvent
 from app.services.intelligence_analytics import menu_engineering_rows
+from app.services.restaurant_graph import rebuild_restaurant_graph_profiles
 from app.services.tenant_scope import orders_location_filter, orders_tenant_clause
 
 _COMPLETED = (
@@ -61,6 +62,10 @@ def _item_public(row: dict[str, Any]) -> dict[str, Any]:
         "quantity_sold": int(row.get("quantity_sold") or 0),
         "revenue": round(float(row.get("revenue") or 0), 2),
         "margin_pct": round(float(row["margin_pct"]), 1) if row.get("margin_pct") is not None else None,
+        "margin_source": row.get("margin_source"),
+        "margin_confidence_score": (
+            round(float(row["margin_confidence_score"]), 4) if row.get("margin_confidence_score") is not None else None
+        ),
         "is_available": bool(row.get("is_available", True)),
         "reason": row.get("reason"),
         "score": round(float(row.get("score") or 0), 2),
@@ -230,6 +235,15 @@ async def build_menu_profit_report(
             select(MenuItem).where(MenuItem.organization_id == org_id),
         )
     ).scalars().all()
+    graph_stats = await rebuild_restaurant_graph_profiles(db, org_id, days=30 if label == "30d" else 7)
+    margin_profiles = {
+        row.dish_product_id: row
+        for row in (
+            await db.execute(
+                select(DishMarginProfile).where(DishMarginProfile.organization_id == org_id),
+            )
+        ).scalars().all()
+    }
 
     by_iiko: dict[str, MenuItem] = {}
     by_name: dict[str, MenuItem] = {}
@@ -245,9 +259,18 @@ async def build_menu_profit_report(
     def ensure_menu_item(mi: MenuItem) -> dict[str, Any]:
         if mi.id not in stats:
             price = float(mi.price or 0)
-            cost = float(mi.cost_price) if mi.cost_price is not None else None
+            profile = margin_profiles.get(str(mi.iiko_id or mi.id))
+            cost = (
+                float(profile.estimated_cost)
+                if profile is not None and profile.estimated_cost is not None
+                else float(mi.cost_price)
+                if mi.cost_price is not None
+                else None
+            )
             margin_pct = None
-            if cost is not None and price > 0:
+            if profile is not None and profile.margin_pct is not None:
+                margin_pct = round(float(profile.margin_pct), 1)
+            elif cost is not None and price > 0:
                 margin_pct = round((price - cost) / price * 100.0, 1)
             stats[mi.id] = {
                 "menu_item_id": int(mi.id),
@@ -257,6 +280,12 @@ async def build_menu_profit_report(
                 "price": price,
                 "cost_price": cost,
                 "margin_pct": margin_pct,
+                "margin_source": "dish_margin_profile" if profile is not None else "menu_item_cost_price",
+                "margin_confidence_score": (
+                    round(float(profile.confidence_score or 0), 4)
+                    if profile is not None and profile.confidence_score is not None
+                    else (0.6 if cost is not None else 0.0)
+                ),
                 "is_available": bool(mi.is_available),
                 "quantity_sold": 0,
                 "revenue": 0.0,
@@ -300,7 +329,9 @@ async def build_menu_profit_report(
             ensure_menu_item(mi)
 
     stoplist_counts = await _load_stoplist_counts(db, org_id, start, end)
-    cost_data_available = any(mi.cost_price is not None for mi in menu_rows)
+    cost_data_available = any(mi.cost_price is not None for mi in menu_rows) or any(
+        p.estimated_cost is not None for p in margin_profiles.values()
+    )
 
     item_list = list(stats.values())
     for st in item_list:
@@ -487,6 +518,7 @@ async def build_menu_profit_report(
         "date_to": end.date().isoformat(),
         "cost_data_available": cost_data_available,
         "lite_mode": not cost_data_available,
+        "knowledge_graph": graph_stats,
         "items_analyzed": len(item_list),
         "unattributed_quantity": unattributed_qty,
         "unattributed_revenue": round(unattributed_revenue, 2),

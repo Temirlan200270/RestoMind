@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.db.models import Organization, SystemEvent
+from app.db.models import Organization, RecommendationOutcome, SystemEvent
 from app.db.session import redis_client
 from app.integrations.telegram import send_ops_notification_html
 from app.services.owner_intelligence_digest import build_owner_intelligence_weekly_digest
@@ -85,6 +85,35 @@ async def _build_digest_payload(
     payload = await build_owner_intelligence_weekly_digest(db, org)
     if not payload:
         payload = await build_week_digest_payload(db, org)
+    if payload:
+        since = datetime.now(timezone.utc) - timedelta(days=14)
+        roi_rows = (
+            await db.execute(
+                select(RecommendationOutcome)
+                .where(
+                    RecommendationOutcome.organization_id == int(org.id),
+                    RecommendationOutcome.status == "measured",
+                    RecommendationOutcome.measured_at >= since,
+                )
+                .order_by(RecommendationOutcome.measured_at.desc(), RecommendationOutcome.id.desc())
+                .limit(3),
+            )
+        ).scalars().all()
+        if roi_rows:
+            text = str(payload.get("text") or "").strip()
+            lines = ["ROI по рекомендациям:"]
+            total_money = 0.0
+            for row in roi_rows:
+                money = float(row.realized_money or 0)
+                total_money += money
+                confidence = float(row.data_quality_confidence or 0)
+                suffix = "низкая уверенность данных" if confidence < 0.7 else f"уверенность {confidence:.0%}"
+                lines.append(f"- {row.recommendation_type or row.metric}: {money:+.0f} ({suffix})")
+            payload["text"] = (text + "\n\n" if text else "") + "\n".join(lines)
+            metrics = dict(payload.get("metrics") or {})
+            metrics["recommendation_roi_realized_money"] = round(total_money, 2)
+            metrics["recommendation_roi_items"] = len(roi_rows)
+            payload["metrics"] = metrics
     return payload
 
 

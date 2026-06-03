@@ -83,8 +83,13 @@
             </div>
 
             <div class="mt-4 flex flex-wrap gap-2">
-                <template x-for="q in intelligenceQuickQuestions" :key="q">
-                    <button type="button" class="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:border-brand-300 hover:text-brand-700" @click="askIntelligence(q)" x-text="q"></button>
+                <div class="w-full text-[11px] font-bold uppercase text-slate-400"
+                     x-text="'Сценарии для роли: ' + (intelligenceBusinessRole || 'owner')"></div>
+                <template x-for="row in (intelligenceBusinessQuestions.length ? intelligenceBusinessQuestions : intelligenceQuickQuestions.map((q) => ({ question: q, use_case: 'default' })))" :key="row.question">
+                    <button type="button" class="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:border-brand-300 hover:text-brand-700" @click="askIntelligence(row.question)">
+                        <span x-text="row.question"></span>
+                        <span class="ml-1 text-[10px] text-slate-400" x-show="row.use_case" x-text="'· ' + row.use_case"></span>
+                    </button>
                 </template>
             </div>
         </section>
@@ -98,12 +103,128 @@
                             <div class="min-w-0">
                                 <div class="text-sm font-semibold text-gray-900" x-text="ins.title"></div>
                                 <p class="mt-1 text-sm text-gray-600" x-text="ins.summary"></p>
+                                <div class="mt-3 flex flex-wrap items-center gap-2">
+                                    <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-bold ring-1"
+                                          :class="insightTrustClass((ins.confidence_score ?? ins.payload?.confidence_score) || 0)"
+                                          x-text="'Уверенность ' + insightConfidencePct(ins) + '%'"></span>
+                                    <span class="text-[11px] font-semibold text-slate-500"
+                                          x-show="(ins.evidence && Object.keys(ins.evidence).length) || (ins.drilldown && Object.keys(ins.drilldown).length)">
+                                        Основания и drilldown
+                                    </span>
+                                </div>
+                                <div class="mt-2 grid gap-2" x-show="insightEvidenceList(ins).length || insightDrilldownList(ins).length">
+                                    <div x-show="insightEvidenceList(ins).length" class="rounded-lg bg-white/70 p-2 ring-1 ring-black/5">
+                                        <div class="text-[10px] font-bold uppercase text-slate-400">Основание</div>
+                                        <div class="mt-1 flex flex-wrap gap-1.5">
+                                            <template x-for="item in insightEvidenceList(ins)" :key="'ev-' + item">
+                                                <span class="rounded-md bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700" x-text="item"></span>
+                                            </template>
+                                        </div>
+                                    </div>
+                                    <div x-show="insightDrilldownList(ins).length" class="rounded-lg bg-white/70 p-2 ring-1 ring-black/5">
+                                        <div class="text-[10px] font-bold uppercase text-slate-400">Разбор</div>
+                                        <div class="mt-1 flex flex-wrap gap-1.5">
+                                            <template x-for="item in insightDrilldownList(ins)" :key="'dd-' + item">
+                                                <span class="rounded-md bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700" x-text="item"></span>
+                                            </template>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                             <button type="button" class="shrink-0 text-xs font-medium text-gray-500 hover:text-gray-900" @click="updateInsightStatus(ins.id, 'dismissed')">Скрыть</button>
                         </div>
                     </div>
                 </template>
                 <div x-show="!(intelligenceData.insights || []).length" class="text-sm text-gray-500">Инсайты появятся после расчета метрик.</div>
+            </div>
+
+            <div class="mt-5 border-t border-gray-100 pt-4">
+                <div class="flex items-center justify-between gap-2">
+                    <h3 class="text-sm font-bold text-gray-900">Требует внимания</h3>
+                    <button type="button" class="text-xs font-semibold text-slate-500 hover:text-slate-900" @click="loadIntelligence()">Обновить</button>
+                </div>
+                <div class="mt-3 space-y-3">
+                    <template x-for="row in intelligenceDeliveries || []" :key="row.id">
+                        <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                            <div class="flex items-start justify-between gap-2">
+                                <div class="min-w-0">
+                                    <div class="text-sm font-semibold text-slate-900 truncate" x-text="row.payload?.title || row.payload?.insight_title || ('Insight #' + row.insight_id)"></div>
+                                    <div class="mt-1 text-xs text-slate-500" x-text="deliveryStatusLabel(row)"></div>
+                                </div>
+                                <span class="rounded-full px-2 py-0.5 text-[10px] font-bold"
+                                      :class="row.severity === 'critical' ? 'bg-rose-100 text-rose-700' : row.severity === 'warning' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'"
+                                      x-text="row.severity || 'info'"></span>
+                            </div>
+                            <div class="mt-3 flex flex-wrap gap-2">
+                                <button type="button" class="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                                        @click="markInsightDelivery(row.id, 'read')">Прочитано</button>
+                                <button type="button" class="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+                                        @click="markInsightDelivery(row.id, 'action_taken')">В работу</button>
+                                <button type="button" class="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-500 hover:bg-slate-100"
+                                        @click="markInsightDelivery(row.id, 'dismiss')">Скрыть</button>
+                            </div>
+                        </div>
+                    </template>
+                    <div x-show="!(intelligenceDeliveries || []).length" class="text-sm text-gray-500">Новых доставленных инсайтов нет.</div>
+                </div>
+            </div>
+
+            <div class="mt-5 border-t border-gray-100 pt-4" x-show="intelligenceDeliverySettings">
+                <h3 class="text-sm font-bold text-gray-900">Правила уведомлений</h3>
+                <div class="mt-2 flex flex-wrap gap-2">
+                    <template x-for="sev in ['critical','warning','info']" :key="sev">
+                        <button type="button" class="rounded-full px-2.5 py-1 text-xs font-bold ring-1"
+                                :class="deliverySeverityAllowed(sev) ? 'bg-blue-100 text-blue-700 ring-blue-200' : 'bg-white text-slate-500 ring-slate-200'"
+                                @click="toggleDeliverySeverity(sev)" x-text="sev"></button>
+                    </template>
+                </div>
+                <div class="mt-3 grid gap-2 text-xs text-slate-600">
+                    <label class="inline-flex items-center gap-2">
+                        <input type="checkbox" class="rounded border-slate-300" x-model="intelligenceDeliverySettings.daily_digest.enabled">
+                        <span>Daily digest</span>
+                    </label>
+                    <label class="inline-flex items-center gap-2">
+                        <input type="checkbox" class="rounded border-slate-300" x-model="intelligenceDeliverySettings.weekly_digest.enabled">
+                        <span>Weekly digest</span>
+                    </label>
+                    <label class="inline-flex items-center gap-2">
+                        <input type="checkbox" class="rounded border-slate-300" x-model="intelligenceDeliverySettings.inbox.enabled">
+                        <span>Inbox</span>
+                    </label>
+                </div>
+                <button type="button" class="mt-3 w-full rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white disabled:opacity-60"
+                        @click="saveInsightDeliverySettings()" :disabled="intelligenceDeliverySettingsSaving">
+                    <span x-text="intelligenceDeliverySettingsSaving ? 'Сохраняю...' : 'Сохранить правила'"></span>
+                </button>
+            </div>
+
+            <div class="mt-5 border-t border-gray-100 pt-4">
+                <h3 class="text-sm font-bold text-gray-900">ROI: совет → результат</h3>
+                <div class="mt-3 space-y-3">
+                    <template x-for="row in intelligenceRoiOutcomes || []" :key="row.id">
+                        <div class="rounded-lg border border-slate-200 p-3">
+                            <div class="text-sm font-semibold text-slate-900" x-text="roiOutcomeLabel(row)"></div>
+                            <div class="mt-2 grid grid-cols-3 gap-2 text-xs">
+                                <div>
+                                    <div class="font-bold text-slate-400">База</div>
+                                    <div class="tabular-nums" x-text="row.baseline_value != null ? fmt.money(row.baseline_value) : '—'"></div>
+                                </div>
+                                <div>
+                                    <div class="font-bold text-slate-400">Факт</div>
+                                    <div class="tabular-nums" x-text="row.measurement_window?.measured_value != null ? fmt.money(row.measurement_window.measured_value) : '—'"></div>
+                                </div>
+                                <div>
+                                    <div class="font-bold text-slate-400">Эффект</div>
+                                    <div class="font-bold tabular-nums" :class="Number(row.realized_money || 0) >= 0 ? 'text-emerald-700' : 'text-rose-700'"
+                                         x-text="row.realized_money != null ? fmt.money(row.realized_money) : '—'"></div>
+                                </div>
+                            </div>
+                            <div class="mt-2 text-[11px] text-slate-500"
+                                 x-text="'Уверенность данных ' + Math.round((row.data_quality_confidence || 0) * 100) + '% · ' + (row.causality || 'measured_delta')"></div>
+                        </div>
+                    </template>
+                    <div x-show="!(intelligenceRoiOutcomes || []).length" class="text-sm text-gray-500">Измеренные рекомендации появятся после окна замера.</div>
+                </div>
             </div>
         </aside>
     </div>

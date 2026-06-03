@@ -18,6 +18,7 @@
 | Final Mile (backend) | SupplyMind + iiko Office sync, StaffMind onboarding, Voice (`stt_fallback` + Realtime code), Daily OS Digest cron, GuestCare 2GIS sync | **MVP ✅** | [`docs/FINAL_MILE_IMPLEMENTED.md`](FINAL_MILE_IMPLEMENTED.md) |
 | Final Mile (UI) | SupplyMind / StaffMind / Voice toggle / digest preview / GuestCare sync в админке | **wired ✅** | [`docs/REMAINING_UPDATES.md`](REMAINING_UPDATES.md) — **ops gates** |
 | **UI Layer (Phase 6)** | Focus-Driven Admin Shell: 3 режима, split Shift, Action Queue inbox, Command Bar | **✅ Sprint 1–4** (Strangler) | [`docs/UI_DESIGN_SYSTEM.md`](UI_DESIGN_SYSTEM.md), ROADMAP P5 «Focus-Driven OS» |
+| **Intelligence OS (Restory-class)** | iiko OLAP fact layer, D0 data quality, explainable insights, organization memory, tool-based AI Analyst, knowledge graph, forecasting v2, ROI feedback loop, guarded experimental drafts | **Trust-layer ✅** | [`docs/INTELLIGENCE_OS_PLAN.md`](INTELLIGENCE_OS_PLAN.md), `iiko_olap_sales_sync.py`, `data_quality.py`, `copilot/` |
 
 **Главный вывод (2026-05-22):** RestoMind OS — **Industrial Platform** с закрытыми фазами 1–4 и Phase 3 (~100%). Final Mile backend+UI в репо; следующий слой — **staging/ops**: Telegram digest, WS `os.audit`, iiko Office live pilot, Twilio Realtime call + cost report.
 

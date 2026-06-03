@@ -128,6 +128,7 @@ async def test_menu_profit_with_cost_price_and_margin(db_session) -> None:
 
     assert report["cost_data_available"] is True
     assert report["lite_mode"] is False
+    assert report["knowledge_graph"]["dish_margin_profiles"] >= 2
     assert any(x["name"] == "Суп" for x in report["low_margin_items"])
     assert all(x.get("margin_pct") is not None for x in report["top_revenue_items"] if x["name"] in {"Суп", "Стейк"})
 

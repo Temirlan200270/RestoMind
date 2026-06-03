@@ -91,6 +91,21 @@ async def run_menu_sync(org_id: int) -> dict[str, Any]:
         try:
             stats = await adapter.sync_menu(db, org_id)
             ok = True
+            from app.services.organization_memory import record_memory_event
+
+            await record_memory_event(
+                db,
+                org_id,
+                event_type="menu_import",
+                entity_type="menu",
+                summary=(
+                    f"Menu sync completed: created={stats.get('created', 0)}, "
+                    f"updated={stats.get('updated', 0)}, total={stats.get('total', 0)}."
+                ),
+                payload={"stats": stats},
+                source="iiko_sync",
+                confidence_score=1.0,
+            )
         except Exception as exc:
             error = str(exc)
             logger.warning("run_menu_sync org_id=%s failed: %s", org_id, exc)

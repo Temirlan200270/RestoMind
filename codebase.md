@@ -19,6 +19,8 @@
 
 **Модули поверх ядра:** Ordering, GuestCare, Marketing, Intelligence, SupplyMind (дорожная карта).
 
+**Intelligence OS / Restory-class слой:** продуктовая модель клиента — [`docs/CUSTOMER.md`](docs/CUSTOMER.md); архитектура данных/Copilot/ROI — [`docs/INTELLIGENCE_OS_PLAN.md`](docs/INTELLIGENCE_OS_PLAN.md). Ключевые файлы: `app/services/iiko_olap_sales_sync.py`, `app/services/data_quality.py`, `app/services/copilot/`, `app/services/restaurant_graph.py`, `app/services/forecasting.py`, `app/services/recommendation_outcomes.py`, `app/services/insight_delivery.py`.
+
 **Админ-панель:** серверный HTML (Jinja2) + Alpine.js, REST под `/api/admin/*`, live-события по WebSocket; отдельно UI и API **superadmin** (`/api/superadmin/*`, страница `/superadmin`).
 
 **ИИ:** по умолчанию OpenAI; через настройки возможен **Gemini** (`AI_PROVIDER`). См. `app/services/ai_engine/`, `app/services/ai_brain.py`.
@@ -194,7 +196,7 @@ python -m pytest tests/ -v
 
 В репозитории — **965+** тестов в `tests/` (на 2026-05: `pytest -q` → 965 passed). GitHub Actions: [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (`push` на `main` / `develop`, PR в `main`).
 
-**Alembic head (Owner Intelligence OS):** `20260604_telegram_org_mapping` — см. [`docs/DEPLOY_RUNBOOK.md`](docs/DEPLOY_RUNBOOK.md) §8.
+**Alembic head (Intelligence OS lineage):** `20260603_intelos_lineage` — см. [`docs/DEPLOY_RUNBOOK.md`](docs/DEPLOY_RUNBOOK.md) §8.
 
 ---
 

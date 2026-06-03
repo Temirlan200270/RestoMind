@@ -33,7 +33,7 @@
                 Последняя отправка:
                 <span class="font-semibold text-slate-700">
                     <span x-text="ownerIntelDigestLastSent?.created_at ? fmt.date(ownerIntelDigestLastSent.created_at) : '—'"></span>
-                    <span x-show="ownerIntelDigestLastSent?.created_at" x-text="', ' + fmt.time(ownerIntelDigestLastSent.created_at)"></span>
+                    <span x-show="ownerIntelDigestLastSent?.created_at" x-text="ownerIntelDigestLastSent?.created_at ? ', ' + fmt.time(ownerIntelDigestLastSent.created_at) : ''"></span>
                 </span>
             </div>
             <div x-show="ownerIntelDigestLoading" class="h-24 rounded-xl bg-slate-100 animate-pulse"></div>

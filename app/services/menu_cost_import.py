@@ -150,6 +150,7 @@ async def import_menu_costs_from_csv(
         return parsed
 
     applied = 0
+    changed_rows: list[dict[str, Any]] = []
     for preview in parsed.get("rows") or []:
         if not preview.get("changed"):
             continue
@@ -161,8 +162,22 @@ async def import_menu_costs_from_csv(
             continue
         item.cost_price = float(preview["new_cost_price"])
         applied += 1
+        changed_rows.append(preview)
 
     await db.flush()
+    if applied:
+        from app.services.organization_memory import record_memory_event
+
+        await record_memory_event(
+            db,
+            int(organization_id),
+            event_type="cost_change",
+            entity_type="menu_cost",
+            summary=f"Imported cost updates for {applied} menu items.",
+            payload={"updated": applied, "sample": changed_rows[:20]},
+            source="csv_import",
+            confidence_score=0.9,
+        )
     return {
         "ok": True,
         "updated": applied,

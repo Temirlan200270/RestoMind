@@ -85,6 +85,7 @@ async def create_blast(
 ) -> Any:
     """Создаёт черновик рассылки и наполняет список получателей."""
     from app.db.models import MarketingBlast, MarketingBlastRecipient
+    from app.services.organization_memory import record_memory_event
 
     recipients = await get_segment_phones(db, org_id, segment_type)
     blast = MarketingBlast(
@@ -109,6 +110,24 @@ async def create_blast(
         )
         db.add(rec)
 
+    await record_memory_event(
+        db,
+        int(org_id),
+        event_type="campaign",
+        entity_type="marketing_blast",
+        entity_id=str(blast.id),
+        summary=f"Marketing campaign created: {name} for segment {segment_type}.",
+        payload={
+            "blast_id": int(blast.id),
+            "name": name,
+            "segment_type": segment_type,
+            "template_name": template_name,
+            "scheduled_for": scheduled_for.isoformat() if scheduled_for else None,
+            "total_recipients": len(recipients),
+        },
+        source="marketing",
+        confidence_score=0.9,
+    )
     await db.commit()
     return blast
 

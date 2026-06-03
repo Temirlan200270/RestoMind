@@ -14,6 +14,18 @@
 
 ## [Unreleased]
 
+### Intelligence OS — единый слой данных и AI-Аналитик
+
+- iiko OLAP sales layer: Cloud + Server, факт-таблицы продаж, daily/hourly агрегаты, backfill CLI и ARQ cron.
+- AI Center получил таб «Продажи»; добавлены `/analytics/sales/*` API.
+- `/intelligence/query` переведён на safe tool-based Copilot; добавлены sales anomalies, demand-driven SupplyMind, ROI outcomes и guarded autonomous drafts.
+- Архитектурная корректировка: добавлены `CUSTOMER.md`, D0 Data Quality, C1.5 Explainability + Confidence, M1 Organization Memory, relational C2 Knowledge Graph; X1 Autonomy перенесён в future.
+- Закрыт основной gap до Restaurant OS trust-layer: canonical-first pipeline, lineage/reconciliation, deep drilldown, proactive delivery, memory autogeneration, graph ETL, forecasting v2, ROI chain/digest и preliminary live sales.
+- Добит trust-layer gap: fact build переведён на canonical-first, добавлены lineage fields, schema hash, reconciliation report, Copilot `get_data_lineage`, deep drilldown category/dish/hour, delivery action endpoints, memory autogeneration и preliminary live sales preview.
+- Доведены C2/O1/F1/D1.2/P1: graph profile rebuild для Menu Profit Lab, seasonality + dirty-data weighting в forecast, ROI chain API и ROI-блок в owner digest, per-org delivery settings и timezone normalization для naive iiko OLAP timestamps.
+- Закрыт D3.1 Trust UI: AI Center показывает confidence badge, evidence list и drilldown path на карточках инсайтов.
+- Добит продуктовый слой Intelligence OS: role-based quick questions в Copilot, AI Center inbox для insight deliveries с read/dismiss/action_taken, UI настроек delivery rules, ROI-блок "совет -> выполнено -> результат", supplier/campaign memory autogeneration и baseline causal drilldown по category/dish/hour.
+
 ### Документация — реструктуризация CHANGELOG
 
 - Трёхуровневая модель: ROADMAP (задачи) → CHANGELOG (релизы, ~100 строк) → `docs/releases/` (детали эпиков).

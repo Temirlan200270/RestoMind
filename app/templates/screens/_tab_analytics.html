@@ -527,7 +527,7 @@
                     </table>
                     <p x-show="waiterKpi.last_sync?.finished_at && !waiterKpiLoading"
                         class="text-[11px] text-slate-400 mt-3"
-                        x-text="'Последняя синхронизация: ' + fmt.datetime(waiterKpi.last_sync.finished_at)"></p>
+                        x-text="waiterKpi.last_sync?.finished_at ? 'Последняя синхронизация: ' + fmt.date(waiterKpi.last_sync.finished_at) + ', ' + fmt.time(waiterKpi.last_sync.finished_at) : ''"></p>
                 {% endcall %}
 
                 <!-- Help slide-over (replaces heavy details blocks) -->
@@ -578,4 +578,3 @@
                     </div>
                 </div>
             </div>
-

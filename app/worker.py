@@ -13,10 +13,14 @@ from app.core.config import settings
 from app.services.billing_rollup import billing_usage_daily_scheduled_tick
 from app.services.daily_os_digest import daily_os_digest_scheduled_tick
 from app.services.draft_recovery import draft_recovery_scheduled_tick
+from app.services.iiko_olap_sales_sync import olap_sales_scheduled_tick
+from app.services.insight_delivery import insight_delivery_scheduled_tick
 from app.services.iiko_sales_hourly_sync import sales_hourly_iiko_scheduled_tick
 from app.services.night_preorders import morning_preorders_tick
 from app.services.owner_weekly_digest import owner_digest_scheduled_tick
 from app.services.payment_notify import run_payment_received_customer_notify
+from app.services.recommendation_outcomes import recommendation_outcomes_scheduled_tick
+from app.services.sales_anomaly_engine import sales_anomaly_scheduled_tick
 
 try:
     from arq.cron import cron
@@ -337,6 +341,10 @@ class WorkerSettings:
         daily_os_digest_scheduled_tick,
         draft_recovery_scheduled_tick,
         sales_hourly_iiko_scheduled_tick,
+        olap_sales_scheduled_tick,
+        sales_anomaly_scheduled_tick,
+        insight_delivery_scheduled_tick,
+        recommendation_outcomes_scheduled_tick,
     ]
     # Digest: 4× в час; биллинг: суточный rollup; ночные предзаказы: каждые 5 мин.
     # Запланированные рассылки: каждые 5 минут. AI-инциденты: каждый час в :05.
@@ -352,6 +360,10 @@ class WorkerSettings:
             cron(iiko_inventory_sync_scheduled_tick, hour={0, 6, 12, 18}, minute=20),
             cron(waiter_kpi_sync_scheduled_tick, hour=22, minute=30),
             cron(sales_hourly_iiko_scheduled_tick, hour=23, minute=15),
+            cron(olap_sales_scheduled_tick, minute=25),
+            cron(sales_anomaly_scheduled_tick, minute=35),
+            cron(insight_delivery_scheduled_tick, minute=40),
+            cron(recommendation_outcomes_scheduled_tick, minute=45),
             cron(external_reviews_sync_scheduled_tick, hour={2, 14}, minute=10),
             cron(order_ai_audit_backfill_tick, minute={5, 20, 35, 50}),
         ]
@@ -373,4 +385,3 @@ def _build_worker_redis_settings():
 
 
 WorkerSettings.redis_settings = _build_worker_redis_settings()
-

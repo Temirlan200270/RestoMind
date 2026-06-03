@@ -31,6 +31,45 @@
 - [x] **Money Layer v2 — Queue gaps:** `menu_confusion`, `booking_at_risk` в `money_queue.py`; slow_chat с AOV×0.5; action surfaces на дашборде.
 - [x] **Money Layer v2 — iiko hourly ETL (lite):** таблица `sales_hourly_daily`, cron `sales_hourly_iiko_scheduled_tick`, `GET /analytics/sales-heatmap`, heatmap в расширенной аналитике.
 
+## 🧠 Intelligence OS — Restory-class слой данных и AI-Аналитик
+
+- [x] **P0 — Customer Model:** [`docs/CUSTOMER.md`](docs/CUSTOMER.md) фиксирует покупателей, ежедневные вопросы и first paid use cases; Copilot должен отвечать на них, а не на произвольную аналитику.
+- [x] **D0 — Data Quality Layer:** `source_data → validation → normalization → canonical schema → fact tables`; добавлены raw snapshots, canonical sales/product tables, `data_quality_reports`, confidence и статус в sales overview.
+- [x] **D1 — Unified iiko OLAP sales layer:** Cloud OLAP SALES + Server OLAP v2, per-org `iiko_data_source`, fact tables `sales_fact_orders/items`, `sales_daily_agg`, hourly `source=iiko_olap`, ARQ cron, backfill CLI.
+- [x] **D2 — Food cost:** `product_expenses`/STOCK fallback обновляет `MenuItem.cost_price` и `SalesFactItem.cost`, поэтому Menu Profit Lab получает реальную себестоимость.
+- [x] **D3 — Sales data UX:** AI Center → «Продажи» + `/analytics/sales/*` endpoints для overview/top-dishes/categories/hour.
+- [x] **A1 — Sales anomalies:** `sales_anomaly_engine.py` создаёт `OperationalInsight` по падению выручки к OLAP baseline.
+- [x] **C1 — Tool-based AI Analyst:** `/intelligence/query` использует safe read-only Copilot tools вместо эвристики/сырого SQL.
+- [x] **C1.5 — Explainability + Confidence:** `OperationalInsight` имеет `confidence_score`, `evidence_json`, `drilldown_json`; anomaly engine и Copilot возвращают вероятные причины с основанием.
+- [x] **M1 — Organization Memory:** добавлены `organization_memory_events`, API ручных заметок, автозапись resolved insight/ROI, Copilot memory tools.
+- [x] **C2 — Restaurant Knowledge Graph (relational):** добавлены таблицы dish/ingredient/supplier/margin/seasonality/substitution и Copilot tools для margin risk, price simulation, supplier exposure, seasonality.
+- [x] **O1 — Demand-driven SupplyMind:** черновик закупки учитывает OLAP demand multiplier.
+- [x] **F1 — ROI feedback loop:** `recommendation_outcomes` + scheduled measurement + `recommendation.measured` event.
+- [x] **X1 — Autonomy (future):** autonomous draft явно помечен как `experimental/internal`, без внешних действий и без мутаций в iiko/закупках без подтверждения.
+
+### Intelligence OS — gap to 100%
+
+> Текущий статус: trust-layer MVP готов. Ниже не "переделать заново", а добить продуктовую полноту до Restaurant OS, где каждая цифра доказуема, объяснима и связана с ROI.
+
+- [x] **D0.1 Canonical-first fact build:** `sales_fact_orders/items` строятся из `canonical_sales_orders/items`, а raw OLAP rows используются только для snapshot/debug.
+- [x] **D0.2 Quarantine + lineage:** сохраняются duplicate quarantine samples, `snapshot_id`/canonical lineage для facts, checksum и source schema/fields hash.
+- [x] **D0.3 Reconciliation:** сверяется `sum(items.revenue)` с `order.revenue`; расхождения пишутся в `data_quality_reports`.
+- [x] **P0.1 Role-based Copilot UX:** `/api/admin/intelligence/business-questions` отдаёт вопросы по роли (`owner`, `manager`, `network`, `franchise`), `/intelligence/query` прокидывает роль в tool selection, AI Center показывает сценарии по роли пользователя.
+- [x] **C1.6 Data lineage tool:** Copilot tool `get_data_lineage(metric, period)` возвращает snapshot, checksum, quality report, fact counts и reconciliation status.
+- [x] **C1.7 Deep drilldown:** revenue delta раскладывается на orders/guests/avg_check и baseline contribution по category/dish/hour с quantity/revenue deltas.
+- [x] **D3.1 Trust UI:** AI Center показывает confidence badge, evidence list и drilldown path на карточках инсайтов; sales tab показывает data quality status/confidence.
+- [x] **P1 Proactive inbox:** `OperationalInsight` становится источником proactive delivery; добавлены read/dismiss/action_taken endpoints и AI Center блок «Требует внимания».
+- [x] **P1 Delivery rules:** per-org настройки severity -> channel в `Organization.meta_json`, API settings/history/actions, dedupe по insight/channel; AI Center умеет менять правила уведомлений.
+- [x] **M1.1 Memory autogeneration:** menu import, price change, cost update/import, supplier graph link, marketing campaign, resolved anomaly и measured ROI создают `organization_memory_events`.
+- [x] **C2.1 Graph ETL:** `restaurant_graph.rebuild_restaurant_graph_profiles()` наполняет `dish_ingredients`, `ingredient_suppliers`, `dish_margin_profile`, `dish_seasonality_profile` из меню/cost/inventory/sales facts; будущие 1C/Sheets подключаются как источники тех же профилей.
+- [x] **C2.2 Menu Profit Lab v2:** Menu Profit Lab пересобирает graph profiles и читает `DishMarginProfile` как основной источник margin/cost, с fallback на `MenuItem.cost_price`.
+- [x] **O1.1 Forecasting v2:** forecast использует seasonality profile, dirty-data weighting, memory events и confidence по basis rows.
+- [x] **F1.1 ROI chain API + UI:** `/api/admin/intelligence/roi-outcomes` показывает цепочку "совет -> выполнено -> результат" с baseline/measurement windows, confidence и causality label; AI Center показывает ROI-блок.
+- [x] **F1.2 ROI digest:** owner digest включает realized money, confidence и пометку качества данных по измеренным рекомендациям.
+- [x] **D1.1 Live/open orders layer:** отдельный preliminary слой для открытых заказов; не смешивается с закрытыми OLAP facts без метки.
+- [x] **D1.2 Timezone normalization:** canonical OLAP close time нормализуется через timezone организации; naive iiko timestamps трактуются как local org time и сохраняются в UTC.
+- [x] **X1.1 Autonomy freeze:** внешняя автономность оставлена future/experimental; без внешних iiko/закупочных мутаций без подтверждения человека.
+
 ## 🔴 P0: Критический техдолг и баги (делать сейчас)
 
 > Перенесено из бывшего `problems.md` (2026‑05): потенциальные data leaks, потеря/дубли сообщений, рассинхроны state и гонки UI.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import time
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -318,10 +319,24 @@ async def answer_intelligence_query(
     org_id: int,
     question: str,
     conversation_id: int | None = None,
+    role: str | None = None,
 ) -> dict[str, Any]:
+    from app.services.copilot.engine import run_owner_copilot_for_org
+
     intent = parse_revenue_orders_intent(question)
-    summary = await revenue_orders_summary(db, org_id, intent["period"])
-    answer = build_intelligence_answer(question, intent, summary)
+    started = time.perf_counter()
+    copilot_error = False
+    try:
+        copilot_result = await run_owner_copilot_for_org(org_id=org_id, question=question, role=role)
+    except Exception:
+        copilot_error = True
+        from app.services.copilot.engine import run_owner_copilot
+
+        copilot_result = await run_owner_copilot(db, org_id=org_id, question=question, role=role)
+    latency_ms = int((time.perf_counter() - started) * 1000)
+    await _record_copilot_usage(db, org_id, latency_ms=latency_ms, error=copilot_error)
+    answer = str(copilot_result.get("answer") or "").strip()
+    summary = copilot_result.get("data") or {}
 
     conv: IntelligenceConversation | None = None
     if conversation_id:
@@ -346,7 +361,10 @@ async def answer_intelligence_query(
                 organization_id=org_id,
                 role="assistant",
                 content=answer,
-                payload_json={"summary": summary},
+                payload_json={
+                    "summary": summary,
+                    "tool_calls": copilot_result.get("tool_calls") or [],
+                },
             ),
         ]
     )
@@ -356,7 +374,42 @@ async def answer_intelligence_query(
         "answer": answer,
         "intent": intent,
         "summary": summary,
+        "tool_calls": copilot_result.get("tool_calls") or [],
     }
+
+
+async def _record_copilot_usage(
+    db: AsyncSession,
+    org_id: int,
+    *,
+    latency_ms: int,
+    error: bool,
+) -> None:
+    today = datetime.now(tz=timezone.utc).date()
+    row = await db.scalar(
+        select(AiUsageLog).where(
+            AiUsageLog.organization_id == int(org_id),
+            AiUsageLog.day == today,
+        ),
+    )
+    if row is None:
+        row = AiUsageLog(
+            organization_id=int(org_id),
+            day=today,
+            provider="copilot",
+            model="tool-orchestrator",
+            prompt_tokens=0,
+            completion_tokens=0,
+            total_tokens=0,
+            call_count=0,
+            error_count=0,
+        )
+        db.add(row)
+    row.call_count = int(row.call_count or 0) + 1
+    row.error_count = int(row.error_count or 0) + (1 if error else 0)
+    current_p95 = int(row.p95_latency_ms or 0)
+    row.p95_latency_ms = max(current_p95, int(latency_ms or 0))
+    await db.flush()
 
 
 async def generate_revenue_order_insights(db: AsyncSession, org_id: int) -> list[OperationalInsight]:

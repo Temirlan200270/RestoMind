@@ -7,6 +7,7 @@
 import asyncio
 import logging
 from collections.abc import Mapping
+from datetime import date
 from typing import Any
 
 import httpx
@@ -370,3 +371,118 @@ class IikoClient:
             order_count,
         )
         return data
+
+    async def fetch_olap_sales(
+        self,
+        organization_id: str,
+        date_from: date,
+        date_to: date,
+    ) -> list[dict[str, Any]]:
+        """OLAP SALES rows for a full restaurant sales fact layer."""
+        body: dict[str, Any] = {
+            "organizationId": organization_id,
+            "reportType": "SALES",
+            "buildSummary": False,
+            "groupByRowFields": [
+                "UniqOrderId.Id",
+                "OpenDate.Typed",
+                "CloseTime",
+                "WaiterName",
+                "OrderType",
+                "OriginName",
+                "DishId",
+                "DishName",
+                "DishCategory",
+            ],
+            "groupByColFields": [],
+            "aggregateFields": [
+                "DishDiscountSumInt",
+                "DishAmountInt",
+                "GuestNum",
+            ],
+            "filters": {
+                "OpenDate.Typed": {
+                    "filterType": "DateRange",
+                    "periodType": "CUSTOM",
+                    "from": date_from.isoformat(),
+                    "to": date_to.isoformat(),
+                    "includeLow": True,
+                    "includeHigh": True,
+                },
+                "DeletedWithWriteoff": {
+                    "filterType": "IncludeValues",
+                    "values": ["NOT_DELETED"],
+                },
+                "OrderDeleted": {
+                    "filterType": "IncludeValues",
+                    "values": ["NOT_DELETED"],
+                },
+            },
+        }
+        data = await self._request(
+            "POST",
+            "/api/1/reports/olap",
+            json=body,
+            timeout=90.0,
+        )
+        return self._extract_olap_rows(data)
+
+    async def fetch_product_expenses(
+        self,
+        organization_id: str,
+        date_from: date,
+        date_to: date,
+    ) -> list[dict[str, Any]]:
+        """Product expenses / STOCK fallback for food-cost analytics."""
+        try:
+            data = await self._request(
+                "POST",
+                "/api/1/product_expenses",
+                json={
+                    "organizationId": organization_id,
+                    "dateFrom": f"{date_from.isoformat()} 00:00:00.000",
+                    "dateTo": f"{date_to.isoformat()} 23:59:59.999",
+                },
+                timeout=90.0,
+            )
+            rows = data.get("items") or data.get("productExpenses") or []
+            if isinstance(rows, list):
+                return [row for row in rows if isinstance(row, dict)]
+        except httpx.HTTPStatusError:
+            logger.info("iiko: product_expenses недоступен, fallback на OLAP STOCK")
+
+        body: dict[str, Any] = {
+            "organizationId": organization_id,
+            "reportType": "STOCK",
+            "buildSummary": False,
+            "groupByRowFields": ["DishId", "DishName", "ProductName"],
+            "groupByColFields": [],
+            "aggregateFields": ["ProductCostBase.ProductCost", "Amount"],
+            "filters": {
+                "OpenDate.Typed": {
+                    "filterType": "DateRange",
+                    "periodType": "CUSTOM",
+                    "from": date_from.isoformat(),
+                    "to": date_to.isoformat(),
+                    "includeLow": True,
+                    "includeHigh": True,
+                },
+            },
+        }
+        data = await self._request(
+            "POST",
+            "/api/1/reports/olap",
+            json=body,
+            timeout=90.0,
+        )
+        return self._extract_olap_rows(data)
+
+    @staticmethod
+    def _extract_olap_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
+        data = payload.get("data")
+        if isinstance(data, list):
+            return [row for row in data if isinstance(row, dict)]
+        rows = payload.get("rows")
+        if isinstance(rows, list):
+            return [row for row in rows if isinstance(row, dict)]
+        return []
