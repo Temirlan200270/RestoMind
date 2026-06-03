@@ -123,7 +123,7 @@
 
 - [x] **Franchise / Branch (Phase 1 OS):** … **Phase 1.2 analytics:** per-location rollup из `SystemEvent.payload._location_id` в [`owner_dashboard.py`](app/services/owner_dashboard.py) (`rollup_location_event_stats`) — non-shift `/stats`, `/analytics`, `/funnel` (без `/shift/*`).
 
-- [x] **Refresh `docs/ui/baseline/`:** screenshots are generated locally via [`scripts/capture_admin_u0_baseline.py`](scripts/capture_admin_u0_baseline.py); PNG artifacts are ignored to avoid stale UI snapshots in git. `docs/ui/mobile-review/` remains a separate mobile refresh.
+- [x] **Refresh `docs/ui/baseline/`:** baseline PNGs are tracked because `docs/UI_DESIGN_SYSTEM.md` embeds them; regenerate via [`scripts/capture_admin_u0_baseline.py`](scripts/capture_admin_u0_baseline.py) after major UI changes. `docs/ui/mobile-review/` remains a separate mobile refresh.
 
 ## 🟢 P2: Развитие (Growth)
 

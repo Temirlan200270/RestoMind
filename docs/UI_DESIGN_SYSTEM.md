@@ -64,7 +64,7 @@
 
 ### Скриншоты (baseline) и витрина компонентов
 
-Live macros: **`GET /admin/_/components`** (superadmin or `APP_DEBUG=true`). Baseline screenshots are generated locally with [`scripts/capture_admin_u0_baseline.py`](../scripts/capture_admin_u0_baseline.py); PNG artifacts are ignored so they do not drift in git.
+Live macros: **`GET /admin/_/components`** (superadmin or `APP_DEBUG=true`). Baseline screenshots in [`docs/ui/baseline/`](../docs/ui/baseline/) are tracked because this page embeds them; regenerate with [`scripts/capture_admin_u0_baseline.py`](../scripts/capture_admin_u0_baseline.py) after major UI changes.
 
 Дополнительно: **mobile review** со скриншотами из Playwright и приоритезированным списком улучшений — [`docs/ui/mobile-review/README.md`](ui/mobile-review/README.md).
 
@@ -280,5 +280,5 @@ UI рендерит поля **`focus`** как отдано API ([`_focus_paylo
 - `docs/ROADMAP.md` — единственный трекер задач/техдолга; блок **Focus-Driven OS (Admin Shell)** в P5.  
 - `docs/OS_TRANSITION_PLAN.md` — § UI Layer (Phase 6), Strangler-выкатка.  
 - `docs/G10_SHIFT_CONTROL_PLANE.md`, `docs/G10_SEMANTIC_CONTRACT.md` — backend смены и focus contract.  
-- `docs/ui/baseline/` - local output folder for visual-regression screenshots; PNG files are generated and ignored.  
+- `docs/ui/baseline/` - tracked visual-regression baseline screenshots used by this document.  
 - `docs/ui/lighthouse/` — отчёты Lighthouse и таблица сводки.  

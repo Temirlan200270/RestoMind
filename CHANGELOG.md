@@ -15,7 +15,7 @@
 ## [Unreleased]
 
 - Code/test cleanup: removed tracked generated `scripts/_nomenclature_summary.txt`, fixed the broken Windows `post_nomenclature.cmd` path by adding `scripts/post_nomenclature.ps1`, and updated `_summarize_nomenclature.py` so reports are stdout/`--out` only.
-- Docs cleanup: obsolete root debug dumps (`nomenclature.json`, `payload.json`), old sprint scratch docs, and stale tracked admin baseline PNGs were removed; deployment/status docs now point to the current runbook, roadmap, and Alembic head `20260603_menu_item_lifecycle`.
+- Docs cleanup: obsolete root debug dumps (`nomenclature.json`, `payload.json`) and old sprint scratch docs were removed; tracked admin baseline PNGs were kept because `docs/UI_DESIGN_SYSTEM.md` embeds them. Deployment/status docs now point to the current runbook, roadmap, and Alembic head `20260603_menu_item_lifecycle`.
 
 ### Intelligence OS — единый слой данных и AI-Аналитик
 
