@@ -89,7 +89,16 @@ async def run_menu_sync(org_id: int) -> dict[str, Any]:
         error = ""
         stats: dict[str, Any] = {}
         try:
-            stats = await adapter.sync_menu(db, org_id)
+            if hasattr(adapter, "sync_menu_replace"):
+                stats = await adapter.sync_menu_replace(
+                    db,
+                    org_id,
+                    prune_missing=True,
+                    prune_mode="archive",
+                    prune_legacy=True,
+                )
+            else:
+                stats = await adapter.sync_menu(db, org_id)
             ok = True
             from app.services.organization_memory import record_memory_event
 
@@ -100,7 +109,9 @@ async def run_menu_sync(org_id: int) -> dict[str, Any]:
                 entity_type="menu",
                 summary=(
                     f"Menu sync completed: created={stats.get('created', 0)}, "
-                    f"updated={stats.get('updated', 0)}, total={stats.get('total', 0)}."
+                    f"updated={stats.get('updated', 0)}, "
+                    f"archived={stats.get('archived', 0)}, deleted={stats.get('deleted', 0)}, "
+                    f"total={stats.get('total', 0)}."
                 ),
                 payload={"stats": stats},
                 source="iiko_sync",

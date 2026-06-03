@@ -6279,13 +6279,20 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
             if (!this.integrationStatus.iiko_configured) return;
             this.integrationSyncLoading = true;
             try {
-                const { ok, data } = await this.apiJsonResponse('/api/admin/menu/sync', { method: 'POST' });
+                const url = '/api/admin/menu/sync?prune_missing=true&prune_mode=archive&prune_legacy=true&confirm_prune=true';
+                const { ok, data } = await this.apiJsonResponse(url, { method: 'POST' });
                 if (ok && data.ok) {
                     await this.loadIntegrationStatus();
+                    const archived = data.archived != null ? `, архивировано ${data.archived}` : '';
+                    const deleted = data.deleted != null && data.deleted > 0 ? `, удалено ${data.deleted}` : '';
                     const sk = data.skipped != null ? `, пропущено ${data.skipped}` : '';
-                    this.flashToast(`Меню из iiko: новых ${data.created ?? 0}, обновлено ${data.updated ?? 0}${sk}`, 'success', 5000);
+                    this.flashToast(
+                        `Меню из iiko: новых ${data.created ?? 0}, обновлено ${data.updated ?? 0}${archived}${deleted}${sk}`,
+                        'success',
+                        6000,
+                    );
                     this.menuViewRevision += 1;
-                    await this.loadMenu();
+                    await Promise.all([this.loadMenu(), this.loadMenuProfitLab()]);
                 } else {
                     void this.showUiAlert(this.formatApiError(data.detail) || 'Синхронизация меню не удалась', 'Ошибка');
                 }
