@@ -9,6 +9,7 @@ import re
 from collections.abc import Mapping
 from datetime import date
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -26,6 +27,22 @@ def password_for_server_auth(password: str) -> str:
     if _SHA1_HEX_RE.fullmatch(raw):
         return raw.lower()
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+
+def normalize_server_host(host: str, port: int = 443) -> str:
+    """Return a base URL for /resto API from plain host or URL input."""
+    raw = (host or "").strip().rstrip("/")
+    if not raw:
+        return ""
+    parsed = urlparse(raw if "://" in raw else f"https://{raw}")
+    scheme = parsed.scheme or "https"
+    netloc = parsed.netloc or parsed.path
+    path = parsed.path if parsed.netloc else ""
+    if path.endswith("/resto"):
+        path = path[: -len("/resto")]
+    if ":" not in netloc and int(port or 443) != 443:
+        netloc = f"{netloc}:{int(port)}"
+    return f"{scheme}://{netloc}{path}/resto"
 
 
 class IikoServerClient:
@@ -54,7 +71,7 @@ class IikoServerClient:
         if not self._login or not self._password:
             raise ValueError("IIKO_SERVER_LOGIN/IIKO_SERVER_PASSWORD не заданы")
         self._http = httpx.AsyncClient(
-            base_url=f"https://{self._host}:{self._port}/resto",
+            base_url=normalize_server_host(self._host, self._port),
             timeout=REQUEST_TIMEOUT,
         )
         await self._authenticate()
@@ -183,6 +200,48 @@ class IikoServerClient:
                 "DishAmountInt",
                 "GuestNum",
             ],
+            "filters": filters,
+        }
+        data = await self._request(
+            "POST",
+            "/api/v2/reports/olap",
+            json=body,
+            timeout=120.0,
+        )
+        return self._extract_olap_rows(data)
+
+    async def fetch_product_expenses(
+        self,
+        organization_id: str,
+        date_from: date,
+        date_to: date,
+    ) -> list[dict[str, Any]]:
+        """Server OLAP STOCK rows for food-cost enrichment.
+
+        iiko Server does not use organizationId in the OLAP v2 request; the
+        argument is accepted to keep the Cloud/Server client protocol uniform.
+        """
+        filters: dict[str, Any] = {
+            "OpenDate.Typed": {
+                "filterType": "DateRange",
+                "from": date_from.isoformat(),
+                "to": date_to.isoformat(),
+                "includeLow": True,
+                "includeHigh": True,
+            },
+        }
+        if self._department_id:
+            filters["Department.Id"] = {
+                "filterType": "IncludeValues",
+                "values": [self._department_id],
+            }
+
+        body: dict[str, Any] = {
+            "reportType": "STOCK",
+            "buildSummary": False,
+            "groupByRowFields": ["DishId", "DishName", "ProductName"],
+            "groupByColFields": [],
+            "aggregateFields": ["ProductCostBase.ProductCost", "Amount"],
             "filters": filters,
         }
         data = await self._request(

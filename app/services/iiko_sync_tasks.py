@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -196,8 +197,45 @@ async def run_inventory_sync(org_id: int) -> dict[str, Any]:
     logger.info("run_inventory_sync org_id=%s ok=%s stats=%s", org_id, ok, stats)
     return {"ok": ok, "error": error, "stats": stats, "org_id": org_id}
 
+async def run_food_cost_sync(org_id: int, *, days: int = 30) -> dict[str, Any]:
+    """Enrich menu and sales facts with iiko food cost for one organization."""
+    from app.db.session import async_session_factory
+    from app.services.events import publish_event
+    from app.services.iiko_food_cost_sync import sync_food_cost_for_org
+    from app.services.order_logic import invalidate_menu_context_cache
+
+    today = datetime.now(tz=timezone.utc).date()
+    date_from = today - timedelta(days=max(1, int(days)))
+    date_to = today
+    ok = False
+    error = ""
+    updated = 0
+    async with async_session_factory() as db:
+        try:
+            updated = await sync_food_cost_for_org(db, int(org_id), date_from, date_to)
+            ok = True
+        except Exception as exc:
+            error = str(exc)
+            logger.warning("run_food_cost_sync org_id=%s failed: %s", org_id, exc)
+        await db.commit()
+
+    invalidate_menu_context_cache(org_id)
+    stats = {"updated": int(updated), "date_from": date_from.isoformat(), "date_to": date_to.isoformat()}
+    await publish_event(
+        "menu_cost_updated",
+        {
+            "organization_id": org_id,
+            "ok": ok,
+            "stats": stats,
+            "error": error or None,
+        },
+    )
+    logger.info("run_food_cost_sync org_id=%s ok=%s stats=%s", org_id, ok, stats)
+    return {"ok": ok, "error": error, "stats": stats, "org_id": org_id}
+
 
 async def run_full_iiko_sync_for_org(org_id: int) -> None:
     """Полная ручная синхронизация: номенклатура, затем стоп-листы (для BackgroundTasks)."""
     await run_menu_sync(org_id)
     await run_stoplist_sync(org_id)
+    await run_food_cost_sync(org_id)

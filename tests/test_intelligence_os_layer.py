@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from datetime import date
+
 import pytest
 
-from app.integrations.iiko_server_client import password_for_server_auth
+from app.integrations.iiko_server_client import IikoServerClient, password_for_server_auth
 from app.services.copilot.engine import _period_from_question, _select_tools
 from app.services.iiko_olap_sales_sync import _parse_date, _parse_decimal, _row_get
 

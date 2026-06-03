@@ -11,9 +11,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import IikoSyncRun, MenuItem, SalesFactItem, SalesFactOrder
-from app.integrations.iiko_client import IikoClient
 from app.services.iiko_olap_sales_sync import _parse_decimal, _row_get
-from app.services.org_iiko import resolve_org_iiko_credentials
+from app.services.iiko_sales_factory import resolve_iiko_sales_client
 
 logger = logging.getLogger(__name__)
 
@@ -36,13 +35,19 @@ async def sync_food_cost_for_org(
     date_from: date,
     date_to: date,
 ) -> int:
-    creds = await resolve_org_iiko_credentials(db, org_id)
-    if creds is None:
-        await _record_run(db, org_id, ok=False, rows=0, error_text="iiko cloud credentials missing")
+    resolved = await resolve_iiko_sales_client(db, org_id)
+    if resolved is None:
+        await _record_run(db, org_id, ok=False, rows=0, error_text="iiko credentials missing")
         return 0
+    client, creds, data_source = resolved
 
-    async with IikoClient(api_login=creds.api_login) as client:
-        rows = await client.fetch_product_expenses(creds.iiko_organization_id, date_from, date_to)
+    try:
+        async with client as active_client:
+            rows = await active_client.fetch_product_expenses(creds.iiko_organization_id, date_from, date_to)
+    except Exception as exc:
+        await _record_run(db, org_id, ok=False, rows=0, error_text=str(exc))
+        logger.warning("iiko food-cost sync org=%s source=%s failed: %s", org_id, data_source, exc)
+        return 0
 
     costs_by_id: dict[str, Decimal] = {}
     costs_by_name: dict[str, Decimal] = {}
@@ -99,7 +104,7 @@ async def sync_food_cost_for_org(
             item.cost = (cost * max(qty, Decimal("1"))).quantize(Decimal("0.01"))
 
     await _record_run(db, org_id, ok=True, rows=updated)
-    logger.info("iiko food-cost sync org=%s menu_items_updated=%s", org_id, updated)
+    logger.info("iiko food-cost sync org=%s source=%s rows=%s menu_items_updated=%s", org_id, data_source, len(rows), updated)
     return updated
 
 

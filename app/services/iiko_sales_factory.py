@@ -30,6 +30,13 @@ class IikoSalesClient(Protocol):
         date_to: date,
     ) -> list[dict[str, Any]]: ...
 
+    async def fetch_product_expenses(
+        self,
+        organization_id: str,
+        date_from: date,
+        date_to: date,
+    ) -> list[dict[str, Any]]: ...
+
 
 def org_sales_data_source(org: Organization | None) -> str:
     raw = (getattr(org, "iiko_data_source", "") or settings.iiko_data_source or "cloud").strip().lower()
