@@ -30,6 +30,7 @@
 - Добит продуктовый слой Intelligence OS: role-based quick questions в Copilot, AI Center inbox для insight deliveries с read/dismiss/action_taken, UI настроек delivery rules, ROI-блок "совет -> выполнено -> результат", supplier/campaign memory autogeneration и baseline causal drilldown по category/dish/hour.
 - Исправлен деплойный Alembic-fail на Postgres: revision id `20260603_intelos_sales_copilot_layer` укорочен до `20260603_intelos_sales_copilot`, чтобы помещаться в `alembic_version.version_num varchar(32)`; добавлен регрессионный тест на длину revision id.
 - Исправлена автоподгрузка себестоимости: ручная iiko sync теперь запускает food-cost enrichment, а `iiko_food_cost_sync` использует общий Cloud/Server sales client; iiko Server получает себестоимость через OLAP STOCK.
+- Уточнён food-cost sync: `IIKO_DATA_SOURCE=server` из `.env` больше не перебивается дефолтным `Organization.iiko_data_source=cloud` для дефолтной организации; парсер распознаёт вложенные/альтернативные поля iiko и пишет диагностику, если строки себестоимости не пришли, не распознаны или не совпали с меню.
 - Исправлен ложный перевод на оператора при AI timeout: enriched technical fallback больше не смешивается с plov-kazan подсказкой и не переводит гостя в sticky `HUMAN_MODE`.
 
 ### Документация — реструктуризация CHANGELOG

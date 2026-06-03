@@ -246,7 +246,9 @@ async def _build_olap_status(db: AsyncSession, *, organization_id: int) -> dict:
             .limit(1),
         )
     ).scalar_one_or_none()
-    configured_source = (getattr(org, "iiko_data_source", "") or "cloud").strip().lower()
+    from app.services.iiko_sales_factory import org_sales_data_source
+
+    configured_source = org_sales_data_source(org)
     error = (latest.error_text or "") if latest is not None else ""
     olap_allowed = None
     if latest is not None:

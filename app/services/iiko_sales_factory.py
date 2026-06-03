@@ -39,7 +39,11 @@ class IikoSalesClient(Protocol):
 
 
 def org_sales_data_source(org: Organization | None) -> str:
-    raw = (getattr(org, "iiko_data_source", "") or settings.iiko_data_source or "cloud").strip().lower()
+    org_raw = (getattr(org, "iiko_data_source", "") or "").strip().lower()
+    env_raw = (settings.iiko_data_source or "").strip().lower()
+    if env_raw == "server" and (org is None or int(getattr(org, "id", 0) or 0) == int(settings.default_organization_id)):
+        return "server"
+    raw = org_raw or env_raw or "cloud"
     return "server" if raw == "server" else "cloud"
 
 
@@ -49,14 +53,17 @@ async def resolve_iiko_sales_client(
 ) -> tuple[IikoSalesClient, OrgIikoCredentials, str] | None:
     """Return client + Cloud org credentials + selected data source."""
     org = await db.get(Organization, organization_id)
-    cloud_creds = await resolve_org_iiko_credentials(db, organization_id)
-    if cloud_creds is None:
-        return None
-
     source = org_sales_data_source(org)
     if source == "server":
         server_creds = await resolve_org_iiko_server_credentials(db, organization_id)
         if server_creds is not None:
+            cloud_creds = await resolve_org_iiko_credentials(db, organization_id)
+            if cloud_creds is None:
+                cloud_creds = OrgIikoCredentials(
+                    api_login="",
+                    iiko_organization_id=(settings.iiko_organization_id or "").strip(),
+                    terminal_group_id=(settings.iiko_terminal_group_id or "").strip(),
+                )
             return (
                 IikoServerClient(
                     host=server_creds.host,
@@ -69,4 +76,7 @@ async def resolve_iiko_sales_client(
                 "server",
             )
 
+    cloud_creds = await resolve_org_iiko_credentials(db, organization_id)
+    if cloud_creds is None:
+        return None
     return IikoClient(api_login=cloud_creds.api_login), cloud_creds, "cloud"

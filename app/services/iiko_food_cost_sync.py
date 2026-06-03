@@ -11,21 +11,82 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import IikoSyncRun, MenuItem, SalesFactItem, SalesFactOrder
-from app.services.iiko_olap_sales_sync import _parse_decimal, _row_get
+from app.services.iiko_olap_sales_sync import _parse_decimal
 from app.services.iiko_sales_factory import resolve_iiko_sales_client
 
 logger = logging.getLogger(__name__)
 
 SYNC_KIND_FOOD_COST = "food_cost_iiko"
 
+ID_FIELDS = (
+    "DishId",
+    "DishId.Id",
+    "ProductId",
+    "Product.Id",
+    "ProductId.Id",
+    "productId",
+    "id",
+)
+NAME_FIELDS = (
+    "DishName",
+    "DishName.Name",
+    "ProductName",
+    "Product.Name",
+    "productName",
+    "name",
+)
+UNIT_COST_FIELDS = (
+    "ProductCostBase.ProductCost",
+    "ProductCostBase.Cost",
+    "ProductCost",
+    "CostPrice",
+    "costPrice",
+    "Cost",
+    "cost",
+    "price",
+)
+TOTAL_COST_FIELDS = (
+    "ProductCostBase.Sum",
+    "ProductCostBase.Total",
+    "ProductCostBase",
+    "Sum",
+    "sum",
+    "CostSum",
+    "costSum",
+    "totalCost",
+    "TotalCost",
+)
+QUANTITY_FIELDS = ("Amount", "amount", "Qty", "qty", "Quantity", "quantity")
+
 
 def _norm_name(value: str) -> str:
     return " ".join((value or "").strip().lower().split())
 
 
+def _deep_row_get(row: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in row:
+            return row[key]
+        current: Any = row
+        for part in key.split("."):
+            if isinstance(current, dict) and part in current:
+                current = current[part]
+            else:
+                current = None
+                break
+        if current is not None:
+            return current
+    return None
+
+
 def _cost_from_row(row: dict[str, Any]) -> Decimal | None:
-    raw = _row_get(row, "ProductCostBase.ProductCost", "ProductCost", "Cost", "cost")
+    raw = _deep_row_get(row, *UNIT_COST_FIELDS)
     cost = _parse_decimal(raw)
+    if cost <= 0:
+        total = _parse_decimal(_deep_row_get(row, *TOTAL_COST_FIELDS))
+        qty = _parse_decimal(_deep_row_get(row, *QUANTITY_FIELDS))
+        if total > 0 and qty > 0:
+            cost = total / qty
     return cost if cost > 0 else None
 
 
@@ -51,12 +112,14 @@ async def sync_food_cost_for_org(
 
     costs_by_id: dict[str, Decimal] = {}
     costs_by_name: dict[str, Decimal] = {}
+    rows_with_cost = 0
     for row in rows:
         cost = _cost_from_row(row)
         if cost is None:
             continue
-        dish_id = str(_row_get(row, "DishId", "ProductId", "productId") or "").strip()
-        dish_name = str(_row_get(row, "DishName", "ProductName", "productName") or "").strip()
+        rows_with_cost += 1
+        dish_id = str(_deep_row_get(row, *ID_FIELDS) or "").strip()
+        dish_name = str(_deep_row_get(row, *NAME_FIELDS) or "").strip()
         if dish_id:
             costs_by_id[dish_id] = cost
         name_key = _norm_name(dish_name)
@@ -103,8 +166,24 @@ async def sync_food_cost_for_org(
             qty = _parse_decimal(item.quantity, Decimal("1"))
             item.cost = (cost * max(qty, Decimal("1"))).quantize(Decimal("0.01"))
 
-    await _record_run(db, org_id, ok=True, rows=updated)
-    logger.info("iiko food-cost sync org=%s source=%s rows=%s menu_items_updated=%s", org_id, data_source, len(rows), updated)
+    warning = None
+    if not rows:
+        warning = f"iiko returned no product expense/STOCK rows for {date_from}..{date_to}"
+    elif rows_with_cost == 0:
+        warning = f"iiko returned {len(rows)} product expense/STOCK rows, but no recognized cost fields"
+    elif updated == 0:
+        warning = f"iiko returned {rows_with_cost} rows with cost, but none matched active menu items"
+
+    await _record_run(db, org_id, ok=True, rows=updated, error_text=warning)
+    logger.info(
+        "iiko food-cost sync org=%s source=%s rows=%s rows_with_cost=%s menu_items_updated=%s warning=%s",
+        org_id,
+        data_source,
+        len(rows),
+        rows_with_cost,
+        updated,
+        warning,
+    )
     return updated
 
 
