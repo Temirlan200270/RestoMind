@@ -116,6 +116,15 @@ def test_very_old_draft_resets_even_without_greeting() -> None:
     assert _should_reset_existing_draft_for_message(draft, "Плов")
 
 
+def test_human_mode_auto_resume_detects_new_order_hint() -> None:
+    from app.api.webhooks import _should_resume_bot_from_human_mode
+
+    assert _should_resume_bot_from_human_mode("Есть плов?")
+    assert _should_resume_bot_from_human_mode("Хочу заказать")
+    assert _should_resume_bot_from_human_mode("Меню")
+    assert not _should_resume_bot_from_human_mode("Оператор ещё здесь?")
+
+
 @pytest.mark.asyncio
 async def test_technical_ai_fallback_does_not_enter_human_mode(db_with_menu: AsyncSession) -> None:
     from app.services.ai_brain import _FALLBACK_RESPONSE

@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.db.models import ChatLog, Organization, User
 from app.db.session import get_db, redis_client
@@ -32,8 +33,10 @@ from app.services.telegram_customer import (
 )
 from app.services.dialog_mgr import (
     UserState,
+    clear_human_mode_ttl_meta,
     get_user_state,
     set_user_state_durable,
+    with_human_mode_ttl_meta,
 )
 from app.services.bot_sla_status import (
     SHORT_MODE_THRESHOLD,
@@ -370,6 +373,9 @@ async def takeover_chat(
     org_id = admin_org_from_session(request)
     user = await find_user_by_phone(db, org_id, phone)
     phone = user.phone if user is not None else _canonical_chat_phone(phone)
+    if user is not None:
+        user.meta_json = with_human_mode_ttl_meta(user.meta_json)
+        flag_modified(user, "meta_json")
     await set_user_state_durable(
         redis_client,
         phone=phone,
@@ -419,6 +425,9 @@ async def release_chat(
     org_id = admin_org_from_session(request)
     user = await find_user_by_phone(db, org_id, phone)
     phone = user.phone if user is not None else _canonical_chat_phone(phone)
+    if user is not None:
+        user.meta_json = clear_human_mode_ttl_meta(user.meta_json)
+        flag_modified(user, "meta_json")
     await set_user_state_durable(
         redis_client,
         phone=phone,

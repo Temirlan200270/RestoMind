@@ -60,11 +60,13 @@ from app.services.dialog_mgr import (
     clear_pending_booking,
     clear_pending_order,
     clear_pending_order_durable,
+    clear_human_mode_ttl_meta,
     get_chat_history,
     get_pending_booking,
     get_pending_order,
     get_user_state,
     is_cancel_all_message,
+    parse_human_mode_until,
     set_pending_booking,
     set_pending_order,
     set_user_state,
@@ -109,6 +111,7 @@ from app.services.intent_router import (
     confirm_order,
     get_open_draft_order,
     get_or_create_user,
+    RouteResult,
     route_intent,
 )
 from app.services.order_logic import (
@@ -1464,6 +1467,15 @@ def _should_reset_existing_draft_for_message(draft: Order, message_text: str) ->
     return False
 
 
+def _should_resume_bot_from_human_mode(message_text: str) -> bool:
+    """Explicit new-session phrases let a customer return to bot without operator action."""
+    text = (message_text or "").strip().lower()
+    if not text:
+        return False
+    compact = re.sub(r"\s+", " ", text)
+    return any(h in compact for h in _NEW_CONVERSATION_HINTS)
+
+
 async def _handle_cancel_all_in_chatting(
     phone: str,
     message_text: str,
@@ -1635,6 +1647,7 @@ async def _process_message_inner(
         pipe_sw = pipeline_sw or PipelineStopwatch()
         active_location_id: int | None = None
         state = await get_user_state(redis_client, phone, organization_id=organization_id)
+        preflight_session_version: int | None = None
 
         wmid = (whatsapp_message_id or "").strip()
         if not await check_rate_limit(phone):
@@ -1655,6 +1668,9 @@ async def _process_message_inner(
                 ),
             )
             ai_paused_db = bool(u_row and getattr(u_row, "ai_paused", False))
+            preflight_session_version = (
+                int(getattr(u_row, "session_version", 0) or 0) if u_row is not None else None
+            )
             db_human_mode = False
             if u_row is not None:
                 db_human_mode = (
@@ -1670,10 +1686,62 @@ async def _process_message_inner(
                 await clear_ai_snooze_if_expired(db_u, u_row)
                 ai_snooze_active = ai_snooze_is_active(u_row)
                 await db_u.commit()
+            if u_row is not None and db_human_mode and not ai_paused_db:
+                human_mode_until = parse_human_mode_until(getattr(u_row, "meta_json", None))
+                if human_mode_until is not None and human_mode_until <= datetime.now(timezone.utc):
+                    u_row.meta_json = clear_human_mode_ttl_meta(getattr(u_row, "meta_json", None))
+                    await update_user_session_fields_in_db(
+                        db_u,
+                        phone=phone,
+                        organization_id=organization_id,
+                        current_state=UserState.CHATTING.value,
+                        transition_source="webhooks.auto_resume",
+                        transition_reason="human_mode_ttl_expired",
+                        transition_context=trace_payload(trace_id=trace_id, conversation_id=conversation_id),
+                    )
+                    await db_u.commit()
+                    await set_user_state(
+                        redis_client, phone, UserState.CHATTING, organization_id=organization_id,
+                    )
+                    state = UserState.CHATTING
+                    db_human_mode = False
+                    preflight_session_version = None
 
         if db_human_mode and state != UserState.HUMAN_MODE:
             state = UserState.HUMAN_MODE
             await set_user_state(redis_client, phone, UserState.HUMAN_MODE, organization_id=organization_id)
+
+        if (
+            db_human_mode
+            and not ai_paused_db
+            and not ai_snooze_active
+            and _should_resume_bot_from_human_mode(message_text)
+        ):
+            async with async_session_factory() as db_resume:
+                resume_user = await db_resume.scalar(
+                    select(User).where(
+                        User.phone == phone,
+                        User.organization_id == organization_id,
+                    ),
+                )
+                if resume_user is not None:
+                    resume_user.meta_json = clear_human_mode_ttl_meta(getattr(resume_user, "meta_json", None))
+                    await update_user_session_fields_in_db(
+                        db_resume,
+                        phone=phone,
+                        organization_id=organization_id,
+                        current_state=UserState.CHATTING.value,
+                        transition_source="webhooks.auto_resume",
+                        transition_reason="new_conversation_hint",
+                        transition_context=trace_payload(trace_id=trace_id, conversation_id=conversation_id),
+                    )
+                await db_resume.commit()
+            await set_user_state(
+                redis_client, phone, UserState.CHATTING, organization_id=organization_id,
+            )
+            state = UserState.CHATTING
+            db_human_mode = False
+            preflight_session_version = None
 
         # Голос без мультимодального чата: сначала текст (подтверждения, оператор)
         if voice_bytes is not None and (
@@ -2377,25 +2445,60 @@ async def _process_message_inner(
         post_commit_state: UserState | None = None
         post_commit_pending_order: int | None = None
         post_commit_pending_booking: int | None = None
+        db_state_applied = True
         async with async_session_factory() as db:
-            result = await route_intent(
-                db,
-                phone,
-                ai_response,
-                menu_items=menu_items,
-                organization_id=organization_id,
-                inbound_message_id=wmid,
-                sales_gastro_hint=sales_gastro_hint,
-                sales_target_iiko_ids=sales_target_iiko_ids,
-                newly_stopped_names=fresh_stopped,
-                trace_id=trace_id,
-                conversation_id=conversation_id,
-                location_id=active_location_id,
-                draft_order=read_ctx.draft_row,
-                user=read_ctx.user,
-                org=read_ctx.org,
-                user_message=message_text,
+            current_db_row = await db.execute(
+                select(User.current_state, User.session_version).where(
+                    User.phone == phone,
+                    User.organization_id == organization_id,
+                ),
             )
+            current_db_state, current_session_version = (
+                current_db_row.first() or (None, None)
+            )
+            session_version_changed = (
+                preflight_session_version is not None
+                and current_session_version is not None
+                and int(current_session_version or 0) != preflight_session_version
+            )
+            if (
+                normalize_conversation_state(current_db_state) != normalize_conversation_state(state.value)
+                or session_version_changed
+            ):
+                db_state_applied = False
+                result = RouteResult(reply_text="")
+                logger.info(
+                    "Skip stale LLM route org=%s phone=%s expected_state=%s actual_state=%s "
+                    "expected_version=%s actual_version=%s",
+                    organization_id,
+                    phone,
+                    state.value,
+                    normalize_conversation_state(current_db_state).value,
+                    preflight_session_version,
+                    current_session_version,
+                )
+            else:
+                result = await route_intent(
+                    db,
+                    phone,
+                    ai_response,
+                    menu_items=menu_items,
+                    organization_id=organization_id,
+                    inbound_message_id=wmid,
+                    sales_gastro_hint=sales_gastro_hint,
+                    sales_target_iiko_ids=sales_target_iiko_ids,
+                    newly_stopped_names=fresh_stopped,
+                    trace_id=trace_id,
+                    conversation_id=conversation_id,
+                    location_id=active_location_id,
+                    draft_order=read_ctx.draft_row,
+                    user=read_ctx.user,
+                    org=read_ctx.org,
+                    user_message=message_text,
+                )
+            if not db_state_applied:
+                await db.commit()
+                return
             log_pipeline_stage(
                 "route_ok",
                 phone=phone,
@@ -2422,11 +2525,17 @@ async def _process_message_inner(
                 db_state_kwargs["current_pending_booking_id"] = (
                     int(result.pending_booking_id) if result.pending_booking_id else None
                 )
-            await update_user_session_fields_in_db(db, **db_state_kwargs)
+            db_state_applied = await update_user_session_fields_in_db(
+                db,
+                **db_state_kwargs,
+                expected_current_state=state.value,
+                expected_session_version=preflight_session_version,
+            )
 
-            post_commit_state = result.new_state
-            post_commit_pending_order = result.pending_order_id
-            post_commit_pending_booking = result.pending_booking_id
+            if db_state_applied:
+                post_commit_state = result.new_state
+                post_commit_pending_order = result.pending_order_id
+                post_commit_pending_booking = result.pending_booking_id
 
             assistant_meta = {
                 "intent": ai_response.intent,

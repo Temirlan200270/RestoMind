@@ -425,6 +425,7 @@ async def _apply_sqlite_startup_schema_patches() -> None:
         "ALTER TABLE organizations ADD COLUMN review_url_2gis VARCHAR(512)",
         "ALTER TABLE users ADD COLUMN marketing_opt_out INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE users ADD COLUMN ai_snoozed_until TIMESTAMP",
+        "ALTER TABLE users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 0",
     ):
         try:
             async with async_engine.begin() as conn:

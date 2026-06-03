@@ -32,6 +32,12 @@ class Settings(BaseSettings):
         default="development",
         validation_alias=AliasChoices("APP_ENV", "ENVIRONMENT", "app_environment"),
     )
+    human_mode_ttl_minutes: int = Field(
+        default=240,
+        ge=0,
+        le=10_080,
+        validation_alias=AliasChoices("HUMAN_MODE_TTL_MINUTES", "human_mode_ttl_minutes"),
+    )
 
     # --- Режим базы данных ---
     # "sqlite" — работает без установки (по умолчанию для разработки)

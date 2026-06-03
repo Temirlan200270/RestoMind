@@ -14,6 +14,7 @@ from app.services.trace_context import (
     get_conversation_id,
     get_trace_id,
     stamp_order_meta_trace,
+    publish_chat_event,
     trace_context,
 )
 
@@ -52,6 +53,31 @@ def test_stamp_order_meta_trace() -> None:
     assert meta["trace_id"] == "t1"
     assert meta["conversation_id"] == "c1"
     assert meta["payment_method"] == "cash"
+
+
+@pytest.mark.asyncio
+async def test_publish_chat_event_includes_chat_log_id_alias(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_publish_event(event_type: str, data: dict) -> None:
+        captured["event_type"] = event_type
+        captured["data"] = data
+
+    monkeypatch.setattr("app.services.events.publish_event", fake_publish_event)
+
+    await publish_chat_event(
+        phone="+77005550001",
+        role="assistant",
+        content="Ок",
+        organization_id=1,
+        chat_log_id=123,
+    )
+
+    assert captured["event_type"] == "new_message"
+    data = captured["data"]
+    assert isinstance(data, dict)
+    assert data["id"] == 123
+    assert data["chat_log_id"] == 123
 
 
 @pytest.mark.asyncio

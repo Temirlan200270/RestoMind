@@ -204,6 +204,7 @@ async def publish_chat_event(
     }
     if chat_log_id is not None:
         payload["id"] = chat_log_id
+        payload["chat_log_id"] = chat_log_id
     payload.update(extra)
     await publish_event("new_message", payload)
 

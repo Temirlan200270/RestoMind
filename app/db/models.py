@@ -406,6 +406,13 @@ class User(Base):
         String(50), default="chatting", server_default="chatting",
         comment="Состояние диалога (backup для Redis при eviction)",
     )
+    session_version: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        server_default="0",
+        nullable=False,
+        comment="Optimistic lock for durable dialog state writes",
+    )
     current_pending_order_id: Mapped[int | None] = mapped_column(
         Integer, nullable=True, default=None,
         comment="ID заказа, ожидающего подтверждения (backup для Redis)",

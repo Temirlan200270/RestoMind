@@ -8,6 +8,7 @@ State Recovery: при каждом изменении состояния дуб
 
 import json
 import logging
+from datetime import datetime, timedelta, timezone
 from enum import StrEnum
 from typing import Any
 
@@ -24,6 +25,7 @@ logger = logging.getLogger(__name__)
 MAX_HISTORY_LENGTH = 20
 HISTORY_TTL = 86400
 STATE_TTL = 86400
+HUMAN_MODE_UNTIL_META_KEY = "human_mode_until"
 
 CONFIRM_WORDS = frozenset({
     "да", "yes", "ок", "подтверждаю", "верно", "давай", "aga", "конечно",
@@ -56,6 +58,49 @@ class UserState(StrEnum):
     CONFIRMING_ORDER = "confirming_order"
     CONFIRMING_BOOKING = "confirming_booking"
     HUMAN_MODE = "human_mode"
+
+
+def parse_human_mode_until(meta_json: dict[str, Any] | None) -> datetime | None:
+    """Read HUMAN_MODE TTL deadline from User.meta_json."""
+    raw = (meta_json or {}).get(HUMAN_MODE_UNTIL_META_KEY)
+    if not raw:
+        return None
+    try:
+        value = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def human_mode_ttl_deadline(now: datetime | None = None) -> datetime | None:
+    """Return configured HUMAN_MODE deadline or None when TTL is disabled."""
+    from app.core.config import settings
+
+    ttl_minutes = int(settings.human_mode_ttl_minutes or 0)
+    if ttl_minutes <= 0:
+        return None
+    base = now or datetime.now(timezone.utc)
+    return base + timedelta(minutes=ttl_minutes)
+
+
+def with_human_mode_ttl_meta(meta_json: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Return meta_json with refreshed HUMAN_MODE TTL marker."""
+    meta = dict(meta_json or {})
+    until = human_mode_ttl_deadline()
+    if until is None:
+        meta.pop(HUMAN_MODE_UNTIL_META_KEY, None)
+    else:
+        meta[HUMAN_MODE_UNTIL_META_KEY] = until.isoformat()
+    return meta or None
+
+
+def clear_human_mode_ttl_meta(meta_json: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Return meta_json without HUMAN_MODE TTL marker."""
+    meta = dict(meta_json or {})
+    meta.pop(HUMAN_MODE_UNTIL_META_KEY, None)
+    return meta or None
 
 
 def _effective_org(organization_id: int | None) -> int:
@@ -105,7 +150,9 @@ async def update_user_session_fields_in_db(
     transition_source: str = "session_update",
     transition_reason: str | None = None,
     transition_context: dict[str, Any] | None = None,
-) -> None:
+    expected_current_state: str | None = None,
+    expected_session_version: int | None = None,
+) -> bool:
     """
     Обновляет durable-поля сессии в таблице User *в рамках текущей DB-транзакции*.
     Никаких отдельный сессий/commit здесь быть не должно: иначе возможен рассинхрон Redis↔БД при падении.
@@ -119,10 +166,11 @@ async def update_user_session_fields_in_db(
     org = _effective_org(organization_id)
     patch: dict[str, Any] = {}
     prev_state_raw: str | None = None
+    prev_session_version: int | None = None
     user_id: int | None = None
-    if current_state is not None:
+    if current_state is not None or expected_current_state is not None or expected_session_version is not None:
         row = await db.execute(
-            sa_select(User.id, User.current_state)
+            sa_select(User.id, User.current_state, User.session_version)
             .where(User.phone == phone, User.organization_id == org)
             .limit(1),
         )
@@ -130,18 +178,61 @@ async def update_user_session_fields_in_db(
         if existing is not None:
             user_id = int(existing[0])
             prev_state_raw = str(existing[1] or "")
+            prev_session_version = int(existing[2] or 0)
+        if expected_current_state is not None:
+            expected = normalize_conversation_state(expected_current_state)
+            actual = normalize_conversation_state(prev_state_raw)
+            if actual != expected:
+                logger.info(
+                    "Skip stale session state update org=%s phone=%s expected=%s actual=%s next=%s source=%s",
+                    org,
+                    phone,
+                    expected.value,
+                    actual.value,
+                    normalize_conversation_state(current_state).value,
+                    transition_source,
+                )
+                return False
+        if expected_session_version is not None and prev_session_version != expected_session_version:
+            logger.info(
+                "Skip stale session update org=%s phone=%s expected_version=%s actual_version=%s source=%s",
+                org,
+                phone,
+                expected_session_version,
+                prev_session_version,
+                transition_source,
+            )
+            return False
+    if current_state is not None:
         patch["current_state"] = normalize_conversation_state(current_state).value
     if current_pending_order_id is not _NOCHANGE:
         patch["current_pending_order_id"] = current_pending_order_id
     if current_pending_booking_id is not _NOCHANGE:
         patch["current_pending_booking_id"] = current_pending_booking_id
     if not patch:
-        return
-    await db.execute(
+        return True
+    patch["session_version"] = User.session_version + 1
+    stmt = (
         sa_update(User)
         .where(User.phone == phone, User.organization_id == org)
-        .values(**patch),
+        .values(**patch)
     )
+    if expected_current_state is not None:
+        stmt = stmt.where(User.current_state == normalize_conversation_state(expected_current_state).value)
+    if expected_session_version is not None:
+        stmt = stmt.where(User.session_version == expected_session_version)
+    result = await db.execute(stmt)
+    if (expected_current_state is not None or expected_session_version is not None) and result.rowcount == 0:
+        logger.info(
+            "Skip stale session update after optimistic write org=%s phone=%s expected_state=%s "
+            "expected_version=%s source=%s",
+            org,
+            phone,
+            expected_current_state,
+            expected_session_version,
+            transition_source,
+        )
+        return False
     if current_state is not None:
         prev_state = normalize_conversation_state(prev_state_raw)
         next_state = normalize_conversation_state(current_state)
@@ -163,6 +254,7 @@ async def update_user_session_fields_in_db(
                     },
                 ),
             )
+    return True
 
 
 async def set_user_state_durable(
