@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Order, OrderStatus, User
+from app.db.models import MenuItem, Order, OrderStatus, User
 from app.services.dialog_mgr import (
     UserState,
     is_cancel_all_message,
@@ -148,6 +148,42 @@ async def test_enriched_technical_ai_fallback_does_not_enter_human_mode(db_with_
 
     assert result.new_state == UserState.CHATTING
     assert "Напишите ещё раз" in result.reply_text
+
+
+@pytest.mark.asyncio
+async def test_partial_plov_variant_asks_to_choose_matching_menu_item(db_with_menu: AsyncSession) -> None:
+    menu = [
+        MenuItem(
+            organization_id=1,
+            name="Плов Праздничный баранина",
+            price=2790,
+            is_available=True,
+            iiko_id="plov-holiday-lamb",
+        ),
+        MenuItem(
+            organization_id=1,
+            name="Плов Праздничный говядина",
+            price=2890,
+            is_available=True,
+            iiko_id="plov-holiday-beef",
+        ),
+    ]
+    result = await route_intent(
+        db_with_menu,
+        "+77001114455",
+        AIBrainResponse(
+            intent="order",
+            reply_text="Уточню вариант.",
+            items=[OrderItem(name="Праздничный", quantity=1)],
+        ),
+        organization_id=1,
+        menu_items=menu,
+    )
+
+    assert "Плов Праздничный баранина" in result.reply_text
+    assert "Плов Праздничный говядина" in result.reply_text
+    assert "Какой добавить" in result.reply_text
+    assert "не наш" not in result.reply_text.lower()
 
 
 def test_payment_gate_does_not_request_confirmation_without_delivery_address() -> None:

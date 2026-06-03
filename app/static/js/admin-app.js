@@ -7078,11 +7078,21 @@ function adminMixinWebSocketEvents() {
             // Обновляем кэш чата, даже если он не открыт сейчас
             const cachedForMsg = this._chatCacheGet(msgPhone);
             if (cachedForMsg) {
-                cachedForMsg.messages.push(newMsg);
+                const existingIdx = cachedForMsg.messages.findIndex((m) => Number(m.id) === Number(newMsg.id));
+                if (existingIdx >= 0) {
+                    cachedForMsg.messages.splice(existingIdx, 1, { ...cachedForMsg.messages[existingIdx], ...newMsg });
+                } else {
+                    cachedForMsg.messages.push(newMsg);
+                }
                 cachedForMsg.ts = Date.now();
             }
             if (adminPhonesMatch(msgPhone, this.activeChatPhone)) {
-                this.chatMessages.push(newMsg);
+                const existingIdx = this.chatMessages.findIndex((m) => Number(m.id) === Number(newMsg.id));
+                if (existingIdx >= 0) {
+                    this.chatMessages.splice(existingIdx, 1, { ...this.chatMessages[existingIdx], ...newMsg });
+                } else {
+                    this.chatMessages.push(newMsg);
+                }
                 this.scrollChatToBottom();
             }
 

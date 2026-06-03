@@ -314,6 +314,15 @@ async def validate_order(
 
         # Нечёткий поиск, если точного совпадения нет
         if entry is None and menu_names:
+            partial_matches = [
+                candidate
+                for candidate in menu_names
+                if len(name_lower) >= 3 and name_lower in candidate
+            ]
+            if len(partial_matches) > 1:
+                unknown_items.append(item.name)
+                logger.info("Ambiguous partial menu match: '%s' -> %s", name_lower, partial_matches[:5])
+                continue
             matches = get_close_matches(name_lower, menu_names, n=1, cutoff=0.6)
             if matches:
                 matched_name = matches[0]

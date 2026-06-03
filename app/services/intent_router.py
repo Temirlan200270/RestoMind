@@ -132,6 +132,55 @@ def _draft_has_food_items(draft: Order | None) -> bool:
     )
 
 
+def _unknown_item_suggestion_reply(
+    unknown_items: list[str],
+    menu_items: list[MenuItem] | None,
+) -> str | None:
+    """Turn partial item names into a useful clarification instead of a dead-end error."""
+    if not unknown_items or not menu_items:
+        return None
+    blocks: list[str] = []
+    for raw_unknown in unknown_items[:3]:
+        unknown = " ".join((raw_unknown or "").strip().lower().split())
+        if len(unknown) < 3:
+            continue
+        candidates: list[MenuItem] = []
+        terms = [t for t in re.split(r"\s+", unknown) if len(t) >= 3]
+        for item in menu_items:
+            if not bool(getattr(item, "is_available", True)):
+                continue
+            name = " ".join((item.name or "").strip().lower().split())
+            if not name:
+                continue
+            if unknown in name or (terms and all(term in name for term in terms)):
+                candidates.append(item)
+        if not candidates:
+            continue
+        seen: set[str] = set()
+        names: list[str] = []
+        for item in candidates:
+            nm = (item.name or "").strip()
+            key = nm.lower()
+            if not nm or key in seen:
+                continue
+            seen.add(key)
+            price = getattr(item, "price", None)
+            if price is not None:
+                try:
+                    names.append(f"{nm} — {float(price):.0f} ₸")
+                except (TypeError, ValueError):
+                    names.append(nm)
+            else:
+                names.append(nm)
+            if len(names) >= 5:
+                break
+        if len(names) == 1:
+            blocks.append(f"Похоже, вы имели в виду: {names[0]}. Подтвердите, добавить эту позицию?")
+        elif names:
+            blocks.append(f"Нашёл варианты по «{raw_unknown}»: {', '.join(names)}. Какой добавить?")
+    return "\n".join(blocks).strip() or None
+
+
 def _blend_ai_with_stored_order_meta(ai: AIBrainResponse, meta: dict | None) -> AIBrainResponse:
     """
     При дельтах к корзине подставляем из черновика тип получения, оплату, адрес —
@@ -589,6 +638,9 @@ async def _handle_order(
                     location_id=location_id,
                 )
                 return RouteResult(reply_text=f"{ai_response.reply_text}\n\n{notice}")
+            suggestion = _unknown_item_suggestion_reply(validated.unknown_items, menu_items)
+            if suggestion:
+                return RouteResult(reply_text=f"{ai_response.reply_text}\n\n{suggestion}")
             unknown_list = ", ".join(validated.unknown_items) if validated.unknown_items else "—"
             return RouteResult(
                 reply_text=(
@@ -635,6 +687,9 @@ async def _handle_order(
                 location_id=location_id,
             )
             return RouteResult(reply_text=f"{ai_response.reply_text}\n\n{notice}")
+        suggestion = _unknown_item_suggestion_reply(validated.unknown_items, menu_items)
+        if suggestion:
+            return RouteResult(reply_text=f"{ai_response.reply_text}\n\n{suggestion}")
         unknown_list = ", ".join(validated.unknown_items) if validated.unknown_items else "—"
         return RouteResult(
             reply_text=(
