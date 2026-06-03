@@ -131,6 +131,25 @@ async def test_technical_ai_fallback_does_not_enter_human_mode(db_with_menu: Asy
     assert "Напишите ещё раз" in result.reply_text
 
 
+@pytest.mark.asyncio
+async def test_enriched_technical_ai_fallback_does_not_enter_human_mode(db_with_menu: AsyncSession) -> None:
+    from app.services.ai_brain import _FALLBACK_RESPONSE
+
+    enriched = (
+        _FALLBACK_RESPONSE.reply_text
+        + "\n\nСейчас на стопе: Фитнес плов. Казаны по плову открываются в 12:00, 16:00, 19:00."
+    )
+    result = await route_intent(
+        db_with_menu,
+        "+77001112233",
+        AIBrainResponse(intent="escalate", reply_text=enriched),
+        organization_id=1,
+    )
+
+    assert result.new_state == UserState.CHATTING
+    assert "Напишите ещё раз" in result.reply_text
+
+
 def test_payment_gate_does_not_request_confirmation_without_delivery_address() -> None:
     from app.api.webhooks import _missing_fulfillment_after_payment_reply
 

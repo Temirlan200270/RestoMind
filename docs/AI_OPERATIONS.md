@@ -28,7 +28,7 @@ Intelligence не дублирует Analytics — он отвечает на в
 | Weekly digest | `owner_digest_delivery.py`, `owner_weekly_digest.py` | OI preview + cron Mon 10:00 org TZ |
 
 Deploy smoke: [`docs/DEPLOY_RUNBOOK.md`](DEPLOY_RUNBOOK.md) §8, `scripts/verify_owner_intel_schema.py`.  
-Alembic head: `20260604_telegram_org_mapping`.
+Alembic head: `20260603_menu_item_lifecycle`.
 
 ---
 
@@ -407,7 +407,7 @@ Location scope поддержан в:
 
 ## Final Mile — backend MVP
 
-Детали деплоя и эндпоинтов: [`docs/FINAL_MILE_IMPLEMENTED.md`](FINAL_MILE_IMPLEMENTED.md). **Ops/staging gate** (не «нет UI»): [`docs/REMAINING_UPDATES.md`](REMAINING_UPDATES.md).
+?????? ?????? ? ??????????: [`docs/FINAL_MILE_IMPLEMENTED.md`](FINAL_MILE_IMPLEMENTED.md). **Ops/staging gate**: [`docs/FINAL_MILE_OPS_SIGNOFF.md`](FINAL_MILE_OPS_SIGNOFF.md).
 
 ### SupplyMind
 

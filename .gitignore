@@ -18,6 +18,14 @@ venv/
 # Логи
 logs/
 
+# Local/generated integration diagnostics
+nomenclature.json
+payload.json
+*_payload.json
+iiko_nomenclature*.json
+scripts/_nomenclature_summary.txt
+docs/ui/baseline/*.png
+
 # IDE / OS
 .idea/
 .vscode/*

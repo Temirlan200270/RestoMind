@@ -1,6 +1,6 @@
 # Final Mile Implementation
 
-Implemented backend MVPs for the remaining Ultimate Platform modules.
+Historical Final Mile module index. Current product status lives in [`ROADMAP.md`](ROADMAP.md), deployment checks in [`DEPLOY_RUNBOOK.md`](DEPLOY_RUNBOOK.md), and Intelligence OS layers in [`INTELLIGENCE_OS_PLAN.md`](INTELLIGENCE_OS_PLAN.md).
 
 ## SupplyMind
 
@@ -41,13 +41,13 @@ Implemented backend MVPs for the remaining Ultimate Platform modules.
 
 ## Deployment Notes
 
-- Run `alembic upgrade head`; current head is `20260522_iiko_office_inventory`.
+- Run `alembic upgrade head`; current head is `20260603_menu_item_lifecycle`.
 - Restart web and ARQ worker processes after deploy, because new routes, models, cron ticks (`daily_os_digest_scheduled_tick`, `iiko_inventory_sync`, `external_reviews_sync`) load at import time.
 - Make sure org `timezone` values are valid IANA names; Daily OS Digest uses the organization timezone window.
 - Voice AI is disabled by default. Enable per organization with `POST /api/admin/intelligence/voice/config`.
 - SupplyMind: bulk snapshots, iiko Office sync, or manual pushes all land in `inventory_stock_snapshots`.
 
-## Admin UI status (2026-05-22)
+## Admin UI status (historical Final Mile snapshot)
 
 | Module | Backend | Admin UI | Gap status |
 |--------|---------|----------|------------|

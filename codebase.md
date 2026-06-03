@@ -159,7 +159,6 @@ RestoMind/
 ├── docs/CONVENTIONS.md            # инварианты разработки (контракт)
 ├── CHANGELOG.md
 ├── DEPLOY_RENDER.md
-├── DEPLOY_GUIDE.md
 ├── docs/                          # ROADMAP, CONVENTIONS, releases/ (архив эпиков), UI_MAP, …
 ├── requirements.txt
 ├── pytest.ini
@@ -194,9 +193,9 @@ RestoMind/
 python -m pytest tests/ -v
 ```
 
-В репозитории — **965+** тестов в `tests/` (на 2026-05: `pytest -q` → 965 passed). GitHub Actions: [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (`push` на `main` / `develop`, PR в `main`).
+Test suite: **1018+** tests in `tests/` (`pytest -q` -> 1018 collected). GitHub Actions: [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
-**Alembic head (Intelligence OS lineage):** `20260603_intelos_lineage` — см. [`docs/DEPLOY_RUNBOOK.md`](docs/DEPLOY_RUNBOOK.md) §8.
+**Alembic head (current lineage):** `20260603_menu_item_lifecycle` — см. [`docs/DEPLOY_RUNBOOK.md`](docs/DEPLOY_RUNBOOK.md) §8.
 
 ---
 
@@ -208,12 +207,12 @@ python -m pytest tests/ -v
 | [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md) | Правила разработки (инварианты/контракт) |
 | [CHANGELOG.md](CHANGELOG.md) | Краткие релизы |
 | [docs/releases/README.md](docs/releases/README.md) | Архив эпиков (детали) |
-| [DEPLOY_RENDER.md](DEPLOY_RENDER.md) / [DEPLOY_GUIDE.md](DEPLOY_GUIDE.md) | Продакшен (Render / VPS) |
+| [DEPLOY_RENDER.md](DEPLOY_RENDER.md) / [docs/DEPLOY_RUNBOOK.md](docs/DEPLOY_RUNBOOK.md) | Production (Render / self-hosted checklist) |
 | [docs/DEPLOY_RUNBOOK.md](docs/DEPLOY_RUNBOOK.md) | Staging/prod чеклист; §8 Owner Intelligence smoke |
 | [docs/SUPERADMIN_GUIDE.md](docs/SUPERADMIN_GUIDE.md) | Super Admin (владелец платформы): заявки/регистрация, управление ресторанами, аудит webhook, идеи улучшений |
 | [docs/UI_MAP.md](docs/UI_MAP.md) | Карта админ UI: `admin.html`, `screens/*`, компоненты, `admin-app.js` |
 | [docs/AI_TOOLS_SETUP.md](docs/AI_TOOLS_SETUP.md) | Настройка Cursor / Claude Code / MCP для работы над репо |
 | [docs/AI_OPERATIONS.md](docs/AI_OPERATIONS.md) | Restaurant Intelligence, **Owner Intelligence**, инсайты, Final Mile API |
 | [docs/FINAL_MILE_IMPLEMENTED.md](docs/FINAL_MILE_IMPLEMENTED.md) | SupplyMind, StaffMind, Voice, Digest — backend MVP |
-| [docs/REMAINING_UPDATES.md](docs/REMAINING_UPDATES.md) | UI gaps и staging checks после Final Mile |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Single tracker for tasks and statuses |
 | [docs/EVENT_ARCHITECTURE.md](docs/EVENT_ARCHITECTURE.md) | Durable `SystemEvent`, пайплайн аналитики |

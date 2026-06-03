@@ -50,8 +50,8 @@
 | AI | OpenAI (`gpt-4o-mini`, env `OPENAI_MODEL`) или Gemini (`AI_PROVIDER=gemini`, `GEMINI_API_KEY`); structured output + Whisper (`OPENAI_TRANSCRIPTION_MODEL`); опц. `OPENAI_BASE_URL` |
 | Интеграции | Meta WhatsApp API, **Telegram** (ops + guest), iiko Cloud API, POS adapter (`iiko` / `rkeeper`) |
 | Админка | Jinja2 + Alpine.js + Tailwind CSS + Chart.js |
-| Тесты | pytest, pytest-asyncio (`tests/`, **965+** тестов — см. CI) |
-| Продакшен | Docker; **Render** ([DEPLOY_RENDER.md](DEPLOY_RENDER.md)); либо VPS + [DEPLOY_GUIDE.md](DEPLOY_GUIDE.md) |
+| Tests | pytest, pytest-asyncio (`tests/`, **1018+** tests; see CI) |
+| Production | Docker; **Render** ([DEPLOY_RENDER.md](DEPLOY_RENDER.md)); staging/prod checklist in [docs/DEPLOY_RUNBOOK.md](docs/DEPLOY_RUNBOOK.md) |
 
 ## Быстрый старт
 
@@ -134,7 +134,7 @@ curl -b cookies.txt -X POST http://localhost:8000/api/admin/test-bot \
 | Платформа | Документ |
 |-----------|----------|
 | **Render** (Web Service; PostgreSQL — Supabase или другой хост, см. `DATABASE_URL`) | **[DEPLOY_RENDER.md](DEPLOY_RENDER.md)**, миграция БД — **[docs/SUPABASE_MIGRATION.md](docs/SUPABASE_MIGRATION.md)** |
-| **Свой сервер** (Docker + Traefik + HTTPS) | **[DEPLOY_GUIDE.md](DEPLOY_GUIDE.md)** |
+| **Self-hosted Docker** | **[docs/DEPLOY_RUNBOOK.md](docs/DEPLOY_RUNBOOK.md)** |
 | **Vercel** | Этот бэкенд на Vercel не рассчитан; см. [docs/VERCEL.md](docs/VERCEL.md) |
 
 Автоматически задеплоить в ваш аккаунт нельзя — нужен ваш git-репозиторий и вход в Render. Плагины Vercel/Render в IDE только помогают связать проект; шаги — в таблице выше.

@@ -8,12 +8,15 @@ from zoneinfo import ZoneInfo
 from app.db.models import MenuItem
 from app.services.plov_kazan_schedule import (
     compute_next_kazan_batch,
+    enrich_plov_kazan_reply_if_needed,
     format_plov_kazan_schedule_prompt_block,
     is_plov_menu_item,
     plov_on_stop,
     resolve_plov_kazan_batch_times,
     stopped_plov_items,
 )
+from app.schemas.ai_schemas import AIBrainResponse
+from app.services.ai_brain import _FALLBACK_RESPONSE
 
 
 def _item(name: str, *, available: bool = True, portion_kind: str = "single", category: str = "Горячее") -> MenuItem:
@@ -120,3 +123,15 @@ def test_prompt_block_for_stopped_company_set() -> None:
 def test_resolve_batch_times_from_org_meta() -> None:
     times = resolve_plov_kazan_batch_times({"plov_kazan_batch_times": ["11:30", "15:00"]})
     assert times == ("11:30", "15:00")
+
+
+def test_plov_enrichment_skips_technical_fallback() -> None:
+    response = enrich_plov_kazan_reply_if_needed(
+        AIBrainResponse(intent="escalate", reply_text=_FALLBACK_RESPONSE.reply_text),
+        "Остальные виды плова есть?",
+        [_item("Фитнес плов", available=False)],
+        timezone_name="Etc/GMT-5",
+        now=datetime(2026, 5, 26, 18, 38, tzinfo=ZoneInfo("Etc/GMT-5")),
+    )
+
+    assert response.reply_text == _FALLBACK_RESPONSE.reply_text

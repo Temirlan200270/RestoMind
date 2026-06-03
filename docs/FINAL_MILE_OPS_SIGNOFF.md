@@ -1,6 +1,7 @@
 # Final Mile — ops sign-off (Render + Supabase + Upstash)
 
-Инженерный код и UI **готовы** (587+ pytest). Закрытие ROADMAP `Voice [ ]` и `iiko Office live smoke` — только после заполнения таблиц ниже на **production/staging**.
+Engineering code and UI are ready (1018+ pytest). ROADMAP `Voice [ ]` and `iiko Office live smoke` close only after the production/staging sign-off tables below are filled.
+
 
 Связанные чеклисты:
 - Deploy (env + smoke): [`docs/DEPLOY_RUNBOOK.md`](DEPLOY_RUNBOOK.md)
@@ -37,11 +38,11 @@
 
 | Шаг | OK | Дата | Примечание |
 |-----|----|------|------------|
-| `alembic upgrade head` (до `20260521_superadmin_audit` + `20260522_iiko_office_inventory`) | [ ] | | Supabase SQL или Render shell |
+| `alembic upgrade head` (current head: `20260603_menu_item_lifecycle`) | [ ] | | Supabase SQL or Render shell |
 | Перезапуск **web** + **ARQ worker** после деплоя | [ ] | | `python -m arq app.worker.WorkerSettings` |
-| Cron зарегистрирован: `daily_os_digest_scheduled_tick` | [ ] | | Утренняя сводка → Telegram |
-| Cron зарегистрирован: `external_reviews_sync_scheduled_tick` | [ ] | | 2GIS sync 02:10 / 14:10 UTC |
-| Cron зарегистрирован: `iiko_inventory_sync` | [ ] | | Остатки iiko Office ~6 ч |
+| Cron registered: `daily_os_digest_scheduled_tick`, `owner_digest_scheduled_tick` | [ ] | | Telegram ops/owner digest |
+| Cron registered: `external_reviews_sync_scheduled_tick`, `sales_anomaly_scheduled_tick`, `insight_delivery_scheduled_tick`, `recommendation_outcomes_scheduled_tick` | [ ] | | Reviews, anomalies, deliveries, ROI measurements |
+| Cron registered: `iiko_inventory_sync`, `food_cost_scheduled_tick`, `olap_sales_scheduled_tick` | [ ] | | iiko Office/OLAP sync |
 
 **Sign-off deploy:** _________________ Дата: _______
 

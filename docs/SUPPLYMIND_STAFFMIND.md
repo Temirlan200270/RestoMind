@@ -107,4 +107,4 @@ Implemented bridge:
 
 Tests: [`tests/test_ultimate_platform_sprint.py`](../tests/test_ultimate_platform_sprint.py), [`tests/test_iiko_inventory_sync.py`](../tests/test_iiko_inventory_sync.py) (lifecycle + RBAC).
 
-Ops checklist: [`docs/REMAINING_UPDATES.md`](REMAINING_UPDATES.md).
+Ops checklist: [`docs/FINAL_MILE_OPS_SIGNOFF.md`](FINAL_MILE_OPS_SIGNOFF.md).

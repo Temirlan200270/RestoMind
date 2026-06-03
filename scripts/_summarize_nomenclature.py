@@ -1,141 +1,137 @@
-"""Сводка nomenclature.json (поддерживает UTF-8 BOM). Запуск: python scripts/_summarize_nomenclature.py [путь]"""
+"""Summarize an iiko nomenclature JSON dump.
+
+Usage:
+  python scripts/_summarize_nomenclature.py [path] [--out report.txt]
+"""
 from __future__ import annotations
 
 import json
 import sys
 from collections import Counter
 from pathlib import Path
+from typing import Any
+
+
+def _walk_groups(nodes: list[Any]) -> list[tuple[str, str]]:
+    out: list[tuple[str, str]] = []
+    for group in nodes:
+        if not isinstance(group, dict):
+            continue
+        group_id = str(group.get("id") or "")
+        name = str(group.get("name") or "").strip()
+        out.append((group_id, name))
+        kids = group.get("childGroups") or group.get("childgroups") or []
+        if isinstance(kids, list):
+            out.extend(_walk_groups(kids))
+    return out
+
+
+def _category_refs(product: dict[str, Any]) -> list[str]:
+    refs: list[str] = []
+    parent_group = product.get("parentGroup")
+    if parent_group:
+        if isinstance(parent_group, dict) and parent_group.get("id"):
+            refs.append(str(parent_group["id"]))
+        elif isinstance(parent_group, str):
+            refs.append(parent_group)
+    for key in ("groupId", "productCategoryId"):
+        value = product.get(key)
+        if not value:
+            continue
+        if isinstance(value, dict) and value.get("id"):
+            refs.append(str(value["id"]))
+        elif not isinstance(value, dict):
+            refs.append(str(value))
+    return refs
+
+
+def _display_category(product: dict[str, Any], group_map: dict[str, str]) -> str:
+    for uid in _category_refs(product):
+        group_name = group_map.get(uid, "")
+        if group_name:
+            return group_name
+    parent_group = product.get("parentGroup")
+    if isinstance(parent_group, dict) and parent_group.get("name"):
+        return str(parent_group["name"]).strip()
+    for key in ("productCategoryName", "groupName", "categoryName"):
+        value = product.get(key)
+        if value and str(value).strip():
+            return str(value).strip()
+    return ""
 
 
 def main() -> None:
     root = Path(__file__).resolve().parent.parent
-    p = root / "nomenclature.json"
-    if len(sys.argv) > 1:
-        p = Path(sys.argv[1])
+    args = sys.argv[1:]
+    if any(arg in {"-h", "--help"} for arg in args):
+        print(__doc__.strip())
+        return
 
-    out_path = root / "scripts" / "_nomenclature_summary.txt"
+    out_path: Path | None = None
+    if "--out" in args:
+        idx = args.index("--out")
+        try:
+            out_path = Path(args[idx + 1])
+        except IndexError as exc:
+            raise SystemExit("--out requires a path") from exc
+        del args[idx : idx + 2]
 
-    with p.open(encoding="utf-8-sig") as f:
-        d = json.load(f)
+    dump_path = Path(args[0]) if args else root / "nomenclature.json"
 
-    groups = d.get("groups") or []
-    products = d.get("products") or []
+    with dump_path.open(encoding="utf-8-sig") as file:
+        data = json.load(file)
 
-    lines: list[str] = []
+    groups = data.get("groups") or []
+    products = data.get("products") or []
+    group_map = {gid: name for gid, name in _walk_groups(groups) if gid}
 
-    def pr(msg: str = "") -> None:
-        lines.append(msg)
+    keywords = ("суши", "ролл", "саши", "нигири")
+    group_hits = sorted({name for name in group_map.values() if any(k in name.lower() for k in keywords)})
 
-    def walk(nodes: list) -> list[tuple[str, str]]:
-        out: list[tuple[str, str]] = []
-        for g in nodes:
-            if not isinstance(g, dict):
-                continue
-            gid = str(g.get("id") or "")
-            name = str(g.get("name") or "").strip()
-            out.append((gid, name))
-            kids = g.get("childGroups") or g.get("childgroups") or []
-            if isinstance(kids, list):
-                out.extend(walk(kids))
-        return out
-
-    grp_map: dict[str, str] = {}
-    for gid, nm in walk(groups):
-        if gid:
-            grp_map[gid] = nm
-
-    def cat_uuids(pr_: dict) -> list[str]:
-        refs: list[str] = []
-        pg = pr_.get("parentGroup")
-        if pg:
-            if isinstance(pg, dict) and pg.get("id"):
-                refs.append(str(pg["id"]))
-            elif isinstance(pg, str):
-                refs.append(pg)
-        for k in ("groupId", "productCategoryId"):
-            v = pr_.get(k)
-            if v:
-                if isinstance(v, dict) and v.get("id"):
-                    refs.append(str(v["id"]))
-                elif not isinstance(v, dict):
-                    refs.append(str(v))
-        return refs
-
-    def display_cat(pr_: dict) -> str:
-        for uid in cat_uuids(pr_):
-            g = grp_map.get(uid, "")
-            if g:
-                return g
-        pg = pr_.get("parentGroup")
-        if isinstance(pg, dict) and pg.get("name"):
-            return str(pg["name"]).strip()
-        for k in ("productCategoryName", "groupName", "categoryName"):
-            v = pr_.get(k)
-            if v and str(v).strip():
-                return str(v).strip()
-        return ""
-
-    keywords = ("суши", "ролл", "саши", "нигир")
-    group_hits = sorted({nm for nm in grp_map.values() if any(k in nm.lower() for k in keywords)})
-
-    cat_dist: Counter[str] = Counter()
-    kw_rows: Counter[str] = Counter()
-    for prod in products:
-        if not isinstance(prod, dict):
+    category_distribution: Counter[str] = Counter()
+    keyword_rows: Counter[str] = Counter()
+    for product in products:
+        if not isinstance(product, dict):
             continue
-        cn = display_cat(prod) or "(empty)"
-        cat_dist[cn] += 1
-        blob = ((prod.get("name") or "") + " " + cn).lower()
-        for k in keywords:
-            if k in blob:
-                kw_rows[k] += 1
+        category_name = _display_category(product, group_map) or "(empty)"
+        category_distribution[category_name] += 1
+        blob = f"{product.get('name') or ''} {category_name}".lower()
+        for keyword in keywords:
+            if keyword in blob:
+                keyword_rows[keyword] += 1
 
-    sushi_cats = sorted(
-        [(n, c) for n, c in cat_dist.items() if any(k in n.lower() for k in keywords)],
-        key=lambda x: (-x[1], x[0]),
+    keyword_categories = sorted(
+        [(name, count) for name, count in category_distribution.items() if any(k in name.lower() for k in keywords)],
+        key=lambda item: (-item[1], item[0]),
     )
 
-    ids = [str(prod.get("id") or "") for prod in products if isinstance(prod, dict)]
-    unique = {i for i in ids if i}
+    ids = [str(product.get("id") or "") for product in products if isinstance(product, dict)]
+    unique_ids = {item_id for item_id in ids if item_id}
+    product_types = Counter(str(product.get("type") or "(none)") for product in products if isinstance(product, dict))
 
-    types = Counter(str(prod.get("type") or "(none)") for prod in products if isinstance(prod, dict))
-
-    pr(f"=== {p.name} ===")
-    pr(f"correlationId: {d.get('correlationId')}")
-    pr(f"top-level groups (array): {len(groups)}")
-    pr(f"flattened group ids (nested walk): {len(grp_map)}")
-    pr(f"products (array length): {len(products)}")
-    pr(f"unique product ids: {len(unique)}")
-    pr(f"duplicate rows (len - unique): {len(ids) - len(unique)}")
-    pr("")
-    pr("product.type:")
-    for t, n in types.most_common():
-        pr(f"  {t}: {n}")
-    pr("")
-    pr("Groups with name containing суши/ролл/саши/нигир:")
-    if not group_hits:
-        pr("  (none)")
-    else:
-        for nm in group_hits:
-            pr(f"  - {nm}")
-    pr("")
-    pr("Product counts by resolved category (same keywords in category name):")
-    if not sushi_cats:
-        pr("  (none)")
-    else:
-        for nm, cnt in sushi_cats:
-            pr(f"  {cnt:4}  {nm}")
-    pr("")
-    pr(f"Rows (name or resolved category) matching keywords {keywords}: {dict(kw_rows)}")
-    pr("")
-    pr("Top 25 categories by product row count:")
-    for nm, cnt in cat_dist.most_common(25):
-        pr(f"  {cnt:4}  {nm}")
-    pr("")
+    lines = [
+        f"=== {dump_path.name} ===",
+        f"correlationId: {data.get('correlationId')}",
+        f"top-level groups (array): {len(groups)}",
+        f"flattened group ids (nested walk): {len(group_map)}",
+        f"products (array length): {len(products)}",
+        f"unique product ids: {len(unique_ids)}",
+        f"duplicate rows (len - unique): {len(ids) - len(unique_ids)}",
+        "",
+        "product.type:",
+    ]
+    lines.extend(f"  {product_type}: {count}" for product_type, count in product_types.most_common())
+    lines.extend(["", "Groups with name containing суши/ролл/саши/нигири:"])
+    lines.extend(f"  - {name}" for name in group_hits) if group_hits else lines.append("  (none)")
+    lines.extend(["", "Product counts by resolved category (same keywords in category name):"])
+    lines.extend(f"  {count:4}  {name}" for name, count in keyword_categories) if keyword_categories else lines.append("  (none)")
+    lines.extend(["", f"Rows (name or resolved category) matching keywords {keywords}: {dict(keyword_rows)}", ""])
+    lines.append("Top 25 categories by product row count:")
+    lines.extend(f"  {count:4}  {name}" for name, count in category_distribution.most_common(25))
 
     report = "\n".join(lines) + "\n"
-    out_path.write_text(report, encoding="utf-8")
-
+    if out_path is not None:
+        out_path.write_text(report, encoding="utf-8")
     print(report, end="")
 
 

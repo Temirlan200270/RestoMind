@@ -260,6 +260,10 @@ def enrich_plov_kazan_reply_if_needed(
     now: datetime | None = None,
 ) -> AIBrainResponse:
     """Дополняет ответ, если гость спрашивает про плов, а LLM не назвал слот казана."""
+    from app.services.ai_brain import is_openai_fallback_escalation_reply
+
+    if is_openai_fallback_escalation_reply(ai_response.reply_text):
+        return ai_response
     if not _PLOV_QUERY_RE.search(user_message or ""):
         return ai_response
     if not plov_on_stop(menu_items):

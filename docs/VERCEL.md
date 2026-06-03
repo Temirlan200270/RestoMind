@@ -5,7 +5,7 @@
 - **RestoMind** — один **FastAPI**-процесс: HTML-админка (Jinja), **WebSocket** (`/api/admin/ws`), фоновые задачи, долгие соединения.
 - **Vercel** ориентирован на **serverless** и статические сайты: лимиты по времени выполнения, холодные старты, неудобные долгоживущие WebSocket для такого монолита.
 
-Поэтому продакшен-размещение описано для **Render** (или VPS по [DEPLOY_GUIDE.md](../DEPLOY_GUIDE.md)).
+Production deployment is documented for Render; see [DEPLOY_RENDER.md](../DEPLOY_RENDER.md) and [docs/DEPLOY_RUNBOOK.md](DEPLOY_RUNBOOK.md).
 
 ## Когда Vercel уместен
 

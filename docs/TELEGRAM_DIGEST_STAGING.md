@@ -34,4 +34,4 @@
 
 - [`app/services/daily_os_digest.py`](../app/services/daily_os_digest.py)
 - [`app/worker.py`](../app/worker.py) — `daily_os_digest_scheduled_tick`
-- [`docs/REMAINING_UPDATES.md`](REMAINING_UPDATES.md) — общий ops backlog
+- [`docs/FINAL_MILE_OPS_SIGNOFF.md`](FINAL_MILE_OPS_SIGNOFF.md) ? ????? ops sign-off

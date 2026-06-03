@@ -96,7 +96,12 @@ _FALLBACK_RESPONSE = AIBrainResponse(
 
 def is_openai_fallback_escalation_reply(reply_text: str) -> bool:
     """True, если ответ совпадает с запасным при сбое OpenAI (квота, сеть и т.д.)."""
-    return (reply_text or "").strip() == _FALLBACK_RESPONSE.reply_text.strip()
+    text = (reply_text or "").strip()
+    fallback = _FALLBACK_RESPONSE.reply_text.strip()
+    if text == fallback:
+        return True
+    lowered = text.lower()
+    return "технические сложности" in lowered and "переключаю на оператора" in lowered
 
 
 VOICE_FROM_STT_INSTRUCTION = (
