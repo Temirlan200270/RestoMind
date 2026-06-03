@@ -775,6 +775,27 @@ class MenuItem(Base):
         Numeric(10, 2), nullable=True, comment="Себестоимость для Menu Profit Lab",
     )
     is_available: Mapped[bool] = mapped_column(Boolean, default=True, comment="Есть ли в наличии")
+    source: Mapped[str] = mapped_column(
+        String(24),
+        default="manual",
+        server_default="manual",
+        index=True,
+        comment="Источник позиции: manual | iiko | legacy",
+    )
+    last_seen_iiko_sync_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+        comment="Когда позиция последний раз пришла из iiko menu sync",
+    )
+    is_archived: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default="0",
+        index=True,
+        comment="Скрыта из активного меню после replace/prune",
+    )
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     image_url: Mapped[str | None] = mapped_column(String(500), nullable=True, comment="Ссылка на фото")
     embedding: Mapped[bytes | None] = mapped_column(
         LargeBinary,

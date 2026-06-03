@@ -196,3 +196,73 @@ async def test_sync_only_dish_good_skips_modifier(db_session, mock_iiko_nomencla
     goods = cnt.scalars().all()
     assert len(goods) == 1
     assert goods[0].name == "Стейк"
+
+
+@pytest.mark.asyncio
+async def test_sync_prune_archives_missing_iiko_rows_but_keeps_manual(db_session, mock_iiko_nomenclature):
+    org_db = 46
+    keep_id = "66666666-6666-4666-a666-666666666666"
+    stale_id = "77777777-7777-4777-a777-777777777777"
+    db_session.add_all(
+        [
+            MenuItem(
+                organization_id=org_db,
+                iiko_id=stale_id,
+                name="Старый iiko товар",
+                category="Архив",
+                price=100,
+                source="iiko",
+                is_available=True,
+            ),
+            MenuItem(
+                organization_id=org_db,
+                iiko_id="manual-local-id",
+                name="Ручная позиция",
+                category="Локальное",
+                price=200,
+                source="manual",
+                is_available=True,
+            ),
+        ],
+    )
+    await db_session.flush()
+
+    mock_iiko_nomenclature.configure_payload(
+        {
+            "groups": [],
+            "products": [
+                {
+                    "id": keep_id,
+                    "name": "Новый товар",
+                    "type": "Dish",
+                    "productCategoryName": "Основное",
+                    "price": 300,
+                },
+            ],
+        },
+    )
+
+    with patch("app.services.menu_sync.IikoClient", return_value=mock_iiko_nomenclature):
+        stats = await sync_menu_from_iiko(
+            db_session,
+            "fake-login",
+            "iiko-org-uuid",
+            only_dish_and_good=False,
+            restomind_organization_id=org_db,
+            prune_missing=True,
+            prune_mode="archive",
+        )
+
+    assert stats["created"] == 1
+    assert stats["archived"] == 1
+    assert stats["deleted"] == 0
+
+    rows = (
+        await db_session.execute(select(MenuItem).where(MenuItem.organization_id == org_db))
+    ).scalars().all()
+    by_name = {row.name: row for row in rows}
+    assert by_name["Старый iiko товар"].is_archived is True
+    assert by_name["Старый iiko товар"].is_available is False
+    assert by_name["Ручная позиция"].is_archived is False
+    assert by_name["Новый товар"].source == "iiko"
+    assert by_name["Новый товар"].last_seen_iiko_sync_at is not None

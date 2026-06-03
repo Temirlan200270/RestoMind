@@ -28,6 +28,14 @@ def menu_item_dict(item: MenuItem) -> dict:
         "price": float(item.price),
         "cost_price": float(item.cost_price) if item.cost_price is not None else None,
         "is_available": item.is_available,
+        "source": getattr(item, "source", None) or "manual",
+        "last_seen_iiko_sync_at": (
+            item.last_seen_iiko_sync_at.isoformat()
+            if getattr(item, "last_seen_iiko_sync_at", None)
+            else None
+        ),
+        "is_archived": bool(getattr(item, "is_archived", False)),
+        "archived_at": item.archived_at.isoformat() if getattr(item, "archived_at", None) else None,
         "image_url": item.image_url,
     }
 

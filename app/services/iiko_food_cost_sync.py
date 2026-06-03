@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -60,7 +60,12 @@ async def sync_food_cost_for_org(
 
     updated = 0
     menu_items = (
-        await db.execute(select(MenuItem).where(MenuItem.organization_id == int(org_id)))
+        await db.execute(
+            select(MenuItem).where(
+                MenuItem.organization_id == int(org_id),
+                MenuItem.is_archived.is_(False),
+            ),
+        )
     ).scalars().all()
     for item in menu_items:
         cost = None
@@ -115,3 +120,28 @@ async def _record_run(
             error_text=(error_text or "")[:1000] or None,
         ),
     )
+
+
+async def food_cost_scheduled_tick(_ctx: dict[str, Any] | None = None) -> None:
+    """Daily food-cost enrichment from iiko product_expenses / STOCK OLAP."""
+    from sqlalchemy import select as _select
+
+    from app.db.models import Organization
+    from app.db.session import async_session_factory
+
+    today = datetime.now(tz=timezone.utc).date()
+    date_from = today - timedelta(days=14)
+    date_to = today
+    async with async_session_factory() as db:
+        org_ids = list(
+            (await db.execute(_select(Organization.id).where(Organization.is_active.is_(True)))).scalars().all(),
+        )
+    for org_id in org_ids:
+        async with async_session_factory() as db:
+            try:
+                await sync_food_cost_for_org(db, int(org_id), date_from, date_to)
+                await db.commit()
+            except Exception as exc:
+                logger.exception("food_cost_scheduled_tick failed org=%s", org_id)
+                await _record_run(db, int(org_id), ok=False, rows=0, error_text=str(exc))
+                await db.commit()

@@ -486,6 +486,7 @@ async def list_menu(
     request: Request,
     category: str | None = Query(None, description="Фильтр по категории"),
     available_only: bool = Query(True),
+    include_archived: bool = Query(False, description="Показывать архивные позиции меню"),
     stopped_only: bool = Query(
         False,
         description="Только позиции в стопе (is_available=false); при True игнорируется available_only",
@@ -499,6 +500,8 @@ async def list_menu(
         .where(_menu_tenant_clause(org_id))
         .order_by(MenuItem.category, MenuItem.name)
     )
+    if not include_archived:
+        query = query.where(MenuItem.is_archived.is_(False))
     if category:
         query = query.where(MenuItem.category == category)
     if stopped_only:
@@ -555,6 +558,8 @@ async def create_menu_item(
         price=body.price,
         cost_price=body.cost_price,
         is_available=body.is_available,
+        source="manual",
+        is_archived=False,
         image_url=(body.image_url or "").strip() or None,
     )
     item.iiko_id = str(uuid.uuid4())
@@ -768,6 +773,13 @@ async def sync_menu(
         None,
         description="ID организации в iiko (если не задан — IIKO_ORGANIZATION_ID из .env)",
     ),
+    prune_missing: bool = Query(False, description="Скрыть/удалить iiko-позиции, которых нет в новой выгрузке"),
+    prune_mode: str = Query("archive", pattern="^(archive|delete)$", description="archive безопаснее; delete удаляет строки"),
+    prune_legacy: bool = Query(
+        False,
+        description="Также считать legacy rows с iiko_id iiko-позициями. Нужен для первой replace-синхронизации после миграции.",
+    ),
+    confirm_prune: bool = Query(False, description="Обязательное подтверждение для prune_missing"),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """
@@ -775,17 +787,35 @@ async def sync_menu(
     Учётные данные из query, из настроек филиала или из .env. Совпадение по ``iiko_id``.
     """
     org_id = admin_org_from_session(request)
+    if prune_missing and not confirm_prune:
+        raise HTTPException(
+            status_code=400,
+            detail="Для replace/prune синхронизации передайте confirm_prune=true",
+        )
     import app.services.pos.adapters  # noqa: F401 — register adapters
     from app.services.pos.adapters.base import get_pos_adapter
 
     try:
         adapter = await get_pos_adapter(db, org_id)
-        stats = await adapter.sync_menu(db, org_id)
+        if hasattr(adapter, "sync_menu_replace"):
+            stats = await adapter.sync_menu_replace(
+                db,
+                org_id,
+                prune_missing=prune_missing,
+                prune_mode=prune_mode,
+                prune_legacy=prune_legacy,
+            )
+        elif prune_missing:
+            raise ValueError("POS adapter does not support replace/prune menu sync")
+        else:
+            stats = await adapter.sync_menu(db, org_id)
         invalidate_menu_context_cache(org_id)
         sk = stats.get("skipped")
         detail_m = (
             f"Синхронизация меню: успешно "
             f"(всего {stats.get('total', 0)}, новых {stats.get('created', 0)}, обновлено {stats.get('updated', 0)}"
+            + (f", архивировано {stats.get('archived')}" if stats.get("archived") else "")
+            + (f", удалено {stats.get('deleted')}" if stats.get("deleted") else "")
             + (f", пропущено {sk}" if sk else "")
             + ")"
         )

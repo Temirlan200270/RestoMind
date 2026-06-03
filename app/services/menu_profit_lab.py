@@ -139,7 +139,10 @@ async def build_missing_cost_checklist(
     org_id = int(org_id)
     menu_rows = (
         await db.execute(
-            select(MenuItem).where(MenuItem.organization_id == org_id),
+            select(MenuItem).where(
+                MenuItem.organization_id == org_id,
+                MenuItem.is_archived.is_(False),
+            ),
         )
     ).scalars().all()
     total = len(menu_rows)
@@ -232,7 +235,10 @@ async def build_menu_profit_report(
 
     menu_rows = (
         await db.execute(
-            select(MenuItem).where(MenuItem.organization_id == org_id),
+            select(MenuItem).where(
+                MenuItem.organization_id == org_id,
+                MenuItem.is_archived.is_(False),
+            ),
         )
     ).scalars().all()
     graph_stats = await rebuild_restaurant_graph_profiles(db, org_id, days=30 if label == "30d" else 7)

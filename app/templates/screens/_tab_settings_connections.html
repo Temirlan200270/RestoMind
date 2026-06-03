@@ -265,12 +265,17 @@
                             class="inline-flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold border border-gray-200 bg-white text-gray-800 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">
                             Только меню (iiko → БД)
                         </button>
+                        <button type="button" @click="syncMenuReplaceFromIiko()"
+                            :disabled="integrationSyncLoading || !integrationStatus.iiko_configured"
+                            class="inline-flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold border border-amber-200 bg-amber-50 text-amber-900 hover:bg-amber-100 disabled:opacity-40 disabled:cursor-not-allowed">
+                            Заменить меню из iiko
+                        </button>
                         <details class="hint-details w-full mt-2 rounded-xl border border-gray-200/80 bg-gray-50/50 px-3 py-2">
                             <summary class="cursor-pointer text-xs font-medium text-gray-600 select-none flex items-center gap-2">
                                 <svg class="w-3.5 h-3.5 text-gray-400 shrink-0 transition-transform duration-200 hint-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
                                 Чем отличаются кнопки синхронизации
                             </summary>
-                            <p class="text-xs text-gray-500 mt-2 pl-5 border-l-2 border-gray-200 ml-0.5">Полная кнопка — меню + стоп-листы. «Только меню» — номенклатура и цены в <code class="bg-gray-100 px-1 rounded text-[10px]">menu_items</code> без запроса стоп-листов.</p>
+                            <p class="text-xs text-gray-500 mt-2 pl-5 border-l-2 border-gray-200 ml-0.5">Полная кнопка — меню + стоп-листы. «Только меню» — номенклатура и цены в <code class="bg-gray-100 px-1 rounded text-[10px]">menu_items</code> без запроса стоп-листов. «Заменить меню» архивирует iiko/legacy позиции, которых больше нет в новой выгрузке iiko; ручные новые позиции не трогает.</p>
                         </details>
                     </div>
 

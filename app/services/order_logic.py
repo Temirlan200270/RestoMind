@@ -215,7 +215,7 @@ async def load_available_menu(
     organization_id обязателен: без скоупа возможна утечка меню между филиалами.
     """
     org_id = int(organization_id)
-    where_clauses = [MenuItem.organization_id == org_id]
+    where_clauses = [MenuItem.organization_id == org_id, MenuItem.is_archived.is_(False)]
     if not include_unavailable:
         where_clauses.append(MenuItem.is_available.is_(True))
     stmt = (

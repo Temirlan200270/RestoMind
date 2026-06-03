@@ -641,6 +641,7 @@ async def apply_pricing_signal(
         select(MenuItem).where(
             MenuItem.organization_id == org_id,
             MenuItem.is_available.is_(True),
+            MenuItem.is_archived.is_(False),
             MenuItem.price > 0,
         )
     )).scalars().all()
@@ -712,6 +713,7 @@ async def apply_autopilot_pricing(
         select(MenuItem).where(
             MenuItem.organization_id == org_id,
             MenuItem.is_available.is_(True),
+            MenuItem.is_archived.is_(False),
             MenuItem.price > 0,
         )
     )).scalars().all()
@@ -786,6 +788,7 @@ async def apply_autopilot_pricing_bulk(
         select(MenuItem).where(
             MenuItem.organization_id == org_id,
             MenuItem.is_available.is_(True),
+            MenuItem.is_archived.is_(False),
             MenuItem.price > 0,
         )
     )).scalars().all()

@@ -124,6 +124,7 @@ async def reindex_organization_menu_embeddings(
     stmt = select(MenuItem).where(
         MenuItem.organization_id == oid,
         MenuItem.is_available.is_(True),
+        MenuItem.is_archived.is_(False),
     ).order_by(MenuItem.id)
     result = await db.execute(stmt)
     items = list(result.scalars().all())

@@ -6296,6 +6296,45 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
             }
         },
 
+        async syncMenuReplaceFromIiko() {
+            if (!this.integrationStatus.iiko_configured) return;
+            let r = await this.openUiConfirm({
+                message: 'Заменить локальную iiko-номенклатуру новой выгрузкой? Позиции, которых больше нет в iiko, будут архивированы и скрыты из меню/бота.',
+                danger: true,
+            });
+            if (!r.ok) return;
+            r = await this.openUiConfirm({
+                message: 'Подтвердите replace-sync: ручные новые позиции останутся, но старые iiko/legacy позиции без совпадения будут архивированы.',
+                danger: true,
+            });
+            if (!r.ok) return;
+            this.integrationSyncLoading = true;
+            try {
+                const url = '/api/admin/menu/sync?prune_missing=true&prune_mode=archive&prune_legacy=true&confirm_prune=true';
+                const { ok, data } = await this.apiJsonResponse(url, { method: 'POST' });
+                if (ok && data.ok) {
+                    await this.loadIntegrationStatus();
+                    const archived = data.archived != null ? `, архивировано ${data.archived}` : '';
+                    const deleted = data.deleted != null && data.deleted > 0 ? `, удалено ${data.deleted}` : '';
+                    const sk = data.skipped != null ? `, пропущено ${data.skipped}` : '';
+                    this.flashToast(
+                        `Меню заменено из iiko: новых ${data.created ?? 0}, обновлено ${data.updated ?? 0}${archived}${deleted}${sk}`,
+                        'success',
+                        6500,
+                    );
+                    this.menuViewRevision += 1;
+                    await Promise.all([this.loadMenu(), this.loadMenuProfitLab()]);
+                } else {
+                    void this.showUiAlert(this.formatApiError(data.detail) || 'Replace-синхронизация меню не удалась', 'Ошибка');
+                }
+            } catch (e) {
+                adminLogger.error('[admin] syncMenuReplaceFromIiko', e);
+                void this.showUiAlert('Ошибка сети. Проверьте соединение.', 'Ошибка');
+            } finally {
+                this.integrationSyncLoading = false;
+            }
+        },
+
         async seedDemoData() {
             this.demoActionLoading = true;
             try {

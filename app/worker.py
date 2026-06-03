@@ -13,6 +13,7 @@ from app.core.config import settings
 from app.services.billing_rollup import billing_usage_daily_scheduled_tick
 from app.services.daily_os_digest import daily_os_digest_scheduled_tick
 from app.services.draft_recovery import draft_recovery_scheduled_tick
+from app.services.iiko_food_cost_sync import food_cost_scheduled_tick
 from app.services.iiko_olap_sales_sync import olap_sales_scheduled_tick
 from app.services.insight_delivery import insight_delivery_scheduled_tick
 from app.services.iiko_sales_hourly_sync import sales_hourly_iiko_scheduled_tick
@@ -342,6 +343,7 @@ class WorkerSettings:
         draft_recovery_scheduled_tick,
         sales_hourly_iiko_scheduled_tick,
         olap_sales_scheduled_tick,
+        food_cost_scheduled_tick,
         sales_anomaly_scheduled_tick,
         insight_delivery_scheduled_tick,
         recommendation_outcomes_scheduled_tick,
@@ -361,6 +363,7 @@ class WorkerSettings:
             cron(waiter_kpi_sync_scheduled_tick, hour=22, minute=30),
             cron(sales_hourly_iiko_scheduled_tick, hour=23, minute=15),
             cron(olap_sales_scheduled_tick, minute=25),
+            cron(food_cost_scheduled_tick, hour=23, minute=45),
             cron(sales_anomaly_scheduled_tick, minute=35),
             cron(insight_delivery_scheduled_tick, minute=40),
             cron(recommendation_outcomes_scheduled_tick, minute=45),

@@ -47,7 +47,10 @@ async def _menu_lookups(
     org_id = int(organization_id)
     menu_rows = (
         await db.execute(
-            select(MenuItem).where(MenuItem.organization_id == org_id),
+            select(MenuItem).where(
+                MenuItem.organization_id == org_id,
+                MenuItem.is_archived.is_(False),
+            ),
         )
     ).scalars().all()
     by_iiko: dict[str, MenuItem] = {}

@@ -6,9 +6,10 @@
 """
 
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import or_, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -182,6 +183,9 @@ async def sync_menu_from_iiko(
     *,
     only_dish_and_good: bool | None = None,
     restomind_organization_id: int | None = None,
+    prune_missing: bool = False,
+    prune_mode: str = "archive",
+    prune_legacy: bool = False,
 ) -> dict[str, Any]:
     """
     Полный цикл синхронизации: iiko API → таблица ``menu_items``.
@@ -189,7 +193,7 @@ async def sync_menu_from_iiko(
     Сопоставление по **UUID iiko** в поле ``iiko_id`` (не по ``MenuItem.id``).
 
     Returns:
-        Статистика: created, updated, skipped*, total …
+        Статистика: created, updated, skipped*, archived/deleted, total …
         * поля skip_no_id / skip_deleted / skip_type / skip_no_name — почему часть строк API не попала в БД.
     """
     filt = (
@@ -206,6 +210,7 @@ async def sync_menu_from_iiko(
         p for p in (nomenclature.get("products") or []) if isinstance(p, dict)
     ]
     products, api_products_dup_merged = _dedupe_nomenclature_products(raw_products)
+    sync_seen_at = datetime.now(timezone.utc)
 
     q = select(MenuItem)
     if restomind_organization_id is not None:
@@ -223,10 +228,13 @@ async def sync_menu_from_iiko(
 
     created = 0
     updated = 0
+    archived = 0
+    deleted = 0
     skip_no_id = 0
     skip_deleted = 0
     skip_type = 0
     skip_no_name = 0
+    active_iiko_ids: set[str] = set()
 
     for product in products:
         sid_raw = product.get("id")
@@ -250,6 +258,7 @@ async def sync_menu_from_iiko(
 
         price = extract_price_from_iiko_product(product)
         category_name = _category_display_name(product, groups_map)
+        active_iiko_ids.add(sid)
 
         raw_desc = product.get("description")
         description = (raw_desc if isinstance(raw_desc, str) else str(raw_desc or "")) or ""
@@ -267,6 +276,10 @@ async def sync_menu_from_iiko(
             existing.price = price
             existing.image_url = image_url
             existing.iiko_id = sid
+            existing.source = "iiko"
+            existing.last_seen_iiko_sync_at = sync_seen_at
+            existing.is_archived = False
+            existing.archived_at = None
             updated += 1
         else:
             item = MenuItem(
@@ -278,10 +291,42 @@ async def sync_menu_from_iiko(
                 price=price,
                 image_url=image_url,
                 is_available=True,
+                source="iiko",
+                last_seen_iiko_sync_at=sync_seen_at,
+                is_archived=False,
             )
             db.add(item)
             existing_by_iiko[sid] = item
             created += 1
+
+    prune_mode_norm = (prune_mode or "archive").strip().lower()
+    if prune_mode_norm not in {"archive", "delete"}:
+        prune_mode_norm = "archive"
+    if prune_missing and restomind_organization_id is not None:
+        candidates = []
+        for item in existing_by_iiko.values():
+            item_org = getattr(item, "organization_id", None)
+            if item_org is not None and int(item_org) != int(restomind_organization_id):
+                continue
+            sid = (item.iiko_id or "").strip()
+            if not sid or sid in active_iiko_ids:
+                continue
+            source = (getattr(item, "source", None) or "legacy").strip().lower()
+            if source == "iiko" or (prune_legacy and source == "legacy"):
+                candidates.append(item)
+
+        if prune_mode_norm == "delete":
+            stale_ids = [int(item.id) for item in candidates if getattr(item, "id", None) is not None]
+            if stale_ids:
+                await db.execute(delete(MenuItem).where(MenuItem.id.in_(stale_ids)))
+                deleted = len(stale_ids)
+        else:
+            for item in candidates:
+                if not bool(getattr(item, "is_archived", False)):
+                    archived += 1
+                item.is_archived = True
+                item.archived_at = sync_seen_at
+                item.is_available = False
 
     await db.flush()
 
@@ -289,6 +334,8 @@ async def sync_menu_from_iiko(
     stats = {
         "created": created,
         "updated": updated,
+        "archived": archived,
+        "deleted": deleted,
         "skipped": skipped_total,
         "skip_no_id": skip_no_id,
         "skip_deleted": skip_deleted,
@@ -300,6 +347,9 @@ async def sync_menu_from_iiko(
         "api_products_dup_merged": api_products_dup_merged,
         "api_group_nodes": len(groups_map),
         "filter_only_dish_good": bool(filt),
+        "prune_missing": bool(prune_missing),
+        "prune_mode": prune_mode_norm,
+        "prune_legacy": bool(prune_legacy),
     }
     logger.info(
         "Синхронизация меню: создано %d, обновлено %d, пропущено всего %d "
@@ -433,8 +483,11 @@ async def sync_stop_lists(
             or_(
                 MenuItem.organization_id == menu_organization_id,
                 MenuItem.organization_id.is_(None),
-            )
+            ),
+            MenuItem.is_archived.is_(False),
         )
+    else:
+        qm = qm.where(MenuItem.is_archived.is_(False))
     result = await db.execute(qm)
     all_items = result.scalars().all()
 

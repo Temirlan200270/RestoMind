@@ -254,7 +254,7 @@ async def create_upsell_rule_from_order_feedback(
     else:
         if not item_iiko_id and not item_name:
             raise HTTPException(status_code=400, detail="item_iiko_id or item_name is required")
-        q = select(MenuItem).where(MenuItem.organization_id == org_id)
+        q = select(MenuItem).where(MenuItem.organization_id == org_id, MenuItem.is_archived.is_(False))
         if item_iiko_id:
             q = q.where(MenuItem.iiko_id == item_iiko_id)
         else:

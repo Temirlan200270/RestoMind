@@ -983,7 +983,10 @@ async def dashboard_stats(
     bookings_count = bookings_result.scalar() or 0
 
     menu_result = await db.execute(
-        select(func.count(MenuItem.id)).where(MenuItem.organization_id == org_id),
+        select(func.count(MenuItem.id)).where(
+            MenuItem.organization_id == org_id,
+            MenuItem.is_archived.is_(False),
+        ),
     )
     menu_count = menu_result.scalar() or 0
 

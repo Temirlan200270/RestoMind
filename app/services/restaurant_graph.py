@@ -66,7 +66,12 @@ async def rebuild_restaurant_graph_profiles(
     start = today - timedelta(days=max(1, int(days)))
 
     menu_rows = (
-        await db.execute(select(MenuItem).where(MenuItem.organization_id == org_id_i))
+        await db.execute(
+            select(MenuItem).where(
+                MenuItem.organization_id == org_id_i,
+                MenuItem.is_archived.is_(False),
+            ),
+        )
     ).scalars().all()
     menu_by_pid = {_dish_product_id(row): row for row in menu_rows}
 
@@ -420,6 +425,7 @@ async def simulate_price_change(
         menu = await db.scalar(
             select(MenuItem).where(
                 MenuItem.organization_id == int(org_id),
+                MenuItem.is_archived.is_(False),
                 MenuItem.name.ilike(f"%{product_name or ''}%"),
             ).limit(1),
         )

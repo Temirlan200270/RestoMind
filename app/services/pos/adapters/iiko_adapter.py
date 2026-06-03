@@ -47,6 +47,28 @@ class IikoPOSAdapter:
             restomind_organization_id=organization_id,
         )
 
+    async def sync_menu_replace(
+        self,
+        db: AsyncSession,
+        organization_id: int,
+        *,
+        prune_missing: bool,
+        prune_mode: str = "archive",
+        prune_legacy: bool = False,
+    ) -> dict[str, Any]:
+        creds = await resolve_org_iiko_credentials(db, organization_id)
+        if creds is None:
+            raise ValueError("iiko credentials not configured")
+        return await sync_menu_from_iiko(
+            db,
+            creds.api_login,
+            creds.iiko_organization_id,
+            restomind_organization_id=organization_id,
+            prune_missing=prune_missing,
+            prune_mode=prune_mode,
+            prune_legacy=prune_legacy,
+        )
+
     async def sync_stoplist(self, db: AsyncSession, organization_id: int) -> dict[str, Any]:
         creds = await resolve_org_iiko_credentials(db, organization_id)
         if creds is None:

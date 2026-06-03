@@ -442,7 +442,9 @@ async def generate_revenue_order_insights(db: AsyncSession, org_id: int) -> list
     # Стоп-лист (для cause_hypotheses)
     stoplist_count = int(await db.scalar(
         select(func.count(MenuItem.id)).where(
-            MenuItem.organization_id == org_id, MenuItem.is_available.is_(False)
+            MenuItem.organization_id == org_id,
+            MenuItem.is_available.is_(False),
+            MenuItem.is_archived.is_(False),
         )
     ) or 0)
 
@@ -711,7 +713,13 @@ async def build_state_snapshot(
         or 0
     )
     stoplist = int(
-        await db.scalar(select(func.count(MenuItem.id)).where(MenuItem.organization_id == org_id, MenuItem.is_available.is_(False)))
+        await db.scalar(
+            select(func.count(MenuItem.id)).where(
+                MenuItem.organization_id == org_id,
+                MenuItem.is_available.is_(False),
+                MenuItem.is_archived.is_(False),
+            ),
+        )
         or 0
     )
     operator_msgs_15m = int(

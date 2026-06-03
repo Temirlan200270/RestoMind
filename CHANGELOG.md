@@ -43,6 +43,7 @@
 ### Menu Profit Lab — management value
 
 - Рекомендации по цене, чеклист missing cost, promote today для copilot; UI в OI и каталоге меню.
+- iiko меню получило lifecycle-поля (`source`, `last_seen_iiko_sync_at`, archive flags) и replace/prune sync: отсутствующие в новой выгрузке iiko позиции архивируются/удаляются только по явному подтверждению; food-cost вынесен в отдельный scheduled source (`product_expenses` → OLAP STOCK fallback).
 
 ---
 
