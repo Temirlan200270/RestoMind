@@ -25,6 +25,7 @@
 - Доведены C2/O1/F1/D1.2/P1: graph profile rebuild для Menu Profit Lab, seasonality + dirty-data weighting в forecast, ROI chain API и ROI-блок в owner digest, per-org delivery settings и timezone normalization для naive iiko OLAP timestamps.
 - Закрыт D3.1 Trust UI: AI Center показывает confidence badge, evidence list и drilldown path на карточках инсайтов.
 - Добит продуктовый слой Intelligence OS: role-based quick questions в Copilot, AI Center inbox для insight deliveries с read/dismiss/action_taken, UI настроек delivery rules, ROI-блок "совет -> выполнено -> результат", supplier/campaign memory autogeneration и baseline causal drilldown по category/dish/hour.
+- Исправлен деплойный Alembic-fail на Postgres: revision id `20260603_intelos_sales_copilot_layer` укорочен до `20260603_intelos_sales_copilot`, чтобы помещаться в `alembic_version.version_num varchar(32)`; добавлен регрессионный тест на длину revision id.
 
 ### Документация — реструктуризация CHANGELOG
 
