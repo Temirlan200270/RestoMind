@@ -219,7 +219,7 @@ async def _apply_sqlite_startup_schema_patches() -> None:
 
     try:
         async with async_engine.begin() as conn:
-            sql = "ALTER TABLE orders ADD COLUMN iiko_last_error VARCHAR(512)"
+            sql = "ALTER TABLE orders ADD COLUMN iiko_last_error TEXT"
             await conn.execute(text(sql))
     except Exception as exc:
         _ddl_warn(sql, exc)
@@ -535,6 +535,7 @@ async def _stop_list_sync_loop() -> None:
     """Фоново: стоп-листы iiko (каждые 15 мин) и опционально полный импорт меню (IIKO_MENU_AUTO_SYNC_INTERVAL_SECONDS)."""
     from app.services.integration_health import record_menu_sync, record_stoplist_sync
     from app.services.menu_sync import sync_menu_from_iiko, sync_stop_lists
+    from app.services.redis_locks import acquire_redis_lock, release_redis_lock
 
     global _IIKO_MENU_AUTO_MONO_LAST
     first_cycle = True
@@ -545,6 +546,11 @@ async def _stop_list_sync_loop() -> None:
             first_cycle = False
         except asyncio.CancelledError:
             break
+        lock_key = "restomind:bg:stop_list_sync"
+        lock_token = await acquire_redis_lock(lock_key, ttl_sec=max(60, int(STOP_LIST_SYNC_INTERVAL * 2)))
+        if lock_token is None:
+            logger.info("Стоп-листы: цикл выполняет другой инстанс")
+            continue
         async with async_session_factory() as db:
             try:
                 targets = await _iiko_sync_targets(db)
@@ -604,11 +610,14 @@ async def _stop_list_sync_loop() -> None:
                     await db.commit()
                 except Exception as exc2:
                     logger.error("Не удалось сохранить статус интеграции iiko: %s", exc2)
+            finally:
+                await release_redis_lock(lock_key, lock_token)
 
 
 async def _chat_log_retention_loop() -> None:
     """Фоновая задача: удаление старых chat_logs по CHAT_LOG_RETENTION_DAYS."""
     from app.services.chat_log_retention import purge_old_chat_logs
+    from app.services.redis_locks import acquire_redis_lock, release_redis_lock
 
     if settings.chat_log_retention_days <= 0:
         logger.info("CHAT_LOG_RETENTION_DAYS=0 — автоочистка chat_logs выключена")
@@ -623,6 +632,11 @@ async def _chat_log_retention_loop() -> None:
             first_cycle = False
         except asyncio.CancelledError:
             break
+        lock_key = "restomind:bg:chat_log_retention"
+        lock_token = await acquire_redis_lock(lock_key, ttl_sec=max(60, int(interval * 2)))
+        if lock_token is None:
+            logger.info("Ретеншн chat_logs: цикл выполняет другой инстанс")
+            continue
         try:
             async with async_session_factory() as db:
                 await purge_old_chat_logs(db)
@@ -631,18 +645,26 @@ async def _chat_log_retention_loop() -> None:
             raise
         except Exception as exc:
             logger.error("Ошибка ретеншна chat_logs: %s", exc, exc_info=True)
+        finally:
+            await release_redis_lock(lock_key, lock_token)
 
 
 async def _payment_expiry_loop() -> None:
     """Каждые 10 мин: expired + WhatsApp re-initiation reminder для клиентов."""
     from app.services.payment_expiry import expire_stale_payment_transactions
     from app.services.payment_reminder import send_payment_reminders_for_expired
+    from app.services.redis_locks import acquire_redis_lock, release_redis_lock
 
     while True:
         try:
             await asyncio.sleep(600)
         except asyncio.CancelledError:
             break
+        lock_key = "restomind:bg:payment_expiry"
+        lock_token = await acquire_redis_lock(lock_key, ttl_sec=900)
+        if lock_token is None:
+            logger.info("Payment expiry: цикл выполняет другой инстанс")
+            continue
         try:
             async with async_session_factory() as db:
                 expired = await expire_stale_payment_transactions(db)
@@ -657,6 +679,8 @@ async def _payment_expiry_loop() -> None:
             raise
         except Exception as exc:
             logger.error("Ошибка payment_expiry_loop: %s", exc, exc_info=True)
+        finally:
+            await release_redis_lock(lock_key, lock_token)
 
 
 @asynccontextmanager

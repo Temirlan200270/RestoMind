@@ -485,7 +485,7 @@ class Order(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
     iiko_last_error: Mapped[str | None] = mapped_column(
-        String(512),
+        Text,
         nullable=True,
         default=None,
         comment="Текст ошибки при последней попытке отправить заказ в iiko (если не пусто — показать в админке)",

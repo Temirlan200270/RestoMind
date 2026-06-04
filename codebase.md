@@ -77,14 +77,16 @@ RestoMind/
 │   │   ├── user_phone_resolve.py  # find_user_by_phone (7705… vs +7705…)
 │   │   ├── user_phone_merge.py    # merge duplicate User rows (one-off / scripts)
 │   │   ├── wa_queue_metrics.py    # queue_wait_ms: enqueue → process_with_retry start
+│   │   ├── chat_serializer.py     # per-chat FIFO + owner-token Redis lock для входящих сообщений
 │   │   ├── quick_replies.py       # детерминированные ответы без LLM (greeting, menu, status, …)
 │   │   ├── faq_cache.py           # Redis-кеш intent=faq + get_faq_cache_metrics
+│   │   ├── redis_locks.py         # owner-token Redis locks для фоновых singleton loops
 │   │   ├── task_queue.py          # ARQ enqueue / dispatch_arq_or_background
 │   │   ├── event_consumer_runner.py # post-commit analytics/audit consumers (async по умолчанию)
 │   │   ├── dialog_mgr.py          # состояния чата, Redis, синхронизация с БД; clear_pending_order не сбрасывает HUMAN_MODE
 │   │   ├── stoplist_session.py    # Redis rm:stoplist_seen — diff «только что на стопе» в диалоге
 │   │   ├── trace_context.py       # publish_chat_event / publish_state_event / publish_human_event (WS payload)
-│   │   ├── order_logic.py         # меню (include_unavailable), ValidatedOrder+stoplist_items, цены, черновик, fingerprint стоп-листа в кэше
+│   │   ├── order_logic.py         # меню (include_unavailable), ValidatedOrder+stoplist_items, цены, LRU menu context cache
 │   │   ├── context_engine.py      # параллельный preflight (asyncio.gather), загружает стоп-позиции для ИИ
 │   │   ├── customer_reply.py      # доставка текста/голоса клиенту; finalize_outbound fire-and-forget
 │   │   ├── message_accounting.py  # telemetry учёт сообщений WhatsApp (inbound/outbound, upsert, fire-and-forget)
@@ -193,9 +195,9 @@ RestoMind/
 python -m pytest tests/ -v
 ```
 
-Test suite: **1018+** tests in `tests/` (`pytest -q` -> 1018 collected). GitHub Actions: [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+Test suite: **1000+** tests in `tests/` (`pytest -q`). GitHub Actions: [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
-**Alembic head (current lineage):** `20260603_menu_item_lifecycle` — см. [`docs/DEPLOY_RUNBOOK.md`](docs/DEPLOY_RUNBOOK.md) §8.
+**Alembic head (current lineage):** `20260604_iiko_last_error_text` — см. [`docs/DEPLOY_RUNBOOK.md`](docs/DEPLOY_RUNBOOK.md) §8.
 
 ---
 

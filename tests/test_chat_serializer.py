@@ -36,6 +36,35 @@ async def test_acquire_lock_blocks_concurrent_caller(fake_redis) -> None:
 
 
 @pytest.mark.asyncio
+async def test_lock_owner_token_controls_renew_and_release(fake_redis) -> None:
+    assert await cs.acquire_chat_lock(1, "+77001112233", "owner-a") is True
+    assert await cs.renew_chat_lock(1, "+77001112233", "owner-b") is False
+    assert await cs.release_chat_lock(1, "+77001112233", "owner-b") is False
+    assert await cs.renew_chat_lock(1, "+77001112233", "owner-a") is True
+    assert await cs.release_chat_lock(1, "+77001112233", "owner-a") is True
+    assert await fake_redis.get(cs.chat_lock_key(1, "+77001112233")) is None
+
+
+@pytest.mark.asyncio
+async def test_renew_lock_accepts_real_redis_bytes(monkeypatch) -> None:
+    class BytesGetRedis:
+        def __init__(self) -> None:
+            self.expired_key = ""
+
+        async def get(self, _key: str) -> bytes:
+            return b"owner-a"
+
+        async def expire(self, key: str, _ttl: int) -> None:
+            self.expired_key = key
+
+    store = BytesGetRedis()
+    monkeypatch.setattr(cs, "redis_client", store)
+
+    assert await cs.renew_chat_lock(1, "+77001112233", "owner-a") is True
+    assert store.expired_key == cs.chat_lock_key(1, "+77001112233")
+
+
+@pytest.mark.asyncio
 async def test_queue_fifo_and_drain(fake_redis) -> None:
     await cs.enqueue_pending(1, "+77001112233", _payload(1))
     await cs.enqueue_pending(1, "+77001112233", _payload(2))
@@ -43,6 +72,26 @@ async def test_queue_fifo_and_drain(fake_redis) -> None:
     second = await cs.drain_next(1, "+77001112233")
     assert first is not None and first.message_text == "msg-1"
     assert second is not None and second.message_text == "msg-2"
+
+
+@pytest.mark.asyncio
+async def test_drain_next_decodes_real_redis_bytes(monkeypatch) -> None:
+    class BytesRedis:
+        def __init__(self, raw: bytes) -> None:
+            self.raw = raw
+
+        async def lpop(self, _key: str) -> bytes | None:
+            raw = self.raw
+            self.raw = b""
+            return raw
+
+    payload = _payload(9)
+    monkeypatch.setattr(cs, "redis_client", BytesRedis(payload.to_json().encode("utf-8")))
+
+    drained = await cs.drain_next(1, "+77001112233")
+
+    assert drained is not None
+    assert drained.message_text == "msg-9"
 
 
 @pytest.mark.asyncio

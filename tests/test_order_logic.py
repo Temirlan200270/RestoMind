@@ -27,6 +27,24 @@ from app.services.order_logic import (
 )
 
 
+def test_menu_context_cache_lru_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.services import order_logic as ol
+
+    ol._menu_ctx_cache.clear()
+    monkeypatch.setattr(ol, "_MENU_CTX_CACHE_MAX_SIZE", 3)
+
+    ol._remember_menu_context("a", "A")
+    ol._remember_menu_context("b", "B")
+    ol._remember_menu_context("c", "C")
+    ol._remember_menu_context("a", "A")
+    ol._remember_menu_context("d", "D")
+
+    assert len(ol._menu_ctx_cache) <= 3
+    assert "a" in ol._menu_ctx_cache
+    assert "d" in ol._menu_ctx_cache
+    assert "b" not in ol._menu_ctx_cache
+
+
 @pytest.mark.asyncio
 async def test_load_available_menu_requires_organization_id(db_with_menu: AsyncSession) -> None:
     """Вызов без organization_id — ошибка (нет «глобального» меню)."""

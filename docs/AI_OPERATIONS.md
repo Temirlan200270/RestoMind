@@ -28,7 +28,7 @@ Intelligence не дублирует Analytics — он отвечает на в
 | Weekly digest | `owner_digest_delivery.py`, `owner_weekly_digest.py` | OI preview + cron Mon 10:00 org TZ |
 
 Deploy smoke: [`docs/DEPLOY_RUNBOOK.md`](DEPLOY_RUNBOOK.md) §8, `scripts/verify_owner_intel_schema.py`.  
-Alembic head: `20260603_menu_item_lifecycle`.
+Alembic head: `20260604_iiko_last_error_text`.
 
 ---
 

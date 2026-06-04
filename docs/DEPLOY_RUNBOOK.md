@@ -350,7 +350,7 @@ python scripts/diag_whatsapp_latency.py --org-id 1 --phone +77051310837
 
 ## 8. Owner Intelligence OS — deploy smoke (post-migration)
 
-????? `alembic upgrade head` (????????? head: **`20260603_menu_item_lifecycle`**, ???? head).
+Перед smoke выполните `alembic upgrade head` и убедитесь, что `alembic heads` показывает один head: **`20260604_iiko_last_error_text`**.
 
 ### 8.1 Миграции и схема
 

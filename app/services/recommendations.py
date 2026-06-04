@@ -389,6 +389,15 @@ async def recommendations_daily_loop(session_factory: Any) -> None:
             await asyncio.sleep(wait)
         except asyncio.CancelledError:
             break
+
+        from app.services.redis_locks import acquire_redis_lock, release_redis_lock
+
+        lock_key = "restomind:bg:recommendations_daily"
+        lock_token = await acquire_redis_lock(lock_key, ttl_sec=3600)
+        if lock_token is None:
+            logger.info("Recommendations loop: замок занят другим инстансом")
+            continue
+
         try:
             from app.db.models import Organization
             async with session_factory() as db:
@@ -415,3 +424,5 @@ async def recommendations_daily_loop(session_factory: Any) -> None:
             break
         except Exception as exc:
             logger.error("Recommendations loop error: %s", exc)
+        finally:
+            await release_redis_lock(lock_key, lock_token)

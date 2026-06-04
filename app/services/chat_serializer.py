@@ -8,6 +8,7 @@ import hashlib
 import json
 import logging
 import re
+import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
@@ -28,6 +29,22 @@ else
   return 0
 end
 """
+
+
+def _decode_redis_value(raw: object) -> str:
+    """Decode Redis bytes without turning JSON into a Python bytes repr."""
+    if isinstance(raw, bytes):
+        return raw.decode("utf-8")
+    return str(raw)
+
+
+def _redis_value_equals(raw: object, expected: str) -> bool:
+    if raw is None:
+        return False
+    try:
+        return _decode_redis_value(raw) == expected
+    except UnicodeDecodeError:
+        return False
 
 
 @dataclass(frozen=True)
@@ -99,14 +116,21 @@ async def _eval_release(key: str, owner_id: str) -> bool:
             await redis_client.delete(key)
             return True
         return False
-    result = await redis_client.eval(_RELEASE_LUA, 1, key, owner_id, "0")
+    result = await redis_client.eval(_RELEASE_LUA, 1, key, owner_id)
     return bool(int(result or 0))
 
 
-async def acquire_chat_lock(org_id: int, phone: str, *, ttl_sec: int = LOCK_TTL_SEC) -> bool:
+async def acquire_chat_lock(
+    org_id: int,
+    phone: str,
+    owner_token: str | None = None,
+    *,
+    ttl_sec: int = LOCK_TTL_SEC,
+) -> bool:
     key = chat_lock_key(org_id, phone)
+    token = owner_token or "active"
     try:
-        claimed = await redis_client.set(key, "active", nx=True, ex=int(ttl_sec))
+        claimed = await redis_client.set(key, token, nx=True, ex=int(ttl_sec))
         if claimed:
             logger.info(
                 "chat_serializer.lock_acquired org_id=%s phone_scope=%s",
@@ -119,10 +143,17 @@ async def acquire_chat_lock(org_id: int, phone: str, *, ttl_sec: int = LOCK_TTL_
         return True
 
 
-async def renew_chat_lock(org_id: int, phone: str, *, ttl_sec: int = LOCK_TTL_SEC) -> bool:
+async def renew_chat_lock(
+    org_id: int,
+    phone: str,
+    owner_token: str | None = None,
+    *,
+    ttl_sec: int = LOCK_TTL_SEC,
+) -> bool:
     key = chat_lock_key(org_id, phone)
+    token = owner_token or "active"
     try:
-        if await redis_client.get(key) == "active":
+        if _redis_value_equals(await redis_client.get(key), token):
             await redis_client.expire(key, int(ttl_sec))
             return True
         return False
@@ -131,10 +162,11 @@ async def renew_chat_lock(org_id: int, phone: str, *, ttl_sec: int = LOCK_TTL_SE
         return False
 
 
-async def release_chat_lock(org_id: int, phone: str) -> bool:
+async def release_chat_lock(org_id: int, phone: str, owner_token: str | None = None) -> bool:
     key = chat_lock_key(org_id, phone)
+    token = owner_token or "active"
     try:
-        ok = await _eval_release(key, "active")
+        ok = await _eval_release(key, token)
         if ok:
             logger.info(
                 "chat_serializer.released org_id=%s phone_scope=%s",
@@ -170,7 +202,7 @@ async def _queue_contains_message_id(org_id: int, phone: str, whatsapp_message_i
             items = await redis_client.lrange(key, 0, -1)
         for raw in items or []:
             try:
-                data = json.loads(raw if isinstance(raw, str) else raw.decode())
+                data = json.loads(_decode_redis_value(raw))
                 if str(data.get("whatsapp_message_id") or "") == wmid:
                     return True
             except (json.JSONDecodeError, TypeError, AttributeError):
@@ -236,11 +268,10 @@ async def drain_next(org_id: int, phone: str) -> ChatMessagePayload | None:
         raw = await redis_client.lpop(key)
         if not raw:
             return None
-        return ChatMessagePayload.from_json(str(raw))
+        return ChatMessagePayload.from_json(_decode_redis_value(raw))
     except Exception as exc:
         logger.warning("chat_serializer.drain_failed org_id=%s err=%s", org_id, exc)
         return None
-
 
 async def run_serialized_chat_pipeline(
     org_id: int,
@@ -251,7 +282,8 @@ async def run_serialized_chat_pipeline(
 ) -> bool:
     """Enqueue, acquire lease lock, drain FIFO until empty (renew lock per message)."""
     await enqueue_pending(org_id, phone, initial)
-    acquired = await acquire_chat_lock(org_id, phone)
+    token = uuid.uuid4().hex
+    acquired = await acquire_chat_lock(org_id, phone, token)
     if not acquired:
         return False
 
@@ -261,11 +293,11 @@ async def run_serialized_chat_pipeline(
             item = await drain_next(org_id, phone)
             if item is None:
                 break
-            if not await renew_chat_lock(org_id, phone):
+            if not await renew_chat_lock(org_id, phone, token):
                 await enqueue_pending(org_id, phone, item)
                 break
             await process_one(item)
             processed += 1
     finally:
-        await release_chat_lock(org_id, phone)
+        await release_chat_lock(org_id, phone, token)
     return True

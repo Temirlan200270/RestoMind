@@ -906,6 +906,27 @@ def build_menu_context(db_items: list[MenuItem]) -> str:
 # org_id или "org_id:category_hint" → (context_str, timestamp)
 _menu_ctx_cache: dict[str, tuple[str, float]] = {}
 _MENU_CTX_TTL = 90.0  # seconds
+_MENU_CTX_CACHE_MAX_SIZE = 1000
+
+
+def _ensure_menu_cache_size_limit() -> None:
+    """Примитивный LRU: удаляем старейший по timestamp, если превышен лимит."""
+    if len(_menu_ctx_cache) <= _MENU_CTX_CACHE_MAX_SIZE:
+        return
+    try:
+        # Сортируем по timestamp и берем первые 20% на удаление.
+        sorted_keys = sorted(_menu_ctx_cache.keys(), key=lambda k: _menu_ctx_cache[k][1])
+        overflow = max(1, len(_menu_ctx_cache) - _MENU_CTX_CACHE_MAX_SIZE)
+        remove_count = max(200, overflow) if _MENU_CTX_CACHE_MAX_SIZE >= 200 else overflow
+        for k in sorted_keys[:remove_count]:
+            _menu_ctx_cache.pop(k, None)
+    except Exception:
+        _menu_ctx_cache.clear()
+
+
+def _remember_menu_context(cache_key: str, context: str) -> None:
+    _menu_ctx_cache[cache_key] = (context, time.monotonic())
+    _ensure_menu_cache_size_limit()
 
 # Категории, которые всегда включаются в полный контекст при smart filter (upsell-кандидаты)
 _SMART_UPSELL_CAT_HINTS = ("напит", "кофе", "чай", "бар", "сок", "десерт", "выпечк", "соус")
@@ -1058,12 +1079,13 @@ async def build_menu_context_for_ai(menu_items: list[MenuItem], user_query: str)
         if cache_k is not None:
             cached = _menu_ctx_cache.get(cache_k)
             if cached and (time.monotonic() - cached[1]) < _MENU_CTX_TTL:
+                _remember_menu_context(cache_k, cached[0])
                 return cached[0]
 
         if category_hint:
             ctx = build_menu_context_filtered(menu_items, category_hint)
             if cache_k is not None:
-                _menu_ctx_cache[cache_k] = (ctx, time.monotonic())
+                _remember_menu_context(cache_k, ctx)
             return ctx
 
         async def _materialize_full_menu() -> str:
@@ -1074,7 +1096,7 @@ async def build_menu_context_for_ai(menu_items: list[MenuItem], user_query: str)
                 org_id, _materialize_full_menu, cache_suffix=stoplist_fp,
             )
             if cache_k is not None:
-                _menu_ctx_cache[cache_k] = (ctx, time.monotonic())
+                _remember_menu_context(cache_k, ctx)
             return ctx
         return build_menu_context(menu_items)
     if len(menu_items) < int(settings.menu_rag_min_items):
