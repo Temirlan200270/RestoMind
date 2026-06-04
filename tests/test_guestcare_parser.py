@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import httpx
 
 from app.services.guestcare_parser import (
     GOOGLE_REVIEWS_LIMITATION,
@@ -140,3 +141,36 @@ async def test_sync_skips_google_only_org(db_session) -> None:
     assert stats["skipped"] is True
     assert stats["reason"] == "google_manual_only"
     assert stats["parsed"] == 0
+
+
+@pytest.mark.asyncio
+async def test_sync_reports_2gis_antibot_museum_redirect(db_session) -> None:
+    from app.db.models import Organization
+    from app.services.external_reviews_sync import sync_external_reviews_for_org
+
+    org = Organization(
+        name="2GIS Antibot Org",
+        slug="2gis-antibot-org",
+        review_url_2gis="https://2gis.kz/pavlodar/firm/70000001110142368",
+    )
+    db_session.add(org)
+    await db_session.flush()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/museum":
+            return httpx.Response(200, text="<html><title>2GIS</title></html>", request=request)
+        return httpx.Response(
+            302,
+            headers={"Location": "https://2gis.kz/museum?return_url=https%3A%2F%2F2gis.kz%2Fpavlodar%2Ffirm%2F70000001110142368"},
+            request=request,
+        )
+
+    stats = await sync_external_reviews_for_org(
+        db_session,
+        int(org.id),
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert stats["ok"] is False
+    assert stats["parsed"] == 0
+    assert stats["errors"][0]["code"] == "2gis_antibot"

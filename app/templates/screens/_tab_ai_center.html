@@ -748,7 +748,9 @@
                                 Подтягивает отзывы со страницы 2GIS из
                                 <strong>Настройки → Мой ресторан → Ссылка на 2GIS</strong>
                                 (<code class="text-slate-600">review_url_2gis</code>).
-                                Google — только ручной импорт по URL ниже (авто-sync только 2GIS).
+                                Авто-sync только 2GIS; Google — только ручной импорт по URL ниже.
+                                Если 2GIS отдаёт защитную страницу,
+                                авто-sync покажет ошибку и потребуется scraper/API-интеграция.
                             </p>
                             <p x-show="guestCareSyncMeta?.last_at" class="text-[10px] text-slate-400 mt-1"
                                 x-text="'Последняя синхронизация: ' + (guestCareSyncMeta?.last_at || '')"></p>

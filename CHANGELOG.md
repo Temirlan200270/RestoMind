@@ -36,6 +36,7 @@
 - Усилена FSM без тяжёлой блокировки: добавлен `User.session_version` для stale LLM writes, поздний LLM-ответ не перезаписывает состояние/ожидающий заказ после takeover; `HUMAN_MODE` получил TTL и авто-возврат по явным новым сценариям, если нет ручной паузы AI.
 - Усилены runtime-guards: `chat_serializer` получил owner-token lock и корректный decode Redis bytes при drain очереди, `_menu_ctx_cache` ограничен LRU/max-size, фоновые циклы используют owner-token Redis locks; `orders.iiko_last_error` расширен до `TEXT`.
 - Закрыт P0 reliability-pass: fire-and-forget задачи переведены на tracked helper с логированием ошибок, ключевые silent `except` получили диагностику, FSM state в admin/payment-choice ветках пишется в транзакции вызывающего, chat log retention/menu sync больше не выполняют unscoped tenant-операции.
+- Улучшена диагностика GuestCare 2GIS sync: если 2GIS возвращает защитную страницу `/museum` вместо HTML с отзывами, админка показывает явную ошибку `2gis_antibot`, а не успешное `найдено 0`.
 
 ### Документация — реструктуризация CHANGELOG
 

@@ -32,6 +32,23 @@ _FETCH_HEADERS = {
 _FETCH_TIMEOUT = 20.0
 
 
+class ExternalReviewFetchError(RuntimeError):
+    """Public review page could not be fetched in a parseable form."""
+
+    def __init__(self, message: str, *, code: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def _is_2gis_antibot_url(url: str) -> bool:
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    host = (parsed.netloc or "").lower()
+    path = (parsed.path or "").rstrip("/")
+    return "2gis" in host and path == "/museum"
+
+
 def org_review_sources(org: Organization) -> dict[str, str]:
     """Return configured review page URLs (all sources, for display/import)."""
     urls: dict[str, str] = {}
@@ -71,6 +88,13 @@ async def fetch_review_page_html(
     ) as client:
         response = await client.get(url)
         response.raise_for_status()
+        if _is_2gis_antibot_url(str(response.url)):
+            raise ExternalReviewFetchError(
+                "2GIS вернул защитную страницу /museum вместо страницы организации. "
+                "Публичный HTML сейчас не содержит отзывы; для авто-импорта нужен официальный/партнёрский источник "
+                "или scraper-интеграция.",
+                code="2gis_antibot",
+            )
         return response.text
 
 
@@ -172,13 +196,14 @@ async def sync_external_reviews_for_org(
                 "updated": src_updated,
             }
         except Exception as exc:
+            error_code = getattr(exc, "code", "fetch_or_parse_failed")
             logger.exception(
                 "sync_external_reviews_for_org org=%s source=%s",
                 organization_id,
                 label,
             )
-            errors.append({"source": label, "url": page_url, "error": str(exc)})
-            per_source[label] = {"url": page_url, "error": str(exc)}
+            errors.append({"source": label, "url": page_url, "error": str(exc), "code": str(error_code)})
+            per_source[label] = {"url": page_url, "error": str(exc), "code": str(error_code)}
 
     meta = dict(org.meta_json or {}) if isinstance(org.meta_json, dict) else {}
     meta["guestcare_sync"] = {

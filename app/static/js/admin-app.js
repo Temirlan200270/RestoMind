@@ -11672,6 +11672,15 @@ function adminMixinDataChartsSettings() {
                     this.guestCareSyncMessage = 'Авто-sync только для 2GIS. Для Google используйте ручной импорт по URL ниже.';
                     return;
                 }
+                if (data?.ok === false || stats.ok === false || (Array.isArray(stats.errors) && stats.errors.length)) {
+                    const firstError = Array.isArray(stats.errors) ? stats.errors[0] : null;
+                    if (firstError?.code === '2gis_antibot') {
+                        this.guestCareSyncMessage = '2GIS вернул защитную страницу вместо отзывов. Авто-sync по публичной странице недоступен; нужен официальный/партнёрский источник или scraper-интеграция.';
+                    } else {
+                        this.guestCareSyncMessage = firstError?.error || 'Не удалось синхронизировать отзывы';
+                    }
+                    return;
+                }
                 const inserted = Number(stats.inserted || 0);
                 const updated = Number(stats.updated || 0);
                 const parsed = Number(stats.parsed || 0);
