@@ -1,8 +1,9 @@
 """Fulfillment-only turns: обновление черновика без новых items."""
 
 import pytest
+from sqlalchemy import select
 
-from app.db.models import Order, OrderStatus
+from app.db.models import MenuItem, Order, OrderStatus
 from app.schemas.ai_schemas import AIBrainResponse, OrderItem
 from app.services.decision_engine import decision_engine
 from app.services.dialog_mgr import UserState
@@ -52,6 +53,48 @@ async def test_fulfillment_only_pickup_updates_existing_draft(db_with_menu) -> N
     meta = (draft.items_json or {}).get("order_meta") or {}
     assert meta.get("order_type") == "pickup"
     assert "полчаса" in str(meta.get("pickup_time_note") or "").lower()
+
+
+@pytest.mark.asyncio
+async def test_fulfillment_only_accepts_detached_draft(db_with_menu) -> None:
+    plov = await db_with_menu.scalar(select(MenuItem).where(MenuItem.iiko_id == "uuid-plov"))
+    assert plov is not None
+    seed_ai = AIBrainResponse(
+        intent="order",
+        reply_text="Draft created.",
+        items=[OrderItem(name=plov.name, iiko_item_id="uuid-plov", quantity=1)],
+    )
+    seed = await _handle_order(
+        db_with_menu,
+        "+77051310838",
+        seed_ai,
+        organization_id=1,
+    )
+    assert seed.pending_order_id is not None
+    draft = await db_with_menu.get(Order, seed.pending_order_id)
+    assert draft is not None
+    draft_id = int(draft.id)
+    db_with_menu.expunge(draft)
+
+    fulfillment_ai = AIBrainResponse(
+        intent="order",
+        reply_text="Pickup.",
+        items=[],
+        order_type="pickup",
+    )
+    result = await _handle_order(
+        db_with_menu,
+        "+77051310838",
+        fulfillment_ai,
+        organization_id=1,
+        draft_order=draft,
+    )
+
+    assert result.pending_order_id == draft_id
+    fresh = await db_with_menu.get(Order, draft_id)
+    assert fresh is not None
+    meta = (fresh.items_json or {}).get("order_meta") or {}
+    assert meta.get("order_type") == "pickup"
 
 
 @pytest.mark.asyncio

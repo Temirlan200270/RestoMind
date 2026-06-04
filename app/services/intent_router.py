@@ -569,11 +569,15 @@ async def _handle_order(
             db, organization_id=organization_id, include_unavailable=True,
         )
 
-    existing_draft = (
-        draft_order
-        if draft_order is not None and draft_order.status == OrderStatus.DRAFT
-        else await get_open_draft_order(db, phone, organization_id, user=user)
-    )
+    existing_draft: Order | None = None
+    if draft_order is not None and draft_order.status == OrderStatus.DRAFT:
+        draft_id = getattr(draft_order, "id", None)
+        if draft_id is not None:
+            existing_draft = await db.get(Order, int(draft_id))
+        else:
+            existing_draft = draft_order
+    if existing_draft is None:
+        existing_draft = await get_open_draft_order(db, phone, organization_id, user=user)
     draft_item_names: list[str] = []
     if existing_draft and isinstance(existing_draft.items_json, dict):
         draft_item_names = [

@@ -426,13 +426,28 @@ async def _save_inbound_chat_log(
     *,
     organization_id: int,
     channel: str | None = None,
+    whatsapp_message_id: str = "",
     trace_id: str | None = None,
     conversation_id: str | None = None,
     location_id: int | None = None,
-) -> tuple[int, int]:
+) -> tuple[int, int, bool]:
     from app.services.telegram_customer import current_customer_channel, normalize_customer_channel
 
     user = await get_or_create_user(db, phone, organization_id)
+    inbound_mid = (whatsapp_message_id or "").strip()
+    if inbound_mid:
+        existing_log = await db.scalar(
+            select(ChatLog)
+            .where(
+                ChatLog.organization_id == organization_id,
+                ChatLog.user_id == user.id,
+                ChatLog.role == "user",
+                ChatLog.provider_message_id == inbound_mid,
+            )
+            .order_by(ChatLog.id.asc())
+        )
+        if existing_log is not None:
+            return int(user.id), int(existing_log.id), False
     log = ChatLog(
         organization_id=organization_id,
         location_id=location_id,
@@ -440,6 +455,7 @@ async def _save_inbound_chat_log(
         role="user",
         content=user_text,
         channel=normalize_customer_channel(channel or current_customer_channel()),
+        provider_message_id=inbound_mid or None,
         meta_json=(
             trace_payload(trace_id=trace_id, conversation_id=conversation_id)
             if trace_id and conversation_id else None
@@ -447,7 +463,7 @@ async def _save_inbound_chat_log(
     )
     db.add(log)
     await db.flush()
-    return int(user.id), int(log.id)
+    return int(user.id), int(log.id), True
 
 
 async def _process_whatsapp_status_batch(statuses: list[Any]) -> None:
@@ -1774,28 +1790,31 @@ async def _process_message_inner(
         )
         inbound_user_id: int | None = None
         inbound_log_id: int | None = None
+        inbound_log_created = False
         if user_evt:
             try:
                 async with async_session_factory() as db_in:
-                    inbound_user_id, inbound_log_id = await _save_inbound_chat_log(
+                    inbound_user_id, inbound_log_id, inbound_log_created = await _save_inbound_chat_log(
                         db_in,
                         phone,
                         user_evt,
                         organization_id=organization_id,
+                        whatsapp_message_id=wmid,
                         trace_id=trace_id,
                         conversation_id=conversation_id,
                         location_id=active_location_id,
                     )
                     await db_in.commit()
-                await publish_chat_event(
-                    phone=phone,
-                    role="user",
-                    content=user_evt,
-                    organization_id=organization_id,
-                    chat_log_id=inbound_log_id,
-                    trace_id=trace_id,
-                    conversation_id=conversation_id,
-                )
+                if inbound_log_created:
+                    await publish_chat_event(
+                        phone=phone,
+                        role="user",
+                        content=user_evt,
+                        organization_id=organization_id,
+                        chat_log_id=inbound_log_id,
+                        trace_id=trace_id,
+                        conversation_id=conversation_id,
+                    )
             except Exception:
                 logger.exception("inbound ChatLog early save failed org=%s phone=%s", organization_id, phone[-4:])
                 await publish_event("new_message", {
