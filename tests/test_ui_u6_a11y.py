@@ -10,7 +10,7 @@ def test_kanban_columns_have_data_attribute_and_handler():
     # После декомпозиции `admin.html` на `{% include %}` нужная разметка живёт в конкретном экране.
     # Проверяем именно таб заказов, где расположен канбан.
     orders_tab = (REPO / "app" / "templates" / "screens" / "_tab_orders.html").read_text(encoding="utf-8")
-    assert orders_tab.count("data-kanban-col") == 6
+    assert orders_tab.count("data-kanban-col") == 7
     assert "handleKanbanKeydown" in orders_tab
     assert 'role="tab"' in orders_tab
 

@@ -1619,7 +1619,7 @@ function adminMixinState() {
         unreadChats: 0,
         /** G5 Live Pulse: bump every 30s on вкладке «Чаты» для пересчёта wait time */
         _chatPulseAt: 0,
-        kanbanVisible: { draft: 20, confirmed: 20, sent_to_iiko: 20, in_transit: 20, waiting_pickup: 20, completed: 20 },
+        kanbanVisible: { draft: 20, confirmed: 20, sent_to_iiko: 20, in_transit: 20, waiting_pickup: 20, completed: 20, cancelled: 20 },
         upsellFeedbackLoading: false,
         /** Кабина оператора: сводка по клиенту */
         customerSummaryLoading: false,
@@ -1903,7 +1903,7 @@ function adminMixinMenuOrdersUi() {
 
         get kanbanLateStagesCollapsed() {
             if (this.kanbanLateStagesOpen) return false;
-            const late = this.kanbanInTransit.length + this.kanbanWaitingPickup.length + this.kanbanCompleted.length;
+            const late = this.kanbanInTransit.length + this.kanbanWaitingPickup.length + this.kanbanCompleted.length + this.kanbanCancelled.length;
             const early = this.kanbanDraft.length + this.kanbanConfirmed.length + this.kanbanSent.length;
             return late === 0 && early === 0;
         },
@@ -1955,6 +1955,7 @@ function adminMixinMenuOrdersUi() {
                 + this.kanbanInTransit.length
                 + this.kanbanWaitingPickup.length
                 + this.kanbanCompleted.length
+                + this.kanbanCancelled.length
             ) === 0;
         },
 
@@ -2080,6 +2081,12 @@ function adminMixinMenuOrdersUi() {
         },
         get kanbanCompletedVisible() {
             return this._kanbanVisible(this.kanbanCompleted, 'completed');
+        },
+        get kanbanCancelled() {
+            return this.orders.filter(o => o.status === 'cancelled');
+        },
+        get kanbanCancelledVisible() {
+            return this._kanbanVisible(this.kanbanCancelled, 'cancelled');
         },
 
         /** Разбивка по дням на вкладке Аналитика (не трогает порядок точек на графике). */
