@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import time
 from collections import Counter
@@ -25,6 +26,8 @@ from app.db.models import (
     RestaurantStateSnapshot,
 )
 from app.services.tenant_scope import chat_logs_location_filter, orders_location_filter, orders_tenant_clause
+
+logger = logging.getLogger(__name__)
 
 
 def _dt_as_utc(dt: datetime) -> datetime:
@@ -321,18 +324,41 @@ async def answer_intelligence_query(
     conversation_id: int | None = None,
     role: str | None = None,
 ) -> dict[str, Any]:
-    from app.services.copilot.engine import run_owner_copilot_for_org
+    from app.services.copilot.business_questions import questions_for_role
+    from app.services.copilot.engine import (
+        _collect_tool_results,
+        _compose_answer,
+        _llm_answer_or_fallback,
+        run_owner_copilot,
+    )
 
     intent = parse_revenue_orders_intent(question)
     started = time.perf_counter()
     copilot_error = False
     try:
-        copilot_result = await run_owner_copilot_for_org(org_id=org_id, question=question, role=role)
+        period, results = await _collect_tool_results(
+            db,
+            org_id=org_id,
+            question=question,
+            role=role,
+        )
+        fallback_answer = _compose_answer(question, results)
+        answer = await _llm_answer_or_fallback(
+            question=question,
+            tool_results=results,
+            fallback=fallback_answer,
+        )
+        copilot_result = {
+            "answer": answer,
+            "period": period,
+            "tool_calls": [{"name": r.get("tool"), "result": r} for r in results],
+            "data": {str(r.get("tool")): r for r in results},
+            "llm_used": answer != fallback_answer,
+            "business_questions": questions_for_role(role),
+        }
     except Exception:
         logger.exception("owner copilot failed, falling back to local copilot org=%s", org_id)
         copilot_error = True
-        from app.services.copilot.engine import run_owner_copilot
-
         copilot_result = await run_owner_copilot(db, org_id=org_id, question=question, role=role)
     latency_ms = int((time.perf_counter() - started) * 1000)
     await _record_copilot_usage(db, org_id, latency_ms=latency_ms, error=copilot_error)

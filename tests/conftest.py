@@ -2,10 +2,15 @@
 Общие фикстуры для тестов RestoMind.
 """
 
+import logging
 import os
 
 # До импорта app.core.config: SessionMiddleware с https_only=True не отдаёт cookie в httpx по http:// (ASGITransport).
 os.environ.setdefault("APP_DEBUG", "true")
+
+# CI/local: не засорять лог pytest тысячами строк aiosqlite/sqlalchemy DEBUG.
+logging.getLogger("aiosqlite").setLevel(logging.WARNING)
+logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 # Тесты ожидают синхронные consumers в той же транзакции (DailyOrgStats и т.д.).
 os.environ.setdefault("EVENT_CONSUMERS_ASYNC", "false")
 # Owner digest send_* тесты: send_weekly_digest требует непустой TELEGRAM_BOT_TOKEN (CI без .env).

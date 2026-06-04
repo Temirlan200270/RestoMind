@@ -38,7 +38,7 @@ def import_review_from_url(
         "url": url_s,
         "author": (author or "Гость").strip(),
         "rating": int(rating) if rating is not None else None,
-        "text": (text or note or f"Импортировано из {source}").strip(),
+        "text": (text or note or "").strip(),
         "imported_at": datetime.now(tz=timezone.utc).isoformat(),
         "reply_draft": None,
     }

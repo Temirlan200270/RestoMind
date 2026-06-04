@@ -12,6 +12,7 @@ Google Maps has no stable public HTML API without Places API credentials — see
 from __future__ import annotations
 
 import hashlib
+import html as html_lib
 import json
 import logging
 import re
@@ -41,6 +42,16 @@ _TEXT_KEYS = ("text", "reviewBody", "body", "comment", "content", "message")
 _AUTHOR_KEYS = ("author", "user", "userName", "user_name", "name")
 _RATING_KEYS = ("rating", "score", "stars", "reviewRating", "review_rating")
 _DATE_KEYS = ("datePublished", "date", "createdAt", "created_at", "published_at")
+_GIS_REVIEW_CARD_RE = re.compile(
+    r'<div\s+class=["\']_1rowqpjv["\'][\s\S]*?(?=<div\s+class=["\']_1rowqpjv["\']|<button[^>]*>\s*<span>Загрузить ещё|</body>|$)',
+    re.I,
+)
+_GIS_AUTHOR_TAG_RE = re.compile(r'<span[^>]*class=["\'][^"\']*_19h0cqe[^"\']*["\'][^>]*>', re.I)
+_GIS_TEXT_BLOCK_RE = re.compile(
+    r'<div[^>]*class=["\'][^"\']*_83kmcy[^"\']*["\'][^>]*>([\s\S]*?)</div>',
+    re.I,
+)
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 
 @dataclass(frozen=True)
@@ -180,6 +191,52 @@ def _dedupe_reviews(items: list[ParsedExternalReview]) -> list[ParsedExternalRev
     return unique
 
 
+def _html_attr(tag: str, attr: str) -> str:
+    match = re.search(rf'\b{re.escape(attr)}=["\']([^"\']*)["\']', tag, re.I)
+    if not match:
+        return ""
+    return html_lib.unescape(match.group(1)).strip()
+
+
+def _visible_text(fragment: str) -> str:
+    without_read_more = re.sub(r"<span[^>]*>\s*Читать целиком\s*</span>", " ", fragment, flags=re.I)
+    text = _HTML_TAG_RE.sub(" ", without_read_more)
+    text = html_lib.unescape(text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _parse_2gis_visible_cards(html: str, *, page_url: str) -> list[ParsedExternalReview]:
+    """Fallback for 2GIS server-rendered review cards on ``/tab/reviews`` pages."""
+    found: list[ParsedExternalReview] = []
+    for block in _GIS_REVIEW_CARD_RE.findall(html):
+        author_tag = _GIS_AUTHOR_TAG_RE.search(block)
+        author = _html_attr(author_tag.group(0), "title") if author_tag else ""
+        text_match = _GIS_TEXT_BLOCK_RE.search(block)
+        if not author or not text_match:
+            continue
+
+        text = _visible_text(text_match.group(1))
+        if len(text) < 8:
+            continue
+
+        rating_prefix = block[: text_match.start()]
+        rating = rating_prefix.count('color="#ffb81c"') or rating_prefix.count("color='#ffb81c'")
+        rating_value = rating if 1 <= rating <= 5 else None
+        external_id = _stable_external_id("2gis", None, author=author, text=text, rating=rating_value)
+        found.append(
+            ParsedExternalReview(
+                external_id=external_id,
+                source="2gis",
+                url=f"{page_url.rstrip('/')}#review-{external_id}",
+                author=author,
+                rating=rating_value,
+                text=text,
+                published_at=None,
+            )
+        )
+    return found
+
+
 def _parse_json_ld(html: str, *, source: str, page_url: str) -> list[ParsedExternalReview]:
     found: list[ParsedExternalReview] = []
     for block in _JSON_LD_RE.findall(html):
@@ -218,6 +275,7 @@ def parse_2gis_page(html: str, page_url: str) -> list[ParsedExternalReview]:
     items: list[ParsedExternalReview] = []
     items.extend(_parse_json_ld(html, source=source, page_url=page_url))
     items.extend(_parse_embedded_json(html, source=source, page_url=page_url))
+    items.extend(_parse_2gis_visible_cards(html, page_url=page_url))
     if not items:
         logger.info("parse_2gis_page: no reviews extracted from %s", page_url)
     return _dedupe_reviews(items)

@@ -14,6 +14,7 @@ from app.services.guestcare_parser import (
     parse_google_page,
     parse_reviews_from_html,
 )
+from app.services.external_reviews_sync import normalize_2gis_reviews_url
 
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "guestcare"
 GIS_HTML = FIXTURE_DIR / "2gis_firm_page.html"
@@ -24,6 +25,16 @@ def test_detect_review_source() -> None:
     assert detect_review_source("https://2gis.kz/almaty/firm/123") == "2gis"
     assert detect_review_source("https://www.google.com/maps/place/foo") == "google"
     assert detect_review_source("https://example.com/review") == "external"
+
+
+def test_normalize_2gis_reviews_url_prefers_tab_reviews() -> None:
+    assert normalize_2gis_reviews_url("https://2gis.kz/pavlodar/firm/70000001110142368") == (
+        "https://2gis.kz/pavlodar/firm/70000001110142368/tab/reviews"
+    )
+    assert normalize_2gis_reviews_url("https://2gis.kz/pavlodar/firm/70000001110142368/tab/reviews") == (
+        "https://2gis.kz/pavlodar/firm/70000001110142368/tab/reviews"
+    )
+    assert normalize_2gis_reviews_url("https://example.com/review") == "https://example.com/review"
 
 
 def test_parse_2gis_fixture_extracts_json_ld_and_embedded() -> None:
@@ -53,6 +64,47 @@ def test_parse_reviews_from_html_dispatches() -> None:
     html = GIS_HTML.read_text(encoding="utf-8")
     items = parse_reviews_from_html(html, "https://2gis.kz/almaty/firm/x")
     assert len(items) >= 2
+
+
+def test_parse_2gis_visible_review_cards_from_tab_reviews_html() -> None:
+    html = """
+    <div class="_1rowqpjv">
+      <span class="_19h0cqe" title="Apple User">Apple User</span>
+      <div class="_hf8ayi">
+        <svg color="#ffb81c"></svg><svg color="#ffb81c"></svg><svg color="#ffb81c"></svg>
+        <svg color="#ffb81c"></svg><svg color="#ffb81c"></svg>
+      </div>
+      <div class="_83kmcy">
+        <a class="_oxthv5">Кухня на высшем! Официант Арыстан отлично выполняет работу.</a>
+      </div>
+    </div>
+    <div class="_1rowqpjv">
+      <span class="_19h0cqe" title="balnur">balnur</span>
+      <div class="_hf8ayi">
+        <svg color="#ffb81c"></svg><svg color="#ffb81c"></svg>
+        <svg color="#929292"></svg><svg color="#929292"></svg><svg color="#929292"></svg>
+      </div>
+      <div class="_83kmcy">
+        <a class="_co8kyiw">обслуживание очееенььь плохое, приборы принесли после.</a>
+        <span class="_1e65qgv">Читать целиком</span>
+      </div>
+      <div class="_sgs1pz">
+        <span class="_1cf08aj" title="Plovхана, кафе-халяль">Plovхана, кафе-халяль</span>
+        <div class="_1wk3bjs">Здравствуйте! Нам очень жаль...</div>
+      </div>
+    </div>
+    """
+
+    reviews = parse_2gis_page(html, "https://2gis.kz/pavlodar/firm/70000001110142368/tab/reviews")
+
+    assert len(reviews) == 2
+    assert reviews[0].author == "Apple User"
+    assert reviews[0].rating == 5
+    assert "Кухня на высшем" in reviews[0].text
+    assert reviews[1].author == "balnur"
+    assert reviews[1].rating == 2
+    assert "Читать целиком" not in reviews[1].text
+    assert "Plovхана" not in reviews[1].text
 
 
 @pytest.mark.asyncio

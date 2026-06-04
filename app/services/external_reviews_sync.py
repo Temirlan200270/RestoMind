@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 from typing import Any, TYPE_CHECKING
+from urllib.parse import urlparse, urlunparse
 
 import httpx
 from sqlalchemy import select
@@ -62,12 +63,26 @@ def org_review_sources(org: Organization) -> dict[str, str]:
     return urls
 
 
+def normalize_2gis_reviews_url(url: str) -> str:
+    """Prefer the review tab for 2GIS firm pages; it exposes more review HTML."""
+    raw = (url or "").strip()
+    if not raw:
+        return raw
+    parsed = urlparse(raw)
+    host = (parsed.netloc or "").lower()
+    path = (parsed.path or "").rstrip("/")
+    if "2gis" not in host or "/firm/" not in path or path.endswith("/tab/reviews"):
+        return raw
+    normalized = parsed._replace(path=f"{path}/tab/reviews")
+    return urlunparse(normalized)
+
+
 def org_review_auto_sync_sources(org: Organization) -> dict[str, str]:
     """URLs for cron + «Синхронизировать» — 2GIS only (Google Places API not in scope)."""
     gis = (getattr(org, "review_url_2gis", None) or "").strip()
     if not gis:
         return {}
-    return {"2gis": gis}
+    return {"2gis": normalize_2gis_reviews_url(gis)}
 
 
 async def fetch_review_page_html(
@@ -227,6 +242,11 @@ async def sync_external_reviews_for_org(
         "errors": errors,
         "limitations": [GOOGLE_REVIEWS_LIMITATION],
     }
+    if parsed_total == 0 and not errors:
+        result["warnings"] = [
+            "Страница 2GIS открылась, но тексты отзывов не извлечены. Проверьте, что ссылка ведёт на /tab/reviews; "
+            "если разметка 2GIS изменилась, нужно обновить парсер.",
+        ]
     logger.info(
         "sync_external_reviews_for_org org=%s inserted=%s updated=%s parsed=%s",
         organization_id,

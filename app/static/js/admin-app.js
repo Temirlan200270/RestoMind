@@ -1494,6 +1494,8 @@ function adminMixinState() {
         guestCareSyncMeta: null,
         guestCareSyncMessage: '',
         guestCareImportUrl: '',
+        guestCareImportText: '',
+        guestCareDigest: null,
         applyPricingBulkLoading: false,
         intelligenceLoading: false,
         intelligenceAsking: false,
@@ -11635,9 +11637,40 @@ function adminMixinDataChartsSettings() {
                 const { ok, data } = await this.apiJsonResponse('/api/admin/intelligence/reviews/external');
                 if (ok && data?.items) this.guestCareReviews = data.items;
                 if (ok && data?.sync_meta) this.guestCareSyncMeta = data.sync_meta;
+                this.guestCareDigest = this.buildGuestCareDigest(this.guestCareReviews || []);
             } catch (_e) { /* noop */ } finally {
                 this.guestCareLoading = false;
             }
+        },
+
+        buildGuestCareDigest(reviews) {
+            const items = Array.isArray(reviews) ? reviews : [];
+            const cutoff = Date.now() - (24 * 60 * 60 * 1000);
+            const cleanText = (text) => String(text || '').trim();
+            const isRealText = (text) => {
+                const value = cleanText(text);
+                return value && !value.toLowerCase().startsWith('импортировано из');
+            };
+            const recent = items.filter((review) => {
+                if (!isRealText(review?.text)) return false;
+                const imported = Date.parse(review?.imported_at || '');
+                return Number.isFinite(imported) && imported >= cutoff;
+            });
+            const negativeWords = /(плохо|ужас|долго|ждали|остыл|невкус|разочар|медлен|проблем|не\s+понрав|обслуживание\s+0|ноль)/i;
+            const positiveWords = /(вкусн|отличн|понрав|спасибо|вежлив|быстро|уютн|сервис|на высшем)/i;
+            const negative = recent.filter((review) => Number(review?.rating || 0) <= 2 || negativeWords.test(cleanText(review?.text)));
+            const positive = recent.filter((review) => Number(review?.rating || 0) >= 4 || positiveWords.test(cleanText(review?.text)));
+            const sample = (list) => list.slice(0, 3).map((review) => ({
+                author: cleanText(review?.author) || 'Гость',
+                text: cleanText(review?.text).slice(0, 180),
+            }));
+            return {
+                count: recent.length,
+                positive_count: positive.length,
+                negative_count: negative.length,
+                praise_samples: sample(positive),
+                complaint_samples: sample(negative),
+            };
         },
 
         async syncGuestCareReviews() {
@@ -11654,6 +11687,7 @@ function adminMixinDataChartsSettings() {
                     return;
                 }
                 if (data?.items) this.guestCareReviews = data.items;
+                this.guestCareDigest = this.buildGuestCareDigest(this.guestCareReviews || []);
                 const stats = data?.stats || {};
                 if (stats.sync_meta) this.guestCareSyncMeta = stats.sync_meta;
                 else if (data?.stats?.sources) {
@@ -11684,6 +11718,13 @@ function adminMixinDataChartsSettings() {
                 const inserted = Number(stats.inserted || 0);
                 const updated = Number(stats.updated || 0);
                 const parsed = Number(stats.parsed || 0);
+                if (parsed === 0) {
+                    const warning = Array.isArray(stats.warnings) && stats.warnings.length
+                        ? ` ${stats.warnings[0]}`
+                        : ' Страница открылась, но тексты отзывов не извлечены.';
+                    this.guestCareSyncMessage = `2GIS sync: найдено 0 отзывов.${warning}`;
+                    return;
+                }
                 this.guestCareSyncMessage = `Готово: найдено ${parsed}, новых ${inserted}, обновлено ${updated}.`;
                 if (Array.isArray(stats.errors) && stats.errors.length) {
                     this.guestCareSyncMessage += ` Ошибки: ${stats.errors.length}.`;
@@ -11701,18 +11742,21 @@ function adminMixinDataChartsSettings() {
 
         async importGuestCareReview() {
             const url = (this.guestCareImportUrl || '').trim();
+            const text = (this.guestCareImportText || '').trim();
             if (!url) return;
             const { ok, data } = await this.apiJsonResponse(
                 '/api/admin/intelligence/reviews/external/import',
                 {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url }),
+                    body: JSON.stringify({ url, text: text || null }),
                 },
             );
             if (ok && data?.item) {
                 this.guestCareReviews = [data.item, ...(this.guestCareReviews || [])];
+                this.guestCareDigest = this.buildGuestCareDigest(this.guestCareReviews || []);
                 this.guestCareImportUrl = '';
+                this.guestCareImportText = '';
             }
         },
 
