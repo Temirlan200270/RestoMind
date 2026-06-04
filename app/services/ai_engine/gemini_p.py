@@ -50,6 +50,88 @@ _JSON_ONLY_INSTRUCTION = (
 )
 
 
+def _gemini_response_schema() -> dict[str, Any]:
+    """
+    Gemini structured output supports a subset of JSON Schema. Keep this schema explicit and
+    conservative: no anyOf/null/$defs, while Pydantic remains the final validator.
+    """
+    string_array = {"type": "array", "items": {"type": "string"}}
+    return {
+        "type": "object",
+        "properties": {
+            "intent": {"type": "string", "enum": ["order", "book", "faq", "escalate"]},
+            "reply_text": {"type": "string"},
+            "detected_language": {"type": "string", "enum": ["ru", "kk", "en", "uz"]},
+            "items": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "iiko_item_id": {"type": "string"},
+                        "packaging_plov_1kg": {"type": "string", "enum": ["", "tabak", "foil_kazan"]},
+                        "quantity": {"type": "integer"},
+                        "modifiers_ids": string_array,
+                        "modifiers": {"type": "array", "items": {"type": "object"}},
+                        "exclude_ingredients": string_array,
+                    },
+                    "required": ["name"],
+                },
+            },
+            "order_actions": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "action_id": {"type": "string"},
+                        "item_id": {"type": "string"},
+                        "action": {"type": "string", "enum": ["add", "remove", "set_quantity"]},
+                        "quantity": {"type": "integer"},
+                        "reasoning": {"type": "string"},
+                    },
+                    "required": ["item_id", "action"],
+                },
+            },
+            "is_recommendation": {"type": "boolean"},
+            "upsell_offered": {"type": "string"},
+            "upsell_offered_id": {"type": "string"},
+            "upsell_reasoning": {"type": "string"},
+            "rejected_upsell_iiko_ids": string_array,
+            "booking_details": {
+                "type": "object",
+                "properties": {
+                    "date": {"type": "string"},
+                    "time": {"type": "string"},
+                    "guests": {"type": "integer"},
+                    "hall": {"type": "string", "enum": ["hall_1", "hall_2", "vip"]},
+                    "comment": {"type": "string"},
+                },
+                "required": ["date", "time"],
+            },
+            "order_type": {"type": "string", "enum": ["delivery", "pickup", "hall", ""]},
+            "payment_method": {"type": "string", "enum": ["cash", "card", "remote", ""]},
+            "payment_mode": {"type": "string", "enum": ["single", "mixed"]},
+            "payment_split": {
+                "type": "object",
+                "properties": {
+                    "cash": {"type": "number"},
+                    "card": {"type": "number"},
+                    "remote": {"type": "number"},
+                },
+            },
+            "discount_pct": {"type": "number"},
+            "is_preorder": {"type": "boolean"},
+            "booking_time": {"type": "string"},
+            "delivery_address": {"type": "string"},
+            "pickup_time_note": {"type": "string"},
+            "guest_count_for_meal": {"type": "integer"},
+            "dietary_allergy_notes": {"type": "string"},
+            "recognized_speech": {"type": "string"},
+        },
+        "required": ["intent", "reply_text"],
+    }
+
+
 # Fenced code block (``` или ```json), non-greedy, через несколько строк.
 # DOTALL — чтобы '.' матчил '\n'.
 _MARKDOWN_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL | re.IGNORECASE)
@@ -259,19 +341,16 @@ class GeminiProvider(BaseAIProvider):
                 genai = _lazy_import_genai()
                 model = genai.GenerativeModel(model_name)
                 # Async API is available in google-generativeai; use it to avoid blocking.
-                # response_mime_type="application/json" — нативный JSON-режим Gemini:
-                # модель обязуется вернуть валидный JSON без Markdown-обёртки. Это
-                # защита №1 (работает на уровне API и снижает ValidationError-каскад).
-                # Схему (response_schema=AIBrainResponse) не передаём: AIBrainResponse
-                # слишком сложна (nullable Unions, nested Pydantic) — SDK-конвертер
-                # в JSON Schema может упасть на InvalidArgument для некоторых preview
-                # моделей. Валидируем через Pydantic на нашей стороне — это надёжнее.
+                # response_schema — нативный structured-output режим Gemini. Передаём
+                # упрощённую JSON Schema без Pydantic anyOf/null/$defs, а финальную
+                # бизнес-валидацию всё равно держим в AIBrainResponse.model_validate_json.
                 resp = await asyncio.wait_for(
                     model.generate_content_async(
                         prompt,
                         generation_config=genai.types.GenerationConfig(
                             temperature=0.3,
                             response_mime_type="application/json",
+                            response_schema=_gemini_response_schema(),
                         ),
                     ),
                     timeout=float(settings.ai_llm_timeout_sec),

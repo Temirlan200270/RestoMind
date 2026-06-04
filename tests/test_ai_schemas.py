@@ -75,6 +75,17 @@ def test_payment_split_null_collapses_to_default_factory() -> None:
     assert result.payment_split.remote == 0.0
 
 
+def test_payment_split_non_object_collapses_to_default_factory() -> None:
+    payload = {**_MINIMAL_VALID, "payment_split": "single"}
+
+    result = AIBrainResponse.model_validate(payload)
+
+    assert isinstance(result.payment_split, PaymentSplit)
+    assert result.payment_split.cash == 0.0
+    assert result.payment_split.card == 0.0
+    assert result.payment_split.remote == 0.0
+
+
 def test_null_in_required_field_still_fails() -> None:
     """
     Coercion НЕ должен маскировать ошибки в required-полях без дефолта.

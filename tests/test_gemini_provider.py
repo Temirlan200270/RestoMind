@@ -11,6 +11,7 @@ from app.services.ai_engine.errors import TransientAiError
 from app.services.ai_engine.gemini_p import (
     GeminiProvider,
     _extract_json_from_text,
+    _gemini_response_schema,
     _is_provider_level_error,
 )
 
@@ -43,6 +44,15 @@ from app.services.ai_engine.gemini_p import (
 )
 def test_extract_json_logic(raw_input: str, expected_output: str) -> None:
     assert _extract_json_from_text(raw_input).strip() == expected_output.strip()
+
+
+def test_gemini_response_schema_has_required_contract() -> None:
+    schema = _gemini_response_schema()
+
+    assert schema["type"] == "object"
+    assert schema["required"] == ["intent", "reply_text"]
+    assert schema["properties"]["intent"]["enum"] == ["order", "book", "faq", "escalate"]
+    assert schema["properties"]["payment_split"]["type"] == "object"
 
 
 @pytest.mark.asyncio
@@ -79,10 +89,11 @@ async def test_gemini_provider_smart_cascade_on_quota(caplog: pytest.LogCaptureF
 
 
 @pytest.mark.asyncio
-async def test_gemini_provider_failover_on_validation_error() -> None:
+async def test_gemini_provider_does_not_failover_on_validation_error() -> None:
     """
-    Если первая модель вернула JSON, не проходящий Pydantic (ValidationError),
-    каскад должен попробовать вторую модель того же провайдера.
+    Gemini prod preset держим на 2.5 без автоматического переключения на preview-модели.
+    Если 2.5 вернула JSON, не проходящий Pydantic (ValidationError), наружу выходит
+    быстрый TransientAiError вместо долгого failover на другую модель.
     """
     provider = GeminiProvider()
     provider._ensure_configured = lambda: True  # type: ignore[method-assign]
@@ -92,20 +103,15 @@ async def test_gemini_provider_failover_on_validation_error() -> None:
     # Проверяем именно pydantic.ValidationError, а не json.JSONDecodeError.
     bad_resp.text = '{"intent": 123, "reply_text": "x"}'
 
-    # Минимально валидный ответ: AIBrainResponse требует intent + reply_text.
-    good_resp = MagicMock()
-    good_resp.text = '{"intent":"faq","reply_text":"OK"}'
-
     mock_model = MagicMock()
-    mock_model.generate_content_async = AsyncMock(side_effect=[bad_resp, good_resp])
+    mock_model.generate_content_async = AsyncMock(return_value=bad_resp)
 
     with patch("google.generativeai.GenerativeModel", return_value=mock_model) as mock_factory:
-        result = await provider.generate_response(history=[], user_text="instruction")
+        with pytest.raises(TransientAiError):
+            await provider.generate_response(history=[], user_text="instruction")
 
-        assert isinstance(result, AIBrainResponse)
-        assert result.intent == "faq"
-        assert mock_model.generate_content_async.call_count == 2
-        assert mock_factory.call_count == 2
+        assert mock_model.generate_content_async.call_count == 1
+        assert mock_factory.call_count == 1
 
 
 @pytest.mark.asyncio
@@ -144,6 +150,27 @@ async def test_gemini_provider_is_stateless_across_concurrent_calls() -> None:
         assert mock_model.generate_content_async.call_count == 2
         # В обоих вызовах модель создаётся (preset начинается с первого model_name).
         assert mock_factory.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_gemini_provider_passes_structured_output_schema() -> None:
+    provider = GeminiProvider()
+    provider._ensure_configured = lambda: True  # type: ignore[method-assign]
+
+    response = MagicMock()
+    response.text = '{"intent":"faq","reply_text":"OK"}'
+
+    mock_model = MagicMock()
+    mock_model.generate_content_async = AsyncMock(return_value=response)
+
+    with patch("google.generativeai.GenerativeModel", return_value=mock_model):
+        result = await provider.generate_response(history=[], user_text="instruction")
+
+    assert result.intent == "faq"
+    generation_config = mock_model.generate_content_async.call_args.kwargs["generation_config"]
+    assert generation_config.response_mime_type == "application/json"
+    assert generation_config.response_schema["required"] == ["intent", "reply_text"]
+    assert generation_config.response_schema["properties"]["payment_split"]["type"] == "object"
 
 
 @pytest.mark.asyncio

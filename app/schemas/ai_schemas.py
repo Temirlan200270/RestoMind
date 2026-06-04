@@ -322,6 +322,9 @@ class AIBrainResponse(BaseModel):
         for field_name in cls._LLM_NULLABLE_TO_DEFAULT:
             if data.get(field_name, "__SENTINEL__") is None:
                 data.pop(field_name, None)
+        payment_split = data.get("payment_split", "__SENTINEL__")
+        if payment_split != "__SENTINEL__" and not isinstance(payment_split, (dict, PaymentSplit)):
+            data.pop("payment_split", None)
         return data
 
     @model_validator(mode="after")

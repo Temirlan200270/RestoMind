@@ -172,7 +172,7 @@ class Settings(BaseSettings):
     ai_strong_model_gemini: str = Field(
         default="",
         validation_alias=AliasChoices("AI_STRONG_MODEL_GEMINI", "ai_strong_model_gemini"),
-        description="Override strong-tier Gemini (пусто = cascade из AI_PRESETS)",
+        description="Override strong-tier Gemini (пусто = фиксированный preset из AI_PRESETS)",
     )
     ai_llm_timeout_sec: float = Field(
         default=45.0,

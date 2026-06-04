@@ -23,10 +23,10 @@ class ProviderPreset:
 
 AI_PRESETS: dict[ProviderKey, ProviderPreset] = {
     "gemini": ProviderPreset(
-        # Primary: Gemini 2.5 Flash (GA) — стабильная latency для prod WhatsApp.
-        # Fallback: Gemini 3 Flash preview — только если GA недоступна.
-        models=("gemini-2.5-flash", "gemini-3-flash-preview"),
-        strategy="cascade",
+        # Gemini 2.5 Flash (GA) — фиксированный prod-маршрут для WhatsApp.
+        # Preview-модели не используем как автоматический failover: они дают нестабильную latency.
+        models=("gemini-2.5-flash",),
+        strategy="single",
     ),
     "openai": ProviderPreset(
         models=("gpt-5.4-mini",),
