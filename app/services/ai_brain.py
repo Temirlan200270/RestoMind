@@ -353,7 +353,7 @@ async def _maybe_strong_rerun(
         history=history,
         user_text=user_text,
     )
-    if est_tokens > settings.prompt_max_tokens_soft:
+    if settings.prompt_max_tokens_soft > 0 and est_tokens > settings.prompt_max_tokens_soft:
         logger.info(
             "%s[AI] skip fast→strong: prompt oversize tokens=%d soft=%d intent=%s",
             trace_prefix,

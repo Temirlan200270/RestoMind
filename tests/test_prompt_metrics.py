@@ -60,6 +60,28 @@ def test_apply_prompt_size_controls_trims_when_over_soft() -> None:
     assert after.estimated_tokens <= before.estimated_tokens
 
 
+def test_apply_prompt_size_controls_soft_zero_disables_trimming() -> None:
+    long_hist = [{"role": "user", "content": "x" * 4000} for _ in range(8)]
+    history, menu_out, before, after, trimmed = apply_prompt_size_controls(
+        long_hist,
+        menu_context="m" * 40_000,
+        kb_context="k" * 5000,
+        draft_ctx="",
+        strategy_ctx="",
+        customer_ctx="",
+        current_time_ctx="t" * 500,
+        user_text="u" * 200,
+        soft_limit=0,
+        hard_limit=12000,
+        min_keep=4,
+    )
+    assert trimmed is False
+    assert after is None
+    assert history == long_hist
+    assert menu_out == "m" * 40_000
+    assert before.estimated_tokens > 0
+
+
 def test_trim_menu_context_when_history_empty() -> None:
     huge_menu = "x" * 40_000
     history, menu_out, before, after, trimmed = apply_prompt_size_controls(

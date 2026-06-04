@@ -1,4 +1,4 @@
-"""Замер и обрезка LLM-промпта (история диалога)."""
+"""Замер и опциональная обрезка LLM-промпта."""
 
 from __future__ import annotations
 
@@ -148,6 +148,9 @@ def apply_prompt_size_controls(
         history=history,
         user_text=user_text,
     )
+    if soft_limit <= 0:
+        return history, menu_out, size_before, None, False
+
     if size_before.estimated_tokens <= soft_limit:
         return history, menu_out, size_before, None, False
 

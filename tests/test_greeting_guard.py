@@ -13,4 +13,4 @@ def test_greeting_with_intent_not_detected_as_plain() -> None:
 
 
 def test_greeting_reply_text() -> None:
-    assert greeting_reply() == "Здравствуйте! Чем могу помочь?"
+    assert greeting_reply() == "Здравствуйте! Что бы вы хотели заказать? Могу подсказать по меню и помочь оформить заказ."

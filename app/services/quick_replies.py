@@ -127,7 +127,7 @@ def is_plain_greeting(text: str) -> bool:
 
 
 def greeting_reply() -> str:
-    return "Здравствуйте! Чем могу помочь?"
+    return "Здравствуйте! Что бы вы хотели заказать? Могу подсказать по меню и помочь оформить заказ."
 
 
 def peek_quick_reply_trigger(text: str) -> str | None:

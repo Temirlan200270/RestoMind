@@ -778,11 +778,11 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("PROMPT_SIZE_METRIC_ENABLED", "prompt_size_metric_enabled"),
     )
     prompt_max_tokens_soft: int = Field(
-        default=10000,
-        ge=2000,
+        default=0,
+        ge=0,
         le=64000,
         validation_alias=AliasChoices("PROMPT_MAX_TOKENS_SOFT", "prompt_max_tokens_soft"),
-        description="Превышение → обрезка chat_history перед LLM",
+        description="Превышение → обрезка chat_history/menu перед LLM; 0 = не обрезать",
     )
     prompt_max_tokens_hard: int = Field(
         default=14000,

@@ -21,7 +21,8 @@ async def test_greeting_plain() -> None:
     )
     assert hit is not None
     assert hit.template_id == "greeting_plain"
-    assert "Чем могу помочь" in hit.reply_text
+    assert "Что бы вы хотели заказать" in hit.reply_text
+    assert "подсказать по меню" in hit.reply_text
 
 
 @pytest.mark.asyncio
