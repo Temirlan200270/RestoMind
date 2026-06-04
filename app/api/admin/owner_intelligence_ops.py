@@ -98,10 +98,12 @@ async def owner_intel_kitchen_gate_patch(
             raise HTTPException(status_code=422, detail="Invalid expires_preset")
         try:
             patch_kwargs["expires_at"] = resolve_expires_preset(org_tz or "UTC", preset)
+            patch_kwargs["expires_at_provided"] = True
         except ValueError:
             raise HTTPException(status_code=422, detail="Invalid expires_preset") from None
     elif "expires_at" in body.model_fields_set:
         patch_kwargs["expires_at"] = body.expires_at
+        patch_kwargs["expires_at_provided"] = True
 
     before, after = await set_operational_mode(
         db,

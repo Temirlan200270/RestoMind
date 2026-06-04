@@ -257,6 +257,58 @@ async def test_kitchen_gate_expires_preset_patch(db_with_menu) -> None:
 
 
 @pytest.mark.asyncio
+async def test_kitchen_gate_reset_preset_clears_mode_and_expiry(db_with_menu) -> None:
+    from app.api.admin.owner_intelligence_ops import (
+        KitchenGatePatchBody,
+        owner_intel_kitchen_gate_patch,
+    )
+
+    class DummyRequest:
+        session = {"admin_ok": True, "organization_id": 1}
+
+    future = datetime.now(tz=timezone.utc) + timedelta(hours=1)
+    await set_operational_mode(
+        db_with_menu,
+        1,
+        kitchen_load=KITCHEN_LOAD_BUSY,
+        delivery_mode=DELIVERY_MODE_PAUSED,
+        force_pickup_only=True,
+        prep_time_extra_min=20,
+        expires_at=future,
+    )
+
+    with patch(
+        "app.api.admin.owner_intelligence_ops._location_scope_for_request",
+        return_value=(None, False),
+    ), patch(
+        "app.api.admin.owner_intelligence_ops._session_staff_user",
+        return_value=type("Staff", (), {"id": 42})(),
+    ):
+        payload = await owner_intel_kitchen_gate_patch(
+            DummyRequest(),
+            KitchenGatePatchBody(
+                kitchen_load="normal",
+                delivery_mode="normal",
+                force_pickup_only=False,
+                prep_time_extra_min=0,
+                reason="",
+                expires_preset="reset",
+            ),
+            None,
+            db_with_menu,
+            None,
+        )
+
+    mode = payload["mode"]
+    assert mode["kitchen_load"] == "normal"
+    assert mode["delivery_mode"] == "normal"
+    assert mode["force_pickup_only"] is False
+    assert mode["prep_time_extra_min"] == 0
+    assert mode["reason"] is None
+    assert mode["expires_at"] is None
+
+
+@pytest.mark.asyncio
 async def test_kitchen_gate_api_get_and_patch(db_with_menu) -> None:
     from app.api.admin.owner_intelligence_ops import (
         owner_intel_kitchen_gate_get,

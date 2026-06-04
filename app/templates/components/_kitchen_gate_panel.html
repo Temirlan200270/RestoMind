@@ -57,7 +57,7 @@
                         @click="patchKitchenGate({ expires_preset: 'end_of_shift' })">Конец смены</button>
                     <button type="button" class="ds-btn ds-btn-sm ds-btn-secondary"
                         :disabled="kitchenGateSaving"
-                        @click="patchKitchenGate({ expires_preset: 'reset' })">Сбросить</button>
+                        @click="patchKitchenGate({ kitchen_load: 'normal', delivery_mode: 'normal', force_pickup_only: false, prep_time_extra_min: 0, reason: '', expires_preset: 'reset' })">Сбросить</button>
                     <p x-show="kitchenGate.expires_at" class="text-xs ds-text-muted w-full"
                         x-text="'До: ' + (kitchenGate.expires_at ? new Date(kitchenGate.expires_at).toLocaleString() : '')"></p>
                 </div>

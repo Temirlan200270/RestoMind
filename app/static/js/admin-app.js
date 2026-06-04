@@ -10919,9 +10919,13 @@ function adminMixinDataChartsSettings() {
                 );
                 if (ok && data?.mode) {
                     this.kitchenGate = data.mode;
+                } else {
+                    const detail = data?.detail ? String(data.detail) : 'проверьте права и значение';
+                    this.showToast?.(`Kitchen Gate не сохранён: ${detail}`, 'error');
                 }
             } catch (e) {
                 adminLogger.error('[admin] patchKitchenGate', e);
+                this.showToast?.('Ошибка сохранения Kitchen Gate', 'error');
             } finally {
                 this.kitchenGateSaving = false;
             }

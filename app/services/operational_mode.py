@@ -153,6 +153,7 @@ async def set_operational_mode(
     force_pickup_only: bool | None = None,
     reason: str | None = None,
     expires_at: datetime | None = None,
+    expires_at_provided: bool = False,
     updated_by_staff_id: int | None = None,
 ) -> tuple[OperationalModeSnapshot, OperationalModeSnapshot]:
     """Upsert режима; возвращает (before, after)."""
@@ -178,12 +179,13 @@ async def set_operational_mode(
     if reason is not None:
         cleaned = str(reason).strip()
         row.reason = cleaned[:500] if cleaned else None
-    if expires_at is not None:
+    if expires_at_provided or expires_at is not None:
         row.expires_at = expires_at
     if updated_by_staff_id is not None:
         row.updated_by_staff_id = int(updated_by_staff_id)
 
     await db.flush()
+    await db.refresh(row)
     after = _row_to_snapshot(row)
     return before, after
 
