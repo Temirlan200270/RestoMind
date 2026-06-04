@@ -9,7 +9,6 @@ Pipeline latency tracking & SLA monitor (P4 sprint).
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -20,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.db.models import PipelineLatencyLog, SystemEvent
 from app.db.session import async_session_factory
+from app.services.async_tasks import spawn_tracked
 
 logger = logging.getLogger(__name__)
 
@@ -37,14 +37,11 @@ def schedule_log_pipeline_latency(
         return
     if not stage_ms:
         return
-    try:
-        loop = asyncio.get_running_loop()
-        loop.create_task(
-            _write_latency(int(organization_id), stage_ms, pipeline_type),
-            name=f"pipeline_latency_log_{organization_id}",
-        )
-    except RuntimeError:
-        pass
+    spawn_tracked(
+        _write_latency(int(organization_id), stage_ms, pipeline_type),
+        name=f"pipeline_latency_log_{organization_id}",
+        log=logger,
+    )
 
 
 async def _write_latency(org_id: int, stage_ms: dict[str, int], pipeline_type: str) -> None:

@@ -963,14 +963,16 @@ def invalidate_menu_context_cache(organization_id: int) -> None:
     for k in keys_to_remove:
         _menu_ctx_cache.pop(k, None)
     try:
-        import asyncio
-
+        from app.services.async_tasks import spawn_tracked
         from app.services.restaurant_context_cache import redis_bump_menu_ctx_cache_version
 
-        loop = asyncio.get_running_loop()
-        loop.create_task(redis_bump_menu_ctx_cache_version(int(organization_id)))
-    except RuntimeError:
-        pass
+        spawn_tracked(
+            redis_bump_menu_ctx_cache_version(int(organization_id)),
+            name=f"menu_ctx_cache_version_{organization_id}",
+            log=logger,
+        )
+    except Exception:
+        logger.debug("menu context cache version bump skipped org=%s", organization_id, exc_info=True)
 
 
 def detect_category_hint(message: str, menu_items: list[MenuItem]) -> str | None:

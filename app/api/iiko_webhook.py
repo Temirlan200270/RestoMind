@@ -40,6 +40,7 @@ async def iiko_webhook(request: Request) -> dict[str, Any]:
     from app.core.config import settings
     from app.db.models import Organization
     from app.db.session import async_session_factory
+    from app.services.async_tasks import spawn_tracked
     from app.services.task_queue import enqueue_job
 
     # ── 1. Проверка секрета ────────────────────────────────────────
@@ -60,6 +61,7 @@ async def iiko_webhook(request: Request) -> dict[str, Any]:
             if not isinstance(body, dict):
                 body = {}
     except Exception:
+        logger.debug("iiko webhook: body parse failed", exc_info=True)
         body = {}
 
     event_type = (body.get("event_type") or "all_updated").strip().lower()
@@ -110,9 +112,12 @@ async def iiko_webhook(request: Request) -> dict[str, Any]:
                 except Exception as exc:
                     logger.warning("iiko webhook: enqueue stoplist failed org_id=%s: %s", org_id, exc)
                     # fallback: fire-and-forget
-                    import asyncio
                     from app.services.iiko_sync_tasks import run_stoplist_sync
-                    asyncio.create_task(run_stoplist_sync(org_id))
+                    spawn_tracked(
+                        run_stoplist_sync(org_id),
+                        name=f"iiko_stoplist_sync_fallback_{org_id}",
+                        log=logger,
+                    )
                     queued.append({"org_id": org_id, "kind": "stoplist", "via": "background"})
 
         if want_menu:
@@ -125,9 +130,12 @@ async def iiko_webhook(request: Request) -> dict[str, Any]:
                     queued.append({"org_id": org_id, "kind": "menu"})
                 except Exception as exc:
                     logger.warning("iiko webhook: enqueue menu failed org_id=%s: %s", org_id, exc)
-                    import asyncio
                     from app.services.iiko_sync_tasks import run_menu_sync
-                    asyncio.create_task(run_menu_sync(org_id))
+                    spawn_tracked(
+                        run_menu_sync(org_id),
+                        name=f"iiko_menu_sync_fallback_{org_id}",
+                        log=logger,
+                    )
                     queued.append({"org_id": org_id, "kind": "menu", "via": "background"})
 
     logger.info("iiko webhook: event=%r iiko_org=%r → queued=%s", event_type, iiko_org_id, queued)
@@ -144,4 +152,5 @@ async def _debounce_check(redis: Any, key: str, ttl_sec: int) -> bool:
         # nx=True: SET только если ключа нет. Если SET выполнен → ключа не было → дебаунс НЕ активен.
         return existed is None  # None → ключ уже был → дебаунс активен
     except Exception:
+        logger.debug("iiko webhook: debounce failed key=%s", key, exc_info=True)
         return False  # при ошибке Redis пропускаем дебаунс

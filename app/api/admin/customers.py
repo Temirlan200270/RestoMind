@@ -26,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import EscalationEvent, Order, OrderStatus, User
 from app.db.session import get_db, redis_client
 from app.services.ai_snooze import clear_ai_snooze_if_expired
-from app.services.dialog_mgr import UserState, set_user_state_durable
+from app.services.dialog_mgr import UserState, apply_user_state_transition_in_db, set_user_state
 from app.services.events import publish_event
 
 from .deps import admin_org_from_session, require_admin_session_active
@@ -187,10 +187,10 @@ async def set_customer_ai_pause(
         )
     user.ai_paused = body.paused
     await db.flush()
-    await db.commit()
 
     if body.paused:
-        await set_user_state_durable(
+        applied_state = await apply_user_state_transition_in_db(
+            db,
             redis_client,
             phone=phone,
             organization_id=org_id,
@@ -198,12 +198,15 @@ async def set_customer_ai_pause(
             source="admin.customers",
             reason="customer_ai_pause_on",
         )
+        await db.commit()
+        await set_user_state(redis_client, phone, applied_state, organization_id=org_id)
         await publish_event(
             "state_changed",
             {"phone": phone, "state": UserState.HUMAN_MODE.value, "organization_id": org_id},
         )
     else:
-        await set_user_state_durable(
+        applied_state = await apply_user_state_transition_in_db(
+            db,
             redis_client,
             phone=phone,
             organization_id=org_id,
@@ -211,6 +214,8 @@ async def set_customer_ai_pause(
             source="admin.customers",
             reason="customer_ai_pause_off",
         )
+        await db.commit()
+        await set_user_state(redis_client, phone, applied_state, organization_id=org_id)
         await publish_event(
             "state_changed",
             {"phone": phone, "state": UserState.CHATTING.value, "organization_id": org_id},

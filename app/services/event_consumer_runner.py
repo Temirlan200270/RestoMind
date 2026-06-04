@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 
 from sqlalchemy import event as sa_event
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.async_tasks import spawn_tracked
 from app.services.system_events import BusinessEvent
 
 logger = logging.getLogger(__name__)
@@ -72,4 +72,8 @@ def schedule_event_consumers_after_commit(db: AsyncSession, event: BusinessEvent
 
     @sa_event.listens_for(sync_session, "after_commit", once=True)
     def _on_commit(_session) -> None:
-        asyncio.create_task(run_event_consumers_isolated(event))
+        spawn_tracked(
+            run_event_consumers_isolated(event),
+            name=f"event_consumers_{event.org_id}_{event.type}",
+            log=logger,
+        )

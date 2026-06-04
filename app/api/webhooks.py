@@ -57,6 +57,7 @@ from app.services.dialog_mgr import (
     CONFIRM_WORDS,
     UserState,
     append_to_history,
+    apply_user_state_transition_in_db,
     clear_pending_booking,
     clear_pending_order,
     clear_pending_order_durable,
@@ -75,6 +76,7 @@ from app.services.dialog_mgr import (
 )
 from app.services.conversation_state import ConversationState, normalize_conversation_state
 from app.services.ai_usage import schedule_log_ai_error, schedule_log_ai_usage
+from app.services.async_tasks import spawn_tracked
 from app.services.message_accounting import schedule_log_message
 from app.services.pipeline_latency import schedule_log_pipeline_latency
 from app.services.events import publish_event
@@ -233,7 +235,7 @@ async def _get_twilio_caller(call_sid: str) -> str:
             if raw:
                 return str(raw).strip()
         except Exception:
-            pass
+            logger.debug("twilio caller redis lookup failed call_sid=%s", call_sid, exc_info=True)
     return (_twilio_caller_memory.get(call_sid) or "").strip()
 
 
@@ -246,7 +248,7 @@ async def _get_twilio_org_id(call_sid: str) -> int:
             if raw:
                 return int(str(raw).strip())
         except Exception:
-            pass
+            logger.debug("twilio org redis lookup failed call_sid=%s", call_sid, exc_info=True)
     return int(_twilio_org_memory.get(call_sid) or settings.default_organization_id)
 
 
@@ -260,7 +262,7 @@ async def _get_twilio_voice_mode(call_sid: str) -> str:
                 mode = str(raw).strip().lower()
                 return "realtime" if mode == "realtime" else "stt_fallback"
         except Exception:
-            pass
+            logger.debug("twilio mode redis lookup failed call_sid=%s", call_sid, exc_info=True)
     return _twilio_mode_memory.get(call_sid) or "stt_fallback"
 
 
@@ -273,7 +275,7 @@ async def _get_twilio_location_id(call_sid: str) -> int | None:
             if raw:
                 return int(str(raw).strip())
         except Exception:
-            pass
+            logger.debug("twilio location redis lookup failed call_sid=%s", call_sid, exc_info=True)
     loc = _twilio_location_memory.get(call_sid)
     return int(loc) if loc is not None else None
 
@@ -675,13 +677,15 @@ async def handle_confirmation(
                         body=body,
                     )
                     if fulfillment_reply:
-                        await db.commit()
-                        await sync_user_dialog_state_to_db_then_redis(
+                        applied_state = await apply_user_state_transition_in_db(
+                            db,
                             redis_client,
                             phone=phone,
                             organization_id=organization_id,
                             new_state=UserState.CHATTING,
                         )
+                        await db.commit()
+                        await set_user_state(redis_client, phone, applied_state, organization_id=organization_id)
                         return fulfillment_reply
 
                 from app.services.order_confirm_gate import validate_order_ready_to_confirm
@@ -690,13 +694,15 @@ async def handle_confirmation(
                     db, order_row, check_fulfillment=True, order_meta=om if isinstance(om, dict) else {},
                 )
                 if not gate.ok:
-                    await db.commit()
-                    await sync_user_dialog_state_to_db_then_redis(
+                    applied_state = await apply_user_state_transition_in_db(
+                        db,
                         redis_client,
                         phone=phone,
                         organization_id=organization_id,
                         new_state=UserState.CHATTING,
                     )
+                    await db.commit()
+                    await set_user_state(redis_client, phone, applied_state, organization_id=organization_id)
                     return (
                         f"⚠️ {gate.reason}\n\n"
                         "Исправьте детали заказа — напишите, что изменить, или уточните адрес/время."
@@ -973,21 +979,21 @@ async def handle_order_payment_choice(
             body=body,
         )
         if fulfillment_reply:
-            await db.commit()
-            await sync_user_dialog_state_to_db_then_redis(
+            applied_state = await apply_user_state_transition_in_db(
+                db,
                 redis_client,
                 phone=phone,
                 organization_id=organization_id,
                 new_state=UserState.CHATTING,
             )
+            await db.commit()
+            await set_user_state(redis_client, phone, applied_state, organization_id=organization_id)
             return fulfillment_reply
         reply = (
             f"Принял способ оплаты: {pay_human}.\n\n"
             f"{body}\n\n"
             "✅ Подтверждаете заказ? (Да / Нет)"
         )
-        await db.commit()
-
         total = float(order.total_price)
         meta_after = (order.items_json or {}).get("order_meta") or {}
         needs_prepay = bool(meta_after.get("requires_order_prepayment"))
@@ -995,6 +1001,16 @@ async def handle_order_payment_choice(
         if org_ent and not org_ent.prepayment_enforced:
             needs_prepay = False
         prep_st = (order.prepayment_status or "").strip().lower()
+        next_state = UserState.CHATTING if needs_prepay and prep_st not in ("paid", "waived") else UserState.CONFIRMING_ORDER
+        applied_state = await apply_user_state_transition_in_db(
+            db,
+            redis_client,
+            phone=phone,
+            organization_id=organization_id,
+            new_state=next_state,
+        )
+        await db.commit()
+        await set_user_state(redis_client, phone, applied_state, organization_id=organization_id)
 
         await publish_event("order_updated", {
             "order_id": order.id,
@@ -1019,12 +1035,6 @@ async def handle_order_payment_choice(
             )
         except Exception as exc:
             logger.warning("Telegram prepayment alert skipped: %s", exc)
-        await sync_user_dialog_state_to_db_then_redis(
-            redis_client,
-            phone=phone,
-            organization_id=organization_id,
-            new_state=UserState.CHATTING,
-        )
         prepay_reply = (
             f"Принял способ оплаты: {pay_human}.\n\n"
             f"{body}\n\n"
@@ -1037,12 +1047,6 @@ async def handle_order_payment_choice(
             )
         return prepay_reply
 
-    await sync_user_dialog_state_to_db_then_redis(
-        redis_client,
-        phone=phone,
-        organization_id=organization_id,
-        new_state=UserState.CONFIRMING_ORDER,
-    )
     return reply
 
 
@@ -1201,7 +1205,7 @@ async def process_inbound_message(
             try:
                 await send_customer_text(item.phone, "Извините, произошла техническая ошибка. Мы уже работаем над ней — попробуйте написать чуть позже.")
             except Exception:
-                pass
+                logger.debug("failed to send serialized-chat retry exhaustion notice phone=%s", item.phone[-4:], exc_info=True)
         finally:
             reset_customer_channel_context(tokens)
 
@@ -1555,7 +1559,7 @@ async def _track_slow_chat(
             if elapsed > SLOW_CHAT_SECONDS:  # > 5 минут — считаем медленным
                 return await mark_chat_slow_once(redis_client, organization_id, phone, location_id)
     except Exception:
-        pass
+        logger.debug("slow chat tracking failed org=%s phone=%s", organization_id, phone[-4:], exc_info=True)
     return False
 
 
@@ -2919,7 +2923,7 @@ async def _await_twilio_stream_start(
                 org = await db.get(Organization, org_id)
                 org_name = (org.name if org else "") or ""
         except Exception:
-            pass
+            logger.debug("voice org name resolve failed org=%s callSid=%s", org_id, call_sid, exc_info=True)
     return call_sid, phone, org_id, voice_mode, org_name, stream_sid
 
 
@@ -2984,7 +2988,7 @@ async def _run_stt_fallback_voice_stream(
                     try:
                         buf.extend(base64.b64decode(b64))
                     except Exception:
-                        pass
+                        logger.debug("voice media payload decode failed callSid=%s", call_sid, exc_info=True)
                 await maybe_flush(force=False)
                 continue
             if ev == "stop":
@@ -3250,13 +3254,23 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks) -
                             send_review_negative_alert,
                         )
                         _rating = "positive" if btn_id == "review_pos" else "negative"
-                        asyncio.create_task(save_customer_feedback(
-                            org_id=_org_id, phone=phone, rating=_rating,
-                        ))
+                        spawn_tracked(
+                            save_customer_feedback(org_id=_org_id, phone=phone, rating=_rating),
+                            name=f"review_feedback_{_org_id}_{_rating}",
+                            log=logger,
+                        )
                         if btn_id == "review_pos":
-                            asyncio.create_task(send_review_positive_reply(phone, _org_id))
+                            spawn_tracked(
+                                send_review_positive_reply(phone, _org_id),
+                                name=f"review_positive_reply_{_org_id}",
+                                log=logger,
+                            )
                         else:
-                            asyncio.create_task(send_review_negative_alert(phone, _org_id))
+                            spawn_tracked(
+                                send_review_negative_alert(phone, _org_id),
+                                name=f"review_negative_alert_{_org_id}",
+                                log=logger,
+                            )
                         continue  # не передаём в LLM
                     # Маппинг стандартных ID на слова, которые понимает CONFIRM_WORDS / CANCEL_WORDS
                     if btn_id == "confirm":

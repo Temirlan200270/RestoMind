@@ -35,6 +35,7 @@
 - Исправлен сценарий короткого уточнения блюда: если гость отвечает «Праздничный», а в меню есть несколько подходящих вариантов плова, система больше не выбирает один случайно и не отвечает «не разобрал», а просит выбрать конкретный вариант; админский чат дедуплицирует повторные WS/REST события по `chat_log_id`.
 - Усилена FSM без тяжёлой блокировки: добавлен `User.session_version` для stale LLM writes, поздний LLM-ответ не перезаписывает состояние/ожидающий заказ после takeover; `HUMAN_MODE` получил TTL и авто-возврат по явным новым сценариям, если нет ручной паузы AI.
 - Усилены runtime-guards: `chat_serializer` получил owner-token lock и корректный decode Redis bytes при drain очереди, `_menu_ctx_cache` ограничен LRU/max-size, фоновые циклы используют owner-token Redis locks; `orders.iiko_last_error` расширен до `TEXT`.
+- Закрыт P0 reliability-pass: fire-and-forget задачи переведены на tracked helper с логированием ошибок, ключевые silent `except` получили диагностику, FSM state в admin/payment-choice ветках пишется в транзакции вызывающего, chat log retention/menu sync больше не выполняют unscoped tenant-операции.
 
 ### Документация — реструктуризация CHANGELOG
 

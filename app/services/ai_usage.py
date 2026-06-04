@@ -11,6 +11,7 @@ from datetime import date
 from sqlalchemy import text
 
 from app.db.session import async_session_factory
+from app.services.async_tasks import spawn_tracked
 
 logger = logging.getLogger(__name__)
 
@@ -84,12 +85,11 @@ async def log_ai_error(organization_id: int) -> None:
 
 def schedule_log_ai_error(organization_id: int) -> None:
     """Fire-and-forget: регистрирует транзиентную ошибку AI-провайдера."""
-    import asyncio
-    try:
-        asyncio.create_task(log_ai_error(int(organization_id)),
-                            name=f"ai_error_log_{organization_id}")
-    except RuntimeError:
-        pass
+    spawn_tracked(
+        log_ai_error(int(organization_id)),
+        name=f"ai_error_log_{organization_id}",
+        log=logger,
+    )
 
 
 def schedule_log_ai_usage(
@@ -97,20 +97,17 @@ def schedule_log_ai_usage(
     ai_response_usage: dict | None,
 ) -> None:
     """Fire-and-forget: создаёт asyncio.Task для логирования токенов."""
-    import asyncio
-
     if not ai_response_usage:
         return
-    try:
-        asyncio.create_task(
-            log_ai_usage(
-                organization_id=organization_id,
-                provider=str(ai_response_usage.get("provider") or "openai"),
-                model=str(ai_response_usage.get("model") or ""),
-                prompt_tokens=int(ai_response_usage.get("prompt_tokens") or 0),
-                completion_tokens=int(ai_response_usage.get("completion_tokens") or 0),
-                total_tokens=int(ai_response_usage.get("total_tokens") or 0),
-            )
-        )
-    except RuntimeError:
-        pass
+    spawn_tracked(
+        log_ai_usage(
+            organization_id=organization_id,
+            provider=str(ai_response_usage.get("provider") or "openai"),
+            model=str(ai_response_usage.get("model") or ""),
+            prompt_tokens=int(ai_response_usage.get("prompt_tokens") or 0),
+            completion_tokens=int(ai_response_usage.get("completion_tokens") or 0),
+            total_tokens=int(ai_response_usage.get("total_tokens") or 0),
+        ),
+        name=f"ai_usage_log_{organization_id}",
+        log=logger,
+    )

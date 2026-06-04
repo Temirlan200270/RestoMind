@@ -257,6 +257,34 @@ async def update_user_session_fields_in_db(
     return True
 
 
+async def apply_user_state_transition_in_db(
+    db: Any,
+    redis: Any,
+    *,
+    phone: str,
+    organization_id: int,
+    new_state: UserState,
+    source: str = "session_update",
+    reason: str | None = None,
+    context: dict[str, Any] | None = None,
+) -> UserState:
+    """Validate and persist a state transition inside the caller's transaction."""
+    current_state = await get_user_state(redis, phone, organization_id=organization_id)
+    check = check_conversation_transition(current_state.value, new_state.value)
+    if not check.allowed:
+        raise ValueError(check.reason)
+    await update_user_session_fields_in_db(
+        db,
+        phone=phone,
+        organization_id=organization_id,
+        current_state=check.to_state.value,
+        transition_source=source,
+        transition_reason=reason,
+        transition_context=context,
+    )
+    return UserState(check.to_state.value)
+
+
 async def set_user_state_durable(
     redis: Any,
     *,
@@ -268,24 +296,21 @@ async def set_user_state_durable(
     context: dict[str, Any] | None = None,
 ) -> None:
     """Persist and validate a state transition before updating Redis."""
-    current_state = await get_user_state(redis, phone, organization_id=organization_id)
-    check = check_conversation_transition(current_state.value, new_state.value)
-    if not check.allowed:
-        raise ValueError(check.reason)
     from app.db.session import async_session_factory
 
     async with async_session_factory() as db:
-        await update_user_session_fields_in_db(
+        applied_state = await apply_user_state_transition_in_db(
             db,
+            redis,
             phone=phone,
             organization_id=organization_id,
-            current_state=check.to_state.value,
-            transition_source=source,
-            transition_reason=reason,
-            transition_context=context,
+            new_state=new_state,
+            source=source,
+            reason=reason,
+            context=context,
         )
         await db.commit()
-    await set_user_state(redis, phone, new_state, organization_id=organization_id)
+    await set_user_state(redis, phone, applied_state, organization_id=organization_id)
 
 
 async def sync_user_dialog_state_to_db_then_redis(

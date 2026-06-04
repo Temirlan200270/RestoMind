@@ -78,12 +78,13 @@ RestoMind/
 │   │   ├── user_phone_merge.py    # merge duplicate User rows (one-off / scripts)
 │   │   ├── wa_queue_metrics.py    # queue_wait_ms: enqueue → process_with_retry start
 │   │   ├── chat_serializer.py     # per-chat FIFO + owner-token Redis lock для входящих сообщений
+│   │   ├── async_tasks.py         # tracked fire-and-forget asyncio tasks + логирование исключений
 │   │   ├── quick_replies.py       # детерминированные ответы без LLM (greeting, menu, status, …)
 │   │   ├── faq_cache.py           # Redis-кеш intent=faq + get_faq_cache_metrics
 │   │   ├── redis_locks.py         # owner-token Redis locks для фоновых singleton loops
 │   │   ├── task_queue.py          # ARQ enqueue / dispatch_arq_or_background
 │   │   ├── event_consumer_runner.py # post-commit analytics/audit consumers (async по умолчанию)
-│   │   ├── dialog_mgr.py          # состояния чата, Redis, синхронизация с БД; clear_pending_order не сбрасывает HUMAN_MODE
+│   │   ├── dialog_mgr.py          # состояния чата, Redis/БД, in-transaction durable state transitions
 │   │   ├── stoplist_session.py    # Redis rm:stoplist_seen — diff «только что на стопе» в диалоге
 │   │   ├── trace_context.py       # publish_chat_event / publish_state_event / publish_human_event (WS payload)
 │   │   ├── order_logic.py         # меню (include_unavailable), ValidatedOrder+stoplist_items, цены, LRU menu context cache
@@ -93,7 +94,7 @@ RestoMind/
 │   │   ├── ai_usage.py            # учёт токенов LLM (upsert по org+day, schedule_log_ai_usage)
 │   │   ├── pipeline_latency.py    # latency baselines, SLA monitor, fire-and-forget
 │   │   ├── personalization.py     # get_user_preferences: never_categories/drinks_freq из истории заказов
-│   │   ├── menu_sync.py           # синхронизация меню из iiko
+│   │   ├── menu_sync.py           # tenant-scoped синхронизация меню из iiko
 │   │   ├── events.py              # Pub/Sub для WS админки
 │   │   ├── notification_router.py # Telegram «SOS», уведомления
 │   │   ├── payment_*.py           # уведомление гостя, webhook-адаптеры, автопечать в iiko после оплаты

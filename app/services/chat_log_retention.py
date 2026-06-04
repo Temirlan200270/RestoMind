@@ -22,9 +22,9 @@ def _cutoff_for_sql() -> datetime:
     return cutoff_utc
 
 
-async def purge_old_chat_logs(session: AsyncSession) -> int:
+async def purge_old_chat_logs(session: AsyncSession, *, organization_id: int) -> int:
     """
-    Удалить сообщения chat_logs с created_at старше chat_log_retention_days.
+    Удалить сообщения chat_logs конкретной организации старше chat_log_retention_days.
 
     Returns:
         Число удалённых строк (оценка по rowcount драйвера).
@@ -32,12 +32,18 @@ async def purge_old_chat_logs(session: AsyncSession) -> int:
     if settings.chat_log_retention_days <= 0:
         return 0
     cutoff = _cutoff_for_sql()
-    r = await session.execute(sql_delete(ChatLog).where(ChatLog.created_at < cutoff))
+    r = await session.execute(
+        sql_delete(ChatLog).where(
+            ChatLog.organization_id == int(organization_id),
+            ChatLog.created_at < cutoff,
+        ),
+    )
     n = r.rowcount
     out = int(n) if n is not None and n >= 0 else 0
     if out:
         logger.info(
-            "Ретеншн chat_logs: удалено %d записей (старше %s суток, cutoff=%s)",
+            "Ретеншн chat_logs: org=%s удалено %d записей (старше %s суток, cutoff=%s)",
+            organization_id,
             out,
             settings.chat_log_retention_days,
             cutoff,
@@ -45,12 +51,30 @@ async def purge_old_chat_logs(session: AsyncSession) -> int:
     return out
 
 
-async def count_chat_logs_eligible_for_purge(session: AsyncSession) -> int:
+async def purge_old_chat_logs_for_all_orgs(session: AsyncSession) -> int:
+    """Run retention per organization without an unscoped DELETE."""
+    org_ids = (
+        await session.execute(select(ChatLog.organization_id).distinct())
+    ).scalars().all()
+    total = 0
+    for org_id in org_ids:
+        total += await purge_old_chat_logs(session, organization_id=int(org_id))
+    return total
+
+
+async def count_chat_logs_eligible_for_purge(
+    session: AsyncSession,
+    *,
+    organization_id: int,
+) -> int:
     """Сколько строк попадёт под текущую политику (без удаления)."""
     if settings.chat_log_retention_days <= 0:
         return 0
     cutoff = _cutoff_for_sql()
     c = await session.scalar(
-        select(func.count()).select_from(ChatLog).where(ChatLog.created_at < cutoff),
+        select(func.count()).select_from(ChatLog).where(
+            ChatLog.organization_id == int(organization_id),
+            ChatLog.created_at < cutoff,
+        ),
     )
     return int(c or 0)

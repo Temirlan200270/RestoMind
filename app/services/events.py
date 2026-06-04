@@ -13,6 +13,7 @@ from typing import Any
 
 from app.core.config import settings
 from app.db.session import redis_connection_kwargs, redis_pubsub_available
+from app.services.async_tasks import spawn_tracked
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +79,11 @@ async def publish_event(event_type: str, data: dict[str, Any]) -> None:
         from app.services.notification_router import notify_staff_from_event
 
         # Fire-and-forget: уведомления не блокируют realtime-путь
-        asyncio.create_task(notify_staff_from_event(event_type, data))
+        spawn_tracked(
+            notify_staff_from_event(event_type, data),
+            name=f"notify_staff_{event_type}",
+            log=logger,
+        )
     except Exception:
         logger.exception("Staff notification task creation failed for %s", event_type)
 
@@ -143,7 +148,11 @@ async def publish_org_event(org_id: int, event_type: str, data: dict) -> None:
     try:
         from app.services.notification_router import notify_staff_from_event
 
-        asyncio.create_task(notify_staff_from_event(event_type, enriched))
+        spawn_tracked(
+            notify_staff_from_event(event_type, enriched),
+            name=f"notify_staff_{org_id}_{event_type}",
+            log=logger,
+        )
     except Exception:
         logger.exception("Staff notification task creation failed for %s", event_type)
 

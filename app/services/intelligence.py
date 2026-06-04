@@ -329,6 +329,7 @@ async def answer_intelligence_query(
     try:
         copilot_result = await run_owner_copilot_for_org(org_id=org_id, question=question, role=role)
     except Exception:
+        logger.exception("owner copilot failed, falling back to local copilot org=%s", org_id)
         copilot_error = True
         from app.services.copilot.engine import run_owner_copilot
 
@@ -617,7 +618,7 @@ async def list_insights(db: AsyncSession, org_id: int, *, limit: int = 20) -> li
     try:
         await detect_ai_incidents(db, org_id)
     except Exception:
-        pass
+        logger.debug("AI incident detection skipped org=%s", org_id, exc_info=True)
 
     rows = await db.execute(
         select(OperationalInsight)

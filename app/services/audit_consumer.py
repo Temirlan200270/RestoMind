@@ -56,11 +56,11 @@ async def on_business_event(event: "BusinessEvent", db: "AsyncSession") -> None:
 def _schedule_os_audit_ws(event: "BusinessEvent", entry: object) -> None:
     """Real-time OS Decision Feed: push в admin WebSocket без polling."""
     try:
-        import asyncio
+        from app.services.async_tasks import spawn_tracked
         from app.services.events import publish_org_event
 
         created = getattr(entry, "created_at", None)
-        asyncio.create_task(
+        spawn_tracked(
             publish_org_event(
                 int(event.org_id),
                 "os.audit",
@@ -74,10 +74,12 @@ def _schedule_os_audit_ws(event: "BusinessEvent", entry: object) -> None:
                     "created_at": created.isoformat() if created is not None else None,
                     "title": _audit_feed_title(event),
                 },
-            )
+            ),
+            name=f"os_audit_ws_{event.org_id}_{event.type}",
+            log=logger,
         )
     except Exception:
-        logger.debug("os.audit ws push skipped for %s", event.type)
+        logger.debug("os.audit ws push skipped for %s", event.type, exc_info=True)
 
 
 def _audit_feed_title(event: "BusinessEvent") -> str:

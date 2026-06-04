@@ -22,7 +22,11 @@ from app.db.models import (
     Organization,
 )
 from app.db.session import get_db, redis_client
-from app.services.chat_log_retention import count_chat_logs_eligible_for_purge, purge_old_chat_logs
+from app.services.chat_log_retention import (
+    count_chat_logs_eligible_for_purge,
+    purge_old_chat_logs,
+    purge_old_chat_logs_for_all_orgs,
+)
 from app.services.dialog_mgr import purge_all_session_keys_for_phone
 from app.services.integration_config import (
     ai_provider_configured,
@@ -63,6 +67,7 @@ class RetentionRunBody(BaseModel):
     """Разовый запуск политики ретеншна chat_logs вручную."""
 
     confirm: bool = Field(False, description="Должно быть true")
+    all_orgs: bool = Field(False, description="Superadmin: применить ко всем организациям")
 
 
 class RedisPurgePhoneBody(BaseModel):
@@ -98,7 +103,7 @@ async def settings_environment(request: Request, db: AsyncSession = Depends(get_
         str(getattr(org_row, "telegram_ops_chat_id", "") or "").strip(),
     ) if org_row is not None else False
     telegram_staff_reachable = tg_token_ok and (tg_global_chat_ok or tg_org_chat_ok)
-    elig = await count_chat_logs_eligible_for_purge(db)
+    elig = await count_chat_logs_eligible_for_purge(db, organization_id=int(org_id))
     return {
         "app_name": settings.app_name,
         "app_version": settings.app_version,
@@ -254,6 +259,7 @@ async def redis_purge_phone(
 
 @settings_ops_router.post("/settings/chat-logs/run-retention")
 async def run_chat_log_retention_manual(
+    request: Request,
     body: RetentionRunBody,
     _perm: None = Depends(require_superadmin),
     db: AsyncSession = Depends(get_db),
@@ -266,6 +272,9 @@ async def run_chat_log_retention_manual(
             status_code=400,
             detail="Ретеншн выключен: задайте CHAT_LOG_RETENTION_DAYS > 0 в .env",
         )
-    n = await purge_old_chat_logs(db)
+    if body.all_orgs:
+        n = await purge_old_chat_logs_for_all_orgs(db)
+    else:
+        n = await purge_old_chat_logs(db, organization_id=admin_org_from_session(request))
     await db.commit()
     return {"ok": True, "deleted": n, "retention_days": settings.chat_log_retention_days}

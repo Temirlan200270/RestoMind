@@ -19,6 +19,7 @@ from datetime import timedelta, timezone
 
 from app.db.models import AIContextSnapshot, MenuItem, Order, Organization, SystemEvent, Tenant, User
 from app.db.session import async_session_factory
+from app.services.async_tasks import spawn_tracked
 
 logger = logging.getLogger(__name__)
 from app.services.customer_context import build_customer_context
@@ -70,13 +71,13 @@ async def fetch_ai_read_context(phone: str, organization_id: int, location_id: i
                 if loyalty_line:
                     customer_ctx = f"{customer_ctx}\n{loyalty_line}".strip() if customer_ctx else loyalty_line
             except Exception:
-                pass
+                logger.debug("loyalty context load failed org=%s user_id=%s", organization_id, u.id, exc_info=True)
             try:
                 from app.services.personalization import get_user_preferences
 
                 user_preferences = await get_user_preferences(db, u.id, organization_id)
             except Exception:
-                pass
+                logger.debug("user preferences load failed org=%s user_id=%s", organization_id, u.id, exc_info=True)
 
         org_row = await db.get(Organization, organization_id)
         kb = await load_knowledge_context_block(db, organization_id)
@@ -97,6 +98,7 @@ async def fetch_ai_read_context(phone: str, organization_id: int, location_id: i
                 location_id=int(location_id) if location_id is not None else None,
             )
         except Exception:
+            logger.debug("copilot feed load failed org=%s", organization_id, exc_info=True)
             copilot_feed = None
 
     return AIReadContext(
@@ -124,22 +126,19 @@ def schedule_save_ai_context_snapshot(
 ) -> str:
     """Fire-and-forget: сохраняет снимок в фоне. Возвращает snapshot_id сразу (не ждёт БД)."""
     snapshot_id = str(uuid.uuid4())
-    try:
-        loop = asyncio.get_running_loop()
-        loop.create_task(
-            save_ai_context_snapshot(
-                phone,
-                organization_id,
-                context,
-                menu_context_text=menu_context_text,
-                trace_id=trace_id,
-                conversation_id=conversation_id,
-                snapshot_id=snapshot_id,
-            ),
-            name=f"ai_ctx_snapshot_{organization_id}",
-        )
-    except RuntimeError:
-        pass
+    spawn_tracked(
+        save_ai_context_snapshot(
+            phone,
+            organization_id,
+            context,
+            menu_context_text=menu_context_text,
+            trace_id=trace_id,
+            conversation_id=conversation_id,
+            snapshot_id=snapshot_id,
+        ),
+        name=f"ai_ctx_snapshot_{organization_id}",
+        log=logger,
+    )
     return snapshot_id
 
 

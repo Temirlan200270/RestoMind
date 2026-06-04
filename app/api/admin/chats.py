@@ -33,9 +33,10 @@ from app.services.telegram_customer import (
 )
 from app.services.dialog_mgr import (
     UserState,
+    apply_user_state_transition_in_db,
     clear_human_mode_ttl_meta,
     get_user_state,
-    set_user_state_durable,
+    set_user_state,
     with_human_mode_ttl_meta,
 )
 from app.services.bot_sla_status import (
@@ -376,7 +377,8 @@ async def takeover_chat(
     if user is not None:
         user.meta_json = with_human_mode_ttl_meta(user.meta_json)
         flag_modified(user, "meta_json")
-    await set_user_state_durable(
+    applied_state = await apply_user_state_transition_in_db(
+        db,
         redis_client,
         phone=phone,
         organization_id=org_id,
@@ -384,8 +386,6 @@ async def takeover_chat(
         source="admin.chats",
         reason="operator_takeover",
     )
-    from app.services.trace_context import publish_state_event
-    await publish_state_event(phone=phone, state=UserState.HUMAN_MODE.value, organization_id=org_id)
     try:
         # emit_event внутри try: если _user_for_chat не найдёт пользователя (404),
         # оба изменения откатятся вместе — событие не повиснет без triage update.
@@ -408,6 +408,10 @@ async def takeover_chat(
         )
     except HTTPException:
         pass
+    await db.commit()
+    await set_user_state(redis_client, phone, applied_state, organization_id=org_id)
+    from app.services.trace_context import publish_state_event
+    await publish_state_event(phone=phone, state=UserState.HUMAN_MODE.value, organization_id=org_id)
     logger.info("Оператор перехватил диалог: %s", phone)
     return {"status": "ok", "phone": phone, "mode": "human"}
 
@@ -428,7 +432,8 @@ async def release_chat(
     if user is not None:
         user.meta_json = clear_human_mode_ttl_meta(user.meta_json)
         flag_modified(user, "meta_json")
-    await set_user_state_durable(
+    applied_state = await apply_user_state_transition_in_db(
+        db,
         redis_client,
         phone=phone,
         organization_id=org_id,
@@ -436,6 +441,8 @@ async def release_chat(
         source="admin.chats",
         reason="operator_release",
     )
+    await db.commit()
+    await set_user_state(redis_client, phone, applied_state, organization_id=org_id)
     from app.services.trace_context import publish_state_event
     await publish_state_event(phone=phone, state=UserState.CHATTING.value, organization_id=org_id)
     logger.info("Оператор вернул бота: %s", phone)
@@ -483,8 +490,8 @@ async def set_chat_ai_snooze(
     if preset == "forever":
         user.ai_snoozed_until = None
         user.ai_paused = True
-        await db.commit()
-        await set_user_state_durable(
+        applied_state = await apply_user_state_transition_in_db(
+            db,
             redis_client,
             phone=phone,
             organization_id=org_id,
@@ -492,6 +499,8 @@ async def set_chat_ai_snooze(
             source="admin.chats",
             reason="ai_pause_forever",
         )
+        await db.commit()
+        await set_user_state(redis_client, phone, applied_state, organization_id=org_id)
         from app.services.trace_context import publish_state_event
         await publish_state_event(phone=phone, state=UserState.HUMAN_MODE.value, organization_id=org_id)
         return {"ok": True, "ai_paused": True, "ai_snoozed_until": None}
@@ -499,8 +508,8 @@ async def set_chat_ai_snooze(
     user.ai_paused = False
     until = snooze_until_for_preset(preset, tz)  # type: ignore[arg-type]
     user.ai_snoozed_until = until
-    await db.commit()
-    await set_user_state_durable(
+    applied_state = await apply_user_state_transition_in_db(
+        db,
         redis_client,
         phone=phone,
         organization_id=org_id,
@@ -508,6 +517,8 @@ async def set_chat_ai_snooze(
         source="admin.chats",
         reason="ai_pause_temporary",
     )
+    await db.commit()
+    await set_user_state(redis_client, phone, applied_state, organization_id=org_id)
     from app.services.trace_context import publish_state_event
     await publish_state_event(phone=phone, state=UserState.CHATTING.value, organization_id=org_id)
     return {

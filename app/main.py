@@ -616,7 +616,7 @@ async def _stop_list_sync_loop() -> None:
 
 async def _chat_log_retention_loop() -> None:
     """Фоновая задача: удаление старых chat_logs по CHAT_LOG_RETENTION_DAYS."""
-    from app.services.chat_log_retention import purge_old_chat_logs
+    from app.services.chat_log_retention import purge_old_chat_logs_for_all_orgs
     from app.services.redis_locks import acquire_redis_lock, release_redis_lock
 
     if settings.chat_log_retention_days <= 0:
@@ -639,7 +639,7 @@ async def _chat_log_retention_loop() -> None:
             continue
         try:
             async with async_session_factory() as db:
-                await purge_old_chat_logs(db)
+                await purge_old_chat_logs_for_all_orgs(db)
                 await db.commit()
         except asyncio.CancelledError:
             raise

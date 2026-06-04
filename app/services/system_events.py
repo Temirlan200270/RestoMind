@@ -108,9 +108,11 @@ async def emit_event(db: AsyncSession, event: BusinessEvent) -> SystemEvent | No
 
         # Phase 2a/5 OS: websocket_consumer — org-scoped Pub/Sub push
         try:
-            import asyncio
             from app.services.events import publish_org_event as _ws_publish
-            asyncio.create_task(
+
+            from app.services.async_tasks import spawn_tracked
+
+            spawn_tracked(
                 _ws_publish(
                     event.org_id,
                     event.type,
@@ -119,7 +121,9 @@ async def emit_event(db: AsyncSession, event: BusinessEvent) -> SystemEvent | No
                         "type": event.type,
                         "payload": {k: v for k, v in event.payload.items() if not k.startswith("_")},
                     },
-                )
+                ),
+                name=f"ws_publish_{event.org_id}_{event.type}",
+                log=logger,
             )
         except Exception:
             logger.debug("websocket_consumer skipped for event type=%s", event.type)

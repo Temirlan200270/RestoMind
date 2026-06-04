@@ -15,6 +15,7 @@ from datetime import date
 from sqlalchemy import text
 
 from app.db.session import async_session_factory
+from app.services.async_tasks import spawn_tracked
 
 logger = logging.getLogger(__name__)
 
@@ -62,16 +63,13 @@ def schedule_log_message(
     message_type: str,
 ) -> None:
     """Fire-and-forget: создаёт asyncio.Task, не блокирует вызывающий код."""
-    import asyncio
-    try:
-        asyncio.create_task(
-            log_message(
-                organization_id=organization_id,
-                direction=direction,
-                source=source,
-                message_type=message_type,
-            ),
-            name=f"msg_acct_{organization_id}_{direction}_{source}",
-        )
-    except RuntimeError:
-        pass
+    spawn_tracked(
+        log_message(
+            organization_id=organization_id,
+            direction=direction,
+            source=source,
+            message_type=message_type,
+        ),
+        name=f"msg_acct_{organization_id}_{direction}_{source}",
+        log=logger,
+    )

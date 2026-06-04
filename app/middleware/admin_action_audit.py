@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Callable
 
 from starlette.requests import Request
 from starlette.responses import Response
+
+from app.services.async_tasks import spawn_tracked
 
 logger = logging.getLogger(__name__)
 
@@ -94,13 +95,15 @@ async def admin_action_audit_middleware(request: Request, call_next: Callable) -
     actor = str(session.get("admin_user") or "staff")
     staff_raw = session.get("staff_id")
     staff_id = int(staff_raw) if staff_raw is not None else None
-    asyncio.create_task(
+    spawn_tracked(
         _persist_admin_mutation_audit(
             organization_id=int(org_id),
             actor=actor,
             method=method,
             path=path,
             staff_id=staff_id,
-        )
+        ),
+        name=f"admin_action_audit_{org_id}",
+        log=logger,
     )
     return response

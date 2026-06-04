@@ -13,7 +13,7 @@ from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.db.models import MenuItem
+from app.db.models import MenuItem, Organization
 from app.integrations.iiko_client import IikoClient
 
 logger = logging.getLogger(__name__)
@@ -212,14 +212,29 @@ async def sync_menu_from_iiko(
     products, api_products_dup_merged = _dedupe_nomenclature_products(raw_products)
     sync_seen_at = datetime.now(timezone.utc)
 
-    q = select(MenuItem)
-    if restomind_organization_id is not None:
-        q = q.where(
-            or_(
-                MenuItem.organization_id == restomind_organization_id,
-                MenuItem.organization_id.is_(None),
+    if restomind_organization_id is None:
+        org_ids = (
+            await db.execute(
+                select(Organization.id).where(
+                    Organization.iiko_organization_id == organization_id,
+                    Organization.is_active.is_(True),
+                ),
             )
+        ).scalars().all()
+        if len(org_ids) != 1:
+            raise ValueError(
+                "restomind_organization_id is required when iiko organization cannot be "
+                "resolved to exactly one active Organization",
+            )
+        restomind_organization_id = int(org_ids[0])
+
+    q = select(MenuItem)
+    q = q.where(
+        or_(
+            MenuItem.organization_id == restomind_organization_id,
+            MenuItem.organization_id.is_(None),
         )
+    )
     existing_result = await db.execute(q)
     existing_by_iiko: dict[str, MenuItem] = {}
     for mi in existing_result.scalars().all():

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, time
+from datetime import date, datetime, timedelta, time, timezone
 
 import pytest
 import pytest_asyncio
@@ -15,6 +15,7 @@ from app.db.models import (
     AIContextSnapshot,
     Base,
     Booking,
+    ChatLog,
     Organization,
     SystemEvent,
     User,
@@ -167,6 +168,54 @@ async def test_ai_context_snapshot_isolated(iso_db):
         )).scalars().all()
         assert len(a) == 1
         assert a[0].id == "s1"
+
+
+@pytest.mark.asyncio
+async def test_chat_log_retention_is_scoped_by_org(iso_db, monkeypatch):
+    from app.services.chat_log_retention import purge_old_chat_logs
+
+    monkeypatch.setattr(settings, "chat_log_retention_days", 1)
+    old = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=2)
+    async with iso_db() as db:
+        org_a = Organization(name="A", slug="ret-a", is_active=True)
+        org_b = Organization(name="B", slug="ret-b", is_active=True)
+        db.add_all([org_a, org_b])
+        await db.commit()
+        await db.refresh(org_a)
+        await db.refresh(org_b)
+        user_a = User(phone="+77005550101", organization_id=org_a.id)
+        user_b = User(phone="+77005550102", organization_id=org_b.id)
+        db.add_all([user_a, user_b])
+        await db.commit()
+        await db.refresh(user_a)
+        await db.refresh(user_b)
+        db.add_all(
+            [
+                ChatLog(
+                    organization_id=org_a.id,
+                    user_id=user_a.id,
+                    role="user",
+                    content="old a",
+                    created_at=old,
+                ),
+                ChatLog(
+                    organization_id=org_b.id,
+                    user_id=user_b.id,
+                    role="user",
+                    content="old b",
+                    created_at=old,
+                ),
+            ],
+        )
+        await db.commit()
+
+    async with iso_db() as db:
+        deleted = await purge_old_chat_logs(db, organization_id=org_a.id)
+        await db.commit()
+        assert deleted == 1
+        remaining = (await db.execute(select(ChatLog))).scalars().all()
+        assert len(remaining) == 1
+        assert remaining[0].organization_id == org_b.id
 
 
 @pytest.mark.asyncio
