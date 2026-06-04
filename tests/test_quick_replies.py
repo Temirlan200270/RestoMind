@@ -5,6 +5,7 @@ import pytest
 from app.db.models import Organization
 from app.services.dialog_mgr import UserState
 from app.services.quick_replies import (
+    build_recommendation_quick_reply_text,
     is_plain_greeting,
     try_quick_reply,
 )
@@ -149,6 +150,25 @@ async def test_menu_request(db_with_menu) -> None:
     assert hit is not None
     assert hit.template_id == "menu_request"
     assert "Плов" in hit.reply_text or "меню" in hit.reply_text.lower()
+
+
+@pytest.mark.asyncio
+async def test_recommendation_request_returns_real_menu_items(db_with_menu) -> None:
+    preview = await build_recommendation_quick_reply_text(db_with_menu, 1)
+    hit = await try_quick_reply(
+        phone="+77001112233",
+        organization_id=1,
+        message_text="Что посоветуете?",
+        state=UserState.CHATTING,
+        has_open_draft=False,
+        recommendation_preview=preview,
+    )
+    assert hit is not None
+    assert hit.template_id == "recommendation_request"
+    assert "Из популярного могу посоветовать" in hit.reply_text
+    assert "Плов" in hit.reply_text
+    assert "Что добавить в заказ" in hit.reply_text
+    assert "С радостью помогу оформить заказ" not in hit.reply_text
 
 
 @pytest.mark.asyncio

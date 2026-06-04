@@ -2162,6 +2162,7 @@ async def _process_message_inner(
                 has_open_draft=qr_preload.has_open_draft,
                 org=qr_preload.org,
                 menu_preview=qr_preload.menu_preview,
+                recommendation_preview=qr_preload.recommendation_preview,
                 order_status_text=qr_preload.order_status_text,
             )
             if qr_hit is not None:

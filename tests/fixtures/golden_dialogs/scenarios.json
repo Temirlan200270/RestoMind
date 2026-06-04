@@ -15,6 +15,15 @@
     "fulfillment_infer": {"order_type": "pickup", "pickup_time_note_contains": "30"}
   },
   {
+    "id": "recommendation_request_not_empty_order",
+    "user_message": "Что посоветуете?",
+    "ai_response": {"intent": "order", "reply_text": "Могу посоветовать плов и лагман.", "items": []},
+    "order_start": false,
+    "recommendation_request": true,
+    "decision_engine_block": true,
+    "expect_no_empty_order_block": true
+  },
+  {
     "id": "complaint_no_upsell",
     "user_message": "Вы так долго отвечаете",
     "ai_response": {

@@ -97,6 +97,7 @@ class QuickReplyPreload:
     org: Organization | None
     has_open_draft: bool
     menu_preview: str | None = None
+    recommendation_preview: str | None = None
     order_status_text: str | None = None
 
 
@@ -137,10 +138,16 @@ def peek_quick_reply_trigger(text: str) -> str | None:
 
 def _match_trigger(text: str) -> str | None:
     norm = _normalize(text)
-    if not norm or len(norm) > 40:
+    if not norm:
         return None
     if is_plain_greeting(text):
         return "greeting_plain"
+    from app.services.upsell_safety_gate import is_recommendation_request
+
+    if len(norm) <= 80 and is_recommendation_request(text):
+        return "recommendation_request"
+    if len(norm) > 40:
+        return None
     if norm in _THANKS_PHRASES:
         return "thanks"
     if norm in _OPERATOR_PHRASES:
@@ -235,6 +242,41 @@ async def build_menu_quick_reply_text(db: AsyncSession, organization_id: int) ->
     return body[:600]
 
 
+async def build_recommendation_quick_reply_text(db: AsyncSession, organization_id: int) -> str:
+    items = await load_available_menu(
+        db,
+        organization_id=organization_id,
+        include_unavailable=False,
+    )
+    available = [i for i in items if i.is_available and (i.name or "").strip()]
+    if not available:
+        return "Могу подсказать по меню, но список блюд сейчас обновляется. Напишите, что любите: сытное, лёгкое, мясное или напиток."
+
+    def score(item) -> tuple[int, str]:
+        blob = f"{item.name or ''} {item.category or ''} {item.tags or ''}".lower()
+        points = 0
+        if any(k in blob for k in ("хит", "популяр", "рекоменд")):
+            points += 50
+        if any(k in blob for k in ("плов", "манты", "шашлык", "лагман", "самса")):
+            points += 30
+        if any(k in blob for k in ("кофе", "напит", "чай", "лимонад", "десерт")):
+            points -= 10
+        return (-points, str(item.name or ""))
+
+    picks = sorted(available, key=score)[:3]
+    lines: list[str] = []
+    for item in picks:
+        price = float(item.price or 0)
+        price_part = f" — {price:.0f} ₸" if price > 0 else ""
+        lines.append(f"• {str(item.name).strip()}{price_part}")
+
+    return (
+        "Из популярного могу посоветовать:\n"
+        + "\n".join(lines)
+        + "\n\nЧто добавить в заказ? Если хотите, подберу под вкус: сытное, лёгкое, мясное или напиток."
+    )
+
+
 async def build_order_status_quick_reply_text(
     db: AsyncSession,
     *,
@@ -296,9 +338,12 @@ async def load_quick_reply_preload(
     draft_row = await get_open_draft_order(db, phone, organization_id)
     trigger = peek_quick_reply_trigger(message_text)
     menu_preview: str | None = None
+    recommendation_preview: str | None = None
     order_status_text: str | None = None
     if trigger == "menu_request":
         menu_preview = await build_menu_quick_reply_text(db, organization_id)
+    elif trigger == "recommendation_request":
+        recommendation_preview = await build_recommendation_quick_reply_text(db, organization_id)
     elif trigger == "order_status":
         order_status_text = await build_order_status_quick_reply_text(
             db,
@@ -310,6 +355,7 @@ async def load_quick_reply_preload(
         org=org,
         has_open_draft=draft_row is not None,
         menu_preview=menu_preview,
+        recommendation_preview=recommendation_preview,
         order_status_text=order_status_text,
     )
 
@@ -334,6 +380,7 @@ async def try_quick_reply(
     has_open_draft: bool,
     org: Organization | None = None,
     menu_preview: str | None = None,
+    recommendation_preview: str | None = None,
     order_status_text: str | None = None,
     user_locale: str = "ru",
 ) -> QuickReplyHit | None:
@@ -389,6 +436,10 @@ async def try_quick_reply(
         if state != UserState.CHATTING or not menu_preview:
             return None
         hit = QuickReplyHit(template_id=template_id, reply_text=menu_preview)
+    elif template_id == "recommendation_request":
+        if state != UserState.CHATTING or not recommendation_preview:
+            return None
+        hit = QuickReplyHit(template_id=template_id, reply_text=recommendation_preview)
     elif template_id == "order_status":
         if not order_status_text:
             return None

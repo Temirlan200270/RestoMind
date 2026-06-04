@@ -13,6 +13,7 @@ from app.services.fulfillment_infer import enrich_ai_fulfillment_from_message
 from app.services.upsell_safety_gate import (
     UpsellSafetyContext,
     is_order_start_without_items,
+    is_recommendation_request,
     should_suppress_upsell,
     strip_upsell_from_ai_response,
 )
@@ -46,6 +47,9 @@ def test_golden_dialog_expectations(case: dict) -> None:
     if case.get("order_start"):
         assert is_order_start_without_items(user_msg) is bool(case["order_start"])
 
+    if case.get("recommendation_request"):
+        assert is_recommendation_request(user_msg) is bool(case["recommendation_request"])
+
     if case.get("upsell_suppressed"):
         ctx = UpsellSafetyContext(
             user_message=user_msg,
@@ -71,6 +75,9 @@ def test_golden_dialog_expectations(case: dict) -> None:
             ctx.draft_row = _Draft()
 
         result = de._check_empty_order(ai, ctx, user_message=user_msg)  # noqa: SLF001
+        if case.get("expect_no_empty_order_block"):
+            assert result is None
+            return
         assert result is not None
         if case.get("expect_friendly_start"):
             assert "С радостью помогу" in (result.detail or "")

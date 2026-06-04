@@ -97,7 +97,7 @@ def test_real_gemini_payload_from_prod_log_parses() -> None:
     """
     payload = {
         "intent": "faq",
-        "reply_text": "Здравствуйте! Чем могу помочь?",
+        "reply_text": "Здравствуйте! Что бы вы хотели заказать? Могу подсказать по меню и помочь оформить заказ.",
         "detected_language": "ru",
         "items": [],
         "order_actions": [],
@@ -117,7 +117,7 @@ def test_real_gemini_payload_from_prod_log_parses() -> None:
     result = AIBrainResponse.model_validate(payload)
 
     assert result.intent == "faq"
-    assert result.reply_text == "Здравствуйте! Чем могу помочь?"
+    assert result.reply_text == "Здравствуйте! Что бы вы хотели заказать? Могу подсказать по меню и помочь оформить заказ."
     # Все «проблемные» поля — в дефолтах:
     assert result.order_type == ""
     assert result.payment_method == ""

@@ -20,7 +20,12 @@ _COMPLAINT_RE = re.compile(
     re.IGNORECASE,
 )
 _ORDER_START_RE = re.compile(
-    r"(хочу\s+(?:сделать\s+)?заказ|можно\s+заказать|оформ\w+\s+заказ|что\s+(?:есть|посовет\w*))",
+    r"(хочу\s+(?:сделать\s+)?заказ|можно\s+заказать|оформ\w+\s+заказ|что\s+есть)",
+    re.IGNORECASE,
+)
+_RECOMMENDATION_REQUEST_RE = re.compile(
+    r"(что\s+посовет\w*|посовет\w+|порекоменду\w+|что\s+рекоменду\w+|"
+    r"ваш[аи]?\s+хит\w*|что\s+лучше\s+взять)",
     re.IGNORECASE,
 )
 
@@ -111,3 +116,11 @@ def is_order_start_without_items(message_text: str) -> bool:
     if not text:
         return False
     return bool(_ORDER_START_RE.search(text))
+
+
+def is_recommendation_request(message_text: str) -> bool:
+    """Гость просит совет по меню, а не оформляет пустой заказ."""
+    text = (message_text or "").strip()
+    if not text:
+        return False
+    return bool(_RECOMMENDATION_REQUEST_RE.search(text))

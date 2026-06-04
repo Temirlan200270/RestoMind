@@ -305,7 +305,10 @@ class DecisionEngine:
         if self._draft_has_cart_items(context):
             return None
 
-        from app.services.upsell_safety_gate import is_order_start_without_items
+        from app.services.upsell_safety_gate import is_order_start_without_items, is_recommendation_request
+
+        if is_recommendation_request(user_message):
+            return None
 
         if is_order_start_without_items(user_message):
             return PolicyViolation(
@@ -313,7 +316,7 @@ class DecisionEngine:
                 severity="block",
                 detail=(
                     "С радостью помогу оформить заказ! Напишите, что хотите — "
-                    "например: «плов на двоих и салат», или спросите «что посоветуете?»."
+                    "например: «плов на двоих и салат», или напишите «меню» — покажу варианты."
                 ),
             )
 
