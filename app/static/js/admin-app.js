@@ -1177,6 +1177,7 @@ function adminMixinState() {
         dashboardTab: 'overview',
         /** Role-first IA: normal (hero KPI) vs advanced (full analytics). */
         analyticsDensity: 'normal',
+        aiCenterExtendedTabs: false,
         /** Под-табы ИИ-центра: вклад / инсайты / нагрузка (P1.5.0). */
         aiCenterTab: 'value',
         salesDataLoading: false,
@@ -1943,7 +1944,7 @@ function adminMixinMenuOrdersUi() {
         },
 
         get aiCenterShowExtendedTabs() {
-            return this.analyticsDensity === 'advanced' || !this.canToggleAnalyticsDensity();
+            return this.aiCenterExtendedTabs || !this.canToggleAnalyticsDensity();
         },
 
         get kanbanAllEmpty() {
@@ -4402,6 +4403,10 @@ function adminMixinAuthKnowledge() {
             this.dashboardTab = d === 'advanced' ? 'analytics' : 'overview';
             this._persistAnalyticsDensity();
             if (this.currentTab === 'dashboard') void this.loadTabData();
+        },
+
+        showAiCenterExtendedTabs() {
+            this.aiCenterExtendedTabs = true;
         },
 
         _persistAnalyticsDensity() {

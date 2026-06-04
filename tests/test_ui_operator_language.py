@@ -96,6 +96,16 @@ def test_final_mile_tab_operator_language():
     assert "voiceCallModeLabel" in js
 
 
+def test_ai_center_more_expands_tabs_without_clipped_dropdown():
+    html = _read("app", "templates", "screens", "_tab_ai_center.html")
+    js = JS.read_text(encoding="utf-8")
+    assert "showAiCenterExtendedTabs()" in html
+    assert "x-show=\"!aiCenterShowExtendedTabs\"" in html
+    assert "<details x-show=\"!aiCenterShowExtendedTabs\"" not in html
+    assert "showAiCenterExtendedTabs()" in js
+    assert "aiCenterExtendedTabs" in js
+
+
 def test_team_settings_operator_language():
     team = _read("app", "templates", "screens", "_tab_settings_team.html")
     assert "StaffMind onboarding" not in team

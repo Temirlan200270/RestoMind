@@ -52,23 +52,13 @@
                                 @click="navigateToTab('ai_center', { aiCenterTab: 'final_mile' }); loadFinalMileUi()">
                                 Финал
                             </button>
-                            <details x-show="!aiCenterShowExtendedTabs" x-cloak class="relative inline-block">
-                                <summary class="list-none min-h-[44px] inline-flex items-center px-3 py-2 rounded-lg text-sm font-semibold border border-slate-200 bg-white text-slate-700 cursor-pointer select-none">
-                                    Ещё
-                                </summary>
-                                <div class="absolute right-0 top-full mt-1 z-20 min-w-[10rem] rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
-                                    <button type="button" class="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-slate-50"
-                                        @click="navigateToTab('ai_center', { aiCenterTab: 'sales_data' }); loadSalesDataLayer(); $el.closest('details').open = false">Продажи</button>
-                                    <button type="button" class="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-slate-50"
-                                        @click="navigateToTab('ai_center', { aiCenterTab: 'load' }); $el.closest('details').open = false">Нагрузка</button>
-                                    <button type="button" class="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-slate-50"
-                                        @click="navigateToTab('ai_center', { aiCenterTab: 'os' }); loadOsDashboard(); $el.closest('details').open = false">Автопилот</button>
-                                    <button type="button" class="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-slate-50"
-                                        @click="navigateToTab('ai_center', { aiCenterTab: 'guestcare' }); loadGuestCareReviews(); $el.closest('details').open = false">Отзывы</button>
-                                    <button type="button" class="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-slate-50"
-                                        @click="navigateToTab('ai_center', { aiCenterTab: 'final_mile' }); loadFinalMileUi(); $el.closest('details').open = false">Финал</button>
-                                </div>
-                            </details>
+                            <button type="button"
+                                x-show="!aiCenterShowExtendedTabs"
+                                x-cloak
+                                class="min-h-[44px] px-3 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap border border-slate-200 bg-white text-slate-700"
+                                @click="showAiCenterExtendedTabs()">
+                                Ещё
+                            </button>
                         </div>
                         {% endcall %}
                     </div>
