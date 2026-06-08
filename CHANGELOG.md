@@ -18,6 +18,7 @@
 - Executive Hub v1: overlay для manager/admin с narrative cards, drill-down drawer и чатом агента; API `GET /api/admin/intelligence/executive-hub`.
 
 ### Fixed
+- Deploy: миграция `20260608_pg_parity_index_bool` больше не пересоздаёт `ix_orders_org_kind` (индекс уже есть с `20260514_night_preorders`).
 - DB: полный переход тестов/CI/runtime на PostgreSQL — SQLite startup DDL и `aiosqlite` удалены, тестовая схема и GitHub Actions работают через Postgres.
 - CI: `test_fulfillment_only_order` — мок `check_operational_status` (открытая кухня), тест больше не падает ночью из‑за `night_preorder`.
 

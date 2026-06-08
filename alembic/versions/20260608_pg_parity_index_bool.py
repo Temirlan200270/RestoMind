@@ -1,4 +1,6 @@
-"""Postgres parity for order kind index and menu archived default.
+"""Postgres parity for menu_items.is_archived boolean default.
+
+ix_orders_org_kind already created in 20260514_night_preorders — do not recreate here.
 
 Revision ID: 20260608_pg_parity_index_bool
 Revises: 20260604_iiko_last_error_text
@@ -20,7 +22,6 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.create_index("ix_orders_org_kind", "orders", ["organization_id", "kind"])
     op.alter_column(
         "menu_items",
         "is_archived",
@@ -38,4 +39,3 @@ def downgrade() -> None:
         existing_nullable=False,
         server_default=None,
     )
-    op.drop_index("ix_orders_org_kind", table_name="orders")
