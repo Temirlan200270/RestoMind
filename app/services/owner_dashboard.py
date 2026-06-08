@@ -16,8 +16,6 @@ from app.services.tenant_scope import orders_location_filter, orders_tenant_clau
 
 def _sql_dt_for_filter(dt: datetime) -> datetime:
     u = dt.astimezone(timezone.utc) if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-    if settings.db_mode == "sqlite":
-        return u.replace(tzinfo=None)
     return u
 
 

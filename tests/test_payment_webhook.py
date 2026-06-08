@@ -8,32 +8,17 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import app.core.config as app_config
 import app.db.session as db_session_module
-from app.db.models import Base, Order, Organization, PaymentEvent, User
+from app.db.models import Order, Organization, PaymentEvent, User
 from app.db.session import get_db
 from app.main import app
 
 
 PW_HOOK_BEARER = "hook-secret"
 PW_HOOK_HMAC = "pw-test-hmac"
-
-
-def _memory_sqlite_engine():
-    """
-    Одна in-memory БД на все соединения пула.
-
-    Иначе sqlite :memory: без StaticPool даёт отдельную пустую БД на каждое соединение —
-    падают BackgroundTasks (run_auto_send_to_iiko_after_payment и т.д.) с no such table: orders.
-    """
-    return create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
 
 
 def _payment_hmac_hex(secret: str, raw: bytes) -> str:
@@ -66,20 +51,10 @@ async def _payment_post(
     return await ac.post(path, content=raw, headers=headers)
 
 
-@pytest_asyncio.fixture
-async def pw_client(monkeypatch):
-    monkeypatch.setattr(app_config.settings, "payment_webhook_bearer_token", PW_HOOK_BEARER)
-    monkeypatch.setattr(app_config.settings, "payment_webhook_hmac_secret", PW_HOOK_HMAC)
-
-    async def _noop_enqueue_job(*_a, **_kw):
-        return None
-
-    monkeypatch.setattr("app.services.task_queue.enqueue_job", _noop_enqueue_job)
-
-    engine = _memory_sqlite_engine()
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    session_factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+def _install_db_override(
+    monkeypatch,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
     monkeypatch.setattr(db_session_module, "async_session_factory", session_factory)
 
     async def _override_db():
@@ -93,11 +68,24 @@ async def pw_client(monkeypatch):
 
     app.dependency_overrides[get_db] = _override_db
 
+
+@pytest_asyncio.fixture
+async def pw_client(monkeypatch, postgres_session_factory):
+    monkeypatch.setattr(app_config.settings, "payment_webhook_bearer_token", PW_HOOK_BEARER)
+    monkeypatch.setattr(app_config.settings, "payment_webhook_hmac_secret", PW_HOOK_HMAC)
+
+    async def _noop_enqueue_job(*_a, **_kw):
+        return None
+
+    monkeypatch.setattr("app.services.task_queue.enqueue_job", _noop_enqueue_job)
+
+    session_factory = postgres_session_factory
+    _install_db_override(monkeypatch, session_factory)
+
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac, session_factory
 
     app.dependency_overrides.clear()
-    await engine.dispose()
 
 
 async def _seed_order(session_factory: async_sessionmaker[AsyncSession]) -> tuple[int, int]:
@@ -123,23 +111,9 @@ async def _seed_order(session_factory: async_sessionmaker[AsyncSession]) -> tupl
 
 
 @pytest.mark.asyncio
-async def test_payment_webhook_not_configured_returns_503(monkeypatch):
+async def test_payment_webhook_not_configured_returns_503(monkeypatch, postgres_session_factory):
     monkeypatch.setattr(app_config.settings, "payment_webhook_bearer_token", "")
-    engine = _memory_sqlite_engine()
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    session_factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
-
-    async def _override_db():
-        async with session_factory() as session:
-            try:
-                yield session
-                await session.commit()
-            except Exception:
-                await session.rollback()
-                raise
-
-    app.dependency_overrides[get_db] = _override_db
+    _install_db_override(monkeypatch, postgres_session_factory)
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             r = await ac.post(
@@ -155,7 +129,6 @@ async def test_payment_webhook_not_configured_returns_503(monkeypatch):
         assert r.status_code == 503
     finally:
         app.dependency_overrides.clear()
-        await engine.dispose()
 
 
 @pytest.mark.asyncio
@@ -306,7 +279,7 @@ async def test_payment_webhook_failed_records_event_only(pw_client):
 
 
 @pytest.mark.asyncio
-async def test_payment_webhook_hmac_only_success(monkeypatch):
+async def test_payment_webhook_hmac_only_success(monkeypatch, postgres_session_factory):
     monkeypatch.setattr(app_config.settings, "payment_webhook_bearer_token", "")
     monkeypatch.setattr(app_config.settings, "payment_webhook_hmac_secret", "hm-shared")
 
@@ -315,22 +288,8 @@ async def test_payment_webhook_hmac_only_success(monkeypatch):
 
     monkeypatch.setattr("app.services.task_queue.enqueue_job", _noop_enqueue_job)
 
-    engine = _memory_sqlite_engine()
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    session_factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
-    monkeypatch.setattr(db_session_module, "async_session_factory", session_factory)
-
-    async def _override_db():
-        async with session_factory() as session:
-            try:
-                yield session
-                await session.commit()
-            except Exception:
-                await session.rollback()
-                raise
-
-    app.dependency_overrides[get_db] = _override_db
+    session_factory = postgres_session_factory
+    _install_db_override(monkeypatch, session_factory)
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             async with session_factory() as db:
@@ -373,29 +332,14 @@ async def test_payment_webhook_hmac_only_success(monkeypatch):
             assert r.json().get("prepayment_status") == "paid"
     finally:
         app.dependency_overrides.clear()
-        await engine.dispose()
 
 
 @pytest.mark.asyncio
-async def test_payment_webhook_hmac_invalid_when_configured(monkeypatch):
+async def test_payment_webhook_hmac_invalid_when_configured(monkeypatch, postgres_session_factory):
     monkeypatch.setattr(app_config.settings, "payment_webhook_bearer_token", "")
     monkeypatch.setattr(app_config.settings, "payment_webhook_hmac_secret", "hm-shared")
 
-    engine = _memory_sqlite_engine()
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    session_factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
-
-    async def _override_db():
-        async with session_factory() as session:
-            try:
-                yield session
-                await session.commit()
-            except Exception:
-                await session.rollback()
-                raise
-
-    app.dependency_overrides[get_db] = _override_db
+    _install_db_override(monkeypatch, postgres_session_factory)
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             payload = {"order_id": 1, "organization_id": 1, "payment_id": "x", "status": "paid"}
@@ -411,7 +355,6 @@ async def test_payment_webhook_hmac_invalid_when_configured(monkeypatch):
             assert r.status_code == 401
     finally:
         app.dependency_overrides.clear()
-        await engine.dispose()
 
 
 @pytest.mark.asyncio
@@ -454,26 +397,12 @@ async def test_payment_webhook_bearer_and_hmac_both_required(pw_client, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_payment_webhook_hmac_required_when_prod_like(monkeypatch):
+async def test_payment_webhook_hmac_required_when_prod_like(monkeypatch, postgres_session_factory):
     monkeypatch.setattr(app_config.settings, "payment_webhook_bearer_token", "only-bearer")
     monkeypatch.setattr(app_config.settings, "payment_webhook_hmac_secret", "")
     monkeypatch.setattr(app_config.settings, "app_environment", "production")
 
-    engine = _memory_sqlite_engine()
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    session_factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
-
-    async def _override_db():
-        async with session_factory() as session:
-            try:
-                yield session
-                await session.commit()
-            except Exception:
-                await session.rollback()
-                raise
-
-    app.dependency_overrides[get_db] = _override_db
+    _install_db_override(monkeypatch, postgres_session_factory)
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             body = {"order_id": 1, "organization_id": 1, "payment_id": "x1234", "status": "paid"}
@@ -489,4 +418,3 @@ async def test_payment_webhook_hmac_required_when_prod_like(monkeypatch):
             assert r.status_code == 503
     finally:
         app.dependency_overrides.clear()
-        await engine.dispose()

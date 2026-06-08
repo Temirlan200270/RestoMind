@@ -7,10 +7,8 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
 from app.db.models import WhatsappInboundDedupe
 
 logger = logging.getLogger(__name__)
@@ -68,18 +66,11 @@ async def try_claim_whatsapp_inbound_in_db(db: AsyncSession, *, message_id: str,
     if not mid:
         return True
 
-    if settings.db_mode == "sqlite":
-        stmt = (
-            sqlite_insert(WhatsappInboundDedupe)
-            .values(message_id=mid, phone=phone)
-            .on_conflict_do_nothing(index_elements=["message_id"])
-        )
-    else:
-        stmt = (
-            pg_insert(WhatsappInboundDedupe)
-            .values(message_id=mid, phone=phone)
-            .on_conflict_do_nothing(index_elements=["message_id"])
-        )
+    stmt = (
+        pg_insert(WhatsappInboundDedupe)
+        .values(message_id=mid, phone=phone)
+        .on_conflict_do_nothing(index_elements=["message_id"])
+    )
 
     result = await db.execute(stmt)
     claimed = (result.rowcount or 0) > 0
@@ -110,7 +101,7 @@ async def try_start_whatsapp_inbound_in_db(db: AsyncSession, *, message_id: str,
         "error": "",
         "claimed_at": now,
     }
-    insert_stmt = sqlite_insert(WhatsappInboundDedupe) if settings.db_mode == "sqlite" else pg_insert(WhatsappInboundDedupe)
+    insert_stmt = pg_insert(WhatsappInboundDedupe)
     inserted = await db.execute(insert_stmt.values(**values).on_conflict_do_nothing(index_elements=["message_id"]))
     if (inserted.rowcount or 0) > 0:
         return True

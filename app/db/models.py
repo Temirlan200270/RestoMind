@@ -23,6 +23,7 @@ from sqlalchemy import (
     Text,
     Time,
     UniqueConstraint,
+    false,
     func,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -452,6 +453,9 @@ class Order(Base):
     """Заказ клиента. Позиции хранятся в JSONB для гибкости (модификаторы, исключения)."""
 
     __tablename__ = "orders"
+    __table_args__ = (
+        Index("ix_orders_org_kind", "organization_id", "kind"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     organization_id: Mapped[int | None] = mapped_column(
@@ -798,7 +802,7 @@ class MenuItem(Base):
     is_archived: Mapped[bool] = mapped_column(
         Boolean,
         default=False,
-        server_default="0",
+        server_default=false(),
         index=True,
         comment="Скрыта из активного меню после replace/prune",
     )

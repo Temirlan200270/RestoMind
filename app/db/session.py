@@ -1,16 +1,17 @@
 """
-Асинхронное подключение к БД (SQLite / PostgreSQL) и Redis (опционально).
+ Асинхронное подключение к PostgreSQL и Redis (опционально).
 Фабрика сессий для Dependency Injection в FastAPI.
 """
 
 import logging
+import os
 import ssl
 from collections.abc import AsyncGenerator
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 
-from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
 from app.db.pool_settings import resolve_postgres_pool_settings
@@ -18,61 +19,54 @@ from app.db.ssl_context import postgres_connect_args
 
 logger = logging.getLogger(__name__)
 
-# --- БД (async) — SQLite по умолчанию, PostgreSQL для прода ---
+# --- БД (async) — PostgreSQL ---
 engine_kwargs: dict[str, Any] = {
     "echo": settings.app_debug,
 }
 
 if settings.db_mode == "postgres":
-    pool_cfg = resolve_postgres_pool_settings(
-        settings.database_url,
-        pool_size=settings.db_pool_size,
-        max_overflow=settings.db_max_overflow,
-        pool_timeout=settings.db_pool_timeout,
-        pool_recycle=settings.db_pool_recycle,
-    )
-    engine_kwargs.update(
-        pool_size=pool_cfg.pool_size,
-        max_overflow=pool_cfg.max_overflow,
-        pool_timeout=pool_cfg.pool_timeout,
-        pool_recycle=pool_cfg.pool_recycle,
-        pool_pre_ping=pool_cfg.pool_pre_ping,
-    )
+    if os.environ.get("RESTOMIND_TEST_POSTGRES") == "true":
+        engine_kwargs["poolclass"] = NullPool
+        pool_cfg = None
+    else:
+        pool_cfg = resolve_postgres_pool_settings(
+            settings.database_url,
+            pool_size=settings.db_pool_size,
+            max_overflow=settings.db_max_overflow,
+            pool_timeout=settings.db_pool_timeout,
+            pool_recycle=settings.db_pool_recycle,
+        )
+        engine_kwargs.update(
+            pool_size=pool_cfg.pool_size,
+            max_overflow=pool_cfg.max_overflow,
+            pool_timeout=pool_cfg.pool_timeout,
+            pool_recycle=pool_cfg.pool_recycle,
+            pool_pre_ping=pool_cfg.pool_pre_ping,
+        )
     # Не полагаемся на `?sslmode=` в DATABASE_URL (SQLAlchemy/asyncpg иногда превращают это в kwargs).
     # TLS включаем явно через connect_args.
     engine_kwargs["connect_args"] = postgres_connect_args(settings.database_url)
     from app.db.pool_settings import is_supabase_session_pooler, is_supabase_transaction_pooler
 
-    if is_supabase_transaction_pooler(settings.database_url):
-        logger.info("Supabase transaction pooler :6543 — higher client limit OK")
-    elif is_supabase_session_pooler(settings.database_url):
-        logger.warning(
-            "Supabase session pooler detected — pool capped at %s+%s per process "
-            "(project limit ~15). Prefer transaction pooler :6543 or set DB_POOL_SIZE.",
+    if pool_cfg is not None:
+        if is_supabase_transaction_pooler(settings.database_url):
+            logger.info("Supabase transaction pooler :6543 — higher client limit OK")
+        elif is_supabase_session_pooler(settings.database_url):
+            logger.warning(
+                "Supabase session pooler detected — pool capped at %s+%s per process "
+                "(project limit ~15). Prefer transaction pooler :6543 or set DB_POOL_SIZE.",
+                pool_cfg.pool_size,
+                pool_cfg.max_overflow,
+            )
+        logger.info(
+            "Postgres pool: size=%s max_overflow=%s timeout=%ss recycle=%ss",
             pool_cfg.pool_size,
             pool_cfg.max_overflow,
+            pool_cfg.pool_timeout,
+            pool_cfg.pool_recycle,
         )
-    logger.info(
-        "Postgres pool: size=%s max_overflow=%s timeout=%ss recycle=%ss",
-        pool_cfg.pool_size,
-        pool_cfg.max_overflow,
-        pool_cfg.pool_timeout,
-        pool_cfg.pool_recycle,
-    )
 
 async_engine = create_async_engine(settings.database_url, **engine_kwargs)
-
-
-@event.listens_for(async_engine.sync_engine, "connect")
-def _sqlite_enable_foreign_keys(dbapi_connection, connection_record) -> None:
-    """В SQLite по умолчанию FK выключены — без этого каскады и целостность не гарантируются."""
-    if settings.db_mode != "sqlite":
-        return
-    cursor = dbapi_connection.cursor()
-    try:
-        cursor.execute("PRAGMA foreign_keys=ON")
-    finally:
-        cursor.close()
 
 
 async_session_factory = async_sessionmaker(

@@ -222,7 +222,7 @@ class IikoServerClient:
         argument is accepted to keep the Cloud/Server client protocol uniform.
         """
         filters: dict[str, Any] = {
-            "OpenDate.Typed": {
+            "EventDate": {
                 "filterType": "DateRange",
                 "from": date_from.isoformat(),
                 "to": date_to.isoformat(),
@@ -239,9 +239,9 @@ class IikoServerClient:
         body: dict[str, Any] = {
             "reportType": "STOCK",
             "buildSummary": False,
-            "groupByRowFields": ["DishId", "DishName", "ProductName"],
+            "groupByRowFields": ["ProductId", "ProductName", "ProductCategory"],
             "groupByColFields": [],
-            "aggregateFields": ["ProductCostBase.ProductCost", "Amount"],
+            "aggregateFields": ["ProductCostBase.OneItem", "ProductCostBase.ProductCost", "Amount"],
             "filters": filters,
         }
         data = await self._request(

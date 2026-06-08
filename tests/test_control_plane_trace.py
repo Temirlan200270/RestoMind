@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models import SystemEvent
 from app.services.system_events import BusinessEvent, emit_event
@@ -82,6 +82,10 @@ async def test_publish_chat_event_includes_chat_log_id_alias(monkeypatch: pytest
 
 @pytest.mark.asyncio
 async def test_emit_event_injects_trace_from_context(db_session: AsyncSession) -> None:
+    from app.db.models import Organization
+
+    db_session.add(Organization(id=1, name="Trace Org", slug="trace-org"))
+    await db_session.flush()
     with trace_context("trace-emit-1", "conv-emit-1"):
         result = await emit_event(
             db_session,
@@ -191,14 +195,14 @@ async def test_latest_trace_for_phone_reads_chat_meta(db_session: AsyncSession) 
 
 
 @pytest.mark.asyncio
-async def test_process_with_retry_forwards_trace_id(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_process_with_retry_forwards_trace_id(
+    monkeypatch: pytest.MonkeyPatch,
+    postgres_session_factory: async_sessionmaker,
+) -> None:
     from app.api import webhooks
-    from app.db.models import Base, Organization
+    from app.db.models import Organization
 
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    session_factory = async_sessionmaker(bind=engine, expire_on_commit=False)
+    session_factory = postgres_session_factory
     async with session_factory() as db:
         org = Organization(name="WA Active", is_active=True)
         db.add(org)
@@ -227,7 +231,6 @@ async def test_process_with_retry_forwards_trace_id(monkeypatch: pytest.MonkeyPa
         trace_id="trace-from-arq",
     )
     assert captured.get("trace_id") == "trace-from-arq"
-    await engine.dispose()
 
 
 @pytest.mark.asyncio

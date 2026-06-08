@@ -25,16 +25,19 @@ async def test_iiko_server_fetch_product_expenses_uses_stock_olap(monkeypatch) -
 
     async def fake_request(method: str, path: str, *, json: dict, timeout: float) -> dict:
         seen.update({"method": method, "path": path, "json": json, "timeout": timeout})
-        return {"data": [{"DishId": "p1", "ProductCostBase.ProductCost": 123}]}
+        return {"data": [{"ProductId": "p1", "ProductCostBase.OneItem": 123}]}
 
     monkeypatch.setattr(client, "_request", fake_request)
     rows = await client.fetch_product_expenses("cloud-org", date(2026, 6, 1), date(2026, 6, 3))
 
-    assert rows == [{"DishId": "p1", "ProductCostBase.ProductCost": 123}]
+    assert rows == [{"ProductId": "p1", "ProductCostBase.OneItem": 123}]
     assert seen["method"] == "POST"
     assert seen["path"] == "/api/v2/reports/olap"
     assert seen["json"]["reportType"] == "STOCK"
+    assert seen["json"]["filters"]["EventDate"]["from"] == "2026-06-01"
     assert seen["json"]["filters"]["Department.Id"]["values"] == ["dep-1"]
+    assert seen["json"]["groupByRowFields"] == ["ProductId", "ProductName", "ProductCategory"]
+    assert "ProductCostBase.OneItem" in seen["json"]["aggregateFields"]
 
 
 def test_iiko_server_host_normalization() -> None:

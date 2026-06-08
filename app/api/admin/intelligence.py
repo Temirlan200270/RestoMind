@@ -55,6 +55,7 @@ from app.services.insight_delivery import (
     mark_insight_delivery,
 )
 from app.services.copilot.business_questions import questions_for_role
+from app.services.executive_hub import build_executive_hub_payload
 from app.services.intelligence import (
     SimulationInput,
     answer_intelligence_query,
@@ -255,6 +256,44 @@ async def intelligence_overview(
             "stoplist_count": snapshot.stoplist_count,
             "created_at": snapshot.created_at.isoformat() if snapshot.created_at else None,
         },
+        "location_scope": {
+            "location_id": int(location_id) if location_id is not None else None,
+            "source": "sql_location" if location_scoped else "org",
+        },
+    }
+
+
+@router.get("/executive-hub")
+async def intelligence_executive_hub(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    period: Annotated[str, Query(pattern="^(today|7d|30d)$")] = "today",
+    location_id: Annotated[int | None, Query(ge=1)] = None,
+) -> dict:
+    org_id = admin_org_from_session(request)
+    allowed_location_ids, location_scoped = await _location_scope_for_request(
+        request,
+        db,
+        org_id,
+        location_id,
+    )
+    role = await _copilot_role_from_request(request, db, org_id)
+    payload = await build_executive_hub_payload(
+        db,
+        org_id,
+        period=period,
+        location_id=location_id,
+        allowed_location_ids=allowed_location_ids,
+        role=role,
+    )
+    await db.commit()
+    return {
+        "ok": True,
+        "organization_id": org_id,
+        "role": role,
+        "period": payload["period"],
+        "cards": payload["cards"],
+        "chat": payload["chat"],
         "location_scope": {
             "location_id": int(location_id) if location_id is not None else None,
             "source": "sql_location" if location_scoped else "org",

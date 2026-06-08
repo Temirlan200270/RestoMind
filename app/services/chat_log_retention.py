@@ -17,8 +17,6 @@ logger = logging.getLogger(__name__)
 def _cutoff_for_sql() -> datetime:
     """Граница «старше чем» в виде datetime для сравнения с колонкой БД."""
     cutoff_utc = datetime.now(timezone.utc) - timedelta(days=settings.chat_log_retention_days)
-    if settings.db_mode == "sqlite":
-        return cutoff_utc.replace(tzinfo=None)
     return cutoff_utc
 
 

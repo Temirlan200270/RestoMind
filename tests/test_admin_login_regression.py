@@ -3,7 +3,7 @@
 
 Проблема, которую детектирует:
     Если в модели Organization появляется новый столбец без соответствующей
-    миграции (или SQLite-патча в main.py), SQLAlchemy генерирует
+    миграции, SQLAlchemy генерирует
     SELECT ... organizations.new_col ... при любом db.get(Organization, id).
     Это происходит в login-эндпоинте → вход полностью ломается с
     UndefinedColumnError, хотя сами credentials верны.
@@ -19,49 +19,22 @@
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
 
 import app.db.session as db_session_module
-from app.db.models import Base, Organization
+from app.db.models import Organization
 from app.db.session import get_db
 from app.main import app
-
-
-def _make_engine():
-    return create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
+from tests.db_helpers import install_app_db_override
 
 
 @pytest_asyncio.fixture
-async def login_client(monkeypatch):
+async def login_client(monkeypatch, postgres_session_factory):
     """
-    Фикстура: приложение с in-memory SQLite и одной организацией.
-    create_all создаёт таблицы по текущим ORM-моделям — именно это
-    нам нужно: тест проверяет что модели консистентны сами по себе.
+    Фикстура: приложение с Postgres test DB и одной организацией.
+    Alembic создаёт схему как в production — тест ловит drift моделей/миграций.
     """
-    engine = _make_engine()
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    session_factory = async_sessionmaker(
-        bind=engine, class_=AsyncSession, expire_on_commit=False
-    )
-    monkeypatch.setattr(db_session_module, "async_session_factory", session_factory)
-
-    async def _override_db():
-        async with session_factory() as session:
-            try:
-                yield session
-                await session.commit()
-            except Exception:
-                await session.rollback()
-                raise
-
-    app.dependency_overrides[get_db] = _override_db
+    session_factory = postgres_session_factory
+    install_app_db_override(app, get_db, monkeypatch, db_session_module, session_factory)
 
     # Создаём организацию — без неё legacy-login не найдёт org и вернёт ошибку
     async with session_factory() as db:
@@ -73,7 +46,6 @@ async def login_client(monkeypatch):
         yield ac
 
     app.dependency_overrides.clear()
-    await engine.dispose()
 
 
 @pytest.mark.asyncio
@@ -91,7 +63,7 @@ async def test_login_with_default_credentials(login_client: AsyncClient):
     )
     assert resp.status_code == 200, (
         f"Login вернул {resp.status_code}: {resp.text}\n"
-        "Возможная причина: в модели Organization есть столбец без миграции/патча. "
+        "Возможная причина: в модели Organization есть столбец без миграции. "
         "Проверьте docs/CONVENTIONS.md §8.2"
     )
     data = resp.json()
@@ -139,7 +111,7 @@ async def test_superadmin_me_after_env_login(login_client: AsyncClient, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_organizations_model_columns_accessible():
+async def test_organizations_model_columns_accessible(postgres_session_factory):
     """
     SELECT * FROM organizations должен работать без ошибок.
 
@@ -150,13 +122,7 @@ async def test_organizations_model_columns_accessible():
     from sqlalchemy import select
     from app.db.models import Organization as OrgModel
 
-    engine = _make_engine()
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    session_factory = async_sessionmaker(
-        bind=engine, class_=AsyncSession, expire_on_commit=False
-    )
+    session_factory = postgres_session_factory
     async with session_factory() as db:
         # Добавляем org для теста
         org = OrgModel(name="Probe", slug="probe", is_active=True)
@@ -175,8 +141,6 @@ async def test_organizations_model_columns_accessible():
         # Полный SELECT тоже должен работать
         rows = (await db.execute(select(OrgModel))).scalars().all()
         assert len(rows) >= 1
-
-    await engine.dispose()
 
 
 @pytest.mark.asyncio

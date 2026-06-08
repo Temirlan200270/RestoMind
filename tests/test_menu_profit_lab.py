@@ -12,6 +12,8 @@ from app.db.models import (
     Order,
     OrderStatus,
     Organization,
+    SalesFactItem,
+    SalesFactOrder,
     StaffRole,
     StaffUser,
     SystemEvent,
@@ -239,6 +241,58 @@ async def test_menu_profit_tenant_scope_isolation(db_session) -> None:
 
     assert report_a["top_revenue_items"][0]["name"] == "Блюдо A"
     assert report_b["top_revenue_items"] == []
+
+
+@pytest.mark.asyncio
+async def test_menu_profit_uses_iiko_sales_facts_when_present(db_session) -> None:
+    now = datetime.now(tz=timezone.utc)
+    org = Organization(name="Iiko Fact Org", slug="iiko-fact-org")
+    db_session.add(org)
+    await db_session.flush()
+    db_session.add(
+        MenuItem(
+            organization_id=int(org.id),
+            name="Plov",
+            category="Hot",
+            price=3000.0,
+            is_available=True,
+            iiko_id="iiko-plov",
+        ),
+    )
+    fact_order = SalesFactOrder(
+        organization_id=int(org.id),
+        iiko_order_id="order-1",
+        order_date=now.date(),
+        closed_at=now,
+        revenue=6000.0,
+        guest_count=2,
+    )
+    db_session.add(fact_order)
+    await db_session.flush()
+    db_session.add(
+        SalesFactItem(
+            organization_id=int(org.id),
+            order_id=int(fact_order.id),
+            product_id="iiko-plov",
+            product_name="Plov",
+            category="Hot",
+            quantity=2,
+            revenue=6000.0,
+            cost=2000.0,
+        ),
+    )
+    await db_session.flush()
+
+    report = await build_menu_profit_report(db_session, int(org.id), period="7d")
+
+    assert report["sales_source"] == "iiko_sales_facts"
+    assert report["cost_data_available"] is True
+    assert report["lite_mode"] is False
+    assert report["top_revenue_items"][0]["name"] == "Plov"
+    assert report["top_revenue_items"][0]["quantity_sold"] == 2
+    assert report["top_revenue_items"][0]["revenue"] == 6000.0
+    assert report["top_revenue_items"][0]["cost_price"] == 1000.0
+    assert report["top_revenue_items"][0]["margin_source"] == "sales_fact_item_cost"
 
 
 @pytest.mark.asyncio

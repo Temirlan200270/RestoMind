@@ -13,12 +13,9 @@ from __future__ import annotations
 
 import pytest
 import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
 
 from app.db.models import (
     AiUsageLog,
-    Base,
     BusinessRecommendation,
     ChatLog,
     EscalationEvent,
@@ -31,27 +28,9 @@ from app.db.models import (
 )
 
 
-# ──────────────────────── Fixtures ────────────────────────
-
-
-def _make_engine():
-    return create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-
-
 @pytest_asyncio.fixture
-async def iso_db():
-    engine = _make_engine()
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    session_factory = async_sessionmaker(
-        bind=engine, class_=AsyncSession, expire_on_commit=False,
-    )
-    yield session_factory
-    await engine.dispose()
+async def iso_db(postgres_session_factory):
+    yield postgres_session_factory
 
 
 async def _seed_orgs(sf) -> tuple[int, int]:

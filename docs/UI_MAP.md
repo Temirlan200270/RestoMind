@@ -44,6 +44,7 @@
 
 ### Управление (`section: management`)
 
+- **Executive Hub** (`_executive_hub.html`, global overlay в `admin.html`): слой поверх текущих вкладок для manager/admin. Кнопка **Hub** в `_header.html`, CTA на `_tab_dashboard.html`. Карточки грузятся из `GET /api/admin/intelligence/executive-hub`; drill-down drawer + чат агента (`askIntelligence`). Нижние вкладки (`dashboard`, `ai_center`, `menu`, `settings`, analytics) остаются источниками данных, evidence и ручного аудита.
 - `_tab_dashboard.html` — дашборд: KPI, ROI, график; под-таб **`dashboardTab`** `overview` | `analytics`; на overview — блок **«Живая ОС»** (`dashLiveFeed`, обновляется из WebSocket). Бейдж **«данные ОС»** при `event_driven_stats.source === 'event_driven'`. При выбранной точке loaders добавляют `location_id`, а API возвращает `location_scope.source=sql_location`. Аналитика — `{% include "screens/_tab_analytics.html" %}`.
 - `_tab_ai_center.html` — **«ИИ-аналитика»**: под-табы `aiCenterTab`:
   - `value` — вклад ИИ (ROI, метрики);

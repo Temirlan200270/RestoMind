@@ -1,7 +1,7 @@
 """
 Интеграция fetch_ai_read_context: реальные AsyncSession, без моков ORM.
 
-Патчим только фабрику сессий на in-memory SQLite — один context manager на fetch.
+Патчим только фабрику сессий на Postgres test DB — один context manager на fetch.
 """
 
 from __future__ import annotations
@@ -11,12 +11,11 @@ import typing
 
 import pytest
 import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import app.core.config as app_config
 import app.services.context_engine as context_engine
 from app.db.models import (
-    Base,
     KnowledgeItem,
     MenuItem,
     Order,
@@ -68,21 +67,18 @@ def _make_tracking_session_factory(
 
 
 @pytest_asyncio.fixture
-async def ctx_engine() -> typing.AsyncIterator[tuple[typing.Any, list[int], async_sessionmaker[AsyncSession]]]:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    inner_factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+async def ctx_engine(
+    postgres_session_factory: async_sessionmaker[AsyncSession],
+) -> typing.AsyncIterator[tuple[typing.Any, list[int], async_sessionmaker[AsyncSession]]]:
+    inner_factory = postgres_session_factory
     open_sessions: list[int] = [0]
 
-    yield engine, open_sessions, inner_factory
+    yield None, open_sessions, inner_factory
 
     open_sessions[0] = 0
-    await engine.dispose()
 
 
-async def _seed_full(ctx_engine: tuple[typing.Any, list[int], async_sessionmaker[AsyncSession]]) -> None:
+async def _seed_full(ctx_engine: tuple[typing.Any, list[int], async_sessionmaker[AsyncSession]]) -> tuple[int, int]:
     engine, _open_sessions, session_factory = ctx_engine
     _ = engine
     # default_organization_id=1: филиал 2 в load_available_menu фильтруется строго по org_id
@@ -91,14 +87,14 @@ async def _seed_full(ctx_engine: tuple[typing.Any, list[int], async_sessionmaker
         org2 = Organization(name="Org Two", slug="two", timezone="Europe/London", schedule_json={"mon": {}})
         db.add_all([org1, org2])
         await db.flush()
-        assert org1.id == 1
-        assert org2.id == 2
+        org1_id = int(org1.id)
+        org2_id = int(org2.id)
 
         # Меню: только org2 попадёт в выборку при organization_id=2; чужой филиал и скрытая позиция — нет
         db.add_all(
             [
                 MenuItem(
-                    organization_id=1,
+                    organization_id=org1_id,
                     name="Чужой филиал Суп",
                     category="Суп",
                     price=100.0,
@@ -106,7 +102,7 @@ async def _seed_full(ctx_engine: tuple[typing.Any, list[int], async_sessionmaker
                     iiko_id="iiko-org1-soup",
                 ),
                 MenuItem(
-                    organization_id=2,
+                    organization_id=org2_id,
                     name="Борщ целевой",
                     category="Суп",
                     price=200.0,
@@ -114,7 +110,7 @@ async def _seed_full(ctx_engine: tuple[typing.Any, list[int], async_sessionmaker
                     iiko_id="iiko-borsch",
                 ),
                 MenuItem(
-                    organization_id=2,
+                    organization_id=org2_id,
                     name="Скрытая пицца",
                     category="Пицца",
                     price=300.0,
@@ -126,7 +122,7 @@ async def _seed_full(ctx_engine: tuple[typing.Any, list[int], async_sessionmaker
         await db.flush()
 
         user2 = User(
-            organization_id=2,
+            organization_id=org2_id,
             phone="+77001002030",
             name="Тестовый гость",
             operator_note="VIP без лука",
@@ -136,7 +132,7 @@ async def _seed_full(ctx_engine: tuple[typing.Any, list[int], async_sessionmaker
 
         # История для build_customer_context (последние заказы)
         past = Order(
-            organization_id=2,
+            organization_id=org2_id,
             user_id=user2.id,
             status=OrderStatus.CONFIRMED,
             total_price=1500.0,
@@ -147,7 +143,7 @@ async def _seed_full(ctx_engine: tuple[typing.Any, list[int], async_sessionmaker
             },
         )
         draft = Order(
-            organization_id=2,
+            organization_id=org2_id,
             user_id=user2.id,
             status=OrderStatus.DRAFT,
             total_price=400.0,
@@ -162,7 +158,7 @@ async def _seed_full(ctx_engine: tuple[typing.Any, list[int], async_sessionmaker
 
         db.add(
             KnowledgeItem(
-                organization_id=2,
+                organization_id=org2_id,
                 knowledge_kind="facility",
                 category="Парковка",
                 question="Парковка?",
@@ -172,6 +168,7 @@ async def _seed_full(ctx_engine: tuple[typing.Any, list[int], async_sessionmaker
             ),
         )
         await db.commit()
+    return org1_id, org2_id
 
 
 async def test_fetch_ai_read_context_integration(
@@ -181,15 +178,15 @@ async def test_fetch_ai_read_context_integration(
     engine, open_sessions, inner_factory = ctx_engine
     _ = engine
 
-    monkeypatch.setattr(app_config.settings, "default_organization_id", 1)
-    await _seed_full(ctx_engine)
+    org1_id, org2_id = await _seed_full(ctx_engine)
+    monkeypatch.setattr(app_config.settings, "default_organization_id", org1_id)
 
     tracked = _make_tracking_session_factory(inner_factory, open_sessions)
     open_sessions[0] = 0
     monkeypatch.setattr(context_engine, "async_session_factory", tracked)
 
     phone = "+77001002030"
-    org_id = 2
+    org_id = org2_id
 
     assert open_sessions[0] == 0
     out = await fetch_ai_read_context(phone, org_id)

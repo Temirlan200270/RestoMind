@@ -40,9 +40,10 @@ class Settings(BaseSettings):
     )
 
     # --- Режим базы данных ---
-    # "sqlite" — работает без установки (по умолчанию для разработки)
-    # "postgres" — для продакшена
-    db_mode: str = "sqlite"
+    # "postgres" — основной режим для local/dev/staging/prod
+    # Сохраняем флаг для health/UI, но runtime поддерживает PostgreSQL.
+    # Postgres is the primary runtime for local dev, staging, and production.
+    db_mode: str = "postgres"
 
     # --- Полный DSN PostgreSQL (Render, Railway и др. задают DATABASE_URL) ---
     # Если задан — используется вместо сборки из postgres_*; режим БД становится postgres.
@@ -979,7 +980,7 @@ class Settings(BaseSettings):
 
     @property
     def database_url(self) -> str:
-        """DSN для подключения к БД — SQLite или PostgreSQL в зависимости от режима."""
+        """PostgreSQL DSN для подключения к БД."""
         raw = self.database_url_dsn.strip()
         if raw:
             # Supabase часто даёт `?sslmode=require` (psql/psycopg). Для asyncpg это невалидный kwargs,
@@ -1009,12 +1010,10 @@ class Settings(BaseSettings):
                 rest = raw[len("postgresql://") :]
                 raw = f"postgresql+asyncpg://{rest}"
             return self._maybe_rewrite_supabase_pooler(raw)
-        if self.db_mode == "postgres":
-            return (
-                f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}"
-                f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
-            )
-        return "sqlite+aiosqlite:///restomind.db"
+        return (
+            f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}"
+            f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
+        )
 
     @property
     def redis_url(self) -> str:

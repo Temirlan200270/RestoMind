@@ -112,7 +112,7 @@ async def on_business_event(event: "BusinessEvent", db: "AsyncSession") -> None:
     """Consumer для BusinessEvent: инкрементирует дневной агрегат в DailyOrgStats.
 
     Вызывается синхронно внутри транзакции emit_event(). Использует raw SQL upsert
-    (INSERT ... ON CONFLICT DO UPDATE) — работает на PostgreSQL и SQLite 3.24+.
+    (INSERT ... ON CONFLICT DO UPDATE) — PostgreSQL upsert.
     """
     if event.type not in HANDLED_EVENT_TYPES:
         return

@@ -91,7 +91,7 @@ def default_schedule_json() -> dict[str, Any]:
 
 
 def _as_utc_aware(dt: datetime) -> datetime:
-    """Normalize DB datetimes (often naive UTC on Postgres/SQLite) for comparisons."""
+    """Normalize DB datetimes (naive values are treated as UTC) for comparisons."""
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)

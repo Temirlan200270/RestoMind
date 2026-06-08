@@ -1527,6 +1527,13 @@ function adminMixinState() {
             'Что с отменами сегодня?',
             'Сравни сегодня со вчера',
         ],
+        executiveHubOpen: false,
+        executiveHubLoading: false,
+        executiveHubCards: [],
+        executiveHubActiveCard: null,
+        executiveHubChatOpen: true,
+        executiveHubBusinessQuestions: [],
+        executiveHubRole: 'owner',
         digitalTwinLoading: false,
         digitalTwin: { snapshot: {} },
         digitalTwinSim: { orders_per_hour: 30, operators: 2, avg_check: 5000, base_cancel_rate_pct: 5 },
@@ -3632,6 +3639,16 @@ function adminMixinSearchBookings() {
                 this.analyticsHelpOpen = false;
                 return;
             }
+            if (this.executiveHubActiveCard) {
+                e.preventDefault();
+                this.closeExecutiveHubDrill();
+                return;
+            }
+            if (this.executiveHubOpen) {
+                e.preventDefault();
+                this.closeExecutiveHub();
+                return;
+            }
             if (this.globalSearchOpen) {
                 e.preventDefault();
                 this.globalSearchOpen = false;
@@ -4327,6 +4344,10 @@ function adminMixinAuthKnowledge() {
         },
 
         /** Текущая роль staff (legacy без staff_id → admin). */
+        canOpenExecutiveHub() {
+            return this.effectiveStaffRole() !== 'operator';
+        },
+
         effectiveStaffRole() {
             return String(this.staffRole || 'admin').trim().toLowerCase();
         },
@@ -10443,6 +10464,95 @@ function adminMixinDataChartsSettings() {
             } finally {
                 this.intelligenceAsking = false;
             }
+        },
+
+        async loadExecutiveHub() {
+            this.executiveHubLoading = true;
+            try {
+                const { ok, data } = await this.apiJsonResponse(
+                    `/api/admin/intelligence/executive-hub${this.locationQueryString('?')}`,
+                );
+                if (!ok) return;
+                this.executiveHubCards = Array.isArray(data.cards) ? data.cards : [];
+                this.executiveHubRole = data.role || this.executiveHubRole || 'owner';
+                this.executiveHubBusinessQuestions = Array.isArray(data.chat?.business_questions)
+                    ? data.chat.business_questions
+                    : [];
+            } catch (e) {
+                adminLogger.error('[admin] loadExecutiveHub', e);
+            } finally {
+                this.executiveHubLoading = false;
+            }
+        },
+
+        async openExecutiveHub() {
+            if (!this.canOpenExecutiveHub()) return;
+            this.executiveHubOpen = true;
+            this.executiveHubChatOpen = true;
+            await this.loadExecutiveHub();
+        },
+
+        closeExecutiveHub() {
+            this.executiveHubOpen = false;
+            this.closeExecutiveHubDrill();
+        },
+
+        openExecutiveHubCard(card) {
+            if (!card || typeof card !== 'object') return;
+            this.executiveHubActiveCard = card;
+            this.executiveHubChatOpen = true;
+        },
+
+        closeExecutiveHubDrill() {
+            this.executiveHubActiveCard = null;
+        },
+
+        executiveHubAskCard(card) {
+            const prompt = String(card?.chat_prompt || card?.headline || '').trim();
+            if (!prompt) return;
+            this.executiveHubChatOpen = true;
+            this.intelligenceQuestion = prompt;
+            void this.askIntelligence(prompt);
+        },
+
+        executiveHubDrillGo() {
+            const card = this.executiveHubActiveCard;
+            const target = card?.drilldown;
+            if (!target || typeof target !== 'object') return;
+            this.closeExecutiveHub();
+            this.incidentGo(target);
+        },
+
+        executiveHubSeverityBorder(severity) {
+            const s = String(severity || 'info').toLowerCase();
+            if (s === 'critical') return 'border-red-500';
+            if (s === 'warning') return 'border-amber-500';
+            return 'border-indigo-400';
+        },
+
+        executiveHubSeverityBadge(severity) {
+            const s = String(severity || 'info').toLowerCase();
+            if (s === 'critical') return 'bg-red-100 text-red-800 ring-1 ring-red-200';
+            if (s === 'warning') return 'bg-amber-100 text-amber-900 ring-1 ring-amber-200';
+            return 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-100';
+        },
+
+        executiveHubSeverityLabel(severity) {
+            const s = String(severity || 'info').toLowerCase();
+            if (s === 'critical') return 'критично';
+            if (s === 'warning') return 'внимание';
+            return 'норма';
+        },
+
+        executiveHubActiveCardEvidence() {
+            const card = this.executiveHubActiveCard;
+            if (!card) return [];
+            const evidence = card.evidence && typeof card.evidence === 'object' ? card.evidence : {};
+            const why = Array.isArray(card.why) ? card.why : [];
+            const evidenceRows = Object.entries(evidence)
+                .filter(([key, value]) => key !== 'source' && value != null && value !== '')
+                .map(([key, value]) => `${key}: ${value}`);
+            return [...why, ...evidenceRows].slice(0, 8);
         },
 
         async updateInsightStatus(id, status) {

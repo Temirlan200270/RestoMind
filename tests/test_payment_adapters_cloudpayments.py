@@ -8,24 +8,16 @@ import json
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import app.core.config as app_config
 import app.db.session as db_session_module
-from app.db.models import Base, Order, Organization, User
+from app.db.models import Order, Organization, User
 from app.db.session import get_db
 from app.main import app
+from tests.db_helpers import install_app_db_override
 
 CP_SECRET = "cloudpayments-api-secret"
-
-
-def _memory_sqlite_engine():
-    return create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-)
 
 
 def _cp_hmac_b64(secret: str, raw: bytes) -> str:
@@ -56,7 +48,7 @@ async def _seed_order(session_factory: async_sessionmaker[AsyncSession]) -> tupl
 
 
 @pytest_asyncio.fixture
-async def cp_client(monkeypatch):
+async def cp_client(monkeypatch, postgres_session_factory):
     monkeypatch.setattr(app_config.settings, "payment_webhook_bearer_token", "")
     monkeypatch.setattr(app_config.settings, "payment_webhook_hmac_secret", "")
     monkeypatch.setattr(app_config.settings, "cloudpayments_api_secret", CP_SECRET)
@@ -69,28 +61,13 @@ async def cp_client(monkeypatch):
         _noop_arq_dispatch,
     )
 
-    engine = _memory_sqlite_engine()
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    session_factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
-    monkeypatch.setattr(db_session_module, "async_session_factory", session_factory)
-
-    async def _override_db():
-        async with session_factory() as session:
-            try:
-                yield session
-                await session.commit()
-            except Exception:
-                await session.rollback()
-                raise
-
-    app.dependency_overrides[get_db] = _override_db
+    session_factory = postgres_session_factory
+    install_app_db_override(app, get_db, monkeypatch, db_session_module, session_factory)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac, session_factory
 
     app.dependency_overrides.clear()
-    await engine.dispose()
 
 
 @pytest.mark.asyncio

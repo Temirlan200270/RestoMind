@@ -32,8 +32,6 @@ def _dt_as_utc(dt: datetime) -> datetime:
 
 def _sql_dt_for_filter(dt: datetime) -> datetime:
     u = _dt_as_utc(dt)
-    if settings.db_mode == "sqlite":
-        return u.replace(tzinfo=None)
     return u
 
 

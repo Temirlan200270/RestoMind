@@ -10,11 +10,9 @@ from typing import Literal
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Order, PaymentEvent, PaymentTransaction, PaymentTxStatus
-from app.core.config import settings
 from app.services.system_events import BusinessEvent, emit_event, emit_system_event
 
 PaymentWebhookStatus = Literal["paid", "failed"]
@@ -55,7 +53,7 @@ async def apply_payment_webhook(
         raise LookupError("order_not_found")
     oid = order.organization_id
     if oid is None or int(oid) != int(organization_id):
-        insert_stmt_m = sqlite_insert(PaymentEvent) if settings.db_mode == "sqlite" else pg_insert(PaymentEvent)
+        insert_stmt_m = pg_insert(PaymentEvent)
         mismatch_note = f"{note_key}:org_mismatch:expected={oid}:got={organization_id}"
         await db.execute(
             insert_stmt_m.values(
@@ -71,7 +69,7 @@ async def apply_payment_webhook(
         raise PermissionError("organization_mismatch")
 
     if status == "paid":
-        insert_stmt = sqlite_insert(PaymentEvent) if settings.db_mode == "sqlite" else pg_insert(PaymentEvent)
+        insert_stmt = pg_insert(PaymentEvent)
         stmt = (
             insert_stmt.values(
                 order_id=order.id,
@@ -138,7 +136,7 @@ async def apply_payment_webhook(
             "payment_event_id": int(pe_id) if pe_id is not None else None,
         }
 
-    insert_stmt_f = sqlite_insert(PaymentEvent) if settings.db_mode == "sqlite" else pg_insert(PaymentEvent)
+    insert_stmt_f = pg_insert(PaymentEvent)
     stmt_f = (
         insert_stmt_f.values(
             order_id=order.id,

@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 def _sql_dt(dt: datetime) -> datetime:
     u = dt.astimezone(timezone.utc) if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-    return u.replace(tzinfo=None) if settings.db_mode == "sqlite" else u
+    return u
 
 
 async def backfill_daily_org_stats(

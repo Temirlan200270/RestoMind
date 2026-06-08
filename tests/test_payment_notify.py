@@ -3,22 +3,16 @@
 import pytest
 import pytest_asyncio
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 import app.db.session as db_session_module
-from app.db.models import Base, ChatLog, Order, Organization, User
+from app.db.models import ChatLog, Order, Organization, User
 from app.services.payment_notify import run_payment_received_customer_notify
 
 
 @pytest_asyncio.fixture
-async def notify_session_factory(monkeypatch):
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    sf = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
-    monkeypatch.setattr(db_session_module, "async_session_factory", sf)
-    yield sf
-    await engine.dispose()
+async def notify_session_factory(monkeypatch, postgres_session_factory):
+    monkeypatch.setattr(db_session_module, "async_session_factory", postgres_session_factory)
+    yield postgres_session_factory
 
 
 @pytest.mark.asyncio

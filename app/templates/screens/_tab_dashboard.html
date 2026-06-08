@@ -20,6 +20,13 @@
                 <div class="flex flex-wrap items-end justify-between gap-4">
                     <div class="min-w-0 flex-1">
                         {{ section_header('Главная', subtitle='Выручка, вклад ИИ и время команды.', extra_class='!mb-0') }}
+                        <div class="mt-3" x-show="canOpenExecutiveHub()" x-cloak>
+                            <button type="button" @click="openExecutiveHub()"
+                                class="inline-flex items-center gap-2 rounded-xl border border-indigo-200 bg-gradient-to-r from-indigo-50 to-white px-4 py-2.5 text-sm font-semibold text-indigo-900 hover:border-indigo-300 hover:from-indigo-100 transition shadow-sm">
+                                <span>Открыть Executive Hub</span>
+                                <span class="text-[10px] font-bold uppercase tracking-wide text-indigo-600">кратко + drill-down</span>
+                            </button>
+                        </div>
                         <div class="flex flex-wrap items-center gap-2 mt-1">
                             <span x-show="orgProfile && orgProfile.force_closed" x-cloak
                                 class="inline-flex text-[11px] font-semibold px-2 py-1 rounded-full border bg-red-50 border-red-200 text-red-800 cursor-pointer"

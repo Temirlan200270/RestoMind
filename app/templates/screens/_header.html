@@ -27,6 +27,11 @@
                     :title="headerOperationalTitle()"
                     x-text="headerOperationalEmoji() + ' ' + headerOperationalText()">
                 </span>
+                <button type="button" x-show="canOpenExecutiveHub()" x-cloak @click="openExecutiveHub()"
+                    class="shrink-0 min-h-[40px] min-w-[40px] inline-flex items-center justify-center rounded-xl text-indigo-700 bg-indigo-50 border border-indigo-100"
+                    aria-label="Executive Hub">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 21h6l-.75-4M12 3v8m0 0l3-3m-3 3L9 8M4 19h16"/></svg>
+                </button>
                 <button type="button" @click="openGlobalSearch()"
                     class="shrink-0 min-h-[40px] min-w-[40px] inline-flex items-center justify-center rounded-xl text-gray-500"
                     aria-label="Поиск">
@@ -286,6 +291,13 @@
                             class="min-h-[32px] min-w-[32px] inline-flex items-center justify-center rounded-lg text-indigo-600 hover:bg-indigo-100/80"
                             aria-label="Скрыть подсказку">×</button>
                     </div>
+                    <button type="button" x-show="canOpenExecutiveHub()" x-cloak @click="openExecutiveHub()"
+                        class="hidden md:inline-flex items-center gap-2 min-h-[44px] shrink-0 px-3 sm:px-4 py-2 rounded-xl border border-indigo-200 bg-indigo-50 text-sm font-semibold text-indigo-800 hover:bg-indigo-100 transition shadow-sm"
+                        title="Executive Hub — краткие выводы и чат с агентом"
+                        aria-label="Открыть Executive Hub">
+                        <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 21h6l-.75-4M12 3v8m0 0l3-3m-3 3L9 8M4 19h16"/></svg>
+                        <span>Hub</span>
+                    </button>
                     <button type="button" @click="openGlobalSearch()"
                         class="hidden md:inline-flex items-center gap-2 min-h-[44px] shrink-0 px-3 sm:px-4 py-2 rounded-xl border border-gray-200 bg-white text-sm font-medium text-gray-600 hover:bg-gray-50 transition shadow-sm"
                         title="Быстрый поиск (Ctrl+K)"

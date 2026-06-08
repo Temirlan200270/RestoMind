@@ -54,7 +54,11 @@ def postgres_connect_args(database_url: str) -> dict:
     if not parsed.scheme.startswith("postgres"):
         return {}
 
-    args: dict = {"ssl": build_postgres_ssl_context()}
+    args: dict = {}
+    # Local/CI Postgres usually runs without TLS; asyncpg fails if we force an
+    # SSL context against localhost. Managed Postgres keeps the SSL default.
+    if parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
+        args["ssl"] = build_postgres_ssl_context()
     # Supabase transaction pooler (PgBouncer) не поддерживает prepared statements asyncpg.
     if is_supabase_transaction_pooler(database_url):
         args["statement_cache_size"] = 0

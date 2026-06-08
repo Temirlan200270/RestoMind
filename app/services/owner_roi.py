@@ -40,8 +40,6 @@ def _dt_as_utc(dt: datetime) -> datetime:
 
 def _sql_dt_for_filter(dt: datetime) -> datetime:
     u = _dt_as_utc(dt)
-    if settings.db_mode == "sqlite":
-        return u.replace(tzinfo=None)
     return u
 
 _WEEKDAYS_RU = (
@@ -224,7 +222,7 @@ def _previous_week_bounds_local(org_tz: str) -> tuple[datetime, datetime]:
 
 
 def _bounds_to_utc_naive_pair(a: datetime, b: datetime) -> tuple[datetime, datetime]:
-    """Для SQL: пара UTC-aware → naive UTC при sqlite."""
+    """Для SQL: нормализованная пара UTC-aware datetime."""
     au = a.astimezone(timezone.utc)
     bu = b.astimezone(timezone.utc)
     return _sql_dt_for_filter(au), _sql_dt_for_filter(bu)

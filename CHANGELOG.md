@@ -14,7 +14,11 @@
 
 ## [Unreleased]
 
+### Added
+- Executive Hub v1: overlay для manager/admin с narrative cards, drill-down drawer и чатом агента; API `GET /api/admin/intelligence/executive-hub`.
+
 ### Fixed
+- DB: полный переход тестов/CI/runtime на PostgreSQL — SQLite startup DDL и `aiosqlite` удалены, тестовая схема и GitHub Actions работают через Postgres.
 - CI: `test_fulfillment_only_order` — мок `check_operational_status` (открытая кухня), тест больше не падает ночью из‑за `night_preorder`.
 
 - Code/test cleanup: removed tracked generated `scripts/_nomenclature_summary.txt`, fixed the broken Windows `post_nomenclature.cmd` path by adding `scripts/post_nomenclature.ps1`, and updated `_summarize_nomenclature.py` so reports are stdout/`--out` only.

@@ -36,6 +36,7 @@ NAME_FIELDS = (
     "name",
 )
 UNIT_COST_FIELDS = (
+    "ProductCostBase.OneItem",
     "ProductCostBase.ProductCost",
     "ProductCostBase.Cost",
     "ProductCost",

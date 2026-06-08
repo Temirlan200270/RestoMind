@@ -8,7 +8,7 @@
 
 По умолчанию пытается снять скрины с актуального URL (U0_BASELINE_BASE_URL),
 а если это не удалось — поднимает временный uvicorn на U0_BASELINE_PORT (по умолчанию 9877)
-с отдельным SQLite-файлом, входит через «Посмотреть демо», обходит hash-навигацию
+с Postgres DSN из DATABASE_URL, входит через «Посмотреть демо», обходит hash-навигацию
 и сохраняет скрины в docs/ui/baseline/.
 """
 
@@ -17,7 +17,6 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -172,59 +171,53 @@ def main() -> int:
     port = int(os.environ.get("U0_BASELINE_PORT", str(DEFAULT_PORT)))
     remote_base = (os.environ.get("U0_BASELINE_BASE_URL") or "https://restomind.onrender.com").strip().rstrip("/")
 
-    fd, db_path = tempfile.mkstemp(suffix="_u0_baseline.db")
-    os.close(fd)
+    # 1) Пытаемся снять с актуального сайта (prod/stage).
     try:
-        # 1) Пытаемся снять с актуального сайта (prod/stage).
-        try:
-            _wait_http(f"{remote_base}/admin", timeout_s=45.0)
-            _capture(remote_base, allow_demo_login=False)
-            return 0
-        except Exception as e:
-            print(f"[baseline] Не удалось снять с {remote_base}: {e}\n[baseline] Падаем на локальный режим…")
+        _wait_http(f"{remote_base}/admin", timeout_s=45.0)
+        _capture(remote_base, allow_demo_login=False)
+        return 0
+    except Exception as e:
+        print(f"[baseline] Не удалось снять с {remote_base}: {e}\n[baseline] Падаем на локальный режим…")
 
-        # 2) Фоллбек: локальный uvicorn + демо-логин (как раньше).
-        base = f"http://127.0.0.1:{port}"
-        db_url = "sqlite+aiosqlite:///" + Path(db_path).as_posix()
-        env = os.environ.copy()
-        # True: иначе при непустом DATABASE_URL срабатывает prod-like и требуется SESSION_SECRET.
-        env["APP_DEBUG"] = "true"
-        env["REDIS_MEMORY_ONLY"] = "1"
-        env["DATABASE_URL"] = db_url
-        env["APP_ENV"] = "development"
+    # 2) Фоллбек: локальный uvicorn + демо-логин.
+    base = f"http://127.0.0.1:{port}"
+    env = os.environ.copy()
+    # True: иначе при непустом DATABASE_URL срабатывает prod-like и требуется SESSION_SECRET.
+    env["APP_DEBUG"] = "true"
+    env["REDIS_MEMORY_ONLY"] = "1"
+    env.setdefault(
+        "DATABASE_URL",
+        "postgresql+asyncpg://restomind:restomind_secret@localhost:5432/restomind_test",
+    )
+    env["APP_ENV"] = "development"
 
-        proc = subprocess.Popen(
-            [
-                sys.executable,
-                "-m",
-                "uvicorn",
-                "app.main:app",
-                "--host",
-                "127.0.0.1",
-                "--port",
-                str(port),
-                "--log-level",
-                "warning",
-            ],
-            cwd=str(REPO_ROOT),
-            env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        try:
-            _wait_http(f"{base}/admin")
-            _capture(base, allow_demo_login=True)
-        finally:
-            proc.terminate()
-            try:
-                proc.wait(timeout=15)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "app.main:app",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+            "--log-level",
+            "warning",
+        ],
+        cwd=str(REPO_ROOT),
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        _wait_http(f"{base}/admin")
+        _capture(base, allow_demo_login=True)
     finally:
+        proc.terminate()
         try:
-            os.unlink(db_path)
-        except OSError:
-            pass
+            proc.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            proc.kill()
 
     return 0
 

@@ -13,6 +13,29 @@ Intelligence не дублирует Analytics — он отвечает на в
 
 ---
 
+## Executive Hub поверх вкладок
+
+Целевой UX для владельца — не прятать «лишние» вкладки и потом показывать «нужные», а сделать красивый верхний слой поверх аналитических и операционных экранов. Нижние вкладки остаются источниками данных и audit trail, а верхний слой собирает из них короткие, понятные ответы на управленческие вопросы.
+
+Принцип:
+
+- **Executive Hub** показывает 4–6 крупных карточек-выводов: не «график выручки», а «выручка упала на 12% из-за стоп-листа и просадки среднего чека».
+- Каждая карточка имеет **drill-down**: владелец проваливается не в случайную вкладку, а в контекст конкретного вопроса с деталями, evidence, датами и источниками.
+- **Agent chat** — командный интерфейс слоя Intelligence. Вопросы вроде «почему упала выручка?» или «как поднять маржу?» агент разбирает через разрешённые API/tools, а не через HTML или произвольный SQL.
+- Каждый ответ агента должен объяснять, **почему он так решил**, и вести к нижнему слою данных: lineage, графики, события, меню, заказы, iiko snapshots.
+- Будущие действия агента идут только через **human-in-the-loop**: агент предлагает изменить правило допродажи, настройку меню или конфигурацию, владелец подтверждает, затем система применяет структурированное изменение.
+
+Дальний вектор: RestoMind становится не просто аналитикой, а цифровым управляющим. Сначала он объясняет и рекомендует, затем безопасно меняет внутренние настройки RestoMind (например, upsell rules), и только в более поздней фазе, после подтверждения владельца и audit trail, может выполнять изменения во внешних системах вроде iiko.
+
+Реализация v1:
+
+- API: `GET /api/admin/intelligence/executive-hub` — агрегирует 4–6 narrative cards из sales/revenue leak/owner intelligence/insights.
+- UI: глобальный overlay `_executive_hub.html` поверх админки; кнопка **Hub** в шапке и CTA на дашборде (manager/admin).
+- Drill-down: карточка открывает drawer с evidence/actions и ведёт в существующие вкладки через `incidentGo`.
+- Agent chat: панель справа/снизу переиспользует `POST /api/admin/intelligence/query`.
+
+---
+
 ## Owner Intelligence (продуктовый слой для владельца)
 
 Отдельный API-пакет `/api/admin/owner-intelligence/*` — KPI, QA audit, Revenue Copilot impact, Menu Profit, Network Benchmark, Kitchen Gate, weekly digest.
@@ -35,6 +58,7 @@ Alembic head: `20260604_iiko_last_error_text`.
 ## API
 
 ```http
+GET  /api/admin/intelligence/executive-hub
 GET  /api/admin/intelligence/overview
 POST /api/admin/intelligence/query
 GET  /api/admin/intelligence/insights

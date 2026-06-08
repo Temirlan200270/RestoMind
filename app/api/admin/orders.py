@@ -61,10 +61,12 @@ router = APIRouter(
 
 
 def _make_naive(dt: datetime | None) -> datetime | None:
-    """Убираем tzinfo для корректного сравнения с naive-датами."""
+    """Нормализуем datetime для SQL/Python сравнений на Postgres timestamptz."""
     if dt is None:
         return None
-    return dt.replace(tzinfo=None) if dt.tzinfo else dt
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 def _order_items_count(items_json: dict | None) -> int:
@@ -427,7 +429,7 @@ async def list_orders(
                 _tx_map[_tx.order_id] = _tx
 
     # P1.5: число исходящих WhatsApp failed в окне ±1 ч от created_at заказа.
-    # Считаем в Python: SQL datetime +/- timedelta компилируется по-разному в SQLite/Postgres.
+    # Считаем в Python: SQL datetime +/- timedelta зависит от диалекта и сложнее проверяется.
     _failed_wa_map: dict[int, int] = {int(oid): 0 for oid in _order_ids}
     _orders_for_failed = [(o.id, o.user_id, _make_naive(o.created_at)) for o, _, _ in rows if o.created_at]
     if _orders_for_failed:

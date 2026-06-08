@@ -16,7 +16,7 @@ async def build_llm_reliability_metrics(
     *,
     period_days: int = 7,
 ) -> dict[str, object]:
-    """Агрегаты по chat_logs.meta за период (SQLite-safe)."""
+    """Агрегаты по chat_logs.meta за период."""
     since = datetime.now(timezone.utc) - timedelta(days=max(1, period_days))
 
     result = await db.execute(

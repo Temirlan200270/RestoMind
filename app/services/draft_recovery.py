@@ -33,7 +33,7 @@ def _utc(dt: datetime) -> datetime:
 
 def _sql_dt(dt: datetime) -> datetime:
     u = _utc(dt)
-    return u.replace(tzinfo=None) if settings.db_mode == "sqlite" else u
+    return u
 
 
 def _dedupe_key(order_id: int) -> str:

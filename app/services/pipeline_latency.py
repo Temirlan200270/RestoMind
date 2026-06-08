@@ -73,7 +73,7 @@ async def get_latency_summary(
 ) -> list[dict[str, Any]]:
     """
     Возвращает p50/p95/max по каждой стадии за последние N часов.
-    Работает на SQLite (Python-сортировка) и PostgreSQL.
+    Использует Python-сортировку поверх PostgreSQL-выборки.
     """
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
     rows = (await db.execute(

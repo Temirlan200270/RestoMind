@@ -74,6 +74,7 @@
 
 > Перенесено из бывшего `problems.md` (2026‑05): потенциальные data leaks, потеря/дубли сообщений, рассинхроны state и гонки UI.
 
+- [x] **PostgreSQL-only runtime/tests/CI:** тесты и GitHub Actions переведены на `postgres:16`; SQLite startup DDL, sqlite upsert branches и `aiosqlite` удалены; runtime schema управляется Alembic/Postgres.
 - [x] **test_bot: LLM вне DB‑сессии:** чтение → LLM (без сессии) → запись; DB‑соединение не держим во время ответа модели (`app/api/admin/test_bot.py`).
 - [x] **Telegram fire‑and‑forget:** realtime путь не ждёт Telegram-уведомления (`app/services/events.py`: `asyncio.create_task(...)` вместо `await`).
 - [x] **Экстренное закрытие (полный стек):** `Organization.force_closed_until/force_closed_reason` + миграция + учёт в `time_context.py` + `POST /api/admin/organization/force-close` + UI (профиль, модалка, причина).
@@ -104,6 +105,8 @@
 - [x] **E5 диагностика очереди (light):** `GET /api/admin/system/task-queue-health` ([`app/api/admin/system.py`](app/api/admin/system.py)) + хелпер [`app/services/task_queue_health.py`](app/services/task_queue_health.py) — структурированный статус Redis/ARQ/worker (heartbeat по `<queue>:health-check`). Структурный лог `event=task_queue_enqueue` на каждый enqueue в [`app/services/task_queue.py`](app/services/task_queue.py).
 
 ## 🟠 P1.5: UX Density & AI Trust
+
+- [x] **Executive Hub v1:** overlay поверх вкладок для manager/admin — narrative cards (`GET /api/admin/intelligence/executive-hub`), drill-down drawer, чат агента через `/intelligence/query`; кнопка Hub в шапке и CTA на дашборде.
 
 > Источник: внешний UX-аудит (2026‑05). Сюда попало только то, что прошло наш фильтр «реально не сделано и осмысленно для оператора в час пик». Архитектура (Jinja + Alpine + Tailwind + WS) не меняется, на React/HTMX не переходим. Дизайн-система — `docs/UI_DESIGN_SYSTEM.md` секции «Density modes» и «AI in UI».
 

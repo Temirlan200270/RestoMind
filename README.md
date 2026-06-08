@@ -1,5 +1,7 @@
 # RestoMind OS
 
+**Postgres-first:** local development, staging, and production should use PostgreSQL + Alembic. SQLite is legacy/test-only. See [docs/POSTGRES_FIRST.md](docs/POSTGRES_FIRST.md).
+
 **AI-операционная система для ресторанного бизнеса.** Единое ядро управления продажами, маркетингом и операционкой: гость пишет в **WhatsApp**, ответы формирует LLM по структурированной схеме (`AIBrainResponse`); голос — **Whisper**; заказы синхронизируются с **iiko**; аналитика и рекомендации — в Admin-панели владельца.
 
 Релизы — [CHANGELOG.md](CHANGELOG.md) (кратко); детальная история эпиков — [docs/releases/README.md](docs/releases/README.md). Правила разработки (инварианты) — в [docs/CONVENTIONS.md](docs/CONVENTIONS.md). **Дерево проекта и суть кодовой базы** — в [codebase.md](codebase.md). Стратегический план перехода → OS — в [docs/OS_TRANSITION_PLAN.md](docs/OS_TRANSITION_PLAN.md).
@@ -45,7 +47,7 @@
 | Компонент | Технология |
 |-----------|------------|
 | Backend | Python 3.11+, FastAPI |
-| Database | PostgreSQL / SQLite (dev), SQLAlchemy 2.0, **Alembic** |
+| Database | PostgreSQL-first, SQLAlchemy 2.0, **Alembic**; SQLite is legacy/test-only |
 | Cache / очередь | Redis; **ARQ worker** обрабатывает входящие WhatsApp и фоновые задачи (см. ниже) |
 | AI | OpenAI (`gpt-4o-mini`, env `OPENAI_MODEL`) или Gemini (`AI_PROVIDER=gemini`, `GEMINI_API_KEY`); structured output + Whisper (`OPENAI_TRANSCRIPTION_MODEL`); опц. `OPENAI_BASE_URL` |
 | Интеграции | Meta WhatsApp API, **Telegram** (ops + guest), iiko Cloud API, POS adapter (`iiko` / `rkeeper`) |
@@ -83,13 +85,14 @@ copy .env.example .env
 
 **Важно:** команды выполняйте **из корня проекта** (где лежит `seed.py`).
 
-Для **PostgreSQL** после настройки `.env` примените миграции:
+Локальная разработка использует **PostgreSQL**. Поднимите инфраструктуру и примените миграции:
 
 ```bash
+docker compose up -d db redis
 alembic upgrade head
 ```
 
-Для **SQLite** (режим по умолчанию) таблицы создаются при старте приложения.
+После миграций загрузите стартовые данные:
 
 ```bash
 python seed.py
@@ -110,6 +113,8 @@ python seed.py
 ```bash
 python -m uvicorn app.main:app --reload
 ```
+
+Uvicorn не создаёт таблицы на старте: схема управляется Alembic (`alembic upgrade head`) до запуска приложения.
 
 Откройте в браузере: [http://localhost:8000](http://localhost:8000) или [http://localhost:8000/admin](http://localhost:8000/admin) — форма входа, затем панель.
 
@@ -295,8 +300,7 @@ RestoMind/
 
 | Параметр | Значение | Описание |
 |----------|----------|----------|
-| `DB_MODE` | `sqlite` | SQLite (удобно для разработки) |
-| `DB_MODE` | `postgres` | PostgreSQL (продакшен) |
+| `DB_MODE` | `postgres` | Единственный runtime-режим для local/dev/staging/prod |
 | `REDIS_ENABLED` | `false` | In-memory заглушка для сессий/событий |
 | `REDIS_ENABLED` | `true` | Redis сервер |
 | `REDIS_MEMORY_ONLY` | `true` | Принудительно in-memory: **не** подключаться к Redis (приоритет над `REDIS_ENABLED`; для тестов и при исчерпании квоты Upstash) |

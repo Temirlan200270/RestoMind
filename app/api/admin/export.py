@@ -24,20 +24,15 @@ MAX_CSV_EXPORT_ROWS = 50_000
 
 
 def _dt_as_utc(dt: datetime) -> datetime:
-    """SQLite часто отдаёт naive datetime — интерпретируем как UTC (единая ось графиков)."""
+    """Naive datetime интерпретируем как UTC (единая ось графиков)."""
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
 
 
 def _sql_dt_for_filter(dt: datetime) -> datetime:
-    """
-    SQLite хранит naive datetime; сравнение с aware в WHERE даёт пустые выборки
-    (особенно узкое окно «сегодня»). Postgres оставляем с tz-aware UTC.
-    """
+    """Для SQL-фильтров всегда используем UTC-aware datetime."""
     u = _dt_as_utc(dt)
-    if settings.db_mode == "sqlite":
-        return u.replace(tzinfo=None)
     return u
 
 

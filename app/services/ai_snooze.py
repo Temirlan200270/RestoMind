@@ -30,7 +30,7 @@ def utc_now() -> datetime:
 
 
 def _as_utc_aware(dt: datetime) -> datetime:
-    """SQLite can return naive datetimes for timezone=True columns; treat them as UTC."""
+    """Treat naive datetimes as UTC for consistent timezone comparisons."""
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)

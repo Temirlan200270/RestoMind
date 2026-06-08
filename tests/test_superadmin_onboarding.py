@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.api import webhooks
 from app.api.admin import LoginBody, admin_demo_login, admin_login, require_admin_session_active
@@ -15,7 +14,7 @@ from app.api.superadmin import (
     superadmin_approve_registration_request,
 )
 from app.core.passwords import hash_password
-from app.db.models import Base, Organization, RegistrationRequest, StaffRole, StaffUser
+from app.db.models import Organization, RegistrationRequest, StaffRole, StaffUser
 
 
 class DummyRequest:
@@ -151,11 +150,8 @@ async def test_demo_login_sets_readonly_guard(db_session):
 
 
 @pytest.mark.asyncio
-async def test_process_with_retry_skips_inactive_org(monkeypatch):
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    session_factory = async_sessionmaker(bind=engine, expire_on_commit=False)
+async def test_process_with_retry_skips_inactive_org(monkeypatch, postgres_session_factory):
+    session_factory = postgres_session_factory
     async with session_factory() as db:
         org = Organization(name="WA Blocked", is_active=False, whatsapp_phone_number_id="pn_123")
         db.add(org)
@@ -177,4 +173,3 @@ async def test_process_with_retry_skips_inactive_org(monkeypatch):
 
     await webhooks.process_with_retry("77001112233", "hello", webhook_value={"metadata": {"phone_number_id": "pn_123"}})
     assert called is False
-    await engine.dispose()

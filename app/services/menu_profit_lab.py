@@ -6,11 +6,20 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.db.models import DishMarginProfile, MenuItem, Order, OrderStatus, SystemEvent, UpsellOfferEvent
+from app.db.models import (
+    DishMarginProfile,
+    MenuItem,
+    Order,
+    OrderStatus,
+    SalesFactItem,
+    SalesFactOrder,
+    SystemEvent,
+    UpsellOfferEvent,
+)
 from app.services.intelligence_analytics import menu_engineering_rows
 from app.services.restaurant_graph import rebuild_restaurant_graph_profiles
 from app.services.tenant_scope import orders_location_filter, orders_tenant_clause
@@ -33,7 +42,7 @@ def _utc(dt: datetime) -> datetime:
 
 def _sql_dt(dt: datetime) -> datetime:
     u = _utc(dt)
-    return u.replace(tzinfo=None) if settings.db_mode == "sqlite" else u
+    return u
 
 
 def _period_bounds(period: str) -> tuple[datetime, datetime, str]:
@@ -49,6 +58,19 @@ def _period_bounds(period: str) -> tuple[datetime, datetime, str]:
 
 def _norm_name(name: str) -> str:
     return " ".join((name or "").strip().lower().split())
+
+
+def _sales_fact_location_filter(allowed_location_ids: set[int] | None, location_id: int | None = None):
+    if location_id is not None:
+        lid = int(location_id)
+        if allowed_location_ids is not None and lid not in allowed_location_ids:
+            return SalesFactOrder.id == -1
+        return or_(SalesFactOrder.location_id.is_(None), SalesFactOrder.location_id == lid)
+    if allowed_location_ids is None:
+        return True
+    if not allowed_location_ids:
+        return SalesFactOrder.id == -1
+    return or_(SalesFactOrder.location_id.is_(None), SalesFactOrder.location_id.in_(list(allowed_location_ids)))
 
 
 def _item_public(row: dict[str, Any]) -> dict[str, Any]:
@@ -261,6 +283,7 @@ async def build_menu_profit_report(
     stats: dict[int, dict[str, Any]] = {}
     unattributed_revenue = 0.0
     unattributed_qty = 0
+    saw_sales_facts = False
 
     def ensure_menu_item(mi: MenuItem) -> dict[str, Any]:
         if mi.id not in stats:
@@ -298,45 +321,92 @@ async def build_menu_profit_report(
             }
         return stats[mi.id]
 
-    order_rows = await db.execute(
-        select(Order.items_json, Order.total_price).where(
-            org_orders,
-            order_scope,
-            Order.status.in_(list(_COMPLETED)),
-            Order.created_at >= _sql_dt(start),
-            Order.created_at <= _sql_dt(end),
+    def apply_fact_cost(st: dict[str, Any], qty: float, total_cost: float | None) -> None:
+        if total_cost is None or total_cost <= 0 or qty <= 0:
+            return
+        unit_cost = total_cost / qty
+        current = st.get("cost_price")
+        if current is None or float(current) <= 0:
+            st["cost_price"] = unit_cost
+            st["margin_source"] = "sales_fact_item_cost"
+            price = float(st.get("price") or 0)
+            if price > 0:
+                st["margin_pct"] = round((price - unit_cost) / price * 100.0, 1)
+            st["margin_confidence_score"] = max(float(st.get("margin_confidence_score") or 0), 0.75)
+
+    fact_rows = await db.execute(
+        select(SalesFactItem, SalesFactOrder)
+        .join(SalesFactOrder, SalesFactOrder.id == SalesFactItem.order_id)
+        .where(
+            SalesFactItem.organization_id == org_id,
+            SalesFactOrder.organization_id == org_id,
+            SalesFactOrder.order_date >= start.date(),
+            SalesFactOrder.order_date <= end.date(),
+            _sales_fact_location_filter(allowed_location_ids, location_id),
         ),
     )
-    for items_json, _total in order_rows.all():
-        if not isinstance(items_json, dict):
+    for fact_item, _fact_order in fact_rows.all():
+        saw_sales_facts = True
+        qty_f = float(fact_item.quantity or 0)
+        if qty_f <= 0:
+            qty_f = 1.0
+        rev = float(fact_item.revenue or 0)
+        iiko_key = str(fact_item.product_id or "").strip().lower()
+        name_key = _norm_name(str(fact_item.product_name or ""))
+        mi = by_iiko.get(iiko_key) if iiko_key else None
+        if mi is None and name_key:
+            mi = by_name.get(name_key)
+        if mi is None:
+            unattributed_qty += int(qty_f)
+            unattributed_revenue += rev
             continue
-        for line in items_json.get("items") or []:
-            if not isinstance(line, dict):
+        st = ensure_menu_item(mi)
+        st["quantity_sold"] += int(qty_f)
+        st["revenue"] += rev
+        apply_fact_cost(st, qty_f, float(fact_item.cost) if fact_item.cost is not None else None)
+
+    if not saw_sales_facts:
+        order_rows = await db.execute(
+            select(Order.items_json, Order.total_price).where(
+                org_orders,
+                order_scope,
+                Order.status.in_(list(_COMPLETED)),
+                Order.created_at >= _sql_dt(start),
+                Order.created_at <= _sql_dt(end),
+            ),
+        )
+        for items_json, _total in order_rows.all():
+            if not isinstance(items_json, dict):
                 continue
-            qty = int(line.get("quantity") or line.get("qty") or 0)
-            if qty <= 0:
-                qty = 1
-            rev = float(line.get("item_total") or 0)
-            iiko_key = str(line.get("iiko_id") or "").strip().lower()
-            name_key = _norm_name(str(line.get("name") or ""))
-            mi = by_iiko.get(iiko_key) if iiko_key else None
-            if mi is None and name_key:
-                mi = by_name.get(name_key)
-            if mi is None:
-                unattributed_qty += qty
-                unattributed_revenue += rev
-                continue
-            st = ensure_menu_item(mi)
-            st["quantity_sold"] += qty
-            st["revenue"] += rev
+            for line in items_json.get("items") or []:
+                if not isinstance(line, dict):
+                    continue
+                qty = int(line.get("quantity") or line.get("qty") or 0)
+                if qty <= 0:
+                    qty = 1
+                rev = float(line.get("item_total") or 0)
+                iiko_key = str(line.get("iiko_id") or "").strip().lower()
+                name_key = _norm_name(str(line.get("name") or ""))
+                mi = by_iiko.get(iiko_key) if iiko_key else None
+                if mi is None and name_key:
+                    mi = by_name.get(name_key)
+                if mi is None:
+                    unattributed_qty += qty
+                    unattributed_revenue += rev
+                    continue
+                st = ensure_menu_item(mi)
+                st["quantity_sold"] += qty
+                st["revenue"] += rev
 
     for mi in menu_rows:
         if mi.id not in stats and not mi.is_available:
             ensure_menu_item(mi)
 
     stoplist_counts = await _load_stoplist_counts(db, org_id, start, end)
-    cost_data_available = any(mi.cost_price is not None for mi in menu_rows) or any(
-        p.estimated_cost is not None for p in margin_profiles.values()
+    cost_data_available = (
+        any(mi.cost_price is not None for mi in menu_rows)
+        or any(p.estimated_cost is not None for p in margin_profiles.values())
+        or any(x.get("cost_price") is not None for x in stats.values())
     )
 
     item_list = list(stats.values())
@@ -524,6 +594,7 @@ async def build_menu_profit_report(
         "date_to": end.date().isoformat(),
         "cost_data_available": cost_data_available,
         "lite_mode": not cost_data_available,
+        "sales_source": "iiko_sales_facts" if saw_sales_facts else "orders_items_json",
         "knowledge_graph": graph_stats,
         "items_analyzed": len(item_list),
         "unattributed_quantity": unattributed_qty,

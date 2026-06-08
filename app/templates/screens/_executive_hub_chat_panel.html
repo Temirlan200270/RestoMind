@@ -1,0 +1,39 @@
+<div class="flex flex-col h-full p-4 gap-4">
+    <div>
+        <div class="text-sm font-bold text-slate-900">Агент RestoMind</div>
+        <p class="mt-1 text-xs text-slate-500">Спросите, почему упала выручка, где просела маржа или что сделать сегодня. Ответ строится через tools/API, не через HTML.</p>
+    </div>
+
+    <form class="flex flex-col gap-2" @submit.prevent="askIntelligence()">
+        <textarea rows="3"
+            class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100 resize-none"
+            x-model="intelligenceQuestion"
+            placeholder="Почему упала выручка? Как поднять маржу?"></textarea>
+        <button type="submit" class="ds-btn ds-btn-primary ds-btn-sm self-start" :disabled="intelligenceAsking">
+            <span x-show="!intelligenceAsking">Спросить агента</span>
+            <span x-show="intelligenceAsking">Считаю…</span>
+        </button>
+    </form>
+
+    <div class="rounded-xl bg-slate-50 border border-slate-100 p-3 min-h-[120px] text-sm text-slate-800">
+        <template x-if="intelligenceAnswer">
+            <div>
+                <div class="text-[10px] font-bold uppercase text-slate-400">Ответ</div>
+                <p class="mt-2 leading-6 whitespace-pre-wrap" x-text="intelligenceAnswer"></p>
+            </div>
+        </template>
+        <template x-if="!intelligenceAnswer">
+            <p class="text-slate-500">Выберите карточку или задайте вопрос. Каждый ответ можно проверить в нижнем слое данных.</p>
+        </template>
+    </div>
+
+    <div class="flex flex-wrap gap-2">
+        <template x-for="row in (executiveHubBusinessQuestions.length ? executiveHubBusinessQuestions : intelligenceBusinessQuestions)" :key="'ehq-' + row.question">
+            <button type="button"
+                class="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:border-indigo-300 hover:text-indigo-700"
+                @click="executiveHubAskCard({ chat_prompt: row.question })">
+                <span x-text="row.question"></span>
+            </button>
+        </template>
+    </div>
+</div>

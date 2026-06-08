@@ -368,13 +368,8 @@ async def _finalize_demo_pitch_draft_timestamps(
     now: datetime,
 ) -> None:
     """После operational context: ORM onupdate иначе затирает stale_at на черновиках."""
-    from app.core.config import settings
-
     stale_at = now - timedelta(minutes=45)
-    if settings.db_mode == "sqlite":
-        stale_sql = stale_at.replace(tzinfo=None)
-    else:
-        stale_sql = stale_at
+    stale_sql = stale_at
     draft_ids = [
         int(order.id)
         for order in demo_orders
@@ -890,7 +885,7 @@ async def clear_demo_data(db: AsyncSession, *, organization_id: int) -> dict[str
     Удалить всех пользователей с префиксом DEMO_PHONE_PREFIX и связанные записи.
 
     Явные DELETE в порядке FK (чаты → брони → заказы → пользователи), чтобы работало
-    и при SQLite без PRAGMA foreign_keys, и при любом поведении ORM-каскада.
+    независимо от поведения ORM-каскада.
     Плюс очистка Redis/InMemory-ключей сессии по каждому демо-номеру.
     """
     org_id = int(organization_id)

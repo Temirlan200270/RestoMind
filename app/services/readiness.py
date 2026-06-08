@@ -160,13 +160,12 @@ async def build_admin_readiness_payload(db: AsyncSession, org_id: int) -> dict[s
         },
     )
 
-    sqlite_prod_bad = settings.db_mode == "sqlite" and settings.is_prod_like
     checks.append(
         {
             "id": "db_mode_prod",
-            "ok": not sqlite_prod_bad,
+            "ok": settings.db_mode == "postgres",
             "label": "Режим БД для production",
-            "detail": "SQLite не рекомендуется в production — возможна потеря данных" if sqlite_prod_bad else ("PostgreSQL" if settings.db_mode == "postgres" else settings.db_mode),
+            "detail": "PostgreSQL" if settings.db_mode == "postgres" else settings.db_mode,
         },
     )
 

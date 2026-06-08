@@ -117,7 +117,7 @@ def _location_stats_source(location_scoped: bool, event_active: bool) -> str:
 
 
 def _dt_as_utc(dt: datetime) -> datetime:
-    """SQLite часто отдаёт naive datetime — интерпретируем как UTC (единая ось графиков)."""
+    """Naive datetime интерпретируем как UTC (единая ось графиков)."""
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
@@ -130,13 +130,8 @@ def _order_day_key_utc(created_at: datetime | None) -> str | None:
 
 
 def _sql_dt_for_filter(dt: datetime) -> datetime:
-    """
-    SQLite хранит naive datetime; сравнение с aware в WHERE даёт пустые выборки
-    (особенно узкое окно «сегодня»). Postgres оставляем с tz-aware UTC.
-    """
+    """Для SQL-фильтров всегда используем UTC-aware datetime."""
     u = _dt_as_utc(dt)
-    if settings.db_mode == "sqlite":
-        return u.replace(tzinfo=None)
     return u
 
 
@@ -651,16 +646,6 @@ async def admin_incidents(
         )
 
     super_items: list[dict[str, Any]] = []
-    if settings.db_mode == "sqlite" and settings.is_prod_like:
-        super_items.append(
-            {
-                "id": "system:sqlite_prod",
-                "title": "Production работает на SQLite",
-                "subtitle": "Это риск потери данных и блокировок при нагрузке.",
-                "detail": "Переведите DATABASE_URL/DB_MODE на PostgreSQL.",
-                "severity": "critical",
-            },
-        )
     if settings.redis_memory_only or not settings.redis_enabled:
         super_items.append(
             {
