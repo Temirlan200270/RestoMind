@@ -298,12 +298,22 @@ RestoMind/
 
 ## Режимы работы
 
+### Redis — приоритет флагов
+
+| `REDIS_MEMORY_ONLY` | `REDIS_ENABLED` | Поведение |
+|---------------------|-----------------|-----------|
+| `true` | любое | **In-memory** (`InMemoryRedis`). Внешний Redis **не** подключается. Pub/Sub и ARQ queue недоступны. |
+| `false` | `false` | In-memory (как выше). Для local dev без Redis. |
+| `false` | `true` | Реальный Redis по `REDIS_URL`. Нужен для prod: live WS, ARQ, rate limit. |
+
+`REDIS_MEMORY_ONLY=true` **всегда** побеждает `REDIS_ENABLED` — даже если оба «включены», TCP к Redis не открывается.
+
 | Параметр | Значение | Описание |
 |----------|----------|----------|
 | `DB_MODE` | `postgres` | Единственный runtime-режим для local/dev/staging/prod |
-| `REDIS_ENABLED` | `false` | In-memory заглушка для сессий/событий |
-| `REDIS_ENABLED` | `true` | Redis сервер |
-| `REDIS_MEMORY_ONLY` | `true` | Принудительно in-memory: **не** подключаться к Redis (приоритет над `REDIS_ENABLED`; для тестов и при исчерпании квоты Upstash) |
+| `REDIS_ENABLED` | `false` | In-memory заглушка (если `REDIS_MEMORY_ONLY=false`) |
+| `REDIS_ENABLED` | `true` | Подключение к Redis по `REDIS_URL` (если `REDIS_MEMORY_ONLY=false`) |
+| `REDIS_MEMORY_ONLY` | `true` | Принудительно in-memory — **приоритет над `REDIS_ENABLED`** (CI, тесты, квота Upstash) |
 | `REDIS_URL` | *(пусто)* | Если задан — полный URL подключения (приоритет над `REDIS_HOST`/`PORT`). Для Upstash: строка **Redis Connect** `rediss://…` (нужен TCP для Pub/Sub), не REST API |
 | `ARQ_ENABLED` | `false` | Включает постановку фоновых задач в ARQ; в `production/staging` должен быть `true` |
 | `ARQ_QUEUE_NAME` | `restomind` | Имя очереди ARQ; web и worker используют одно значение |

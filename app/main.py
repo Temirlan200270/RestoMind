@@ -22,6 +22,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.middleware.admin_action_audit import admin_action_audit_middleware
 from app.middleware.admin_org_rate_limit import admin_org_rate_limit_middleware
+from app.middleware.tenant_rls import tenant_rls_middleware
 
 from app.api.demo_public import demo_public_router
 from app.api.admin import auth_router as admin_auth_router
@@ -438,7 +439,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Phase 2b OS: per-org rate limit + audit admin mutations
+# Phase 2b OS: per-org rate limit + audit admin mutations + Postgres RLS context
+app.middleware("http")(tenant_rls_middleware)
 app.middleware("http")(admin_org_rate_limit_middleware)
 app.middleware("http")(admin_action_audit_middleware)
 

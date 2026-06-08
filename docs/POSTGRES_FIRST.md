@@ -60,6 +60,8 @@ python scripts/backfill_olap_sales.py --org-id 1 --days 30
 
 ```bash
 alembic current
-alembic heads
+alembic heads -v    # ровно один head
 ```
+
+**Политика документации:** не прописывать конкретный revision id в runbook/README — head меняется с каждой миграцией. Достаточно «один head» + `alembic current == head`.
 

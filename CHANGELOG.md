@@ -14,7 +14,14 @@
 
 ## [Unreleased]
 
+### Docs
+- Синхронизация доков с Postgres-only и текущим Alembic: убраны хардкоды revision id, SQLite-патчи из CONVENTIONS, таблица приоритета Redis, Rule 12 (UTC/tz), X1 staged vs freeze, дедуп AI_OPERATIONS → INTELLIGENCE_OS_PLAN; stubs в `docs/archive/`.
+
 ### Added
+- Executive Hub v2: NLG-виджеты Health/Money/Quality/Ops, action cards (navigate/chat/agent_action), API `dimensions` в `GET /api/admin/intelligence/executive-hub`.
+- Human-in-the-loop agent actions: `POST /api/admin/intelligence/agent-actions/propose|confirm|reject`, force-close, upsell rule create, staged iiko write; детект из `/intelligence/query`.
+- Postgres RLS last-line defense: `app/db/tenant_rls.py`, middleware, миграция `20260609_tenant_rls`.
+- Parallel `fetch_ai_read_context`: три независимых DB-сессии вместо одного sequential fetch.
 - Executive Hub v1: overlay для manager/admin с narrative cards, drill-down drawer и чатом агента; API `GET /api/admin/intelligence/executive-hub`.
 
 ### Fixed

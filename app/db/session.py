@@ -16,6 +16,7 @@ from sqlalchemy.pool import NullPool
 from app.core.config import settings
 from app.db.pool_settings import resolve_postgres_pool_settings
 from app.db.ssl_context import postgres_connect_args
+from app.db.tenant_rls import apply_tenant_rls
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +80,7 @@ async_session_factory = async_sessionmaker(
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency — асинхронная сессия БД. Автоматически закрывается после запроса."""
     async with async_session_factory() as session:
+        await apply_tenant_rls(session)
         try:
             yield session
             await session.commit()

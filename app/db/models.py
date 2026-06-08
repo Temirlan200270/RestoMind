@@ -2635,3 +2635,32 @@ class OperationalModeState(Base):
 
     def __repr__(self) -> str:
         return f"<OperationalModeState org={self.organization_id} loc={self.location_id} load={self.kitchen_load}>"
+
+
+class AgentActionProposal(Base):
+    """Human-in-the-loop action proposed by Executive Hub or intelligence agent."""
+
+    __tablename__ = "agent_action_proposals"
+    __table_args__ = (
+        Index("ix_agent_action_proposals_org_status_created", "organization_id", "status", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("organizations.id"), nullable=False, index=True,
+    )
+    staff_user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("staff_users.id", ondelete="SET NULL"), nullable=True,
+    )
+    action_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default="")
+    summary: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    payload_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="proposed", server_default="proposed")
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="hub", server_default="hub")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<AgentActionProposal id={self.id} type={self.action_type} status={self.status}>"

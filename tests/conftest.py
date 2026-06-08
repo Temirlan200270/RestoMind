@@ -424,7 +424,10 @@ def install_app_db_override(
     monkeypatch.setattr(db_session_module, "async_session_factory", session_factory)
 
     async def _override_db():
+        from app.db.tenant_rls import apply_tenant_rls
+
         async with session_factory() as session:
+            await apply_tenant_rls(session)
             try:
                 yield session
                 await session.commit()
@@ -433,6 +436,16 @@ def install_app_db_override(
                 raise
 
     app.dependency_overrides[get_db] = _override_db
+
+
+@pytest.fixture(autouse=True)
+def _tenant_rls_test_bypass():
+    """Тесты по умолчанию обходят RLS — изоляция проверяется в test_tenant_rls.py."""
+    from app.db.tenant_rls import reset_tenant_rls_bypass, set_tenant_rls_bypass
+
+    token = set_tenant_rls_bypass(True)
+    yield
+    reset_tenant_rls_bypass(token)
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -532,7 +545,10 @@ async def asgi_memory_client(monkeypatch):
     monkeypatch.setattr(db_session_module, "async_session_factory", session_factory)
 
     async def _override_db():
+        from app.db.tenant_rls import apply_tenant_rls
+
         async with session_factory() as session:
+            await apply_tenant_rls(session)
             try:
                 yield session
                 await session.commit()

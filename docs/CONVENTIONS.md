@@ -9,12 +9,11 @@
 
 ## Postgres-first database rule
 
-RestoMind uses PostgreSQL as the source-of-truth runtime for local development, staging, and production.
+RestoMind uses **PostgreSQL only** for local development, staging, production, tests, and CI.
 
-- New schema changes must be represented by Alembic migrations.
-- Do not add normal development schema fixes to `_apply_sqlite_startup_schema_patches()` in `app/main.py`.
-- SQLite is legacy/test-only. It may be used for isolated unit tests, but it must not define production or local runtime behavior.
-- Before debugging data issues, check `alembic current` and `alembic heads`.
+- New schema changes — **только** через Alembic (`alembic/versions/`).
+- SQLite и runtime DDL-патчи (`_apply_sqlite_startup_schema_patches`) **удалены** — не возвращать.
+- Перед отладкой данных: `alembic current` и `alembic heads` (должен быть **один** head; не хардкодить revision id в runbook — см. [`docs/POSTGRES_FIRST.md`](POSTGRES_FIRST.md)).
 
 See [`docs/POSTGRES_FIRST.md`](POSTGRES_FIRST.md).
 
@@ -55,6 +54,12 @@ See [`docs/POSTGRES_FIRST.md`](POSTGRES_FIRST.md).
 **Rule 11 — AI Context через ContextBuilder.**
 ИИ не должен получать данные из БД напрямую внутри LLM-вызова. Все данные для промпта готовятся слоем `fetch_ai_read_context` → `AIReadContext` в [`app/services/context_engine.py`](app/services/context_engine.py). Сырые SQL-запросы внутри `call_openai` / `call_ai_with_audio` — запрещены. Новые поля контекста добавляются в `AIReadContext`, а не в тело вызова ИИ.
 
+**Rule 12 — Timezone-aware timestamps.**
+- В БД и ORM — только **timezone-aware UTC** (`DateTime(timezone=True)`, `datetime.now(timezone.utc)`).
+- Запрещено: `datetime.now()` без tz, naive datetime в сравнениях с полями БД, «локальное время сервера» как источник истины.
+- Локальное время ресторана — через `Organization.timezone` (`time_context.py`, `owner_dashboard`, night preorders, digest cron).
+- Внешние источники (iiko OLAP и др.) нормализуются в UTC при ingest; org TZ — только для отображения, окон смены и уведомлений.
+
 ---
 
 ## 8. Инварианты Jinja2/HTML-шаблонов (агентам обязательно читать)
@@ -78,11 +83,9 @@ See [`docs/POSTGRES_FIRST.md`](POSTGRES_FIRST.md).
 
 ### 8.2 Синхронизация модели и миграций
 
-**Postgres-first override (2026-06):** the runtime schema source of truth is Alembic on PostgreSQL. The old SQLite patch checklist below is legacy context only; do not add new normal-development schema changes to `_apply_sqlite_startup_schema_patches()`.
-
 **Правило:** Добавление любого нового поля в ORM-модель (`app/db/models.py`) **обязательно требует**:
-1. Новой Alembic-миграции в `alembic/versions/` с `op.add_column`
-2. Для SQLite legacy/test-only сценариев: не добавлять runtime-патч без отдельной причины; нормальная схема идет через Alembic + PostgreSQL.
+1. Новой Alembic-миграции в `alembic/versions/` с `op.add_column` / `op.create_table`
+2. Прогона `alembic upgrade head` на dev/staging перед smoke
 
 **Почему это критично:**  
 SQLAlchemy генерирует `SELECT model_col1, model_col2, ...` при любом `db.get(Model, id)` или `select(Model)`. Если столбец есть в модели, но не в БД, **любой запрос к этой модели упадёт** с `UndefinedColumnError`. Для Organization это означает, что **вход в админку полностью ломается** — login-эндпоинт делает `db.get(Organization, oid)`.
@@ -94,7 +97,7 @@ SQLAlchemy генерирует `SELECT model_col1, model_col2, ...` при лю
 ```
 [ ] Новое поле в app/db/models.py
 [ ] Миграция alembic/versions/YYYYMMDD_*.py с op.add_column()
-[ ] SQLite-патч НЕ нужен для normal dev; только Alembic + PostgreSQL
+[ ] alembic upgrade head на Postgres dev DB
 [ ] Запустить tests/test_admin_login_regression.py локально
 ```
 

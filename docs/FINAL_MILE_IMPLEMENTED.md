@@ -41,7 +41,7 @@ Historical Final Mile module index. Current product status lives in [`ROADMAP.md
 
 ## Deployment Notes
 
-- Run `alembic upgrade head`; current head is `20260604_iiko_last_error_text`.
+- Run `alembic upgrade head`; verify single head: `alembic heads` and `alembic current` match.
 - Restart web and ARQ worker processes after deploy, because new routes, models, cron ticks (`daily_os_digest_scheduled_tick`, `iiko_inventory_sync`, `external_reviews_sync`) load at import time.
 - Make sure org `timezone` values are valid IANA names; Daily OS Digest uses the organization timezone window.
 - Voice AI is disabled by default. Enable per organization with `POST /api/admin/intelligence/voice/config`.

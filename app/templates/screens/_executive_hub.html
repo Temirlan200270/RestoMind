@@ -29,6 +29,22 @@
             </div>
 
             <div class="flex-1 min-h-0 overflow-y-auto px-4 md:px-6 py-4 md:py-5">
+                <div class="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4" x-show="Object.keys(executiveHubDimensions || {}).length" x-cloak>
+                    <template x-for="key in ['health','money','quality','ops']" :key="'eh-dim-' + key">
+                        <div class="rounded-xl border border-slate-200 bg-white p-3"
+                            x-show="executiveHubDimensions[key]">
+                            <div class="flex items-center justify-between gap-2">
+                                <div class="text-[10px] font-bold uppercase tracking-wide text-slate-500"
+                                    x-text="executiveHubDimensionLabel(key)"></div>
+                                <span class="text-xs font-bold text-indigo-700"
+                                    x-text="(executiveHubDimensions[key]?.score || 0) + '/100'"></span>
+                            </div>
+                            <p class="mt-2 text-xs text-slate-600 leading-relaxed"
+                                x-text="executiveHubDimensions[key]?.narrative || ''"></p>
+                        </div>
+                    </template>
+                </div>
+
                 <template x-if="executiveHubLoading && !(executiveHubCards || []).length">
                     <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                         <template x-for="i in 6" :key="'eh-skel-' + i">
@@ -68,10 +84,15 @@
                                 </template>
                             </div>
                             <div class="mt-auto flex flex-wrap gap-2 pt-1">
-                                <button type="button" class="ds-btn ds-btn-primary ds-btn-sm"
+                                <template x-for="action in (card.action_items || []).slice(0, 2)" :key="card.id + '-act-' + action.id">
+                                    <button type="button" class="ds-btn ds-btn-sm"
+                                        :class="action.confirm_required ? 'ds-btn-secondary' : 'ds-btn-primary'"
+                                        :disabled="executiveHubActionBusy"
+                                        @click.stop="executiveHubRunAction(action, card)"
+                                        x-text="action.label"></button>
+                                </template>
+                                <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm"
                                     @click.stop="openExecutiveHubCard(card)">Подробнее</button>
-                                <button type="button" class="ds-btn ds-btn-secondary ds-btn-sm"
-                                    @click.stop="executiveHubAskCard(card)">Спросить ИИ</button>
                             </div>
                         </article>
                     </template>
@@ -122,13 +143,17 @@
                     </div>
                 </div>
 
-                <div x-show="(executiveHubActiveCard?.actions || []).length">
-                    <div class="text-[10px] font-bold uppercase text-slate-400">Что сделать</div>
-                    <ul class="mt-2 space-y-1.5 text-sm text-slate-700 list-disc pl-5">
-                        <template x-for="action in (executiveHubActiveCard?.actions || [])" :key="'act-' + action">
-                            <li x-text="action"></li>
+                <div x-show="(executiveHubActiveCard?.action_items || []).length">
+                    <div class="text-[10px] font-bold uppercase text-slate-400">Действия</div>
+                    <div class="mt-2 flex flex-wrap gap-2">
+                        <template x-for="action in (executiveHubActiveCard?.action_items || [])" :key="'act-item-' + action.id">
+                            <button type="button" class="ds-btn ds-btn-sm"
+                                :class="action.confirm_required ? 'ds-btn-secondary' : 'ds-btn-primary'"
+                                :disabled="executiveHubActionBusy"
+                                @click="executiveHubRunAction(action, executiveHubActiveCard)"
+                                x-text="action.label"></button>
                         </template>
-                    </ul>
+                    </div>
                 </div>
 
                 <div class="rounded-xl bg-indigo-50 border border-indigo-100 p-4">

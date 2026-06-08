@@ -1530,10 +1530,13 @@ function adminMixinState() {
         executiveHubOpen: false,
         executiveHubLoading: false,
         executiveHubCards: [],
+        executiveHubDimensions: {},
         executiveHubActiveCard: null,
         executiveHubChatOpen: true,
         executiveHubBusinessQuestions: [],
         executiveHubRole: 'owner',
+        executiveHubActionBusy: false,
+        intelligencePendingActions: [],
         digitalTwinLoading: false,
         digitalTwin: { snapshot: {} },
         digitalTwinSim: { orders_per_hour: 30, operators: 2, avg_check: 5000, base_cancel_rate_pct: 5 },
@@ -10456,6 +10459,7 @@ function adminMixinDataChartsSettings() {
                 if (!ok) return;
                 this.intelligenceAnswer = data.answer || '';
                 this.intelligenceConversationId = data.conversation_id || this.intelligenceConversationId;
+                this.intelligencePendingActions = Array.isArray(data.pending_actions) ? data.pending_actions : [];
                 if (data.summary) {
                     this.intelligenceData.summary = data.summary;
                 }
@@ -10474,6 +10478,7 @@ function adminMixinDataChartsSettings() {
                 );
                 if (!ok) return;
                 this.executiveHubCards = Array.isArray(data.cards) ? data.cards : [];
+                this.executiveHubDimensions = data.dimensions && typeof data.dimensions === 'object' ? data.dimensions : {};
                 this.executiveHubRole = data.role || this.executiveHubRole || 'owner';
                 this.executiveHubBusinessQuestions = Array.isArray(data.chat?.business_questions)
                     ? data.chat.business_questions
@@ -10553,6 +10558,96 @@ function adminMixinDataChartsSettings() {
                 .filter(([key, value]) => key !== 'source' && value != null && value !== '')
                 .map(([key, value]) => `${key}: ${value}`);
             return [...why, ...evidenceRows].slice(0, 8);
+        },
+
+        executiveHubDimensionLabel(key) {
+            const map = { health: 'Здоровье', money: 'Деньги', quality: 'Качество', ops: 'Операции' };
+            return map[key] || key;
+        },
+
+        async executiveHubRunAction(action, card) {
+            if (!action || typeof action !== 'object') return;
+            const type = String(action.action_type || '').toLowerCase();
+            if (type === 'navigate') {
+                const target = action.drilldown || card?.drilldown;
+                if (target && typeof target === 'object') {
+                    this.closeExecutiveHub();
+                    this.incidentGo(target);
+                }
+                return;
+            }
+            if (type === 'chat') {
+                const prompt = String(action.payload?.prompt || card?.chat_prompt || '').trim();
+                if (prompt) {
+                    this.executiveHubChatOpen = true;
+                    this.intelligenceQuestion = prompt;
+                    await this.askIntelligence(prompt);
+                }
+                return;
+            }
+            if (type === 'agent_action') {
+                const spec = action.payload && typeof action.payload === 'object' ? action.payload : {};
+                if (action.confirm_required && !window.confirm(String(spec.summary || spec.title || 'Подтвердить действие?'))) {
+                    return;
+                }
+                await this.executiveHubProposeAndConfirm({
+                    action_type: spec.action_type || spec.actionType,
+                    title: spec.title || action.label,
+                    summary: spec.summary || '',
+                    payload: spec.payload || {},
+                });
+            }
+        },
+
+        async executiveHubProposeAndConfirm(body) {
+            if (!body || !body.action_type) return;
+            this.executiveHubActionBusy = true;
+            try {
+                const { ok, data } = await this.apiJsonResponse('/api/admin/intelligence/agent-actions/propose', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        action_type: body.action_type,
+                        title: body.title || body.action_type,
+                        summary: body.summary || '',
+                        payload: body.payload || {},
+                        source: 'hub',
+                    }),
+                });
+                if (!ok || !data?.proposal?.id) return;
+                const confirmRes = await this.apiJsonResponse(
+                    `/api/admin/intelligence/agent-actions/${encodeURIComponent(data.proposal.id)}/confirm`,
+                    { method: 'POST' },
+                );
+                if (confirmRes.ok) {
+                    this.showToast?.('Действие применено', 'success');
+                    await this.loadExecutiveHub();
+                }
+            } catch (e) {
+                adminLogger.error('[admin] executiveHubProposeAndConfirm', e);
+            } finally {
+                this.executiveHubActionBusy = false;
+            }
+        },
+
+        async confirmIntelligencePendingAction(proposalId) {
+            if (!proposalId) return;
+            this.executiveHubActionBusy = true;
+            try {
+                const { ok } = await this.apiJsonResponse(
+                    `/api/admin/intelligence/agent-actions/${encodeURIComponent(proposalId)}/confirm`,
+                    { method: 'POST' },
+                );
+                if (ok) {
+                    this.intelligencePendingActions = (this.intelligencePendingActions || []).filter((x) => x.id !== proposalId);
+                    this.showToast?.('Действие применено', 'success');
+                    if (this.executiveHubOpen) await this.loadExecutiveHub();
+                }
+            } catch (e) {
+                adminLogger.error('[admin] confirmIntelligencePendingAction', e);
+            } finally {
+                this.executiveHubActionBusy = false;
+            }
         },
 
         async updateInsightStatus(id, status) {

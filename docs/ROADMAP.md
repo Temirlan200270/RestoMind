@@ -142,15 +142,15 @@
 
 **Остаётся (актуальный техдолг / продукт):**
 
-- [ ] **Postgres RLS как last line of defense:** tenant isolation сейчас только через дисципину `.where(organization_id)` (Rule 9 в [`docs/CONVENTIONS.md`](CONVENTIONS.md)).
-- [ ] **Parallel context fetch:** `fetch_ai_read_context` sequential by design; распараллелить независимые блоки через отдельные DB-сессии + бенчмарк latency.
-- [ ] **Executive Hub v2:** NLG-виджеты Health/Money/Quality/Ops; action cards «что сделать» без лишних кликов.
-- [ ] **Conversational configuration:** write-tools для агента (upsell rules, force-close, org meta) с human-in-the-loop confirm — сейчас `copilot/tools.py` read-only.
+- [x] **Postgres RLS как last line of defense:** политики на core-таблицах + pp.organization_id/pp.bypass_rls через middleware и get_db ([pp/db/tenant_rls.py](app/db/tenant_rls.py), миграция 20260609_tenant_rls).
+- [x] **Parallel context fetch:** `fetch_ai_read_context` — три параллельных DB-сессии (`menu` / `user` / `org+kb+draft`) в [`context_engine.py`](app/services/context_engine.py).
+- [x] **Executive Hub v2:** NLG-виджеты Health/Money/Quality/Ops (`dimensions`), action cards с navigate/chat/agent_action в overlay.
+- [x] **Conversational configuration (MVP):** propose/confirm API (`/intelligence/agent-actions/*`), force-close, upsell rule create, staged iiko write; детект из чата + кнопки подтверждения в Hub.
 - [ ] **Snapshot → learning loop:** feedback «ИИ ошибся» → memory / fine-tuning pipeline (сейчас audit + `was_useful`, без auto-fix).
 - [ ] **Analytics fully off live tables:** дожать materialized/event-only пути; убрать тяжёлые сканы `Order`/`ChatLog` там, где уже есть агрегаты.
 - [ ] **iiko Control Plane (write):** автономная запись цен/меню в iiko по запросу владельца — future, после guardrails (см. X1 freeze в Intelligence OS).
 
-**Вердикт:** направление аудита верное; устаревшие пункты — SQLite schizophrenia и «Hub ещё не начат». Следующий фокус: **insight → action в одном слое** (Hub v2 + conversational config), не новые вкладки.
+**Вердикт:** направление аудита верное; устаревшие пункты — SQLite schizophrenia и «Hub ещё не начат». Следующий фокус: **snapshot → learning loop** и **полный iiko write** (после guardrails), не новые вкладки.
 
 ## 🟢 P2: Развитие (Growth)
 

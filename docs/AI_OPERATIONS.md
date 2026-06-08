@@ -1,6 +1,14 @@
 # AI Operations / Restaurant Intelligence
 
-Актуальное описание Intelligence layer и Digital Twin.
+**Операционный runbook** Intelligence layer: API, deploy smoke, Executive Hub, latency, RBAC.
+
+| Документ | Назначение |
+|---|---|
+| **Этот файл** | Endpoints, smoke, ops-поведение, Executive Hub |
+| [`INTELLIGENCE_OS_PLAN.md`](INTELLIGENCE_OS_PLAN.md) | **Единый источник правды** по архитектуре данных ИИ: OperationalInsight, Copilot, D0/M1/C1.5, X1 freeze |
+| [`ROADMAP.md`](ROADMAP.md) | Статусы задач |
+
+При изменении модели `OperationalInsight`, pipeline инсайтов или Copilot tools — обновляйте **сначала** `INTELLIGENCE_OS_PLAN.md`; здесь — только ops-ссылки и endpoint-таблицы.
 
 ## Разграничение: Intelligence vs Analytics
 
@@ -51,7 +59,7 @@ Intelligence не дублирует Analytics — он отвечает на в
 | Weekly digest | `owner_digest_delivery.py`, `owner_weekly_digest.py` | OI preview + cron Mon 10:00 org TZ |
 
 Deploy smoke: [`docs/DEPLOY_RUNBOOK.md`](DEPLOY_RUNBOOK.md) §8, `scripts/verify_owner_intel_schema.py`.  
-Alembic head: `20260604_iiko_last_error_text`.
+Миграции: `alembic upgrade head` → `alembic heads` (один head, без хардкода revision id).
 
 ---
 
@@ -85,81 +93,9 @@ GET  /api/admin/system/faq-cache-metrics?days=7
 
 ## OperationalInsight
 
-### Поля
+Контракт полей, `payload_json`, типы инсайтов, baseline и causal attribution — **только** в [`INTELLIGENCE_OS_PLAN.md`](INTELLIGENCE_OS_PLAN.md) §OperationalInsight.
 
-```python
-id, organization_id
-insight_type: str      # см. типы ниже
-severity: str          # info | warning | critical
-title: str
-summary: str
-status: str            # new | seen | resolved | dismissed
-was_useful: bool|None  # оператор отметил полезным / бесполезным
-notes: str|None        # заметка оператора при закрытии
-payload_json: dict     # см. структуру ниже
-created_at, resolved_at
-```
-
-### payload_json — полная структура
-
-```json
-{
-  "baseline_type": "duration_match",
-  "weekday_baseline": {
-    "baseline_type": "same_weekday_7d",
-    "comparison_label": "vs прошлый Monday",
-    "current_revenue": 45000,
-    "baseline_revenue": 52000,
-    "pct_change": -13.5
-  },
-  "cause_hypotheses": ["high_cancellation_rate", "kitchen_overload"],
-  "recommended_actions": [
-    "Проверить стоп-лист: 7 позиций",
-    "Снизить долю отмен — сейчас 18%, потери ~12000 ₸"
-  ],
-  "current": { "revenue": ..., "orders": ..., "cancel_rate_pct": ... },
-  "previous": { ... },
-  "changes": { "revenue_pct": ..., "orders_pct": ..., "cancel_rate_pp": ... },
-  "top_items": [...],
-  "lost_revenue_estimate": 12000
-}
-```
-
-### Типы инсайтов
-
-| insight_type | severity | Условие |
-|---|---|---|
-| `revenue_drop` | warning | Выручка ≤ −15% vs предыдущий период |
-| `orders_drop` | warning | Кол-во заказов ≤ −15% |
-| `cancellations_up` | critical | Доля отмен выросла ≥ +5 п.п. |
-| `sales_stable` | info | Аномалий нет |
-| `ai_token_spike` | warning | Токены сегодня > 3× rolling-7d avg |
-| `ai_error_spike` | critical | error_count/call_count > 15% |
-| `ai_latency_spike` | warning | p95 latency > 1.5× SLA |
-
-### Temporal baseline model
-
-Два уровня сравнения:
-
-1. **Duration-match** (исходный): сегодня vs вчера или та же длительность назад.
-2. **Same-weekday baseline** (новый): сегодня vs тот же день прошлой недели.
-   - Хранится в `payload_json["weekday_baseline"]`.
-   - Полезен для ресторанов с выраженной недельной сезонностью (пятница vs пятница).
-
-### Causal attribution (v1, эвристика)
-
-При генерации `revenue_drop` и `orders_drop` система проверяет коррелирующие сигналы:
-
-| Гипотеза | Условие |
-|---|---|
-| `high_cancellation_rate` | cancel_rate > 15% |
-| `kitchen_overload` | kitchen_load > 80% |
-| `stoplist_growth` | stoplist_count > prev × 1.3 |
-| `ai_escalation_spike` | escalation_rate > 20% |
-
-Результат — `payload_json["cause_hypotheses"]` — список строк, отображаемый в UI.
-
-### Feedback loop
+### Feedback loop (ops)
 
 ```http
 PATCH /api/admin/intelligence/insights/{id}

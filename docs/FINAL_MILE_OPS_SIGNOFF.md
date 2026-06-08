@@ -38,7 +38,7 @@ Engineering code and UI are ready (1000+ pytest). ROADMAP `Voice [ ]` and `iiko 
 
 | Шаг | OK | Дата | Примечание |
 |-----|----|------|------------|
-| `alembic upgrade head` (current head: `20260604_iiko_last_error_text`) | [ ] | | Supabase SQL or Render shell |
+| `alembic upgrade head` + `alembic heads` (один head) + `alembic current` | [ ] | | Supabase SQL or Render shell |
 | Перезапуск **web** + **ARQ worker** после деплоя | [ ] | | `python -m arq app.worker.WorkerSettings` |
 | Cron registered: `daily_os_digest_scheduled_tick`, `owner_digest_scheduled_tick` | [ ] | | Telegram ops/owner digest |
 | Cron registered: `external_reviews_sync_scheduled_tick`, `sales_anomaly_scheduled_tick`, `insight_delivery_scheduled_tick`, `recommendation_outcomes_scheduled_tick` | [ ] | | Reviews, anomalies, deliveries, ROI measurements |

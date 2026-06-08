@@ -29,7 +29,7 @@
 - JS: `app/static/js/admin-app.js` (Alpine x-data; WS: `os.audit`, business events).
 - UI‑контракт: `docs/UI_DESIGN_SYSTEM.md` (a11y/Lighthouse/`ds-*`; тексты — язык оператора, см. CONVENTIONS §8).
 - FSM чатов и WebSocket: `docs/STATE_MACHINE.md`, `docs/EVENT_ARCHITECTURE.md`.
-- OS / Intelligence API: `docs/AI_OPERATIONS.md`; Final Mile backend: `docs/FINAL_MILE_IMPLEMENTED.md`; UI gaps: `docs/REMAINING_UPDATES.md`.
+- OS / Intelligence API (ops): `docs/AI_OPERATIONS.md`; архитектура ИИ: `docs/INTELLIGENCE_OS_PLAN.md`; Final Mile backend: `docs/FINAL_MILE_IMPLEMENTED.md`; статусы задач: `docs/ROADMAP.md`.
 
 ## Красные линии (не ломать без явного ТЗ)
 

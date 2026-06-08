@@ -2,6 +2,16 @@
 
 Ручная проверка UI после деплоя или локально (`APP_DEBUG=true`, demo login). Автотесты покрывают API; этот чеклист — **видимость и RBAC в браузере**.
 
+### Что уже автоматизировано
+
+| Сценарий | Автотест | Ручной шаг остаётся |
+|----------|----------|---------------------|
+| Final Mile HTTP endpoints (200, no 5xx) | `tests/test_final_mile_smoke.py` | Визуальные disabled/hint по ролям |
+| RBAC 403 на operator-only мутациях | частично в API-тестах | Кнопки disabled в UI + Console 0 errors |
+| Admin baseline PNG | `scripts/capture_admin_u0_baseline.py` | Sign-off таблица ниже |
+
+Перед ручным прогоном: `pytest tests/test_final_mile_smoke.py -q`
+
 Скриншоты (опционально): `python scripts/capture_admin_u0_baseline.py` — включает `final_mile`, `guestcare`, `shift`.
 
 ---

@@ -105,6 +105,14 @@ class IntelligenceQueryBody(BaseModel):
     conversation_id: int | None = None
 
 
+class AgentActionProposeBody(BaseModel):
+    action_type: str = Field(..., min_length=2, max_length=64)
+    title: str = Field(default="", max_length=255)
+    summary: str = Field(default="", max_length=2000)
+    payload: dict[str, Any] = Field(default_factory=dict)
+    source: str = Field(default="hub", max_length=32)
+
+
 class InsightPatchBody(BaseModel):
     status: str = Field(..., pattern="^(new|seen|resolved|dismissed)$")
     was_useful: bool | None = Field(default=None, description="Оператор отметил инсайт полезным (true) или нет (false)")
@@ -291,7 +299,9 @@ async def intelligence_executive_hub(
         "ok": True,
         "organization_id": org_id,
         "role": role,
+        "version": payload.get("version", 1),
         "period": payload["period"],
+        "dimensions": payload.get("dimensions") or {},
         "cards": payload["cards"],
         "chat": payload["chat"],
         "location_scope": {
@@ -299,6 +309,71 @@ async def intelligence_executive_hub(
             "source": "sql_location" if location_scoped else "org",
         },
     }
+
+
+@router.post("/agent-actions/propose")
+async def intelligence_agent_action_propose(
+    body: AgentActionProposeBody,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    from app.services.agent_actions import proposal_public, propose_agent_action
+
+    org_id = admin_org_from_session(request)
+    staff = await _session_staff_user(request, db)
+    row = await propose_agent_action(
+        db,
+        organization_id=org_id,
+        staff_user_id=int(staff.id) if staff is not None else None,
+        action_type=body.action_type,
+        title=body.title,
+        summary=body.summary,
+        payload=body.payload,
+        source=body.source,
+    )
+    await db.commit()
+    return {"ok": True, "proposal": proposal_public(row)}
+
+
+@router.post("/agent-actions/{proposal_id}/confirm")
+async def intelligence_agent_action_confirm(
+    proposal_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    from app.services.agent_actions import confirm_agent_action
+
+    org_id = admin_org_from_session(request)
+    staff = await _session_staff_user(request, db)
+    try:
+        result = await confirm_agent_action(
+            db,
+            proposal_id=proposal_id,
+            organization_id=org_id,
+            staff_user_id=int(staff.id) if staff is not None else None,
+        )
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Proposal not found") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await db.commit()
+    return result
+
+
+@router.post("/agent-actions/{proposal_id}/reject")
+async def intelligence_agent_action_reject(
+    proposal_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    from app.services.agent_actions import proposal_public, reject_agent_action
+
+    org_id = admin_org_from_session(request)
+    row = await reject_agent_action(db, proposal_id=proposal_id, organization_id=org_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    await db.commit()
+    return {"ok": True, "proposal": proposal_public(row)}
 
 
 @router.post("/query")

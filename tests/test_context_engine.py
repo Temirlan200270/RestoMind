@@ -34,7 +34,7 @@ def _make_tracking_session_factory(
 ) -> async_sessionmaker[AsyncSession]:
     """
     Оборачивает фабрику: считает +1 на __aenter__, −1 в finally __aexit__.
-    Ожидаем 0 после await fetch (один with на fetch).
+    Ожидаем 0 после await fetch (до трёх параллельных with на fetch, все закрыты).
     """
 
     class _TrackedFactory:

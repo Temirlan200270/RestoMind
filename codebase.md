@@ -198,7 +198,7 @@ python -m pytest tests/ -v
 
 Test suite: **1000+** tests in `tests/` (`pytest -q`). GitHub Actions: [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
-**Alembic head (current lineage):** `20260604_iiko_last_error_text` — см. [`docs/DEPLOY_RUNBOOK.md`](docs/DEPLOY_RUNBOOK.md) §8.
+**Alembic:** не хардкодить revision id в доках — проверять `alembic heads` (один head) и `alembic current` после `alembic upgrade head`. Smoke: [`docs/DEPLOY_RUNBOOK.md`](docs/DEPLOY_RUNBOOK.md) §8.
 
 ---
 

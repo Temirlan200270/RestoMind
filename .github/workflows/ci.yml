@@ -30,12 +30,14 @@ jobs:
           --health-retries 5
 
     env:
+      APP_DEBUG: "true"
       DB_MODE: postgres
       DATABASE_URL: postgresql+asyncpg://restomind:restomind_secret@localhost:5432/restomind_test
       TEST_DATABASE_URL: postgresql+asyncpg://restomind:restomind_secret@localhost:5432/restomind_test
       REDIS_MEMORY_ONLY: "true"
       DATABASE_SSL_SKIP_VERIFY: "true"
       RESTOMIND_TEST_POSTGRES: "true"
+      TELEGRAM_BOT_TOKEN: "000000000:TEST_CI_BOT_TOKEN"
 
     steps:
       # Shallow checkout + точечный fetch main — меньше RPC-сбоев, чем fetch-depth: 0.

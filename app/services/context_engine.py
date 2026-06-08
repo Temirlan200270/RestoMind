@@ -1,9 +1,8 @@
 """
 Параллельная фаза чтения для AI-контекста.
 
-Один AsyncSession на весь fetch: меньше checkout'ов из пула и один roundtrip к БД
-(sequential queries). AsyncSession не thread-safe для concurrent awaits — поэтому
-не используем asyncio.gather внутри одной сессии.
+Независимые блоки читаются через отдельные AsyncSession (asyncio.gather).
+Одна сессия не используется для concurrent awaits — AsyncSession не thread-safe.
 """
 
 from __future__ import annotations
@@ -42,25 +41,26 @@ class AIReadContext:
     location_id: int | None = None
 
 
-async def fetch_ai_read_context(phone: str, organization_id: int, location_id: int | None = None) -> AIReadContext:
-    """Собирает контекст одной короткой DB-сессией (sequential queries)."""
-
-    phone_s = (phone or "").strip()
-
+async def _fetch_menu_block(organization_id: int) -> list[MenuItem]:
     async with async_session_factory() as db:
-        menu_items = await load_available_menu(
+        return await load_available_menu(
             db,
             organization_id=organization_id,
             include_unavailable=True,
         )
 
+
+async def _fetch_user_block(
+    phone_s: str,
+    organization_id: int,
+) -> tuple[User | None, str, dict]:
+    async with async_session_factory() as db:
         u = await db.scalar(
             select(User).where(
                 User.phone == phone_s,
                 User.organization_id == organization_id,
             ),
         )
-
         customer_ctx = await build_customer_context(db, u)
         user_preferences: dict = {}
         if u is not None:
@@ -78,7 +78,15 @@ async def fetch_ai_read_context(phone: str, organization_id: int, location_id: i
                 user_preferences = await get_user_preferences(db, u.id, organization_id)
             except Exception:
                 logger.debug("user preferences load failed org=%s user_id=%s", organization_id, u.id, exc_info=True)
+        return u, customer_ctx, user_preferences
 
+
+async def _fetch_org_context_block(
+    phone_s: str,
+    organization_id: int,
+    location_id: int | None,
+) -> tuple[Organization | None, str, Order | None, Tenant | None, dict | None]:
+    async with async_session_factory() as db:
         org_row = await db.get(Organization, organization_id)
         kb = await load_knowledge_context_block(db, organization_id)
         draft = await get_open_draft_order(db, phone_s, organization_id)
@@ -100,6 +108,22 @@ async def fetch_ai_read_context(phone: str, organization_id: int, location_id: i
         except Exception:
             logger.debug("copilot feed load failed org=%s", organization_id, exc_info=True)
             copilot_feed = None
+        return org_row, kb, draft, tenant_row, copilot_feed
+
+
+async def fetch_ai_read_context(phone: str, organization_id: int, location_id: int | None = None) -> AIReadContext:
+    """Собирает контекст параллельно — до трёх коротких DB-сессий."""
+
+    phone_s = (phone or "").strip()
+    loc = int(location_id) if location_id is not None else None
+
+    menu_items, user_bundle, org_bundle = await asyncio.gather(
+        _fetch_menu_block(organization_id),
+        _fetch_user_block(phone_s, organization_id),
+        _fetch_org_context_block(phone_s, organization_id, loc),
+    )
+    u, customer_ctx, user_preferences = user_bundle
+    org_row, kb, draft, tenant_row, copilot_feed = org_bundle
 
     return AIReadContext(
         menu_items=menu_items,
@@ -111,7 +135,7 @@ async def fetch_ai_read_context(phone: str, organization_id: int, location_id: i
         user_preferences=user_preferences,
         copilot_feed=copilot_feed,
         tenant=tenant_row,
-        location_id=int(location_id) if location_id is not None else None,
+        location_id=loc,
     )
 
 
@@ -163,9 +187,6 @@ async def save_ai_context_snapshot(
     effective_trace_id = trace_id or get_trace_id()
     effective_conversation_id = conversation_id or get_conversation_id()
     try:
-        # Минимальный снимок цен: только audit-поля нужные для query «цена X в момент T»
-        # iiko_id — стабильный идентификатор (name может меняться при переименовании)
-        # price + is_available — единственные поля, которые меняются и влияют на решение
         menu_prices_snapshot = [
             {
                 "iiko_id": m.iiko_id or "",
@@ -180,9 +201,7 @@ async def save_ai_context_snapshot(
             "org_timezone": getattr(context.org, "timezone", None) if context.org else None,
             "menu_items_count": len(context.menu_items),
             "stoplist_count": sum(1 for m in context.menu_items if not m.is_available),
-            # Structured audit: iiko_id + price + availability at decision time
             "menu_prices_snapshot": menu_prices_snapshot,
-            # Frozen menu text passed to LLM — используется в replay для точного воспроизведения
             "menu_context_text": menu_context_text,
             "trace_id": effective_trace_id,
             "conversation_id": effective_conversation_id,
@@ -283,18 +302,12 @@ async def _load_recent_event_slice(
     minutes: int = 15,
     limit: int = 20,
 ) -> dict:
-    """Phase 3.2: загружает последние N SystemEvent за minutes минут до вызова LLM.
+    """Phase 3.2: загружает последние N SystemEvent за minutes минут до вызова LLM."""
+    from datetime import datetime
 
-    Даёт AI Context Snapshot "живую" картину ресторана:
-    что происходило (заказы, эскалации, платежи) прямо перед этим решением.
-    Без event_slice невозможно объяснить совет ИИ на 100%.
-    """
-    from datetime import datetime, timedelta, timezone
     cutoff = datetime.now(tz=timezone.utc) - timedelta(minutes=minutes)
 
     try:
-        from sqlalchemy import select
-        from app.db.models import SystemEvent
         rows = (await db.execute(
             select(
                 SystemEvent.id,
@@ -323,10 +336,10 @@ async def _load_recent_event_slice(
                 "ts": r["created_at"].isoformat() if r["created_at"] else None,
                 "payload": {
                     k: v for k, v in (r["payload_json"] or {}).items()
-                    if not k.startswith("_")  # убираем служебные _actor, _version
+                    if not k.startswith("_")
                 },
             }
-            for r in reversed(rows)  # хронологический порядок
+            for r in reversed(rows)
         ]
         return {
             "window_minutes": minutes,
@@ -362,8 +375,6 @@ async def build_llm_prompt_bundle(
     fresh_stopped: list[str] | None = None,
 ) -> LLMPromptBundle:
     """Единая сборка LLM-контекста (WhatsApp, test_bot, telephony stub)."""
-    import asyncio
-
     from app.services.order_logic import (
         build_menu_context_for_ai,
         format_draft_order_context_for_prompt,

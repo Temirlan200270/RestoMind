@@ -66,7 +66,12 @@ async def test_build_executive_hub_payload_returns_scoped_cards(db_session):
     assert payload["cards"][0]["id"] == "revenue_pulse"
     assert payload["cards"][0]["metrics"]["revenue_kzt"] == 12000
     assert any(card["id"].startswith("insight_") for card in payload["cards"])
+    assert payload["version"] == 2
+    assert payload["dimensions"]["money"]["card_ids"]
+    assert payload["cards"][0]["dimension"] == "money"
+    assert any(item.get("action_type") == "navigate" for item in payload["cards"][0].get("action_items", []))
     assert payload["chat"]["endpoint"] == "/api/admin/intelligence/query"
+    assert payload["chat"]["agent_actions_endpoint"] == "/api/admin/intelligence/agent-actions"
     assert payload["chat"]["business_questions"]
 
 

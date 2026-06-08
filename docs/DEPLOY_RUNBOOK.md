@@ -104,8 +104,8 @@ Worker не слушает HTTP; healthcheck Render для него — по л�
 | `DB_MODE` | `postgres` | |
 | `DATABASE_URL` | `postgresql://…?sslmode=require` | Supabase Postgres |
 | `REDIS_URL` | `rediss://default:PASS@….upstash.io:6379` | Upstash TCP (Pub/Sub админки + ARQ) |
-| `REDIS_ENABLED` | `true` | |
-| `REDIS_MEMORY_ONLY` | `false` | **`true` отключает внешний Redis** (дефолт blueprint!) |
+| `REDIS_ENABLED` | `true` | Игнорируется, если `REDIS_MEMORY_ONLY=true` |
+| `REDIS_MEMORY_ONLY` | `false` | **`true` — in-memory, TCP к Redis не открывается** (приоритет над `REDIS_ENABLED`; не для prod) |
 | `ARQ_ENABLED` | `true` | |
 | `ARQ_QUEUE_NAME` | `restomind` | Должен совпадать у web и worker |
 | `DB_POOL_SIZE` | `3`–`5` | Пул SQLAlchemy на процесс; `5` допустимо при лимите Supabase session pooler (~15 conn на web+worker) |
@@ -350,13 +350,20 @@ python scripts/diag_whatsapp_latency.py --org-id 1 --phone +77051310837
 
 ## 8. Owner Intelligence OS — deploy smoke (post-migration)
 
-Перед smoke выполните `alembic upgrade head` и убедитесь, что `alembic heads` показывает один head: **`20260604_iiko_last_error_text`**.
+Перед smoke выполните `alembic upgrade head`. **Не привязывайтесь к конкретному revision id в чек-листах** — head меняется с каждой миграцией. Проверка:
+
+```bash
+alembic upgrade head
+alembic heads -v       # ровно одна строка (head)
+alembic current        # current == единственный head из alembic heads
+```
 
 ### 8.1 Миграции и схема
 
 ```bash
 alembic upgrade head
-alembic heads          # один head
+alembic heads -v
+alembic current
 PYTHONPATH=. python scripts/verify_owner_intel_schema.py
 python -m compileall -q app
 ```

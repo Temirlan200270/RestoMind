@@ -155,6 +155,52 @@ AI
 
 Ответы должны говорить «вероятная причина» и «уверенность», а не утверждать причинность как факт.
 
+## OperationalInsight — контракт данных
+
+Единый источник правды по модели инсайтов (ops-endpoints — в [`AI_OPERATIONS.md`](AI_OPERATIONS.md)).
+
+### Поля ORM
+
+```python
+id, organization_id
+insight_type: str      # см. таблицу типов ниже
+severity: str          # info | warning | critical
+title, summary: str
+status: str            # new | seen | resolved | dismissed
+was_useful: bool|None
+notes: str|None
+payload_json: dict
+confidence_score, evidence_json, drilldown_json
+created_at, resolved_at
+```
+
+### payload_json (ключевые блоки)
+
+- `baseline_type`, `weekday_baseline` — duration-match и same-weekday сравнение
+- `cause_hypotheses`, `recommended_actions`
+- `current` / `previous` / `changes`, `top_items`, `lost_revenue_estimate`
+
+### Типы инсайтов
+
+| insight_type | severity | Условие (эвристика) |
+|---|---|---|
+| `revenue_drop` | warning | Выручка ≤ −15% vs предыдущий период |
+| `orders_drop` | warning | Заказы ≤ −15% |
+| `cancellations_up` | critical | Доля отмен +5 п.п. и выше |
+| `sales_stable` | info | Аномалий нет |
+| `ai_token_spike` | warning | Токены > 3× rolling-7d |
+| `ai_error_spike` | critical | errors/calls > 15% |
+| `ai_latency_spike` | warning | p95 > 1.5× SLA |
+
+### Causal attribution (v1)
+
+| Гипотеза | Условие |
+|---|---|
+| `high_cancellation_rate` | cancel_rate > 15% |
+| `kitchen_overload` | kitchen_load > 80% |
+| `stoplist_growth` | stoplist_count > prev × 1.3 |
+| `ai_escalation_spike` | escalation_rate > 20% |
+
 ## M1 — Organization Memory
 
 Самый недооценённый слой. Это память организации, не память пользователя.
@@ -231,14 +277,19 @@ ROI нельзя считать без D0/C1.5/M1, иначе невозможн
 
 ## X1 — Autonomy (future)
 
-Автономность отложена. Ближайший продуктовый фокус:
+Автономность отложена. Ближайший продуктовый фокус: правильные ответы, explainability, confidence/evidence, измеримый ROI.
 
-- правильные ответы;
-- объяснение причин;
-- доверие через confidence/evidence;
-- измеримый ROI.
+### Что разрешено (Human-in-the-loop, 2026-06)
 
-Разрешено только guarded internal action: черновик закупки, задача, уведомление, без внешней финансовой или iiko-мутации без подтверждения человека.
+| Действие | Статус | Поведение |
+|---|---|---|
+| Изменения **внутри RestoMind** (upsell rules, force-close, org meta) | ✅ MVP | `agent_action_proposals` → propose → **confirm** оператором → apply |
+| **Staged** iiko write (цены/меню) | ✅ Staged only | Черновик в RestoMind + подтверждение; **без** автономного вызова iiko API |
+| Автономная запись в iiko / закупки без человека | ❌ Freeze | Запрещено до guardrails X1 и audit trail |
+
+**Staged iiko write** — это не снятие freeze: система готовит структурированный запрос и ждёт явного approve; отправка во внешнюю систему — отдельный будущий этап после X1.
+
+Разрешено также guarded internal action: черновик закупки, задача, уведомление — без внешней финансовой мутации без подтверждения человека.
 
 ## Операционный запуск текущего MVP
 

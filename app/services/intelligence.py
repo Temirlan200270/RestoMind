@@ -394,12 +394,34 @@ async def answer_intelligence_query(
         ]
     )
     await db.flush()
+
+    from app.services.agent_actions import detect_conversational_action_proposals, proposal_public, propose_agent_action
+
+    pending_actions: list[dict[str, Any]] = []
+    for spec in detect_conversational_action_proposals(question):
+        row = await propose_agent_action(
+            db,
+            organization_id=org_id,
+            action_type=str(spec["action_type"]),
+            title=str(spec.get("title") or spec["action_type"]),
+            summary=str(spec.get("summary") or ""),
+            payload=dict(spec.get("payload") or {}),
+            source="chat",
+        )
+        pending_actions.append(proposal_public(row))
+    if pending_actions:
+        answer = (
+            f"{answer}\n\n"
+            "Я подготовил действие — подтвердите в карточке ниже, прежде чем применить изменения."
+        ).strip()
+
     return {
         "conversation_id": int(conv.id),
         "answer": answer,
         "intent": intent,
         "summary": summary,
         "tool_calls": copilot_result.get("tool_calls") or [],
+        "pending_actions": pending_actions,
     }
 
 
