@@ -1,5 +1,7 @@
 """Fulfillment-only turns: обновление черновика без новых items."""
 
+from unittest.mock import patch
+
 import pytest
 from sqlalchemy import select
 
@@ -8,6 +10,19 @@ from app.schemas.ai_schemas import AIBrainResponse, OrderItem
 from app.services.decision_engine import decision_engine
 from app.services.dialog_mgr import UserState
 from app.services.intent_router import _handle_order
+from app.services.time_context import OperationalStatus
+
+
+def _kitchen_open_status() -> OperationalStatus:
+    return OperationalStatus(
+        is_business_open=True,
+        is_kitchen_open=True,
+        next_business_open_at=None,
+        next_kitchen_open_at=None,
+        kitchen_closes_in_minutes=120,
+        human_label="Открыто",
+        prompt_instruction="KITCHEN_OPEN=1",
+    )
 
 
 @pytest.mark.asyncio
@@ -19,12 +34,16 @@ async def test_fulfillment_only_pickup_updates_existing_draft(db_with_menu) -> N
         items=[OrderItem(name="Плов", iiko_item_id="uuid-plov", quantity=1)],
         order_type="pickup",
     )
-    seed = await _handle_order(
-        db_with_menu,
-        "+77051310837",
-        seed_ai,
-        organization_id=1,
-    )
+    with patch(
+        "app.services.time_context.check_operational_status",
+        return_value=_kitchen_open_status(),
+    ):
+        seed = await _handle_order(
+            db_with_menu,
+            "+77051310837",
+            seed_ai,
+            organization_id=1,
+        )
     assert seed.pending_order_id is not None
     draft = await db_with_menu.get(Order, seed.pending_order_id)
     assert draft is not None
@@ -37,13 +56,17 @@ async def test_fulfillment_only_pickup_updates_existing_draft(db_with_menu) -> N
         order_type="pickup",
         pickup_time_note="через полчаса",
     )
-    result = await _handle_order(
-        db_with_menu,
-        "+77051310837",
-        fulfillment_ai,
-        organization_id=1,
-        draft_order=draft,
-    )
+    with patch(
+        "app.services.time_context.check_operational_status",
+        return_value=_kitchen_open_status(),
+    ):
+        result = await _handle_order(
+            db_with_menu,
+            "+77051310837",
+            fulfillment_ai,
+            organization_id=1,
+            draft_order=draft,
+        )
 
     assert "не смог разобрать позиции" not in (result.reply_text or "").lower()
     assert "салат" in (result.reply_text or "").lower() or "плов" in (result.reply_text or "").lower()
@@ -64,12 +87,16 @@ async def test_fulfillment_only_accepts_detached_draft(db_with_menu) -> None:
         reply_text="Draft created.",
         items=[OrderItem(name=plov.name, iiko_item_id="uuid-plov", quantity=1)],
     )
-    seed = await _handle_order(
-        db_with_menu,
-        "+77051310838",
-        seed_ai,
-        organization_id=1,
-    )
+    with patch(
+        "app.services.time_context.check_operational_status",
+        return_value=_kitchen_open_status(),
+    ):
+        seed = await _handle_order(
+            db_with_menu,
+            "+77051310838",
+            seed_ai,
+            organization_id=1,
+        )
     assert seed.pending_order_id is not None
     draft = await db_with_menu.get(Order, seed.pending_order_id)
     assert draft is not None
@@ -82,13 +109,17 @@ async def test_fulfillment_only_accepts_detached_draft(db_with_menu) -> None:
         items=[],
         order_type="pickup",
     )
-    result = await _handle_order(
-        db_with_menu,
-        "+77051310838",
-        fulfillment_ai,
-        organization_id=1,
-        draft_order=draft,
-    )
+    with patch(
+        "app.services.time_context.check_operational_status",
+        return_value=_kitchen_open_status(),
+    ):
+        result = await _handle_order(
+            db_with_menu,
+            "+77051310838",
+            fulfillment_ai,
+            organization_id=1,
+            draft_order=draft,
+        )
 
     assert result.pending_order_id == draft_id
     fresh = await db_with_menu.get(Order, draft_id)

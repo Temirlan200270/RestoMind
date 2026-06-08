@@ -14,6 +14,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- CI: `test_fulfillment_only_order` — мок `check_operational_status` (открытая кухня), тест больше не падает ночью из‑за `night_preorder`.
+
 - Code/test cleanup: removed tracked generated `scripts/_nomenclature_summary.txt`, fixed the broken Windows `post_nomenclature.cmd` path by adding `scripts/post_nomenclature.ps1`, and updated `_summarize_nomenclature.py` so reports are stdout/`--out` only.
 - Docs cleanup: obsolete root debug dumps (`nomenclature.json`, `payload.json`) and old sprint scratch docs were removed; tracked admin baseline PNGs were kept because `docs/UI_DESIGN_SYSTEM.md` embeds them. Deployment/status docs now point to the current runbook, roadmap, and Alembic head `20260603_menu_item_lifecycle`.
 
