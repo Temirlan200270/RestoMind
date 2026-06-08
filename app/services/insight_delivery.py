@@ -13,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.db.models import InsightDelivery, OperationalInsight, Organization
 from app.integrations.telegram import send_ops_notification_html
+from app.services.agent_actions import propose_agent_action, proposal_confirm_links
+from app.services.insight_proactive_actions import build_proactive_action_from_insight
 from app.services.system_events import BusinessEvent, emit_event
 
 logger = logging.getLogger(__name__)
@@ -29,15 +31,19 @@ def _threshold_for_channel(org: Organization, channel: str) -> set[str]:
     return {"critical", "warning"} if channel == "telegram_owner" else {"critical"}
 
 
-def _format_insight_html(row: OperationalInsight) -> str:
+def _format_insight_html(row: OperationalInsight, *, confirm_url: str | None = None) -> str:
     confidence = ""
     if row.confidence_score is not None:
         confidence = f"\n<b>Уверенность:</b> <code>{round(float(row.confidence_score or 0) * 100)}%</code>"
+    action_line = ""
+    if confirm_url:
+        action_line = f'\n\n<a href="{html.escape(confirm_url, quote=True)}">✅ Подтвердить действие</a>'
     return (
         f"<b>{html.escape(row.title)}</b>\n"
         f"{html.escape(row.summary)}"
         f"{confidence}\n"
         f"<i>Источник: Intelligence OS</i>"
+        f"{action_line}"
     )[:3900]
 
 
@@ -78,13 +84,40 @@ async def deliver_due_insights(
         )
         if existing is not None:
             continue
+        action_spec = build_proactive_action_from_insight(insight)
+        proposal_id: str | None = None
+        confirm_url: str | None = None
+        if action_spec is not None:
+            try:
+                proposal = await propose_agent_action(
+                    db,
+                    organization_id=int(org_id),
+                    action_type=str(action_spec["action_type"]),
+                    title=str(action_spec.get("title") or insight.title),
+                    summary=str(action_spec.get("summary") or insight.summary),
+                    payload=action_spec.get("payload") if isinstance(action_spec.get("payload"), dict) else {},
+                    source="insight_delivery",
+                    source_insight_id=int(insight.id),
+                    idempotency_key=f"insight:{int(insight.id)}:{action_spec['action_type']}",
+                )
+                proposal_id = proposal.id
+                links = proposal_confirm_links(proposal)
+                confirm_url = links.get("confirm_url")
+            except Exception:
+                logger.exception("proactive action proposal failed org=%s insight=%s", org_id, insight.id)
+
         delivery = InsightDelivery(
             organization_id=int(org_id),
             insight_id=int(insight.id),
             channel=channel,
             severity=insight.severity,
             status="pending",
-            payload_json={"title": insight.title, "insight_type": insight.insight_type},
+            payload_json={
+                "title": insight.title,
+                "insight_type": insight.insight_type,
+                "agent_action_proposal_id": proposal_id,
+                "confirm_url": confirm_url,
+            },
         )
         db.add(delivery)
         await db.flush()
@@ -97,7 +130,16 @@ async def deliver_due_insights(
             delivery.error_text = "telegram_not_configured"
         else:
             try:
-                await send_ops_notification_html(_format_insight_html(insight), organization_id=int(org_id))
+                reply_markup = None
+                if confirm_url:
+                    reply_markup = {
+                        "inline_keyboard": [[{"text": "✅ Подтвердить действие", "url": confirm_url}]],
+                    }
+                await send_ops_notification_html(
+                    _format_insight_html(insight, confirm_url=confirm_url),
+                    organization_id=int(org_id),
+                    reply_markup=reply_markup,
+                )
                 delivery.status = "sent"
                 delivery.sent_at = datetime.now(tz=timezone.utc)
             except Exception as exc:
@@ -118,6 +160,7 @@ async def deliver_due_insights(
                     "delivery_id": int(delivery.id),
                     "status": delivery.status,
                     "severity": insight.severity,
+                    "agent_action_proposal_id": proposal_id,
                 },
             ),
         )

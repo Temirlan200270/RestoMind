@@ -461,11 +461,19 @@ async def _admin_auth_me_payload(request: Request, db: AsyncSession) -> dict[str
     if staff_me is not None:
         email_out = str(staff_me.email)
 
+    meta = org_me.meta_json if org_me is not None and isinstance(org_me.meta_json, dict) else {}
+    hub_default = bool(settings.executive_hub_default_enabled)
+    if meta.get("executive_hub_default_enabled") is False:
+        hub_default = False
+    elif meta.get("executive_hub_default_enabled") is True:
+        hub_default = True
+
     result = {
         "authenticated": True,
         "username": user,
         "organization_id": int(oid),
         "staff_role": staff_role,
+        "executive_hub_default_enabled": hub_default,
         "is_demo": is_demo,
         "is_superadmin": is_superadmin,
         "ws_token": create_admin_ws_token(

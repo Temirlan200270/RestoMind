@@ -14,8 +14,14 @@ from app.core.config import settings
 from app.db.models import Organization, RecommendationOutcome, SystemEvent
 from app.db.session import redis_client
 from app.integrations.telegram import send_ops_notification_html
+from app.services.digest_agent_actions import (
+    append_actions_to_digest_html,
+    append_actions_to_digest_text,
+    build_digest_agent_actions,
+    digest_actions_reply_markup,
+)
 from app.services.owner_intelligence_digest import build_owner_intelligence_weekly_digest
-from app.services.owner_roi import build_week_digest_payload
+from app.services.owner_roi import _bounds_to_utc_naive_pair, _previous_week_bounds_local, build_week_digest_payload
 from app.services.system_events import BusinessEvent, emit_event
 
 logger = logging.getLogger(__name__)
@@ -244,8 +250,8 @@ async def send_weekly_digest(
             "triggered_by": triggered_by,
         }
 
-    text_plain = str(payload.get("text") or "").strip()
-    if not text_plain:
+    base_text = str(payload.get("text") or "").strip()
+    if not base_text:
         return {
             "ok": False,
             "sent": False,
@@ -253,6 +259,21 @@ async def send_weekly_digest(
             "skip_reason": "empty_text",
             "triggered_by": triggered_by,
         }
+
+    lo_l, hi_l = _previous_week_bounds_local(org.timezone or "UTC")
+    start_utc, end_utc = _bounds_to_utc_naive_pair(lo_l, hi_l)
+    iso_year, iso_week, _ = local.isocalendar()
+    agent_actions = await build_digest_agent_actions(
+        db,
+        int(org_id),
+        start=start_utc,
+        end=end_utc,
+        source="owner_weekly_digest",
+        idempotency_prefix=f"digest:weekly:{iso_year}:W{iso_week:02d}:{org_id}",
+    )
+    text_plain = append_actions_to_digest_text(base_text, agent_actions) if agent_actions else base_text
+    if agent_actions:
+        payload["agent_actions"] = agent_actions
 
     if channel != "telegram":
         return {
@@ -280,11 +301,17 @@ async def send_weekly_digest(
             "triggered_by": triggered_by,
         }
 
-    html = text_to_html(text_plain)
+    html = text_to_html(base_text)
+    html = append_actions_to_digest_html(html, agent_actions)
+    reply_markup = digest_actions_reply_markup(agent_actions)
     actor = "system" if triggered_by == "cron" else "operator"
 
     try:
-        await send_ops_notification_html(html, organization_id=int(org_id))
+        await send_ops_notification_html(
+            html,
+            organization_id=int(org_id),
+            reply_markup=reply_markup,
+        )
     except Exception as exc:
         logger.exception("owner_digest: send failed org=%s: %s", org_id, exc)
         await _emit_digest_event(
@@ -322,7 +349,11 @@ async def send_weekly_digest(
         triggered_by=triggered_by,
         channel=channel,
         period=period,
-        metrics=payload.get("metrics") or {},
+        metrics={
+            **(payload.get("metrics") or {}),
+            "agent_actions_count": len(agent_actions),
+        },
+        agent_actions=agent_actions,
     )
 
     return {
@@ -333,6 +364,7 @@ async def send_weekly_digest(
         "period": period,
         "text_preview": text_plain[:280],
         "metrics": payload.get("metrics") or {},
+        "agent_actions": agent_actions,
         "actor": actor,
     }
 
@@ -348,6 +380,7 @@ async def _emit_digest_event(
     metrics: dict[str, Any],
     error: str | None = None,
     skip_reason: str | None = None,
+    agent_actions: list[dict[str, Any]] | None = None,
 ) -> None:
     event_type = "owner_digest.sent" if success else "owner_digest.failed"
     payload: dict[str, Any] = {
@@ -356,6 +389,15 @@ async def _emit_digest_event(
         "period": period,
         "metrics": metrics,
     }
+    if agent_actions:
+        payload["agent_actions"] = [
+            {
+                "proposal_id": row.get("proposal_id"),
+                "action_type": row.get("action_type"),
+                "confirm_url": row.get("confirm_url"),
+            }
+            for row in agent_actions
+        ]
     if error:
         payload["error"] = error
     if skip_reason:

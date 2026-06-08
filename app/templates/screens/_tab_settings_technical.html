@@ -123,6 +123,11 @@
                                         <span x-show="s.has_menu" class="px-1 py-0.5 rounded bg-indigo-50 text-indigo-600 font-bold">меню</span>
                                         <span x-show="s.has_prices" class="px-1 py-0.5 rounded bg-emerald-50 text-emerald-600 font-bold">цены</span>
                                     </div>
+                                    <button type="button"
+                                        class="shrink-0 rounded-md border border-rose-200 bg-rose-50 px-2 py-1 font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+                                        :disabled="aiSnapshotFeedbackLoading === s.id || s.feedback_recorded"
+                                        @click="markAiSnapshotWrong(s)"
+                                        x-text="s.feedback_recorded ? 'запомнено' : (aiSnapshotFeedbackLoading === s.id ? '...' : 'ИИ ошибся')"></button>
                                 </div>
                             </template>
                         </div>

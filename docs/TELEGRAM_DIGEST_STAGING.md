@@ -2,6 +2,15 @@
 
 Операционный чеклист перед включением cron `daily_os_digest_scheduled_tick` в staging/prod.
 
+## Не путать с Owner Intelligence Digest
+
+| Digest | Cron | Расписание | Аудитория | Канал Telegram | Содержимое |
+|--------|------|------------|-----------|----------------|------------|
+| **Daily OS Digest** | `daily_os_digest_scheduled_tick` | ~09:00 **org TZ** (ежедневно) | Персонал смены | **Ops chat** — `telegram_ops_chat_id` или `TELEGRAM_ADMIN_CHAT_ID` | Операционная сводка смены (очередь, инциденты) |
+| **Owner Intelligence Digest** | `owner_digest_scheduled_tick` | Пн 10:00–10:44 **org TZ** (еженедельно) | Владелец / руководство | **Owner chat** — `telegram_owner_chat_id` / owner-only | Финансы, ROI, маржа — **не** в ops-чат |
+
+**Запрет:** не направлять Owner Digest в ops-чат — риск утечки финансовых KPI линейному персоналу. Чеклист ниже — **только Daily OS Digest**.
+
 ## Env (Render / `.env`)
 
 - [ ] `TELEGRAM_BOT_TOKEN` — бот с правом писать в ops-чат
@@ -34,4 +43,5 @@
 
 - [`app/services/daily_os_digest.py`](../app/services/daily_os_digest.py)
 - [`app/worker.py`](../app/worker.py) — `daily_os_digest_scheduled_tick`
-- [`docs/FINAL_MILE_OPS_SIGNOFF.md`](FINAL_MILE_OPS_SIGNOFF.md) ? ????? ops sign-off
+- [`docs/FINAL_MILE_OPS_SIGNOFF.md`](FINAL_MILE_OPS_SIGNOFF.md) — общий ops sign-off
+- Owner weekly digest: [`docs/DEPLOY_RUNBOOK.md`](DEPLOY_RUNBOOK.md) §8.5 (`owner_digest_scheduled_tick`)

@@ -40,7 +40,8 @@ Engineering code and UI are ready (1000+ pytest). ROADMAP `Voice [ ]` and `iiko 
 |-----|----|------|------------|
 | `alembic upgrade head` + `alembic heads` (один head) + `alembic current` | [ ] | | Supabase SQL or Render shell |
 | Перезапуск **web** + **ARQ worker** после деплоя | [ ] | | `python -m arq app.worker.WorkerSettings` |
-| Cron registered: `daily_os_digest_scheduled_tick`, `owner_digest_scheduled_tick` | [ ] | | Telegram ops/owner digest |
+| Cron `daily_os_digest_scheduled_tick` → **ops chat** (`telegram_ops_chat_id`) | [ ] | | Ежедневно ~09:00 org TZ; см. [`TELEGRAM_DIGEST_STAGING.md`](TELEGRAM_DIGEST_STAGING.md) |
+| Cron `owner_digest_scheduled_tick` → **owner chat only** (не ops) | [ ] | | Еженедельно Пн 10:00 org TZ; финансы/ROI — [`DEPLOY_RUNBOOK.md`](DEPLOY_RUNBOOK.md) §8.5 |
 | Cron registered: `external_reviews_sync_scheduled_tick`, `sales_anomaly_scheduled_tick`, `insight_delivery_scheduled_tick`, `recommendation_outcomes_scheduled_tick` | [ ] | | Reviews, anomalies, deliveries, ROI measurements |
 | Cron registered: `iiko_inventory_sync`, `food_cost_scheduled_tick`, `olap_sales_scheduled_tick` | [ ] | | iiko Office/OLAP sync |
 

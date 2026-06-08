@@ -1450,6 +1450,7 @@ function adminMixinState() {
         /** Phase 3b OS: AI Snapshot list */
         aiSnapshots: [],
         aiSnapshotsLoading: false,
+        aiSnapshotFeedbackLoading: null,
         /** Phase 5 OS: OS Autopilot dashboard data from /intelligence/os-dashboard */
         osDashboardData: null,
         osDashboardLoading: false,
@@ -1536,6 +1537,8 @@ function adminMixinState() {
         executiveHubBusinessQuestions: [],
         executiveHubRole: 'owner',
         executiveHubActionBusy: false,
+        executiveHubActionPreview: null,
+        executiveHubActionPreviewProposalId: '',
         intelligencePendingActions: [],
         digitalTwinLoading: false,
         digitalTwin: { snapshot: {} },
@@ -4511,6 +4514,16 @@ function adminMixinAuthKnowledge() {
         },
 
         /** После auth: умный landing оператора (shift при риске/focus, иначе inbox). */
+        shouldDefaultExecutiveHub() {
+            try {
+                if (localStorage.getItem('rm_executive_hub_landing_off') === '1') return false;
+            } catch (_e) { /* ignore */ }
+            const role = this.effectiveStaffRole();
+            if (role !== 'admin' && role !== 'manager') return false;
+            const flag = this.userData?.executive_hub_default_enabled;
+            return flag !== false;
+        },
+
         async applyRoleDefaultLanding(fromHashTab) {
             if (fromHashTab) return;
             if (this.effectiveStaffRole() === 'operator') {
@@ -4521,6 +4534,9 @@ function adminMixinAuthKnowledge() {
             }
             this._bootstrapAdminMode({ tabFromHash: null });
             this._pushAdminHash();
+            if (this.shouldDefaultExecutiveHub()) {
+                await this.openExecutiveHub();
+            }
         },
 
         /** Подсказка RBAC для UI: '' если доступ есть, иначе текст для operator/manager. */
@@ -4551,6 +4567,7 @@ function adminMixinAuthKnowledge() {
                 ws_token: root.ws_token || '',
                 is_network: !!root.is_network,
                 network_orgs: Array.isArray(root.network_orgs) ? root.network_orgs : [],
+                executive_hub_default_enabled: root.executive_hub_default_enabled !== false,
             };
         },
 
@@ -10068,6 +10085,40 @@ function adminMixinDataChartsSettings() {
             }
         },
 
+        async markAiSnapshotWrong(snapshot) {
+            const id = snapshot?.id;
+            if (!id || this.aiSnapshotFeedbackLoading === id) return;
+            const reason = String(window.prompt('Что именно ИИ понял неправильно?') || '').trim();
+            if (!reason) return;
+            const correction = String(window.prompt('Как нужно было ответить или что запомнить?') || '').trim();
+            this.aiSnapshotFeedbackLoading = id;
+            try {
+                const { ok, data } = await this.apiJsonResponse(
+                    `/api/admin/intelligence/snapshots/${encodeURIComponent(id)}/feedback`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            reason,
+                            correction,
+                            question: snapshot.intent || '',
+                            expected_behavior: correction,
+                        }),
+                    },
+                );
+                if (!ok || !data?.ok) return;
+                this.aiSnapshots = (this.aiSnapshots || []).map((row) => (
+                    row.id === id ? { ...row, feedback_recorded: true } : row
+                ));
+                this.flashToast?.('Фидбек сохранён в память ИИ', 'success', 3000);
+            } catch (e) {
+                adminLogger.error('[admin] markAiSnapshotWrong', e);
+                this.flashToast?.('Не удалось сохранить фидбек', 'error', 4500);
+            } finally {
+                this.aiSnapshotFeedbackLoading = null;
+            }
+        },
+
         async loadRevenueLeak() {
             if (this.revenueLeakLoading) return;
             this.revenueLeakLoading = true;
@@ -10587,10 +10638,7 @@ function adminMixinDataChartsSettings() {
             }
             if (type === 'agent_action') {
                 const spec = action.payload && typeof action.payload === 'object' ? action.payload : {};
-                if (action.confirm_required && !window.confirm(String(spec.summary || spec.title || 'Подтвердить действие?'))) {
-                    return;
-                }
-                await this.executiveHubProposeAndConfirm({
+                await this.executiveHubProposeWithPreview({
                     action_type: spec.action_type || spec.actionType,
                     title: spec.title || action.label,
                     summary: spec.summary || '',
@@ -10599,7 +10647,30 @@ function adminMixinDataChartsSettings() {
             }
         },
 
-        async executiveHubProposeAndConfirm(body) {
+        closeExecutiveHubActionPreview() {
+            this.executiveHubActionPreview = null;
+            this.executiveHubActionPreviewProposalId = '';
+        },
+
+        executiveHubPreviewRows(preview) {
+            if (!preview || typeof preview !== 'object') return [];
+            if (Array.isArray(preview.diff)) {
+                return preview.diff.map((row) => {
+                    const label = row?.label || row?.name || '—';
+                    const oldP = row?.old_price != null ? `${row.old_price} ₸` : '—';
+                    const newP = row?.new_price != null ? `${row.new_price} ₸` : '—';
+                    return `${label}: ${oldP} → ${newP}`;
+                });
+            }
+            if (preview.summary) return [String(preview.summary)];
+            if (preview.proposed_until) return [`До: ${preview.proposed_until}`];
+            if (preview.trigger_category) {
+                return [`${preview.trigger_category} → ${preview.suggest_category || ''}`];
+            }
+            return [];
+        },
+
+        async executiveHubProposeWithPreview(body) {
             if (!body || !body.action_type) return;
             this.executiveHubActionBusy = true;
             try {
@@ -10615,18 +10686,45 @@ function adminMixinDataChartsSettings() {
                     }),
                 });
                 if (!ok || !data?.proposal?.id) return;
-                const confirmRes = await this.apiJsonResponse(
-                    `/api/admin/intelligence/agent-actions/${encodeURIComponent(data.proposal.id)}/confirm`,
+                const previewRes = await this.apiJsonResponse(
+                    `/api/admin/intelligence/agent-actions/${encodeURIComponent(data.proposal.id)}/preview`,
                     { method: 'POST' },
                 );
-                if (confirmRes.ok) {
+                if (!previewRes.ok) return;
+                this.executiveHubActionPreviewProposalId = data.proposal.id;
+                this.executiveHubActionPreview = previewRes.data?.preview || previewRes.data?.proposal?.preview || null;
+            } catch (e) {
+                adminLogger.error('[admin] executiveHubProposeWithPreview', e);
+            } finally {
+                this.executiveHubActionBusy = false;
+            }
+        },
+
+        async executiveHubConfirmPreviewedAction() {
+            const proposalId = this.executiveHubActionPreviewProposalId;
+            if (!proposalId) return;
+            this.executiveHubActionBusy = true;
+            try {
+                const { ok } = await this.apiJsonResponse(
+                    `/api/admin/intelligence/agent-actions/${encodeURIComponent(proposalId)}/confirm`,
+                    { method: 'POST' },
+                );
+                if (ok) {
+                    this.closeExecutiveHubActionPreview();
                     this.showToast?.('Действие применено', 'success');
                     await this.loadExecutiveHub();
                 }
             } catch (e) {
-                adminLogger.error('[admin] executiveHubProposeAndConfirm', e);
+                adminLogger.error('[admin] executiveHubConfirmPreviewedAction', e);
             } finally {
                 this.executiveHubActionBusy = false;
+            }
+        },
+
+        async executiveHubProposeAndConfirm(body) {
+            await this.executiveHubProposeWithPreview(body);
+            if (this.executiveHubActionPreviewProposalId) {
+                await this.executiveHubConfirmPreviewedAction();
             }
         },
 
@@ -10634,6 +10732,11 @@ function adminMixinDataChartsSettings() {
             if (!proposalId) return;
             this.executiveHubActionBusy = true;
             try {
+                const previewRes = await this.apiJsonResponse(
+                    `/api/admin/intelligence/agent-actions/${encodeURIComponent(proposalId)}/preview`,
+                    { method: 'POST' },
+                );
+                if (!previewRes.ok) return;
                 const { ok } = await this.apiJsonResponse(
                     `/api/admin/intelligence/agent-actions/${encodeURIComponent(proposalId)}/confirm`,
                     { method: 'POST' },

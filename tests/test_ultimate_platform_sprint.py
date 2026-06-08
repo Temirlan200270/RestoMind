@@ -13,6 +13,7 @@ from app.db.models import (
     ExternalReview,
     KnowledgeItem,
     Organization,
+    OrganizationMemoryEvent,
 )
 from app.integrations.reviews_external import import_review_from_url
 from app.services.owner_dashboard import build_stock_alerts_from_inventory, build_stock_alerts_stub
@@ -114,6 +115,67 @@ async def test_replay_uses_chat_history_slice(asgi_memory_client, monkeypatch) -
         {"role": "user", "content": "Привет"},
         {"role": "assistant", "content": "Здравствуйте!"},
     ]
+
+
+@pytest.mark.asyncio
+async def test_snapshot_feedback_records_memory_event(asgi_memory_client) -> None:
+    from app.core.passwords import hash_password
+    from app.db.models import StaffUser
+
+    client, session_factory = asgi_memory_client
+
+    async with session_factory() as db:
+        org = Organization(name="Snapshot Feedback Org", slug="snapshot-feedback-org")
+        db.add(org)
+        await db.flush()
+        db.add(StaffUser(
+            organization_id=org.id,
+            email="feedback@test.kz",
+            password_hash=hash_password("secret123"),
+            role="admin",
+            is_active=True,
+        ))
+        db.add(AIContextSnapshot(
+            id="snap-feedback-1",
+            organization_id=org.id,
+            phone="+77005550000",
+            business_state={"last_intent": "order"},
+            customer_state={},
+            event_slice={},
+        ))
+        await db.commit()
+
+    login = await client.post(
+        "/api/admin/auth/login",
+        json={"username": "feedback@test.kz", "password": "secret123"},
+    )
+    assert login.status_code == 200
+
+    res = await client.post(
+        "/api/admin/intelligence/snapshots/snap-feedback-1/feedback",
+        json={
+            "reason": "ИИ перепутал цену комбо",
+            "correction": "Комбо стоит 3490, а не 2990",
+            "expected_behavior": "Уточнять актуальную цену из меню",
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["ok"] is True
+    assert body["memory"]["event_type"] == "ai_snapshot_feedback"
+    assert body["memory"]["entity_id"] == "snap-feedback-1"
+
+    async with session_factory() as db:
+        rows = (
+            await db.execute(
+                select(OrganizationMemoryEvent).where(
+                    OrganizationMemoryEvent.entity_type == "ai_context_snapshot",
+                    OrganizationMemoryEvent.entity_id == "snap-feedback-1",
+                ),
+            )
+        ).scalars().all()
+        assert len(rows) == 1
+        assert rows[0].payload_json["correction"] == "Комбо стоит 3490, а не 2990"
 
 
 @pytest.mark.asyncio

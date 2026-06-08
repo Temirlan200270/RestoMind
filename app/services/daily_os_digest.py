@@ -14,6 +14,12 @@ from app.core.config import settings
 from app.db.models import AuditLog, BusinessRecommendation, OperationalInsight, Organization
 from app.db.session import redis_client
 from app.integrations.telegram import send_ops_notification_html
+from app.services.digest_agent_actions import (
+    append_actions_to_digest_html,
+    append_actions_to_digest_text,
+    build_digest_agent_actions,
+    digest_actions_reply_markup,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -130,9 +136,29 @@ async def maybe_send_daily_os_digest_for_org(db: AsyncSession, org: Organization
     if not await _redis_set_once(key):
         return
     payload = await build_daily_os_digest_payload(db, org, target_day=target_day)
-    safe = payload["text"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    base_text = str(payload.get("text") or "")
+    start = datetime.combine(target_day, time.min, tzinfo=timezone.utc)
+    end = start + timedelta(days=1)
+    agent_actions = await build_digest_agent_actions(
+        db,
+        int(org.id),
+        start=start,
+        end=end,
+        source="daily_os_digest",
+        idempotency_prefix=f"digest:daily:{target_day.isoformat()}:{org.id}",
+    )
+    if agent_actions:
+        payload["agent_actions"] = agent_actions
+        payload["text"] = append_actions_to_digest_text(base_text, agent_actions)
+    safe = base_text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     html = "<b>RestoMind OS — daily digest</b><br/><br/>" + safe.replace("\n", "<br/>")
-    await send_ops_notification_html(html, organization_id=int(org.id))
+    html = append_actions_to_digest_html(html, agent_actions)
+    reply_markup = digest_actions_reply_markup(agent_actions)
+    await send_ops_notification_html(
+        html,
+        organization_id=int(org.id),
+        reply_markup=reply_markup,
+    )
 
 
 async def daily_os_digest_scheduled_tick(_ctx: dict[str, Any]) -> None:

@@ -6,7 +6,7 @@
 
 ---
 
-## Текущее состояние (актуально на 2026-05-22)
+## Текущее состояние (актуально на 2026-06-08)
 
 | Фаза | Что реализовано | Готовность | Ключевые файлы |
 |------|----------------|------------|----------------|
@@ -17,10 +17,11 @@
 | Phase 5: Full OS Behavior | Predictive + autopilot pricing (single + bulk), healing 2.0 WA, digest backend, GuestCare, stock alerts, Decision Feed UI | **~98%** | `owner_dashboard.py`, `healing_actions.py`, `intelligence.py` |
 | Final Mile (backend) | SupplyMind + iiko Office sync, StaffMind onboarding, Voice (`stt_fallback` + Realtime code), Daily OS Digest cron, GuestCare 2GIS sync | **MVP ✅** | [`docs/FINAL_MILE_IMPLEMENTED.md`](FINAL_MILE_IMPLEMENTED.md) |
 | Final Mile (UI) | SupplyMind / StaffMind / Voice toggle / digest preview / GuestCare sync ? ??????? | **wired ?** | [`docs/FINAL_MILE_OPS_SIGNOFF.md`](FINAL_MILE_OPS_SIGNOFF.md) ? **ops gates** |
-| **UI Layer (Phase 6)** | Focus-Driven Admin Shell: 3 режима, split Shift, Action Queue inbox, Command Bar | **✅ Sprint 1–4** (Strangler) | [`docs/UI_DESIGN_SYSTEM.md`](UI_DESIGN_SYSTEM.md), ROADMAP P5 «Focus-Driven OS» |
+| **UI Layer (Phase 6a)** | Focus-Driven Admin Shell: 3 режима, split Shift, Action Queue inbox, Command Bar | **✅ Sprint 1–4** (Strangler) | [`docs/UI_DESIGN_SYSTEM.md`](UI_DESIGN_SYSTEM.md), ROADMAP P5 «Focus-Driven OS» |
+| **Executive OS (Phase 6b)** | Executive Hub поверх вкладок, агент как command surface, `agent_action_proposals` как валидируемые команды + audit events | **MVP ✅** | `executive_hub.py`, `agent_actions.py`, `intelligence.py`, ROADMAP § Phase 6 |
 | **Intelligence OS (Restory-class)** | iiko OLAP fact layer, D0 data quality, explainable insights, organization memory, tool-based AI Analyst, knowledge graph, forecasting v2, ROI feedback loop, guarded experimental drafts | **Trust-layer ✅** | [`docs/INTELLIGENCE_OS_PLAN.md`](INTELLIGENCE_OS_PLAN.md), `iiko_olap_sales_sync.py`, `data_quality.py`, `copilot/` |
 
-**Главный вывод (2026-05-22):** RestoMind OS — **Industrial Platform** с закрытыми фазами 1–4 и Phase 3 (~100%). Final Mile backend+UI в репо; следующий слой — **staging/ops**: Telegram digest, WS `os.audit`, iiko Office live pilot, Twilio Realtime call + cost report.
+**Главный вывод (2026-06-08):** RestoMind OS перешёл от “visibility” к **Executive OS MVP**: Hub становится верхним слоем, вкладки — audit/drill-down, агент получает безопасные “руки” через валидируемые команды и human-in-the-loop. Следующий слой — proactive apply из Telegram и live iiko write после dry-run/owner-confirm guardrails.
 
 ### Что остаётся для 100%
 
@@ -35,7 +36,7 @@
 | All-time KPI из events (без SQL к Order) | **✅ org-level** | `get_cumulative_event_totals()` в `/stats`; location-scoped — SQL fallback |
 | Legacy NULL org/location backfill | **✅ API** | `tenant_backfill.py`, `GET/POST /intelligence/tenant-scope-*` |
 | Per-org admin rate limit | **✅** | `admin_org_rate_limit_middleware`, `ADMIN_RATE_LIMIT_PER_MINUTE` |
-| Postgres RLS | Не реализован | Enterprise hardening — отдельный эпик |
+| Postgres RLS | **✅ core** | `20260609_tenant_rls`; phase 2 для оставшихся таблиц — отдельный hardening |
 | Admin UI i18n kk | Не реализован | Админка — русский inline; kk — отдельный эпик |
 | Event-first per-location aggregate | ✅ Phase 1.2 | Rollup из `SystemEvent._location_id` в `owner_dashboard.py`; org-level `DailyOrgStats` без изменений |
 
@@ -315,11 +316,46 @@ Decision Engine: `max_discount_pct = 15` по policy ресторана → от
 - Auto-recommendations без ручного refresh
 - Self-healing: система сама детектирует и эскалирует операционные проблемы
 
-**Статус (2026-05-22):** ~98% — см. ROADMAP P4/P5. Backend OS-слои и **Focus-Driven Admin Shell (Sprint 1–4)** закрыты в коде; остаются ops-gates Final Mile (§ ниже).
+**Статус (2026-06-08):** ~98% — см. ROADMAP P4/P5. Backend OS-слои, **Focus-Driven Admin Shell** и **Executive Hub v2** закрыты в коде; остаются ops-gates Final Mile и автономные внешние write-guardrails (§ ниже).
 
 ---
 
-## UI Layer — Focus-Driven Admin Shell (Phase 6, Strangler)
+## Executive OS — Actionable AI (Phase 6b)
+
+> **Новая точка невозврата продукта.** RestoMind перестаёт быть “умным зеркалом” и становится AI-управляющим: верхний слой объясняет, агент предлагает действие, человек подтверждает, система исполняет и оставляет аудит.
+
+### Контракт Phase 6b
+
+| Слой | Назначение | Статус |
+|------|------------|--------|
+| Executive Hub | 4–6 narrative cards поверх вкладок, Health/Money/Quality/Ops, drill-down в доказательства | ✅ |
+| Agent as SPOT | `/intelligence/query` держит контекст и создаёт pending actions вместо простых советов | ✅ MVP |
+| Command layer | `agent_action_proposals` хранит валидируемые команды с `_command` metadata | ✅ MVP |
+| Human-in-the-loop | Любая мутация force-close / upsell / staged iiko требует confirm | ✅ |
+| Audit trail | `SystemEvent`: `agent_action.proposed`, `confirmed`, `applied`, `rejected` | ✅ |
+| Learning loop | `AIContextSnapshot` feedback → `organization_memory_events` | ✅ MVP |
+| Proactive apply | Telegram/digest deep-link в тот же confirm contract | ⏳ |
+| iiko write live | Dry-run preview → explicit owner confirm → adapter write → audit | ⏳ |
+
+### Command rules
+
+LLM не пишет напрямую в доменные таблицы и не вызывает внешний iiko write. Он может только предложить команду:
+
+```text
+Agent proposes Command -> server validates payload -> owner confirms -> executor applies -> SystemEvent audit
+```
+
+Текущий registry команд:
+
+- `ForceCloseRestaurantCommand` → `force_close`
+- `CreateUpsellRuleCommand` → `upsell_rule_create`
+- `StageIikoWriteCommand` → `iiko_write_staged` (без live iiko side effect)
+
+Следующий кодовый шаг: связать proactive `InsightDelivery`/Telegram с тем же `/agent-actions/{id}/confirm`, чтобы владелец мог применять действие из push-сообщения, а не только из Hub.
+
+---
+
+## UI Layer — Focus-Driven Admin Shell (Phase 6a, Strangler)
 
 > **Не новая бизнес-логика.** Перенос «центра тяжести» с SaaS-вкладок на **трёхрежимную операционную оболочку** (Admin Shell), связанную с G10 Shift Control Plane. Прод не останавливается: старые hash-URL и сайдбар P1.5.0 живут параллельно до Sprint 4.
 

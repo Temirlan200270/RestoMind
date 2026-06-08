@@ -100,10 +100,11 @@ Implemented bridge:
 
 | Module | Backend MVP | Integration epic | Admin UI |
 |--------|-------------|------------------|----------|
-| SupplyMind | ✅ snapshots + sync + checklist lifecycle | live iiko Office smoke | ✅ final_mile panel (item checks session-local) |
-| StaffMind | ✅ sessions + Q&A | — | ✅ settings team + tracker UI (metrics partial) |
+| SupplyMind | ✅ snapshots + sync + checklist lifecycle + item PATCH persist | live iiko Office smoke (ops gate) | ✅ final_mile panel |
+| StaffMind | ✅ sessions + Q&A + tracker metrics (`test_passed`, `questions_asked`) | — | ✅ settings team + tracker UI |
+| Voice AI (call log) | ✅ `location_id` in `voice_call_logs.payload_json` + `GET /voice/calls?location_id=` | staging smoke | ✅ final_mile strip |
 
-**Known UI/API gaps:** SupplyMind item checkbox persist; StaffMind `test_passed` / `questions_asked` in API; Voice call log `location_id` in payload. See [`docs/ROADMAP.md`](ROADMAP.md) backlog lines.
+Закрытые гэпы (ROADMAP P5 `[x]`): checklist item PATCH, StaffMind backend metrics, Voice `location_id` в payload — **не** считаются открытыми backlog. Новые задачи — только в [`docs/ROADMAP.md`](ROADMAP.md).
 
 Tests: [`tests/test_ultimate_platform_sprint.py`](../tests/test_ultimate_platform_sprint.py), [`tests/test_iiko_inventory_sync.py`](../tests/test_iiko_inventory_sync.py) (lifecycle + RBAC).
 

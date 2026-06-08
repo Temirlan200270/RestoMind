@@ -16,8 +16,13 @@
 
 ### Docs
 - Синхронизация доков с Postgres-only и текущим Alembic: убраны хардкоды revision id, SQLite-патчи из CONVENTIONS, таблица приоритета Redis, Rule 12 (UTC/tz), X1 staged vs freeze, дедуп AI_OPERATIONS → INTELLIGENCE_OS_PLAN; stubs в `docs/archive/`.
+- Второй проход аудита: SUPPLYMIND_STAFFMIND gaps закрыты; SECURITY_AUDIT ↔ RLS `20260609_tenant_rls`; GuestCare Google WONTFIX в AI_OPERATIONS; разделение Daily OS vs Owner digest; уточнение E5 BackgroundTasks в ROADMAP.
+- Executive OS docs: `AI_OPERATIONS.md` § Executive Hub v2 (default landing, preview drawer, Telegram confirm, command registry, action chain); исправлена кодировка `app.organization_id` в ROADMAP § аудит OS vs SaaS-UI.
 
 ### Added
+- Executive OS evolution (6 блоков): Hub default landing (`executive_hub_default_enabled` в `/auth/me` + org meta), proactive apply из `insight_delivery` с `agent_action_proposal_id` и signed Telegram link (`GET /api/public/agent-actions/confirm`), lifecycle `proposed→previewed→confirmed→applied` (`POST .../preview`), registry v2 `app/services/agent_commands/`, lineage `GET .../agent-actions/{id}/chain`, guarded `IikoWriteAdapter` (`IIKO_LIVE_WRITE_ENABLED`).
+- Executive OS command foundation: `agent_action_proposals` оформлены как валидируемые команды (`ForceCloseRestaurantCommand`, `CreateUpsellRuleCommand`, `StageIikoWriteCommand`), добавлен `GET /api/admin/intelligence/agent-actions/commands`, 422 для невалидных payload и audit events `agent_action.proposed|confirmed|applied|rejected`.
+- Snapshot learning loop MVP: `POST /api/admin/intelligence/snapshots/{id}/feedback` + кнопка «ИИ ошибся» в списке snapshots записывают коррекцию в `organization_memory_events`.
 - Executive Hub v2: NLG-виджеты Health/Money/Quality/Ops, action cards (navigate/chat/agent_action), API `dimensions` в `GET /api/admin/intelligence/executive-hub`.
 - Human-in-the-loop agent actions: `POST /api/admin/intelligence/agent-actions/propose|confirm|reject`, force-close, upsell rule create, staged iiko write; детект из `/intelligence/query`.
 - Postgres RLS last-line defense: `app/db/tenant_rls.py`, middleware, миграция `20260609_tenant_rls`.

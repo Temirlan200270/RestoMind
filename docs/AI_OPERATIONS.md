@@ -42,6 +42,16 @@ Intelligence не дублирует Analytics — он отвечает на в
 - Drill-down: карточка открывает drawer с evidence/actions и ведёт в существующие вкладки через `incidentGo`.
 - Agent chat: панель справа/снизу переиспользует `POST /api/admin/intelligence/query`.
 
+Реализация v2 (Executive OS):
+
+- **Default landing:** owner/manager открывают Hub первым слоем (`executive_hub_default_enabled` в `/auth/me` + org `meta_json`; opt-out — «К вкладкам» + `localStorage.rm_executive_hub_landing_off`).
+- **Dimensions + action cards:** NLG-виджеты Health/Money/Quality/Ops (`dimensions` в executive-hub payload); карточки с `navigate` / `chat` / `agent_action`.
+- **Command registry:** `app/services/agent_commands/` — валидируемые команды (`ForceCloseRestaurantCommand`, `CreateUpsellRuleCommand`, `StageIikoWriteCommand`); каталог `GET /api/admin/intelligence/agent-actions/commands`; 422 на невалидный payload.
+- **Preview drawer:** `POST /api/admin/intelligence/agent-actions/{id}/preview` → diff/summary в Hub; lifecycle `proposed → previewed → confirmed → applied`.
+- **Action chain (lineage):** `GET /api/admin/intelligence/agent-actions/{id}/chain` — insight → proposal → preview → apply для audit.
+- **Proactive Telegram confirm:** `insight_delivery` создаёт `agent_action_proposal` + signed link `GET /api/public/agent-actions/confirm`; audit `agent_action.confirm_link_opened|confirmed_from_telegram`.
+- **Human-in-the-loop API:** `POST .../agent-actions/propose|confirm|reject`; детект pending actions из `/intelligence/query`.
+
 ---
 
 ## Owner Intelligence (продуктовый слой для владельца)
@@ -78,6 +88,13 @@ GET  /api/admin/intelligence/operator-efficiency
 GET  /api/admin/intelligence/recommendations
 POST /api/admin/intelligence/recommendations/refresh
 PATCH /api/admin/intelligence/recommendations/{id}
+GET  /api/admin/intelligence/agent-actions/commands
+POST /api/admin/intelligence/agent-actions/propose
+POST /api/admin/intelligence/agent-actions/{id}/preview
+GET  /api/admin/intelligence/agent-actions/{id}/chain
+POST /api/admin/intelligence/agent-actions/{id}/confirm
+POST /api/admin/intelligence/agent-actions/{id}/reject
+GET  /api/public/agent-actions/confirm?token=…
 GET  /api/admin/system/task-queue-health
 GET  /api/admin/system/faq-cache-metrics?days=7
 ```
@@ -353,21 +370,21 @@ Location scope поддержан в:
 ### GuestCare External
 
 - `GET /api/admin/intelligence/reviews/external` — список + `sync_meta` (последний cron/ручной sync)
-- `POST /api/admin/intelligence/reviews/external/sync` — fetch страницы 2GIS (`Organization.review_url_2gis`) и опционально Google (`meta_json.review_url_google`), upsert в `external_reviews`
-- `POST /api/admin/intelligence/reviews/external/import` — ручной URL или полный payload (`author`, `rating`, `text`)
+- `POST /api/admin/intelligence/reviews/external/sync` — **только 2GIS**: fetch страницы `Organization.review_url_2gis`, upsert в `external_reviews`. Google auto-sync **не поддерживается** (WONTFIX Places API).
+- `POST /api/admin/intelligence/reviews/external/import` — **ручной** импорт: URL или полный payload (`author`, `rating`, `text`) — единственный путь для Google-отзывов
 - `POST /api/admin/intelligence/reviews/external/{review_id}/reply-draft`
 
 Хранение: таблица `external_reviews` (не `Organization.meta_json` для самих отзывов; метаданные sync — `meta_json.guestcare_sync`).
 
-**Парсинг (ограничения):** без headless browser; 2GIS — JSON-LD + embedded `__INITIAL_STATE__` при наличии в HTML. Google Maps без **Places API** key обычно не отдаёт отзывы в статическом HTML (ToS/conservative).
+**Парсинг `/sync` (2GIS only):** без headless browser; JSON-LD + embedded `__INITIAL_STATE__` при наличии в HTML. Google не парсится в `/sync` — только ручной `import`.
 
-**Продуктовое решение (2026-05):** GuestCare **100% = 2GIS auto-sync**; Google Places API **не в scope** — Google URL опционален (best-effort + ручной import по URL).
+**Продуктовое решение (2026-05):** GuestCare auto-sync = **2GIS only**. Google: **manual import only** — см. [`FINAL_MILE_IMPLEMENTED.md`](FINAL_MILE_IMPLEMENTED.md).
 
 ---
 
 ## Final Mile — backend MVP
 
-?????? ?????? ? ??????????: [`docs/FINAL_MILE_IMPLEMENTED.md`](FINAL_MILE_IMPLEMENTED.md). **Ops/staging gate**: [`docs/FINAL_MILE_OPS_SIGNOFF.md`](FINAL_MILE_OPS_SIGNOFF.md).
+Полный перечень и статусы: [`docs/FINAL_MILE_IMPLEMENTED.md`](FINAL_MILE_IMPLEMENTED.md). **Ops/staging gate**: [`docs/FINAL_MILE_OPS_SIGNOFF.md`](FINAL_MILE_OPS_SIGNOFF.md).
 
 ### SupplyMind
 

@@ -34,6 +34,7 @@ from app.api.admin.orders import router as admin_orders_router
 from app.api.admin.organization import router as admin_organization_router
 from app.api.admin.rules import router as admin_rules_router
 from app.api.admin.intelligence import router as admin_intelligence_router
+from app.api.public_agent_actions import router as public_agent_actions_router
 from app.api.admin.owner_intelligence import router as admin_owner_intelligence_router
 from app.api.admin.owner_intelligence_analytics import router as admin_owner_intelligence_analytics_router
 from app.api.admin.owner_intelligence_audits import router as admin_owner_intelligence_audits_router
@@ -456,6 +457,7 @@ app.add_middleware(
 
 # --- Подключение роутеров ---
 app.include_router(demo_public_router)
+app.include_router(public_agent_actions_router, prefix="/api")
 app.include_router(webhooks_router, prefix="/api")
 app.include_router(payment_webhook_router, prefix="/api")
 app.include_router(admin_auth_router, prefix="/api")

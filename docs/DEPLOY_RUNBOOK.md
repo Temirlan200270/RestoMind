@@ -269,8 +269,9 @@ curl -sS https://<host>/api/admin/system/task-queue-health \
 | Cron | Расписание (UTC) | Задача |
 |------|------------------|--------|
 | `draft_recovery_scheduled_tick` | каждые ~10 мин | nudge брошенных DRAFT |
-| `daily_os_digest_scheduled_tick` | :00/:15/:30/:45 | утренняя сводка (окно 09:00 org TZ) |
-| `external_reviews_sync_scheduled_tick` | 02:10, 14:10 | 2GIS отзывы |
+| `daily_os_digest_scheduled_tick` | :00/:15/:30/:45 | **Daily OS** → Telegram **ops chat** (~09:00 org TZ) |
+| `owner_digest_scheduled_tick` | :00/:15/:30/:45 | **Owner Intelligence** → **owner chat only** (Пн 10:00–10:44 org TZ) |
+| `external_reviews_sync_scheduled_tick` | 02:10, 14:10 | 2GIS отзывы (Google — manual import only) |
 | `iiko_inventory_sync_scheduled_tick` | 00:20, 06:20, 12:20, 18:20 | остатки iiko Office |
 | `billing_usage_daily_scheduled_tick` | 00:12 | rollup billing |
 

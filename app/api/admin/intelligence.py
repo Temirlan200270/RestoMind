@@ -111,6 +111,10 @@ class AgentActionProposeBody(BaseModel):
     summary: str = Field(default="", max_length=2000)
     payload: dict[str, Any] = Field(default_factory=dict)
     source: str = Field(default="hub", max_length=32)
+    source_insight_id: int | None = None
+    source_snapshot_id: int | None = None
+    source_conversation_id: int | None = None
+    trace_id: str | None = Field(default=None, max_length=64)
 
 
 class InsightPatchBody(BaseModel):
@@ -149,6 +153,13 @@ class MemoryNoteBody(BaseModel):
         if self.event_type not in allowed:
             raise ValueError("Unsupported memory event type")
         return self
+
+
+class SnapshotFeedbackBody(BaseModel):
+    reason: str = Field(..., min_length=2, max_length=1000)
+    correction: str | None = Field(default=None, max_length=2000)
+    question: str | None = Field(default=None, max_length=1000)
+    expected_behavior: str | None = Field(default=None, max_length=2000)
 
 
 class InsightDeliveryActionBody(BaseModel):
@@ -321,18 +332,75 @@ async def intelligence_agent_action_propose(
 
     org_id = admin_org_from_session(request)
     staff = await _session_staff_user(request, db)
-    row = await propose_agent_action(
-        db,
-        organization_id=org_id,
-        staff_user_id=int(staff.id) if staff is not None else None,
-        action_type=body.action_type,
-        title=body.title,
-        summary=body.summary,
-        payload=body.payload,
-        source=body.source,
-    )
+    try:
+        row = await propose_agent_action(
+            db,
+            organization_id=org_id,
+            staff_user_id=int(staff.id) if staff is not None else None,
+            action_type=body.action_type,
+            title=body.title,
+            summary=body.summary,
+            payload=body.payload,
+            source=body.source,
+            source_insight_id=body.source_insight_id,
+            source_snapshot_id=body.source_snapshot_id,
+            source_conversation_id=body.source_conversation_id,
+            trace_id=body.trace_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     await db.commit()
     return {"ok": True, "proposal": proposal_public(row)}
+
+
+@router.get("/agent-actions/commands")
+async def intelligence_agent_action_commands() -> dict:
+    from app.services.agent_actions import supported_agent_commands
+
+    return {"ok": True, "items": supported_agent_commands()}
+
+
+@router.post("/agent-actions/{proposal_id}/preview")
+async def intelligence_agent_action_preview(
+    proposal_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    from app.services.agent_actions import preview_agent_action
+
+    org_id = admin_org_from_session(request)
+    staff = await _session_staff_user(request, db)
+    role = str(getattr(staff, "role", "") or "admin").strip().lower()
+    try:
+        result = await preview_agent_action(
+            db,
+            proposal_id=proposal_id,
+            organization_id=org_id,
+            staff_role=role,
+        )
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Proposal not found") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Role not allowed") from None
+    await db.commit()
+    return result
+
+
+@router.get("/agent-actions/{proposal_id}/chain")
+async def intelligence_agent_action_chain(
+    proposal_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    from app.services.agent_actions import build_action_chain
+
+    org_id = admin_org_from_session(request)
+    try:
+        return await build_action_chain(db, proposal_id=proposal_id, organization_id=org_id)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Proposal not found") from None
 
 
 @router.post("/agent-actions/{proposal_id}/confirm")
@@ -345,17 +413,21 @@ async def intelligence_agent_action_confirm(
 
     org_id = admin_org_from_session(request)
     staff = await _session_staff_user(request, db)
+    role = str(getattr(staff, "role", "") or "admin").strip().lower()
     try:
         result = await confirm_agent_action(
             db,
             proposal_id=proposal_id,
             organization_id=org_id,
             staff_user_id=int(staff.id) if staff is not None else None,
+            staff_role=role,
         )
     except LookupError:
         raise HTTPException(status_code=404, detail="Proposal not found") from None
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Role not allowed") from None
     await db.commit()
     return result
 
@@ -2010,6 +2082,59 @@ async def replay_ai_decision(
             "raw": ai_response.model_dump(),
         },
     }
+
+
+@router.post("/snapshots/{snapshot_id}/feedback")
+async def create_ai_snapshot_feedback(
+    snapshot_id: str,
+    body: SnapshotFeedbackBody,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Record manager feedback for a replayable AI context snapshot.
+
+    MVP learning loop: no fine-tuning here; the correction becomes organization
+    memory so Copilot can use it in future explanations and calibration.
+    """
+    org_id = admin_org_from_session(request)
+    row = await db.get(AIContextSnapshot, snapshot_id)
+    if row is None or int(row.organization_id) != int(org_id):
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+
+    reason = body.reason.strip()
+    correction = (body.correction or "").strip()
+    question = (body.question or "").strip()
+    expected_behavior = (body.expected_behavior or "").strip()
+    parts = [f"AI snapshot feedback: {reason}"]
+    if correction:
+        parts.append(f"Correction: {correction}")
+    if expected_behavior:
+        parts.append(f"Expected behavior: {expected_behavior}")
+    summary = " | ".join(parts)
+
+    memory = await record_memory_event(
+        db,
+        org_id,
+        event_type="ai_snapshot_feedback",
+        event_date=datetime.now(timezone.utc).date(),
+        entity_type="ai_context_snapshot",
+        entity_id=row.id,
+        summary=summary,
+        payload={
+            "snapshot_id": row.id,
+            "phone": row.phone,
+            "question": question,
+            "reason": reason,
+            "correction": correction,
+            "expected_behavior": expected_behavior,
+            "snapshot_created_at": row.created_at.isoformat() if row.created_at else None,
+            "intent": (row.business_state or {}).get("last_intent"),
+        },
+        source="manual",
+        confidence_score=1.0,
+    )
+    await db.commit()
+    return {"ok": True, "snapshot_id": row.id, "memory": memory_event_public(memory)}
 
 
 @router.get("/replay/scenarios")

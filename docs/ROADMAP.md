@@ -101,7 +101,7 @@
 - [x] **Superadmin audit log:** `SuperadminAuditLog` + миграция [`20260521_superadmin_audit`](alembic/versions/20260521_superadmin_audit.py); `GET /api/superadmin/audit`; запись на approve/reject/create/status/credentials/schedule/sync/password_reset — [`superadmin_audit.py`](app/services/superadmin_audit.py). UI «Журнал действий Super Admin». Тесты: [`tests/test_superadmin_audit.py`](tests/test_superadmin_audit.py).
 - [x] **Control Plane Phase 2 (trace_id + API tail):** `trace_context.py`, webhook → ARQ → `emit_event`; iiko/WA/operator logs; `parent_event_id`/`caused_by`; `GET /trace-timeline` — [`docs/CONTROL_PLANE.md`](docs/CONTROL_PLANE.md), [`tests/test_control_plane_trace.py`](tests/test_control_plane_trace.py).
 - [x] **Control Plane — timeline UI panel:** admin UI по `trace_id` (API `GET /trace-timeline` ✅); Phase 3 replay harness — см. CONTROL_PLANE.
-- [x] **E5 ARQ-only:** убран fallback на `BackgroundTasks` в [`app/services/task_queue.py`](app/services/task_queue.py); в `APP_ENV=production|staging` старт web-процесса проверяет Redis+ARQ; worker обязателен в проде. Web enqueue и [`WorkerSettings`](app/worker.py) используют один `ARQ_QUEUE_NAME` (`restomind` по умолчанию).
+- [x] **E5 ARQ-only (prod):** при настроенном Redis (`arq_can_run`) enqueue **без** fallback на `BackgroundTasks`; `APP_ENV=production|staging` проверяет Redis+ARQ на старте; worker обязателен. `BackgroundTasks` остаётся только для local dev без Redis и opt-in `WHATSAPP_TEXT_BACKGROUND_ENABLED` (realtime text path). Прямые `BackgroundTasks` в роутерах (`payment_webhook`, `webhooks`) — отдельные fire-and-forget после commit, не замена ARQ-очереди.
 - [x] **E5 диагностика очереди (light):** `GET /api/admin/system/task-queue-health` ([`app/api/admin/system.py`](app/api/admin/system.py)) + хелпер [`app/services/task_queue_health.py`](app/services/task_queue_health.py) — структурированный статус Redis/ARQ/worker (heartbeat по `<queue>:health-check`). Структурный лог `event=task_queue_enqueue` на каждый enqueue в [`app/services/task_queue.py`](app/services/task_queue.py).
 
 ## 🟠 P1.5: UX Density & AI Trust
@@ -142,15 +142,29 @@
 
 **Остаётся (актуальный техдолг / продукт):**
 
-- [x] **Postgres RLS как last line of defense:** политики на core-таблицах + pp.organization_id/pp.bypass_rls через middleware и get_db ([pp/db/tenant_rls.py](app/db/tenant_rls.py), миграция 20260609_tenant_rls).
+- [x] **Postgres RLS как last line of defense:** политики на core-таблицах + `app.organization_id`/`app.bypass_rls` через middleware и get_db ([`app/db/tenant_rls.py`](app/db/tenant_rls.py), миграция 20260609_tenant_rls).
 - [x] **Parallel context fetch:** `fetch_ai_read_context` — три параллельных DB-сессии (`menu` / `user` / `org+kb+draft`) в [`context_engine.py`](app/services/context_engine.py).
 - [x] **Executive Hub v2:** NLG-виджеты Health/Money/Quality/Ops (`dimensions`), action cards с navigate/chat/agent_action в overlay.
 - [x] **Conversational configuration (MVP):** propose/confirm API (`/intelligence/agent-actions/*`), force-close, upsell rule create, staged iiko write; детект из чата + кнопки подтверждения в Hub.
-- [ ] **Snapshot → learning loop:** feedback «ИИ ошибся» → memory / fine-tuning pipeline (сейчас audit + `was_useful`, без auto-fix).
+- [x] **Snapshot → learning loop MVP:** feedback «ИИ ошибся» на `AIContextSnapshot` пишет `organization_memory_events` (`event_type=ai_snapshot_feedback`) через `POST /api/admin/intelligence/snapshots/{id}/feedback`; UI-кнопка в технастройках, без fine-tuning на старте.
+- [x] **Executive OS command foundation:** `agent_action_proposals` теперь оформлены как валидируемые команды (`ForceCloseRestaurantCommand`, `CreateUpsellRuleCommand`, `StageIikoWriteCommand`) с command metadata, `GET /agent-actions/commands`, 422 на невалидные payload и audit events `agent_action.proposed|confirmed|applied|rejected`.
 - [ ] **Analytics fully off live tables:** дожать materialized/event-only пути; убрать тяжёлые сканы `Order`/`ChatLog` там, где уже есть агрегаты.
 - [ ] **iiko Control Plane (write):** автономная запись цен/меню в iiko по запросу владельца — future, после guardrails (см. X1 freeze в Intelligence OS).
 
-**Вердикт:** направление аудита верное; устаревшие пункты — SQLite schizophrenia и «Hub ещё не начат». Следующий фокус: **snapshot → learning loop** и **полный iiko write** (после guardrails), не новые вкладки.
+**Вердикт:** направление аудита верное; устаревшие пункты — SQLite schizophrenia и «Hub ещё не начат». Следующий фокус: **Executive OS** — Hub как верхний слой, агент как single point of truth, action/command контур как безопасные «руки» продукта; затем **analytics off live tables** и **полный iiko write** после guardrails.
+
+### Phase 6 — Executive OS
+
+> Цель: перейти от «админки с вкладками» к AI-управляющему. Вкладки остаются нижним слоем аудита, но основной путь владельца: Executive Hub → агент → подтверждённое действие.
+
+- [x] **Executive Hub overlay:** 4–6 narrative cards, dimensions Health/Money/Quality/Ops, drill-down в нижний слой данных.
+- [x] **Agent chat как командный слой:** `/intelligence/query` создаёт pending actions, Hub умеет propose/confirm.
+- [x] **Command architecture MVP:** все мутации агента идут через валидируемые команды и human-in-the-loop (`agent_action_proposals`), не через прямые записи из LLM.
+- [x] **Audit log для действий агента:** `SystemEvent` фиксирует proposal/confirm/apply/reject с command metadata.
+- [x] **Hub default для owner/manager:** `executive_hub_default_enabled` (settings + org meta), owner/manager открывают Executive Hub первым слоем; «К вкладкам» + `rm_executive_hub_landing_off`.
+- [x] **Proactive Telegram apply:** `insight_delivery` создаёт `agent_action_proposal`, signed link `GET /api/public/agent-actions/confirm`, audit `agent_action.confirm_link_opened|confirmed_from_telegram`.
+- [x] **Command registry v2 + preview/diff:** `app/services/agent_commands/` (`validate/preview/apply`), `POST .../agent-actions/{id}/preview`, Hub preview drawer, lineage `GET .../chain`.
+- [ ] **iiko live write:** `IikoWriteAdapter` + guardrails готовы; live API подключить когда write-контракт iiko доступен (`IIKO_LIVE_WRITE_ENABLED=false` по умолчанию).
 
 ## 🟢 P2: Развитие (Growth)
 
