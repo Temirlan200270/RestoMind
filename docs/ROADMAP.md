@@ -128,6 +128,30 @@
 
 - [x] **Refresh `docs/ui/baseline/`:** baseline PNGs are tracked because `docs/UI_DESIGN_SYSTEM.md` embeds them; regenerate via [`scripts/capture_admin_u0_baseline.py`](scripts/capture_admin_u0_baseline.py) after major UI changes. `docs/ui/mobile-review/` remains a separate mobile refresh.
 
+### Аудит «OS vs SaaS-UI» (2026‑06) — сверка с кодом
+
+> Внешний разбор: бэкенд ≈ OS Phase 5, фронт ещё tab-based; главный gap — **данные → действие**. Ниже — что из аудита уже закрыто, что остаётся. Детали UX-вектора: [`docs/AI_OPERATIONS.md`](AI_OPERATIONS.md) § Executive Hub.
+
+**Уже закрыто (не тащить в техдолг):**
+
+- [x] **SQLite vs Postgres DDL-дублирование:** `_apply_sqlite_startup_schema_patches` удалён; runtime/tests/CI — Postgres-only, схема через Alembic.
+- [x] **Executive Hub v1:** overlay поверх вкладок, narrative cards, drill-down, чат агента — см. пункт выше в P1.5.
+- [x] **Event-first analytics (частично):** `SystemEvent`, `analytics_consumer`, `SalesDailyAgg`, event-driven `/stats` — не «всё только по Order/ChatLog».
+- [x] **Проактивность (MVP):** `insight_delivery` → Telegram, digest cron, proactive inbox в AI Center.
+- [x] **Snapshot audit trail:** `AIContextSnapshot` + replay API — не мёртвый груз, но без auto-learning.
+
+**Остаётся (актуальный техдолг / продукт):**
+
+- [ ] **Postgres RLS как last line of defense:** tenant isolation сейчас только через дисципину `.where(organization_id)` (Rule 9 в [`docs/CONVENTIONS.md`](CONVENTIONS.md)).
+- [ ] **Parallel context fetch:** `fetch_ai_read_context` sequential by design; распараллелить независимые блоки через отдельные DB-сессии + бенчмарк latency.
+- [ ] **Executive Hub v2:** NLG-виджеты Health/Money/Quality/Ops; action cards «что сделать» без лишних кликов.
+- [ ] **Conversational configuration:** write-tools для агента (upsell rules, force-close, org meta) с human-in-the-loop confirm — сейчас `copilot/tools.py` read-only.
+- [ ] **Snapshot → learning loop:** feedback «ИИ ошибся» → memory / fine-tuning pipeline (сейчас audit + `was_useful`, без auto-fix).
+- [ ] **Analytics fully off live tables:** дожать materialized/event-only пути; убрать тяжёлые сканы `Order`/`ChatLog` там, где уже есть агрегаты.
+- [ ] **iiko Control Plane (write):** автономная запись цен/меню в iiko по запросу владельца — future, после guardrails (см. X1 freeze в Intelligence OS).
+
+**Вердикт:** направление аудита верное; устаревшие пункты — SQLite schizophrenia и «Hub ещё не начат». Следующий фокус: **insight → action в одном слое** (Hub v2 + conversational config), не новые вкладки.
+
 ## 🟢 P2: Развитие (Growth)
 
 - [x] **E1 хвост (платежи):** HMAC-SHA256/MD5 верификация для Freedom Pay (`freedom_pay.py` — MD5 pg_sig + FreedomPayInitiator) и Kaspi Pay (`kaspi.py` — HMAC-SHA256, `sha256=` prefix); per-org `payment_config_json` (миграции `20260509_payment_tx_config` + `20260510_org_pay_cfg_json`); UI CRUD в настройках (`_tab_settings_restaurant.html`, `_tab_settings_connections.html`). Остаток: уточнить заголовки подписи по актуальным докам провайдеров + `E14` генерация ссылок на оплату.
