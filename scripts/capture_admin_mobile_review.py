@@ -109,7 +109,9 @@ def _capture(base: str, *, allow_demo_login: bool) -> None:
                     pass
             except OSError:
                 pass
-    for fname in ["after_320_orders.png", "after_320_orders_filters.png", "after_320_chats_list.png", "after_320_chat_open.png"]:
+    # after_320_chat_open.png генерируется только если в демо есть кликабельный чат.
+    # Не удаляем его заранее: иначе неудачный optional-click выглядит как удаление baseline.
+    for fname in ["after_320_orders.png", "after_320_orders_filters.png", "after_320_chats_list.png"]:
         try:
             (OUT_DIR / fname).unlink(missing_ok=True)
         except TypeError:
@@ -122,21 +124,131 @@ def _capture(base: str, *, allow_demo_login: bool) -> None:
         except OSError:
             pass
 
-    def _dismiss_modal_if_any(page) -> None:
-        # Иногда после логина всплывает uiConfirm «Готово…» и закрывает интерфейс на скринах.
+    def _install_screenshot_defaults(context) -> None:
+        context.add_init_script(
+            """
+            () => {
+              try {
+                window.localStorage.setItem('rm_executive_hub_landing_off', '1');
+              } catch (_) {}
+            }
+            """,
+        )
+
+    def _wait_for_admin_idle(page, frag: str) -> None:
+        expected = frag.split("?", 1)[0].split("/", 1)[0] or "dashboard";
+        if expected == "stoplist":
+            expected = "menu";
         try:
-            btn = page.get_by_role("button", name="Понятно")
-            if btn.is_visible(timeout=1200):
-                btn.click(timeout=2000)
-                page.wait_for_timeout(300)
+            page.wait_for_function(
+                """
+                ([expected]) => {
+                  const roots = [document.body, ...document.querySelectorAll('[x-data]')];
+                  let app = null;
+                  for (const root of roots) {
+                    const stack = root && root._x_dataStack;
+                    if (Array.isArray(stack)) {
+                      app = stack.find((x) => x && typeof x === 'object' && 'currentTab' in x);
+                      if (app) break;
+                    }
+                  }
+                  if (!app || !app.authenticated) return false;
+                  if (app.executiveHubOpen || app.p15TourActive || app.uiConfirmOpen) return false;
+                  if (expected && app.currentTab !== expected) return false;
+                  if (app.tabDataLoading) return false;
+                  const waits = [
+                    'dashStatsLoading', 'dashFunnelLoading', 'attentionSummaryLoading',
+                    'revenueLeakLoading', 'ordersLoading', 'chatListLoading',
+                    'menuLoading', 'stopListLoading', 'bookingsLoading',
+                    'setupStatusLoading', 'integrationStatusLoading',
+                    'iikoOfficeLoading', 'settingsEnvironmentLoading',
+                    'shiftStateLoading', 'moneyQueueLoading',
+                  ];
+                  for (const key of waits) {
+                    if (app[key]) return false;
+                  }
+                  return true;
+                }
+                """,
+                arg=[expected],
+                timeout=30_000,
+            )
         except Exception:
-            return
+            page.wait_for_timeout(1200)
+
+    def _force_load_active_tab(page) -> None:
+        try:
+            page.evaluate(
+                """
+                async () => {
+                  const roots = [document.body, ...document.querySelectorAll('[x-data]')];
+                  let app = null;
+                  for (const root of roots) {
+                    const stack = root && root._x_dataStack;
+                    if (Array.isArray(stack)) {
+                      app = stack.find((x) => x && typeof x === 'object' && 'currentTab' in x);
+                      if (app) break;
+                    }
+                  }
+                  if (!app || typeof app.loadTabData !== 'function') return;
+                  await app.loadTabData();
+                }
+                """,
+            )
+        except Exception:
+            pass
+
+    def _dismiss_overlays_for_screenshot(page) -> None:
+        # Перед mobile-review снимками закрываем только transient UI/landing overlay.
+        # Продуктовое поведение не меняем; это изоляция screenshot-прогона.
+        try:
+            page.evaluate(
+                """
+                () => {
+                  const roots = [document.body, ...document.querySelectorAll('[x-data]')];
+                  for (const root of roots) {
+                    const stack = root && root._x_dataStack;
+                    if (!Array.isArray(stack)) continue;
+                    for (const app of stack) {
+                      if (!app || typeof app !== 'object') continue;
+                      if (typeof app.p15TourStorageKey === 'function') {
+                        try { window.localStorage.setItem(app.p15TourStorageKey(), '1'); } catch (_) {}
+                      }
+                      if ('p15TourActive' in app) app.p15TourActive = false;
+                      if ('p15TourStepIndex' in app) app.p15TourStepIndex = 0;
+                      if ('uiConfirmOpen' in app) app.uiConfirmOpen = false;
+                      if ('_uiConfirmResolve' in app) app._uiConfirmResolve = null;
+                      if ('executiveHubOpen' in app) app.executiveHubOpen = false;
+                      if ('executiveHubActiveCard' in app) app.executiveHubActiveCard = null;
+                      if ('executiveHubActionPreview' in app) app.executiveHubActionPreview = null;
+                    }
+                  }
+                  try { window.localStorage.setItem('rm_executive_hub_landing_off', '1'); } catch (_) {}
+                  try {
+                    for (const key of Object.keys(window.localStorage || {})) {
+                      if (key.startsWith('rm_p15_admin_tour_v1::')) window.localStorage.setItem(key, '1');
+                    }
+                  } catch (_) {}
+                }
+                """,
+            )
+        except Exception:
+            pass
+        try:
+            for label in ("Пропустить", "Понятно"):
+                btn = page.get_by_role("button", name=label, exact=True)
+                if btn.is_visible(timeout=600):
+                    btn.click(timeout=1500)
+                    page.wait_for_timeout(200)
+        except Exception:
+            pass
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
 
         for w, h in VIEWPORTS:
             context = browser.new_context(viewport={"width": w, "height": h})
+            _install_screenshot_defaults(context)
             page = context.new_page()
 
             page.goto(f"{base}/admin", wait_until="domcontentloaded", timeout=120_000)
@@ -156,21 +268,29 @@ def _capture(base: str, *, allow_demo_login: bool) -> None:
 
             page.wait_for_timeout(3500)
             sidebar.wait_for(state="visible", timeout=120_000)
-            _dismiss_modal_if_any(page)
+            _dismiss_overlays_for_screenshot(page)
+            _force_load_active_tab(page)
+            _wait_for_admin_idle(page, "dashboard")
 
             prefix = f"{w}_"
             for name, frag in BASE_SHOTS:
                 fname = f"{prefix}{name}.png"
                 page.goto(f"{base}/admin#{frag}", wait_until="domcontentloaded", timeout=120_000)
-                page.wait_for_timeout(2500)
-                _dismiss_modal_if_any(page)
+                page.wait_for_timeout(250)
+                _force_load_active_tab(page)
+                _wait_for_admin_idle(page, frag)
+                _dismiss_overlays_for_screenshot(page)
+                _wait_for_admin_idle(page, frag)
                 page.screenshot(path=str(OUT_DIR / fname), full_page=False)
                 print("OK", fname)
 
             # after_...: пару рабочих сценариев на 320px (как в README)
             if w == 320:
                 page.goto(f"{base}/admin#orders", wait_until="domcontentloaded", timeout=120_000)
-                page.wait_for_timeout(2500)
+                page.wait_for_timeout(250)
+                _force_load_active_tab(page)
+                _wait_for_admin_idle(page, "orders")
+                _dismiss_overlays_for_screenshot(page)
                 page.screenshot(path=str(OUT_DIR / "after_320_orders.png"), full_page=False)
                 print("OK", "after_320_orders.png")
                 try:
@@ -183,14 +303,16 @@ def _capture(base: str, *, allow_demo_login: bool) -> None:
                     pass
 
                 page.goto(f"{base}/admin#chats", wait_until="domcontentloaded", timeout=120_000)
-                page.wait_for_timeout(2500)
+                page.wait_for_timeout(250)
+                _force_load_active_tab(page)
+                _wait_for_admin_idle(page, "chats")
+                _dismiss_overlays_for_screenshot(page)
                 page.screenshot(path=str(OUT_DIR / "after_320_chats_list.png"), full_page=False)
                 print("OK", "after_320_chats_list.png")
                 try:
-                    page.locator(
-                        ".ds-chat-shell-list .flex-1.min-h-0.overflow-y-auto button.w-full.text-left",
-                    ).first.click(timeout=4000)
+                    page.locator(".ds-chat-list-item").first.click(timeout=4000)
                     page.wait_for_timeout(1500)
+                    _dismiss_overlays_for_screenshot(page)
                     page.screenshot(path=str(OUT_DIR / "after_320_chat_open.png"), full_page=False)
                     print("OK", "after_320_chat_open.png")
                 except (PwTimeoutError, Exception):

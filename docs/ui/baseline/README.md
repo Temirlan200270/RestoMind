@@ -29,6 +29,8 @@
 | `admin_menu.png` | `#menu` |
 | `admin_stoplist.png` | `#stoplist` |
 | `admin_orders.png` | `#orders` |
+| `admin_orders_list.png` | `#orders` → view `Список` |
+| `admin_chats_open.png` | `#chats` → первый диалог |
 | `admin_analytics.png` | `#analytics` |
 | `admin_ai_value.png` | `#ai_value` |
 | `admin_ai_center_final_mile.png` | `#ai_center?tab=final_mile` |

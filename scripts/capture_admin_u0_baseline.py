@@ -53,6 +53,11 @@ SHOTS: list[tuple[str, str]] = [
     ("admin_shift_control.png", "shift"),
 ]
 
+INTERACTION_SHOTS: list[str] = [
+    "admin_orders_list.png",
+    "admin_chats_open.png",
+]
+
 
 def _wait_http(url: str, timeout_s: float = 300.0) -> None:
     deadline = time.monotonic() + timeout_s
@@ -100,20 +105,143 @@ def _capture(base: str, *, allow_demo_login: bool) -> None:
     admin_user = (os.environ.get("ADMIN_USERNAME") or "admin").strip()
     admin_pass = (os.environ.get("ADMIN_PASSWORD") or "").strip()
 
-    def _dismiss_modal_if_any(page) -> None:
-        # Иногда после логина всплывает uiConfirm «Готово…» и закрывает интерфейс на скринах.
-        # Для baseline нам важно видеть UI, поэтому мягко закрываем, если модалка есть.
+    def _install_screenshot_defaults(context) -> None:
+        context.add_init_script(
+            """
+            () => {
+              try {
+                window.localStorage.setItem('rm_executive_hub_landing_off', '1');
+              } catch (_) {}
+            }
+            """,
+        )
+
+    def _wait_for_admin_idle(page, frag: str) -> None:
+        expected = frag.split("?", 1)[0].split("/", 1)[0] or "dashboard";
+        if expected in {"errors", "operator_queue"}:
+            expected = "inbox"
+        elif expected in {"incidents"}:
+            expected = "inbox"
+        elif expected in {"analytics"}:
+            expected = "dashboard"
+        elif expected in {"ai_value", "intelligence", "digital_twin"}:
+            expected = "ai_center"
+        elif expected == "stoplist":
+            expected = "menu"
         try:
-            btn = page.get_by_role("button", name="Понятно")
-            if btn.is_visible(timeout=1200):
-                btn.click(timeout=2000)
-                page.wait_for_timeout(300)
+            page.wait_for_function(
+                """
+                ([expected]) => {
+                  const roots = [document.body, ...document.querySelectorAll('[x-data]')];
+                  let app = null;
+                  for (const root of roots) {
+                    const stack = root && root._x_dataStack;
+                    if (Array.isArray(stack)) {
+                      app = stack.find((x) => x && typeof x === 'object' && 'currentTab' in x);
+                      if (app) break;
+                    }
+                  }
+                  if (!app || !app.authenticated) return false;
+                  if (app.executiveHubOpen || app.p15TourActive || app.uiConfirmOpen) return false;
+                  if (expected && app.currentTab !== expected) return false;
+                  if (app.tabDataLoading) return false;
+                  const waits = [
+                    'dashStatsLoading', 'dashFunnelLoading', 'attentionSummaryLoading',
+                    'revenueLeakLoading', 'analyticsLoading', 'ordersLoading',
+                    'chatListLoading', 'menuLoading', 'stopListLoading',
+                    'setupStatusLoading', 'readinessLoading', 'teamLoading',
+                    'smartSalesImpactLoading', 'upsellRulesLoading',
+                    'integrationStatusLoading', 'iikoOfficeLoading',
+                    'settingsEnvironmentLoading', 'bookingsLoading',
+                    'failedTasksLoading', 'moneyQueueLoading', 'incidentsLoading',
+                    'aiValueLoading', 'guestCareLoading', 'finalMileLoading',
+                    'supplyMindLoading', 'voiceAiLoading', 'voiceCallLogsLoading',
+                    'shiftStateLoading', 'kitchenGateLoading',
+                  ];
+                  for (const key of waits) {
+                    if (app[key]) return false;
+                  }
+                  return true;
+                }
+                """,
+                arg=[expected],
+                timeout=30_000,
+            )
         except Exception:
-            return
+            # Если конкретный экран не выставляет loading-флаг, не валим весь прогон.
+            page.wait_for_timeout(1200)
+
+    def _force_load_active_tab(page) -> None:
+        try:
+            page.evaluate(
+                """
+                async () => {
+                  const roots = [document.body, ...document.querySelectorAll('[x-data]')];
+                  let app = null;
+                  for (const root of roots) {
+                    const stack = root && root._x_dataStack;
+                    if (Array.isArray(stack)) {
+                      app = stack.find((x) => x && typeof x === 'object' && 'currentTab' in x);
+                      if (app) break;
+                    }
+                  }
+                  if (!app || typeof app.loadTabData !== 'function') return;
+                  await app.loadTabData();
+                }
+                """,
+            )
+        except Exception:
+            pass
+
+    def _dismiss_overlays_for_screenshot(page) -> None:
+        # Перед baseline-снимками закрываем только transient UI/landing overlay.
+        # Продуктовое поведение не меняем; это изоляция screenshot-прогона.
+        try:
+            page.evaluate(
+                """
+                () => {
+                  const roots = [document.body, ...document.querySelectorAll('[x-data]')];
+                  for (const root of roots) {
+                    const stack = root && root._x_dataStack;
+                    if (!Array.isArray(stack)) continue;
+                    for (const app of stack) {
+                      if (!app || typeof app !== 'object') continue;
+                      if (typeof app.p15TourStorageKey === 'function') {
+                        try { window.localStorage.setItem(app.p15TourStorageKey(), '1'); } catch (_) {}
+                      }
+                      if ('p15TourActive' in app) app.p15TourActive = false;
+                      if ('p15TourStepIndex' in app) app.p15TourStepIndex = 0;
+                      if ('uiConfirmOpen' in app) app.uiConfirmOpen = false;
+                      if ('_uiConfirmResolve' in app) app._uiConfirmResolve = null;
+                      if ('executiveHubOpen' in app) app.executiveHubOpen = false;
+                      if ('executiveHubActiveCard' in app) app.executiveHubActiveCard = null;
+                      if ('executiveHubActionPreview' in app) app.executiveHubActionPreview = null;
+                    }
+                  }
+                  try { window.localStorage.setItem('rm_executive_hub_landing_off', '1'); } catch (_) {}
+                  try {
+                    for (const key of Object.keys(window.localStorage || {})) {
+                      if (key.startsWith('rm_p15_admin_tour_v1::')) window.localStorage.setItem(key, '1');
+                    }
+                  } catch (_) {}
+                }
+                """,
+            )
+        except Exception:
+            pass
+        try:
+            for label in ("Пропустить", "Понятно"):
+                btn = page.get_by_role("button", name=label, exact=True)
+                if btn.is_visible(timeout=600):
+                    btn.click(timeout=1500)
+                    page.wait_for_timeout(200)
+        except Exception:
+            pass
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(viewport={"width": 1440, "height": 900})
+        _install_screenshot_defaults(context)
         page = context.new_page()
 
         page.goto(f"{base}/admin", wait_until="domcontentloaded", timeout=120_000)
@@ -135,7 +263,9 @@ def _capture(base: str, *, allow_demo_login: bool) -> None:
 
         page.wait_for_timeout(3500)
         sidebar.wait_for(state="visible", timeout=120_000)
-        _dismiss_modal_if_any(page)
+        _dismiss_overlays_for_screenshot(page)
+        _force_load_active_tab(page)
+        _wait_for_admin_idle(page, "dashboard")
 
         OUT_DIR.mkdir(parents=True, exist_ok=True)
         # Чтобы baseline не “смешивался” с предыдущими прогоном: удаляем только файлы,
@@ -151,11 +281,67 @@ def _capture(base: str, *, allow_demo_login: bool) -> None:
 
         for fname, frag in SHOTS:
             page.goto(f"{base}/admin#{frag}", wait_until="domcontentloaded", timeout=120_000)
-            page.wait_for_timeout(2800)
-            _dismiss_modal_if_any(page)
+            page.wait_for_timeout(250)
+            _force_load_active_tab(page)
+            _wait_for_admin_idle(page, frag)
+            _dismiss_overlays_for_screenshot(page)
+            _wait_for_admin_idle(page, frag)
             target = OUT_DIR / fname
             page.screenshot(path=str(target), full_page=False)
             print("OK", fname)
+
+        for fname in INTERACTION_SHOTS:
+            try:
+                target = OUT_DIR / fname
+                if target.exists():
+                    target.unlink()
+            except OSError:
+                pass
+
+        page.goto(f"{base}/admin#orders", wait_until="domcontentloaded", timeout=120_000)
+        page.wait_for_timeout(250)
+        _force_load_active_tab(page)
+        _wait_for_admin_idle(page, "orders")
+        _dismiss_overlays_for_screenshot(page)
+        try:
+            page.evaluate(
+                """
+                async () => {
+                  const roots = [document.body, ...document.querySelectorAll('[x-data]')];
+                  let app = null;
+                  for (const root of roots) {
+                    const stack = root && root._x_dataStack;
+                    if (Array.isArray(stack)) {
+                      app = stack.find((x) => x && typeof x === 'object' && 'ordersView' in x);
+                      if (app) break;
+                    }
+                  }
+                  if (!app) return;
+                  if (typeof app.setOrdersView === 'function') app.setOrdersView('table');
+                  else app.ordersView = 'table';
+                  if (typeof app.loadOrders === 'function') await app.loadOrders();
+                }
+                """,
+            )
+            _wait_for_admin_idle(page, "orders")
+            page.screenshot(path=str(OUT_DIR / "admin_orders_list.png"), full_page=False)
+            print("OK", "admin_orders_list.png")
+        except Exception:
+            pass
+
+        page.goto(f"{base}/admin#chats", wait_until="domcontentloaded", timeout=120_000)
+        page.wait_for_timeout(250)
+        _force_load_active_tab(page)
+        _wait_for_admin_idle(page, "chats")
+        _dismiss_overlays_for_screenshot(page)
+        try:
+            page.locator(".ds-chat-list-item").first.click(timeout=4000)
+            page.wait_for_timeout(1500)
+            _dismiss_overlays_for_screenshot(page)
+            page.screenshot(path=str(OUT_DIR / "admin_chats_open.png"), full_page=False)
+            print("OK", "admin_chats_open.png")
+        except Exception:
+            pass
 
         context.close()
         browser.close()

@@ -1199,7 +1199,7 @@ function adminMixinState() {
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 01-.825-.242m9.345-8.334a21.05 21.05 0 00-1.889-2.403 19.7 19.7 0 00-1.6-1.562c-.642-.522-1.397-.957-2.23-1.25C16.247 1.872 14.747 1.5 12 1.5c-2.747 0-4.247.372-5.63.99-.833.293-1.588.728-2.23 1.25-.563.459-1.082 1-1.6 1.562A21.05 21.05 0 003.75 8.511"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5.25 8.511c-.884.284-1.5 1.128-1.5 2.097v4.286c0 1.136.847 2.1 1.98 2.193.34.027.68.052 1.02.072v3.091l3-3a11.63 11.63 0 014.02-.163 2.115 2.115 0 001.825-.242M9.378 5.378A21.05 21.05 0 0018.72 3.728"/></svg>' },
             { id: 'bookings', section: 'operations', label: 'Бронирования', desc: 'Столики и резервации',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/></svg>' },
-            { id: 'dashboard', section: 'management', label: 'Дашборд', desc: 'Общая статистика и последние заказы',
+            { id: 'dashboard', section: 'management', label: 'Command Center', desc: 'Деньги, гости, ИИ, действия и drill-down',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25A2.25 2.25 0 018.25 10.5H6A2.25 2.25 0 013.75 8.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z"/></svg>' },
             { id: 'marketing', section: 'management', label: 'Маркетинг', desc: 'Рассылки и программа лояльности',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10.34 15.84c-.688-.06-1.386-.09-2.09-.09H7.5a4.5 4.5 0 110-9h.75c.704 0 1.402-.03 2.09-.09m0 9.18c.253.962.584 1.892.985 2.783.247.55.06 1.21-.463 1.511l-.657.38c-.551.318-1.26.117-1.527-.461a20.845 20.845 0 01-1.44-4.282m3.102.069a18.03 18.03 0 01-.59-4.59c0-1.586.205-3.124.59-4.59m0 9.18a23.848 23.848 0 018.835 2.535M10.34 6.66a23.847 23.847 0 008.835-2.535m0 0A23.74 23.74 0 0018.795 3m.38 1.125a23.91 23.91 0 011.014 5.395m-1.014 8.855c-.118.38-.245.754-.38 1.125m.38-1.125a23.91 23.91 0 001.014-5.395m0-3.46c.495.413.811 1.035.811 1.73 0 .695-.316 1.317-.811 1.73m0-3.46a24.347 24.347 0 010 3.46"/></svg>' },
@@ -1235,6 +1235,9 @@ function adminMixinState() {
         dashStatsLoadedOnce: false,
         dashFunnel: null,
         dashFunnelLoading: false,
+        dashboardDrilldownOpen: false,
+        dashboardDrilldownKey: '',
+        dashboardDrilldownPayload: null,
         _dashboardChartObserver: null,
         /** GET /api/admin/roi/today — нарратив + достижения. */
         dashRoiSummary: null,
@@ -2015,6 +2018,204 @@ function adminMixinMenuOrdersUi() {
                     hint: 'На сегодня',
                 },
             ];
+        },
+
+        openDashboardDrilldown(key, payload = null) {
+            if (!this.canToggleAnalyticsDensity()) return;
+            this.dashboardDrilldownKey = String(key || 'overview');
+            this.dashboardDrilldownPayload = payload && typeof payload === 'object' ? payload : null;
+            this.intelligenceAnswer = '';
+            this.dashboardDrilldownOpen = true;
+        },
+
+        closeDashboardDrilldown() {
+            this.dashboardDrilldownOpen = false;
+            this.dashboardDrilldownKey = '';
+            this.dashboardDrilldownPayload = null;
+        },
+
+        dashboardDrilldownTitle() {
+            const action = this.dashboardDrilldownPayload?.action;
+            if (this.dashboardDrilldownKey === 'money') return 'Деньги';
+            if (this.dashboardDrilldownKey === 'guests') return 'Гости и воронка';
+            if (this.dashboardDrilldownKey === 'ai') return 'ИИ и команда';
+            if (this.dashboardDrilldownKey === 'ops') return 'Операции';
+            if (this.dashboardDrilldownKey === 'sales_peak') return 'Пик продаж';
+            if (this.dashboardDrilldownKey === 'action') return action?.title || 'Действие';
+            return 'Детали';
+        },
+
+        dashboardDrilldownSubtitle() {
+            const ds = this.dashStats || {};
+            const action = this.dashboardDrilldownPayload?.action;
+            if (this.dashboardDrilldownKey === 'money') {
+                return `Сегодня ${adminFormat.money(ds.today_revenue || 0)}, заказов ${ds.today_orders || 0}.`;
+            }
+            if (this.dashboardDrilldownKey === 'guests') {
+                const f = this.dashFunnel?.funnel || {};
+                return `Диалоги ${f.dialogs || 0}, заказов ${f.completed || 0}, без заказа ${f.dialog_no_order || 0}.`;
+            }
+            if (this.dashboardDrilldownKey === 'ai') {
+                return `ИИ принес ${adminFormat.money(ds.ai_revenue_today ?? ds.upsell_revenue_today ?? 0)} и сэкономил ${ds.ai_time_saved_hours ?? 0} ч.`;
+            }
+            if (this.dashboardDrilldownKey === 'ops') {
+                return `Открытых задач ${this.inboxTotalOpen()}, ошибок iiko сегодня ${ds.iiko_errors_today || 0}.`;
+            }
+            if (this.dashboardDrilldownKey === 'sales_peak') {
+                return ds.sales_peak_today?.hint || 'Почасовая динамика продаж за сегодня.';
+            }
+            if (this.dashboardDrilldownKey === 'action') {
+                return action?.body || action?.summary || 'Рекомендация с ожидаемым эффектом.';
+            }
+            return 'Сводка по выбранному блоку.';
+        },
+
+        dashboardDrilldownMetrics() {
+            const ds = this.dashStats || {};
+            const f = this.dashFunnel?.funnel || {};
+            const churn = this.dashFunnel?.churn || {};
+            const action = this.dashboardDrilldownPayload?.action || {};
+            const money = (v) => adminFormat.money(v || 0);
+            const pct = (v) => (v == null ? '—' : `${v}%`);
+            if (this.dashboardDrilldownKey === 'money') {
+                return [
+                    { label: 'Выручка сегодня', value: money(ds.today_revenue), tone: 'strong' },
+                    { label: 'Заказы сегодня', value: String(ds.today_orders || 0), tone: 'neutral' },
+                    { label: 'Прогноз недели', value: money(ds.week_forecast?.forecast_revenue), tone: 'good' },
+                    { label: 'Под риском сейчас', value: money(this.revenueLeak?.action_risk_kzt ?? this.revenueLeak?.total_leak_kzt), tone: 'risk' },
+                ];
+            }
+            if (this.dashboardDrilldownKey === 'guests') {
+                return [
+                    { label: 'Диалоги', value: String(f.dialogs || 0), tone: 'neutral' },
+                    { label: 'Черновики', value: String(f.drafts || 0), tone: 'neutral' },
+                    { label: 'Заказы', value: String(f.completed || 0), tone: 'good' },
+                    { label: 'Без заказа', value: String(f.dialog_no_order || 0), tone: 'risk' },
+                    { label: 'Конверсия в заказ', value: pct(f.dialog_to_order_pct), tone: 'strong' },
+                    { label: 'Отток', value: String(churn.churned_count || 0), tone: 'risk' },
+                ];
+            }
+            if (this.dashboardDrilldownKey === 'ai') {
+                return [
+                    { label: 'Выручка от ИИ', value: money(ds.ai_revenue_today ?? ds.upsell_revenue_today), tone: 'good' },
+                    { label: 'Доля ИИ', value: pct(ds.ai_revenue_share_pct), tone: 'strong' },
+                    { label: 'Сэкономлено', value: `${ds.ai_time_saved_hours ?? 0} ч`, tone: 'neutral' },
+                    { label: 'Передано оператору', value: String(ds.escalations_today ?? 0), tone: 'risk' },
+                    { label: 'Бот обработал', value: pct(ds.bot_handled_pct), tone: 'good' },
+                ];
+            }
+            if (this.dashboardDrilldownKey === 'ops') {
+                return [
+                    { label: 'Открыто в inbox', value: String(this.inboxTotalOpen()), tone: 'risk' },
+                    { label: 'Непрочитанные чаты', value: String(this.unreadChats || 0), tone: 'neutral' },
+                    { label: 'Ошибки iiko', value: String(ds.iiko_errors_today || 0), tone: 'risk' },
+                    { label: 'Брони сегодня', value: String(ds.bookings_today ?? ds.bookings ?? 0), tone: 'neutral' },
+                ];
+            }
+            if (this.dashboardDrilldownKey === 'sales_peak') {
+                return [
+                    { label: 'Пик', value: ds.sales_peak_today?.label || '—', tone: 'strong' },
+                    { label: 'Часов в пике', value: String((ds.sales_peak_today?.hours_local || []).length), tone: 'neutral' },
+                    { label: 'Заказов сегодня', value: String(ds.today_orders || 0), tone: 'neutral' },
+                    { label: 'Выручка сегодня', value: money(ds.today_revenue), tone: 'good' },
+                ];
+            }
+            if (this.dashboardDrilldownKey === 'action') {
+                return [
+                    { label: 'Ожидаемый эффект', value: action.impact_kzt ? `+${money(action.impact_kzt)}` : '—', tone: 'good' },
+                    { label: 'Уверенность', value: action.confidence_pct != null ? `${action.confidence_pct}%` : '—', tone: 'neutral' },
+                    { label: 'Тип', value: action.type || action.recommendation_type || 'recommendation', tone: 'neutral' },
+                ];
+            }
+            return [];
+        },
+
+        dashboardDrilldownEvidence() {
+            const ds = this.dashStats || {};
+            const f = this.dashFunnel || {};
+            const action = this.dashboardDrilldownPayload?.action || {};
+            if (this.dashboardDrilldownKey === 'money') {
+                return [
+                    `Серия продаж: ${(ds.daily_series || []).length} дней`,
+                    `Прогноз: ${ds.week_forecast?.confidence || 'нет'} confidence`,
+                    `Поверхности потерь: ${(this.revenueLeak?.surfaces || []).length}`,
+                ];
+            }
+            if (this.dashboardDrilldownKey === 'guests') {
+                return [
+                    `Период: ${f.period_days || 7} дней`,
+                    `Отмены: ${f.losses?.cancellations || 0}`,
+                    `Негативные отзывы: ${f.losses?.feedback_negative || 0}`,
+                ];
+            }
+            if (this.dashboardDrilldownKey === 'ai') {
+                return [
+                    `Сообщения ИИ сегодня: ${ds.ai_messages_today || 0}`,
+                    `Конверсия советов: ${ds.upsell_conversion_pct ?? '—'}%`,
+                    `Доля диалогов с оператором: ${ds.escalation_rate_pct ?? '—'}%`,
+                ];
+            }
+            if (this.dashboardDrilldownKey === 'ops') {
+                return [
+                    `Клиентские задачи: ${this.inboxTotalOpen()}`,
+                    `Ошибки интеграций: ${ds.iiko_errors_today || 0}`,
+                    `Последняя активность: ${(this.dashActivity || []).length} событий`,
+                ];
+            }
+            if (this.dashboardDrilldownKey === 'sales_peak') {
+                return [
+                    ds.sales_peak_today?.hint || 'Пик рассчитан по продажам текущего дня.',
+                    `Часы: ${(ds.sales_peak_today?.hours_local || []).join(', ') || '—'}`,
+                ];
+            }
+            if (this.dashboardDrilldownKey === 'action') {
+                return [
+                    action.body || action.summary || 'Рекомендация из слоя Intelligence.',
+                    action.cta_label || 'Можно открыть полный источник.',
+                ].filter(Boolean);
+            }
+            return [];
+        },
+
+        dashboardDrilldownTarget() {
+            const action = this.dashboardDrilldownPayload?.action;
+            if (this.dashboardDrilldownKey === 'money') return { tab: 'dashboard', dashboardTab: 'analytics' };
+            if (this.dashboardDrilldownKey === 'guests') return { tab: 'dashboard', dashboardTab: 'analytics' };
+            if (this.dashboardDrilldownKey === 'ai') return { tab: 'ai_center', aiCenterTab: 'value' };
+            if (this.dashboardDrilldownKey === 'ops') return { tab: 'inbox', inboxTab: 'clients' };
+            if (this.dashboardDrilldownKey === 'sales_peak') return { tab: 'dashboard', dashboardTab: 'analytics' };
+            if (this.dashboardDrilldownKey === 'action' && action?.target) return action.target;
+            if (this.dashboardDrilldownKey === 'action') return { tab: 'ai_center', aiCenterTab: 'insights' };
+            return { tab: 'dashboard', dashboardTab: 'overview' };
+        },
+
+        dashboardDrilldownFullLabel() {
+            if (this.dashboardDrilldownKey === 'money' || this.dashboardDrilldownKey === 'guests' || this.dashboardDrilldownKey === 'sales_peak') return 'Открыть подробную аналитику';
+            if (this.dashboardDrilldownKey === 'ai') return 'Открыть вклад ИИ';
+            if (this.dashboardDrilldownKey === 'ops') return 'Открыть очередь';
+            if (this.dashboardDrilldownKey === 'action') return this.dashboardDrilldownPayload?.action?.cta_label || 'Открыть источник';
+            return 'Открыть раздел';
+        },
+
+        dashboardDrilldownMetricClass(tone) {
+            const t = String(tone || 'neutral');
+            if (t === 'good') return 'bg-emerald-50 text-emerald-950 ring-emerald-200/70';
+            if (t === 'risk') return 'bg-rose-50 text-rose-950 ring-rose-200/70';
+            if (t === 'strong') return 'bg-indigo-50 text-indigo-950 ring-indigo-200/70';
+            return 'bg-slate-50 text-slate-950 ring-slate-200/80';
+        },
+
+        dashboardDrilldownGoFull() {
+            const target = this.dashboardDrilldownTarget();
+            this.closeDashboardDrilldown();
+            this.incidentGo(target);
+        },
+
+        async dashboardDrilldownAskAi() {
+            const title = this.dashboardDrilldownTitle();
+            const subtitle = this.dashboardDrilldownSubtitle();
+            this.intelligenceQuestion = `Разбери блок "${title}" на dashboard. ${subtitle}`;
+            await this.askIntelligence(this.intelligenceQuestion);
         },
 
         get menuCategoriesKitchenList() {
@@ -4521,7 +4722,7 @@ function adminMixinAuthKnowledge() {
             const role = this.effectiveStaffRole();
             if (role !== 'admin' && role !== 'manager') return false;
             const flag = this.userData?.executive_hub_default_enabled;
-            return flag !== false;
+            return flag === true;
         },
 
         async applyRoleDefaultLanding(fromHashTab) {
@@ -11455,10 +11656,10 @@ function adminMixinDataChartsSettings() {
                 }
             }
             if (action.target && typeof action.target === 'object') {
-                this.incidentGo(action.target);
+                this.openDashboardDrilldown('action', { action });
                 return;
             }
-            this.navigateToTab('ai_center', { aiCenterTab: 'insights' });
+            this.openDashboardDrilldown('action', { action });
         },
 
         async copyReadinessLink(kind) {

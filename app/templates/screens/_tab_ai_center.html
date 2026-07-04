@@ -1,7 +1,7 @@
             <!-- ========== ИИ-АНАЛИТИКА ========== -->
             <div x-show="currentTab === 'ai_center'" x-cloak class="fade-in space-y-4 mb-2">
                 <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3">
-                    {{ section_header('ИИ-аналитика', subtitle='Вклад ИИ, инсайты и нагрузка — без потери контекста.', extra_class='!mb-0') }}
+                    {{ section_header('ИИ-аналитика', subtitle='Источник данных, аудит и лаборатория для Command Center.', extra_class='!mb-0') }}
                     <div class="w-full lg:w-auto min-w-0 overflow-x-auto">
                         {% call segmented(extra_class='border border-slate-200 bg-white shrink-0 inline-flex max-w-full') %}
                         <div class="contents" role="tablist" aria-label="ИИ-аналитика">
@@ -62,6 +62,16 @@
                         </div>
                         {% endcall %}
                     </div>
+                </div>
+                <div data-ai-center-source-lab class="rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div class="min-w-0">
+                        <div class="text-[10px] font-bold uppercase tracking-wide text-slate-500">Source layer</div>
+                        <p class="text-sm text-slate-700 mt-0.5">Глубокие отчёты, аудит рекомендаций, отзывы, нагрузка и финальные модули.</p>
+                    </div>
+                    <button type="button" class="ds-btn ds-btn-secondary ds-btn-sm shrink-0"
+                        @click="navigateToTab('dashboard', { dashboardTab: 'overview' })">
+                        В Command Center
+                    </button>
                 </div>
             </div>
 

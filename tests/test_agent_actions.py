@@ -121,3 +121,40 @@ async def test_agent_action_command_metadata_and_validation(db_session):
             summary="Тест",
             payload={"items": []},
         )
+
+
+@pytest.mark.asyncio
+async def test_propose_agent_action_dedupes_idempotency_key(db_session):
+    org = Organization(id=1, name="Org 1")
+    db_session.add(org)
+    await db_session.flush()
+
+    first = await propose_agent_action(
+        db_session,
+        organization_id=1,
+        action_type="force_close",
+        title="Пауза 30 мин",
+        summary="Первое предложение",
+        payload={"minutes": 30, "reason": "test"},
+        idempotency_key="digest:org1:force-close",
+    )
+    second = await propose_agent_action(
+        db_session,
+        organization_id=1,
+        action_type="force_close",
+        title="Пауза 45 мин",
+        summary="Повторная доставка",
+        payload={"minutes": 45, "reason": "retry"},
+        idempotency_key="digest:org1:force-close",
+    )
+
+    assert second.id == first.id
+    rows = (
+        await db_session.execute(
+            select(SystemEvent.entity_id).where(
+                SystemEvent.organization_id == 1,
+                SystemEvent.event_type == "agent_action.proposed",
+            ),
+        )
+    ).scalars().all()
+    assert rows == [first.id]

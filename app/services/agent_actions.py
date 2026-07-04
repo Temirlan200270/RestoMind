@@ -16,7 +16,6 @@ from app.services.agent_commands import (
     command_requires_preview,
     get_agent_command,
     staff_role_allows,
-    supported_agent_commands,
     validate_agent_command,
 )
 from app.services.agent_commands.base import CommandContext
@@ -109,6 +108,20 @@ async def propose_agent_action(
 ) -> AgentActionProposal:
     action_type_norm = (action_type or "").strip()
     command_payload = validate_agent_command(action_type_norm, payload)
+    idem = (idempotency_key or "").strip()[:120] or None
+    if idem:
+        existing = await db.scalar(
+            select(AgentActionProposal)
+            .where(
+                AgentActionProposal.organization_id == int(organization_id),
+                AgentActionProposal.idempotency_key == idem,
+                AgentActionProposal.status.notin_(("rejected", "expired")),
+            )
+            .order_by(AgentActionProposal.created_at.desc())
+            .limit(1),
+        )
+        if existing is not None:
+            return existing
     row = AgentActionProposal(
         id=str(uuid.uuid4()),
         organization_id=int(organization_id),
@@ -123,7 +136,7 @@ async def propose_agent_action(
         source_snapshot_id=int(source_snapshot_id) if source_snapshot_id is not None else None,
         source_conversation_id=int(source_conversation_id) if source_conversation_id is not None else None,
         trace_id=(trace_id or "").strip()[:64] or None,
-        idempotency_key=(idempotency_key or "").strip()[:120] or None,
+        idempotency_key=idem,
     )
     db.add(row)
     await db.flush()

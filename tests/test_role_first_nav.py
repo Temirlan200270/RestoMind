@@ -44,6 +44,36 @@ def test_dashboard_analytics_density_toggle():
     assert "analyticsDensity === 'advanced'" in analytics
 
 
+def test_owner_command_center_and_dashboard_drilldown():
+    dash = (REPO / "app" / "templates" / "screens" / "_tab_dashboard.html").read_text(encoding="utf-8")
+    js = (REPO / "app" / "static" / "js" / "admin-app.js").read_text(encoding="utf-8")
+    assert "data-owner-command-center" in dash
+    assert "Owner Command Center" in dash
+    assert "openDashboardDrilldown('money')" in dash
+    assert "openDashboardDrilldown('guests')" in dash
+    assert "openDashboardDrilldown('ai')" in dash
+    assert "dashboardDrilldownOpen" in dash
+    assert "dashboardDrilldownGoFull()" in dash
+    assert "openDashboardDrilldown(key" in js
+    assert "dashboardDrilldownMetrics()" in js
+    assert "return flag === true" in js
+
+
+def test_ai_center_is_source_layer_not_daily_landing():
+    ai_center = (REPO / "app" / "templates" / "screens" / "_tab_ai_center.html").read_text(encoding="utf-8")
+    assert "data-ai-center-source-lab" in ai_center
+    assert "Source layer" in ai_center
+    assert "navigateToTab('dashboard', { dashboardTab: 'overview' })" in ai_center
+
+
+def test_operator_keeps_only_execution_tabs():
+    js = (REPO / "app" / "static" / "js" / "admin-app.js").read_text(encoding="utf-8")
+    assert "operator: Object.freeze(['shift', 'inbox', 'orders', 'chats', 'bookings'])" in js
+    assert "const ADMIN_OPERATOR_SECONDARY_TABS = Object.freeze(['orders', 'chats', 'bookings'])" in js
+    assert "canOpenExecutiveHub()" in js
+    assert "return this.effectiveStaffRole() !== 'operator';" in js
+
+
 def test_shift_calm_empty_cta():
     shift = (REPO / "app" / "templates" / "screens" / "_tab_shift_control.html").read_text(encoding="utf-8")
     assert "shiftIsCalmEmpty()" in shift

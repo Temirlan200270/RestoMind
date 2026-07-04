@@ -2,7 +2,7 @@ import pytest
 from sqlalchemy import select
 from unittest.mock import AsyncMock, patch
 
-from app.db.models import AgentActionProposal, InsightDelivery, OperationalInsight, Organization, SystemEvent, UpsellRule
+from app.db.models import AgentActionProposal, InsightDelivery, OperationalInsight, Organization
 from app.services.agent_action_tokens import create_agent_action_confirm_token, parse_agent_action_confirm_token
 from app.services.agent_actions import (
     build_action_chain,
@@ -294,7 +294,17 @@ async def test_public_confirm_endpoint_with_valid_token(asgi_memory_client):
         await db.commit()
 
     token = create_agent_action_confirm_token(proposal_id=proposal_id, organization_id=org_id)
-    resp = await client.get(f"/api/public/agent-actions/confirm?token={token}")
+    page = await client.get(f"/api/public/agent-actions/confirm?token={token}")
+
+    assert page.status_code == 200
+    assert "Подтвердите действие" in page.text
+    assert "Подтвердить и применить" in page.text
+
+    async with session_factory() as db:
+        org = await db.get(Organization, org_id)
+        assert org.force_closed_until is None
+
+    resp = await client.post(f"/api/public/agent-actions/confirm?token={token}")
 
     assert resp.status_code == 200
     assert "Действие применено" in resp.text

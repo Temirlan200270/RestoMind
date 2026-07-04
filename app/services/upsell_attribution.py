@@ -8,6 +8,7 @@ source_rule_id и variant — см. ``app/services/intent_router.py`` (~L200, ~L
 
 from __future__ import annotations
 
+import logging
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -15,7 +16,6 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
 from app.db.models import Order, UpsellOfferEvent
 from app.services.tenant_scope import _location_allowed_expr
 from app.services.upsell_utils import (
@@ -29,6 +29,8 @@ STATUS_SHOWN = "shown"
 STATUS_ACCEPTED = "accepted"
 STATUS_REJECTED = "rejected"
 STATUS_IGNORED = "ignored"
+
+logger = logging.getLogger(__name__)
 
 
 def _dt_as_utc(dt: datetime) -> datetime:

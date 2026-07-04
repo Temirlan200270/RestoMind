@@ -19,7 +19,7 @@
                 <div x-show="analyticsDensity === 'normal'" x-cloak class="space-y-6">
                 <div class="flex flex-wrap items-end justify-between gap-4">
                     <div class="min-w-0 flex-1">
-                        {{ section_header('Главная', subtitle='Выручка, вклад ИИ и время команды.', extra_class='!mb-0') }}
+                        {{ section_header('Command Center', subtitle='Выручка, гости, ИИ, риски и действия.', extra_class='!mb-0') }}
                         <div class="mt-3" x-show="canOpenExecutiveHub()" x-cloak>
                             <button type="button" @click="openExecutiveHub()"
                                 class="inline-flex items-center gap-2 rounded-xl border border-indigo-200 bg-gradient-to-r from-indigo-50 to-white px-4 py-2.5 text-sm font-semibold text-indigo-900 hover:border-indigo-300 hover:from-indigo-100 transition shadow-sm">
@@ -37,6 +37,78 @@
                         </div>
                     </div>
                 </div>
+
+                <section data-owner-command-center x-show="canToggleAnalyticsDensity()" x-cloak
+                    class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                    <div class="grid grid-cols-1 xl:grid-cols-[1fr_320px]">
+                        <div class="p-4 sm:p-5">
+                            <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+                                <div>
+                                    <div class="text-[10px] font-bold uppercase tracking-wide text-slate-500">Owner Command Center</div>
+                                    <h3 class="text-base sm:text-lg font-bold text-slate-950 mt-0.5">Деньги, гости, ИИ и действия в одном месте</h3>
+                                </div>
+                                <button type="button" class="ds-btn ds-btn-secondary ds-btn-sm"
+                                    @click="navigateToTab('dashboard', { dashboardTab: 'analytics' })">
+                                    Полный отчёт
+                                </button>
+                            </div>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+                                <button type="button" class="text-left rounded-xl border border-slate-200 bg-slate-50/80 hover:bg-white px-4 py-3 min-h-[120px] transition"
+                                    @click="openDashboardDrilldown('money')">
+                                    <div class="text-[10px] font-bold uppercase tracking-wide text-slate-500">Деньги</div>
+                                    <div class="mt-2 text-2xl font-black text-slate-950 tabular-nums" x-text="fmt.money(dashStats.today_revenue || 0)"></div>
+                                    <div class="mt-1 text-xs text-slate-500">
+                                        <span class="tabular-nums" x-text="dashStats.today_orders || 0"></span> заказов
+                                        <span x-show="dashStats.week_forecast" x-cloak>
+                                            · прогноз <span class="tabular-nums" x-text="fmt.money(dashStats.week_forecast?.forecast_revenue ?? 0)"></span>
+                                        </span>
+                                    </div>
+                                </button>
+                                <button type="button" class="text-left rounded-xl border border-slate-200 bg-slate-50/80 hover:bg-white px-4 py-3 min-h-[120px] transition"
+                                    @click="openDashboardDrilldown('guests')">
+                                    <div class="text-[10px] font-bold uppercase tracking-wide text-slate-500">Гости</div>
+                                    <div class="mt-2 text-2xl font-black text-slate-950 tabular-nums" x-text="dashFunnel?.funnel?.dialogs ?? 0"></div>
+                                    <div class="mt-1 text-xs text-slate-500">
+                                        заказов <span class="tabular-nums" x-text="dashFunnel?.funnel?.completed ?? 0"></span>
+                                        · без заказа <span class="tabular-nums" x-text="dashFunnel?.funnel?.dialog_no_order ?? 0"></span>
+                                    </div>
+                                </button>
+                                <button type="button" class="text-left rounded-xl border border-violet-200 bg-violet-50/80 hover:bg-white px-4 py-3 min-h-[120px] transition"
+                                    @click="openDashboardDrilldown('ai')">
+                                    <div class="text-[10px] font-bold uppercase tracking-wide text-violet-900/70">ИИ и команда</div>
+                                    <div class="mt-2 text-2xl font-black text-violet-950 tabular-nums" x-text="fmt.money(dashStats.ai_revenue_today ?? dashStats.upsell_revenue_today ?? 0)"></div>
+                                    <div class="mt-1 text-xs text-violet-900/75">
+                                        <span class="tabular-nums" x-text="dashStats.ai_time_saved_hours ?? 0"></span> ч сэкономлено
+                                        · оператору <span class="tabular-nums" x-text="dashStats.escalations_today ?? 0"></span>
+                                    </div>
+                                </button>
+                                <button type="button" class="text-left rounded-xl border border-amber-200 bg-amber-50/80 hover:bg-white px-4 py-3 min-h-[120px] transition"
+                                    @click="openDashboardDrilldown('ops')">
+                                    <div class="text-[10px] font-bold uppercase tracking-wide text-amber-900/75">Операции</div>
+                                    <div class="mt-2 text-2xl font-black text-amber-950 tabular-nums" x-text="inboxTotalOpen()"></div>
+                                    <div class="mt-1 text-xs text-amber-900/75">
+                                        открыто · iiko <span class="tabular-nums" x-text="dashStats.iiko_errors_today ?? 0"></span>
+                                        · чаты <span class="tabular-nums" x-text="unreadChats || 0"></span>
+                                    </div>
+                                </button>
+                            </div>
+                        </div>
+                        <form class="border-t xl:border-t-0 xl:border-l border-slate-200 bg-slate-50/70 p-4 sm:p-5 flex flex-col gap-3"
+                            @submit.prevent="askIntelligence()">
+                            <div>
+                                <div class="text-[10px] font-bold uppercase tracking-wide text-slate-500">Copilot</div>
+                                <div class="text-sm font-semibold text-slate-900 mt-0.5">Спросить по данным ресторана</div>
+                            </div>
+                            <textarea x-model="intelligenceQuestion" rows="3"
+                                class="ds-input resize-none text-sm"
+                                placeholder="Почему просела выручка сегодня?"></textarea>
+                            <button type="submit" class="ds-btn ds-btn-primary ds-btn-sm self-start" :disabled="intelligenceAsking">
+                                <span x-show="!intelligenceAsking">Спросить</span>
+                                <span x-show="intelligenceAsking">Считаю…</span>
+                            </button>
+                        </form>
+                    </div>
+                </section>
 
                 <!-- Wow Layer: today impact for owner -->
                 <template x-if="revenueLeak && (revenueLeak.recovered_today_kzt ?? 0) > 0">
@@ -144,7 +216,7 @@
 
                 <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
                     <button type="button" class="text-left rounded-2xl bg-white ring-1 ring-slate-200/80 shadow-sm px-4 py-3 min-h-[96px]"
-                        @click="navigateToTab('dashboard', { dashboardTab: 'analytics' })">
+                        @click="openDashboardDrilldown('money')">
                         <div class="text-[11px] font-bold uppercase text-slate-500">Выручка сегодня</div>
                         <div class="mt-2 text-xl font-black text-slate-950 tabular-nums" x-text="fmt.money(dashStats.today_revenue || 0)"></div>
                         <div class="mt-1 text-[11px] text-slate-500"><span x-text="dashStats.today_orders || 0"></span> заказов</div>
@@ -153,13 +225,13 @@
                             x-cloak>Пока тихо — проверьте WhatsApp и диалоги или дождитесь первого заказа.</p>
                     </button>
                     <button type="button" class="text-left rounded-2xl bg-violet-50 ring-1 ring-violet-200/80 shadow-sm px-4 py-3 min-h-[96px]"
-                        @click="navigateToTab('ai_center', { aiCenterTab: 'value' })">
+                        @click="openDashboardDrilldown('ai')">
                         <div class="text-[11px] font-bold uppercase text-violet-900/75">Вклад ИИ</div>
                         <div class="mt-2 text-xl font-black text-violet-950 tabular-nums" x-text="fmt.money(dashStats.ai_revenue_today ?? dashStats.upsell_revenue_today ?? 0)"></div>
                         <div class="mt-1 text-[11px] font-semibold text-violet-800">Открыть вклад ИИ</div>
                     </button>
                     <button type="button" class="text-left rounded-2xl bg-white ring-1 ring-slate-200/80 shadow-sm px-4 py-3 min-h-[96px]"
-                        @click="navigateToTab('orders')">
+                        @click="openDashboardDrilldown('ai')">
                         <div class="text-[11px] font-bold uppercase text-slate-500">Доля ИИ</div>
                         <div class="mt-2 text-xl font-black text-slate-950 tabular-nums"
                             x-text="(dashStats.ai_revenue_share_pct ?? '—') + (dashStats.ai_revenue_share_pct != null ? '%' : '')"></div>
@@ -167,7 +239,7 @@
                     </button>
                     <button type="button" class="text-left rounded-2xl bg-orange-50 ring-1 ring-orange-200/80 shadow-sm px-4 py-3 min-h-[96px]"
                         x-show="dashStats.sales_peak_today?.label"
-                        @click="navigateToTab('dashboard', { dashboardTab: 'analytics' })">
+                        @click="openDashboardDrilldown('sales_peak')">
                         <div class="text-[11px] font-bold uppercase text-orange-900/75">Пик продаж сегодня</div>
                         <div class="mt-2 text-lg font-black text-orange-950 tabular-nums leading-tight"
                             x-text="dashStats.sales_peak_today?.label || '—'"></div>
@@ -254,7 +326,11 @@
 
                 <!-- Воронка потерь (Q3) -->
                 <div class="ds-card p-4" x-show="dashFunnel || dashFunnelLoading" x-cloak>
-                    <div class="text-sm font-semibold text-slate-700 mb-3">Где теряем клиентов (7 дней)</div>
+                    <div class="flex items-center justify-between gap-3 mb-3">
+                        <div class="text-sm font-semibold text-slate-700">Где теряем клиентов (7 дней)</div>
+                        <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm"
+                            @click="openDashboardDrilldown('guests')">Детали</button>
+                    </div>
                     <div x-show="dashFunnelLoading && !dashFunnel" class="text-sm text-slate-400">Загрузка…</div>
                     <div x-show="!dashFunnelLoading && !dashFunnel?.funnel" x-cloak class="text-sm text-slate-500 py-2">
                         Пока мало данных за 7 дней — воронка появится после первых диалогов и заказов.
@@ -644,4 +720,66 @@
                 </div><!-- /hidden sm:block последние заказы -->
                 </div><!-- /overview (dashboardTab) -->
                 {% include "screens/_tab_analytics.html" %}
+
+                <div x-show="dashboardDrilldownOpen" x-cloak
+                    class="fixed inset-0 z-[52] flex justify-end"
+                    role="dialog" aria-modal="true" aria-label="Детали dashboard">
+                    <div class="absolute inset-0 bg-slate-900/35" @click="closeDashboardDrilldown()"></div>
+                    <aside class="relative z-[1] flex h-full w-full max-w-xl flex-col bg-white shadow-2xl border-l border-slate-200">
+                        <div class="shrink-0 flex items-start justify-between gap-3 px-5 py-4 border-b border-slate-100">
+                            <div class="min-w-0">
+                                <div class="text-[10px] font-bold uppercase tracking-wide text-slate-500">Drill-down</div>
+                                <h3 class="text-lg font-bold text-slate-950 truncate" x-text="dashboardDrilldownTitle()"></h3>
+                                <p class="text-sm text-slate-500 mt-1 leading-relaxed" x-text="dashboardDrilldownSubtitle()"></p>
+                            </div>
+                            <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm min-w-[40px]"
+                                @click="closeDashboardDrilldown()" aria-label="Закрыть детали">×</button>
+                        </div>
+
+                        <div class="flex-1 min-h-0 overflow-y-auto px-5 py-4 space-y-5">
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <template x-for="m in dashboardDrilldownMetrics()" :key="m.label">
+                                    <div class="rounded-xl px-4 py-3 ring-1" :class="dashboardDrilldownMetricClass(m.tone)">
+                                        <div class="text-[10px] font-bold uppercase tracking-wide opacity-70" x-text="m.label"></div>
+                                        <div class="mt-1 text-xl font-black tabular-nums leading-tight" x-text="m.value"></div>
+                                    </div>
+                                </template>
+                            </div>
+
+                            <div>
+                                <div class="text-[10px] font-bold uppercase tracking-wide text-slate-400">Основания</div>
+                                <div class="mt-2 flex flex-wrap gap-2">
+                                    <template x-for="item in dashboardDrilldownEvidence()" :key="item">
+                                        <span class="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700" x-text="item"></span>
+                                    </template>
+                                </div>
+                            </div>
+
+                            <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                                <div class="flex items-center justify-between gap-3">
+                                    <div>
+                                        <div class="text-[10px] font-bold uppercase tracking-wide text-slate-500">Copilot</div>
+                                        <div class="text-sm font-semibold text-slate-900 mt-0.5">Разбор выбранного блока</div>
+                                    </div>
+                                    <button type="button" class="ds-btn ds-btn-secondary ds-btn-sm"
+                                        :disabled="intelligenceAsking"
+                                        @click="dashboardDrilldownAskAi()">
+                                        <span x-show="!intelligenceAsking">Спросить</span>
+                                        <span x-show="intelligenceAsking">Считаю…</span>
+                                    </button>
+                                </div>
+                                <p class="mt-3 text-sm text-slate-700 whitespace-pre-wrap" x-show="intelligenceAnswer" x-text="intelligenceAnswer"></p>
+                                <p class="mt-3 text-sm text-slate-500" x-show="!intelligenceAnswer">Ответ появится здесь после запроса.</p>
+                            </div>
+                        </div>
+
+                        <div class="shrink-0 flex flex-wrap gap-2 px-5 py-4 border-t border-slate-100 bg-slate-50/80">
+                            <button type="button" class="ds-btn ds-btn-primary ds-btn-sm"
+                                @click="dashboardDrilldownGoFull()"
+                                x-text="dashboardDrilldownFullLabel()"></button>
+                            <button type="button" class="ds-btn ds-btn-secondary ds-btn-sm"
+                                @click="closeDashboardDrilldown()">Остаться на странице</button>
+                        </div>
+                    </aside>
+                </div>
             </div><!-- /dashboard tab -->
