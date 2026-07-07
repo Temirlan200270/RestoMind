@@ -135,7 +135,7 @@
                                     ? (menuView === 'stoplist' ? 'Меню: Стоп-лист' : 'Меню')
                                     : (currentTab === 'dashboard' && analyticsDensity === 'advanced' ? 'Аналитика'
                                     : currentTab === 'inbox' ? (inboxTab === 'system' ? 'Требует внимания · системные' : 'Требует внимания · от клиентов')
-                                    : currentTab === 'ai_center' ? (aiCenterTab === 'owner_intel' ? 'Owner Intelligence' : aiCenterTab === 'insights' ? 'ИИ-аналитика · инсайты' : aiCenterTab === 'load' ? 'ИИ-аналитика · нагрузка' : aiCenterTab === 'os' ? 'ИИ-аналитика · автопилот' : aiCenterTab === 'guestcare' ? 'ИИ-аналитика · отзывы' : aiCenterTab === 'final_mile' ? 'ИИ-аналитика · финал' : 'ИИ-аналитика · вклад ИИ')
+                                    : currentTab === 'ai_center' ? (aiCenterTab === 'owner_intel' ? 'Разборы владельца' : aiCenterTab === 'insights' ? 'ИИ-аналитик · инсайты' : aiCenterTab === 'load' ? 'ИИ-аналитик · нагрузка' : aiCenterTab === 'os' ? 'ИИ-аналитик · автопилот' : aiCenterTab === 'guestcare' ? 'ИИ-аналитик · отзывы' : aiCenterTab === 'final_mile' ? 'ИИ-аналитик · финал' : 'ИИ-аналитик')
                                     : (navItems.find(i => i.id === currentTab)?.label)))"></h1>
                             <button type="button" @click="openGlobalSearch()"
                                 class="md:hidden shrink-0 min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 hover:bg-gray-50"
@@ -265,23 +265,6 @@
                                 <span class="lg:hidden">Стоп</span>
                             </button>
                             {% endcall %}
-                        </div>
-                    </template>
-                    <template x-if="canToggleOperationsDensity()">
-                        <div class="hidden md:flex shrink-0 items-center gap-1 rounded-xl border border-gray-200 bg-white p-1 shadow-sm"
-                            role="tablist" aria-label="Плотность операционного интерфейса">
-                            <button type="button" @click="setOperationsDensity('normal')"
-                                class="min-h-[36px] px-2.5 py-1.5 rounded-lg text-xs font-semibold transition"
-                                :class="operationsDensity === 'normal' ? 'ds-segmented-active' : 'text-gray-600 hover:bg-gray-50'"
-                                :aria-selected="operationsDensity === 'normal' ? 'true' : 'false'" role="tab">
-                                Обычный
-                            </button>
-                            <button type="button" @click="setOperationsDensity('compact')"
-                                class="min-h-[36px] px-2.5 py-1.5 rounded-lg text-xs font-semibold transition"
-                                :class="operationsDensity === 'compact' ? 'ds-segmented-active' : 'text-gray-600 hover:bg-gray-50'"
-                                :aria-selected="operationsDensity === 'compact' ? 'true' : 'false'" role="tab">
-                                Компактный
-                            </button>
                         </div>
                     </template>
                     <div x-show="authenticated && !uiHintDismissed('searchShortcut')" x-cloak

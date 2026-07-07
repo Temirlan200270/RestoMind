@@ -48,7 +48,7 @@ def test_owner_command_center_and_dashboard_drilldown():
     dash = (REPO / "app" / "templates" / "screens" / "_tab_dashboard.html").read_text(encoding="utf-8")
     js = (REPO / "app" / "static" / "js" / "admin-app.js").read_text(encoding="utf-8")
     assert "data-owner-command-center" in dash
-    assert "Owner Command Center" in dash
+    assert "Рабочий слой продаж" in dash
     assert "openDashboardDrilldown('money')" in dash
     assert "openDashboardDrilldown('guests')" in dash
     assert "openDashboardDrilldown('ai')" in dash

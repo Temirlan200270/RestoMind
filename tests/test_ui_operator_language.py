@@ -165,11 +165,11 @@ def test_orders_hint_no_kanban_jargon():
     assert "По этапам" in html
 
 
-def test_operations_density_toggle_in_header():
+def test_operations_density_toggle_not_exposed_in_header():
     header = _read("app", "templates", "screens", "_header.html")
     js = JS.read_text(encoding="utf-8")
-    assert "canToggleOperationsDensity()" in header
-    assert "setOperationsDensity(" in header
+    assert "canToggleOperationsDensity()" not in header
+    assert "setOperationsDensity(" not in header
     assert "restomind_density:operations" in js
     assert "operationsCompactEnabled()" in js
 

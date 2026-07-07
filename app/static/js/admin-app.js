@@ -1021,6 +1021,9 @@ function adminMixinState() {
         /** Роль staff из API: admin | operator (для стартовой вкладки). */
         staffRole: '',
         isSuperadmin: false,
+        isExecutiveHubSurface: typeof document !== 'undefined'
+            && document.body
+            && document.body.dataset.surface === 'executive-hub',
         _adminHashWatchInstalled: false,
         _applyingHashFromBrowser: false,
         _hashPushTimer: null,
@@ -1199,11 +1202,11 @@ function adminMixinState() {
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 01-.825-.242m9.345-8.334a21.05 21.05 0 00-1.889-2.403 19.7 19.7 0 00-1.6-1.562c-.642-.522-1.397-.957-2.23-1.25C16.247 1.872 14.747 1.5 12 1.5c-2.747 0-4.247.372-5.63.99-.833.293-1.588.728-2.23 1.25-.563.459-1.082 1-1.6 1.562A21.05 21.05 0 003.75 8.511"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5.25 8.511c-.884.284-1.5 1.128-1.5 2.097v4.286c0 1.136.847 2.1 1.98 2.193.34.027.68.052 1.02.072v3.091l3-3a11.63 11.63 0 014.02-.163 2.115 2.115 0 001.825-.242M9.378 5.378A21.05 21.05 0 0018.72 3.728"/></svg>' },
             { id: 'bookings', section: 'operations', label: 'Бронирования', desc: 'Столики и резервации',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/></svg>' },
-            { id: 'dashboard', section: 'management', label: 'Command Center', desc: 'Деньги, гости, ИИ, действия и drill-down',
+            { id: 'dashboard', section: 'management', label: 'Продажи', desc: 'Выручка, средний чек, динамика и drill-down',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25A2.25 2.25 0 018.25 10.5H6A2.25 2.25 0 013.75 8.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z"/></svg>' },
             { id: 'marketing', section: 'management', label: 'Маркетинг', desc: 'Рассылки и программа лояльности',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10.34 15.84c-.688-.06-1.386-.09-2.09-.09H7.5a4.5 4.5 0 110-9h.75c.704 0 1.402-.03 2.09-.09m0 9.18c.253.962.584 1.892.985 2.783.247.55.06 1.21-.463 1.511l-.657.38c-.551.318-1.26.117-1.527-.461a20.845 20.845 0 01-1.44-4.282m3.102.069a18.03 18.03 0 01-.59-4.59c0-1.586.205-3.124.59-4.59m0 9.18a23.848 23.848 0 018.835 2.535M10.34 6.66a23.847 23.847 0 008.835-2.535m0 0A23.74 23.74 0 0018.795 3m.38 1.125a23.91 23.91 0 011.014 5.395m-1.014 8.855c-.118.38-.245.754-.38 1.125m.38-1.125a23.91 23.91 0 001.014-5.395m0-3.46c.495.413.811 1.035.811 1.73 0 .695-.316 1.317-.811 1.73m0-3.46a24.347 24.347 0 010 3.46"/></svg>' },
-            { id: 'ai_center', section: 'management', label: 'ИИ-аналитика', desc: 'Вклад ИИ, инсайты и нагрузка',
+            { id: 'ai_center', section: 'management', label: 'ИИ-аналитик', desc: 'Вопросы владельца, инсайты и история разборов',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 3.75h4.5m-7.5 4.5h10.5m-12 4.5h13.5m-15 4.5h7.5m2.25 0h6M7.5 21h9a2.25 2.25 0 002.25-2.25V5.25A2.25 2.25 0 0016.5 3h-9a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21z"/></svg>' },
             { id: 'menu', section: 'management', label: 'Меню', desc: 'Каталог и стоп-лист',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8.25v-1.5m0 1.5c-1.355 0-2.697.056-4.024.166C6.845 8.51 6 9.473 6 10.608v2.513m6-4.871c1.355 0 2.697.055 4.024.165C17.155 8.51 18 9.473 18 10.608v2.513m-3 4.73v-1.59c0-.532-.21-1.042-.586-1.418L12 13.5m-3 4.73c.55.47 1.27.73 2 .73h6c.73 0 1.45-.26 2-.73m-8-4.73V10.6c0-1.12.856-2.08 2.09-2.19.64-.09 1.29-.14 1.91-.14m5 6.37v1.59c0 1.632-.875 3.11-2.25 3.89"/></svg>' },
@@ -4479,6 +4482,20 @@ function adminMixinAuthKnowledge() {
             }, 900);
         },
 
+        async _afterHubSurfaceAuthLoads() {
+            this.executiveHubOpen = true;
+            this.executiveHubChatOpen = true;
+            await Promise.all([
+                this.refreshDemoStatus(),
+                this.loadExecutiveHub(),
+                this.loadSetupStatus(),
+            ]);
+            this.deferIdleWork(() => {
+                void this.loadOrgProfile();
+                void this.loadIntegrationStatus();
+            }, 500);
+        },
+
         /** Сброс чувствительных данных в памяти при 401 — до любых alert и пока форма входа перекрывает UI. */
         clearAdminDataAfterAuthLoss() {
             this.orders = [];
@@ -4944,6 +4961,15 @@ function adminMixinAuthKnowledge() {
                     this.isDemoSession = !!data.is_demo;
                     this.staffRole = me.role;
                     this.isSuperadmin = me.is_superadmin;
+                    if (this.isExecutiveHubSurface) {
+                        if (this.effectiveStaffRole() === 'operator') {
+                            window.location.href = '/admin#shift';
+                            return;
+                        }
+                        this.connectWebSocket();
+                        await this._afterHubSurfaceAuthLoads();
+                        return;
+                    }
                     this._ensureAdminHashListener();
                     await this._bootstrapAdminFromHash();
                     this._installAdminHashWatch();
@@ -4999,6 +5025,15 @@ function adminMixinAuthKnowledge() {
                 if (me.is_superadmin && !window.location.pathname.startsWith('/superadmin')) {
                     adminClearLocationHash();
                     window.location.href = '/superadmin';
+                    return;
+                }
+                if (this.isExecutiveHubSurface) {
+                    if (this.effectiveStaffRole() === 'operator') {
+                        window.location.href = '/admin#shift';
+                        return;
+                    }
+                    this.connectWebSocket();
+                    await this._afterHubSurfaceAuthLoads();
                     return;
                 }
                 this._ensureAdminHashListener();
@@ -10744,12 +10779,17 @@ function adminMixinDataChartsSettings() {
 
         async openExecutiveHub() {
             if (!this.canOpenExecutiveHub()) return;
+            if (!this.isExecutiveHubSurface) {
+                window.location.href = '/hub';
+                return;
+            }
             this.executiveHubOpen = true;
             this.executiveHubChatOpen = true;
             await this.loadExecutiveHub();
         },
 
         closeExecutiveHub() {
+            if (this.isExecutiveHubSurface) return;
             this.executiveHubOpen = false;
             this.closeExecutiveHubDrill();
         },
@@ -10776,8 +10816,49 @@ function adminMixinDataChartsSettings() {
             const card = this.executiveHubActiveCard;
             const target = card?.drilldown;
             if (!target || typeof target !== 'object') return;
+            this.goToAdminTarget(target);
+        },
+
+        adminTargetHash(target) {
+            const t = target && typeof target === 'object' ? target : {};
+            const tab = String(t.tab || '').trim();
+            if (!tab) return 'dashboard';
+            if (tab === 'settings') {
+                return `settings/${encodeURIComponent(t.settingsTab || t.settings_tab || 'connections')}`;
+            }
+            if (tab === 'chats' && t.phone) {
+                return `chats?phone=${encodeURIComponent(String(t.phone))}`;
+            }
+            if (tab === 'incidents') return 'inbox?tab=system';
+            if (tab === 'operator_queue' || tab === 'errors') return 'inbox';
+            if (tab === 'analytics') return 'dashboard?tab=analytics';
+            if (tab === 'ai_value') return 'ai_center';
+            if (tab === 'intelligence') return 'ai_center?tab=insights';
+            if (tab === 'digital_twin') return 'ai_center?tab=load';
+            if (tab === 'menu') {
+                return t.menuView === 'stoplist' ? 'menu?view=stoplist' : 'menu';
+            }
+            if (tab === 'dashboard') {
+                return t.dashboardTab === 'analytics' ? 'dashboard?tab=analytics' : 'dashboard';
+            }
+            if (tab === 'ai_center') {
+                const ac = String(t.aiCenterTab || 'insights').trim();
+                return ac && ac !== 'value' ? `ai_center?tab=${encodeURIComponent(ac)}` : 'ai_center';
+            }
+            return encodeURIComponent(tab);
+        },
+
+        goToAdminTarget(target) {
+            if (this.isExecutiveHubSurface) {
+                window.location.href = `/admin#${this.adminTargetHash(target)}`;
+                return;
+            }
             this.closeExecutiveHub();
             this.incidentGo(target);
+        },
+
+        goToAdminHome() {
+            window.location.href = '/admin';
         },
 
         executiveHubSeverityBorder(severity) {
@@ -10823,8 +10904,7 @@ function adminMixinDataChartsSettings() {
             if (type === 'navigate') {
                 const target = action.drilldown || card?.drilldown;
                 if (target && typeof target === 'object') {
-                    this.closeExecutiveHub();
-                    this.incidentGo(target);
+                    this.goToAdminTarget(target);
                 }
                 return;
             }

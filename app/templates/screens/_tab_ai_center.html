@@ -1,10 +1,10 @@
             <!-- ========== ИИ-АНАЛИТИКА ========== -->
             <div x-show="currentTab === 'ai_center'" x-cloak class="fade-in space-y-4 mb-2">
                 <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3">
-                    {{ section_header('ИИ-аналитика', subtitle='Источник данных, аудит и лаборатория для Command Center.', extra_class='!mb-0') }}
+                    {{ section_header('ИИ-аналитик', subtitle='Источник данных, аудит и история разборов владельца.', extra_class='!mb-0') }}
                     <div class="w-full lg:w-auto min-w-0 overflow-x-auto">
                         {% call segmented(extra_class='border border-slate-200 bg-white shrink-0 inline-flex max-w-full') %}
-                        <div class="contents" role="tablist" aria-label="ИИ-аналитика">
+                        <div class="contents" role="tablist" aria-label="ИИ-аналитик">
                             <button type="button"
                                 class="min-h-[44px] px-3 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap"
                                 :class="aiCenterTab === 'value' ? 'ds-segmented-active' : ''"
@@ -70,7 +70,7 @@
                     </div>
                     <button type="button" class="ds-btn ds-btn-secondary ds-btn-sm shrink-0"
                         @click="navigateToTab('dashboard', { dashboardTab: 'overview' })">
-                        В Command Center
+                        В продажи
                     </button>
                 </div>
             </div>

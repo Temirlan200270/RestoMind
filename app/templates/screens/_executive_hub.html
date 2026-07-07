@@ -1,16 +1,21 @@
-{# Executive Hub — narrative overlay above existing admin tabs (manager/admin). #}
-<div x-show="executiveHubOpen" x-cloak
-    class="fixed inset-0 z-[55] flex items-stretch justify-center p-0 md:p-4 lg:p-6"
-    role="dialog" aria-modal="true" aria-label="Executive Hub">
-    <div class="absolute inset-0 bg-slate-900/45 backdrop-blur-[2px]" @click="closeExecutiveHub()"></div>
+{# Executive Hub — отдельная owner-поверхность; legacy overlay поддержан только как fallback. #}
+<div x-show="executiveHubOpen || isExecutiveHubSurface" x-cloak
+    class="flex items-stretch justify-center"
+    :class="isExecutiveHubSurface ? 'relative min-h-[100dvh] p-0' : 'fixed inset-0 z-[55] p-0 md:p-4 lg:p-6'"
+    :role="isExecutiveHubSurface ? 'main' : 'dialog'"
+    :aria-modal="isExecutiveHubSurface ? 'false' : 'true'"
+    aria-label="Executive Hub">
+    <div x-show="!isExecutiveHubSurface" class="absolute inset-0 bg-slate-900/45 backdrop-blur-[2px]" @click="closeExecutiveHub()"></div>
 
-    <div class="relative z-[1] flex w-full max-w-[1400px] min-h-0 h-full md:h-[calc(100dvh-2rem)] lg:h-[calc(100dvh-3rem)] md:rounded-2xl overflow-hidden bg-slate-50 shadow-2xl ring-1 ring-black/10">
+    <div class="relative z-[1] flex w-full min-h-0 overflow-hidden bg-slate-50"
+        :class="isExecutiveHubSurface ? 'min-h-[100dvh]' : 'max-w-[1400px] h-full md:h-[calc(100dvh-2rem)] lg:h-[calc(100dvh-3rem)] md:rounded-2xl shadow-2xl ring-1 ring-black/10'">
         <div class="flex flex-col min-w-0 flex-1">
             <div class="shrink-0 flex items-center justify-between gap-3 px-4 md:px-6 py-4 border-b border-slate-200/80 bg-white/90 backdrop-blur">
                 <div class="min-w-0">
                     <div class="text-[10px] font-bold uppercase tracking-[0.18em] text-indigo-600">Executive Hub</div>
                     <h2 class="text-lg md:text-xl font-bold text-slate-900 truncate">Кратко, понятно, с проваливанием в детали</h2>
-                    <p class="text-xs md:text-sm text-slate-500 mt-0.5">Верхний слой поверх аналитики. Нижние вкладки остаются для аудита и полной картины.</p>
+                    <p class="text-xs md:text-sm text-slate-500 mt-0.5"
+                        x-text="isExecutiveHubSurface ? 'Ежедневная owner-сводка: деньги, риски, ИИ-вопросы и действия. В админку переходите только для операционной работы.' : 'Ежедневная owner-сводка: деньги, риски, ИИ-вопросы и действия.'"></p>
                 </div>
                 <div class="flex items-center gap-2 shrink-0">
                     <button type="button" class="ds-btn ds-btn-secondary ds-btn-sm hidden sm:inline-flex"
@@ -24,11 +29,11 @@
                         <span x-show="executiveHubLoading">Загрузка…</span>
                     </button>
                     <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm hidden md:inline-flex"
-                        @click="closeExecutiveHub(); try { localStorage.setItem('rm_executive_hub_landing_off', '1'); } catch(_e) {}"
-                        title="Следующий вход — классические вкладки">
-                        К вкладкам
+                        @click="goToAdminHome()"
+                        title="Открыть рабочую админку">
+                        В админку
                     </button>
-                    <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm min-w-[40px]"
+                    <button type="button" x-show="!isExecutiveHubSurface" class="ds-btn ds-btn-ghost ds-btn-sm min-w-[40px]"
                         @click="closeExecutiveHub()" aria-label="Закрыть Executive Hub">×</button>
                 </div>
             </div>
@@ -97,7 +102,7 @@
                                         x-text="action.label"></button>
                                 </template>
                                 <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm"
-                                    @click.stop="openExecutiveHubCard(card)">Подробнее</button>
+                                    @click.stop="openExecutiveHubCard(card)">Разобрать</button>
                             </div>
                         </article>
                     </template>
@@ -191,8 +196,8 @@
                 <div class="rounded-xl bg-indigo-50 border border-indigo-100 p-4">
                     <div class="text-[10px] font-bold uppercase text-indigo-700">Почему система так решила</div>
                     <p class="mt-2 text-sm text-indigo-950/90">
-                        Карточка собрана из существующих слоёв RestoMind: продажи, утечки, Owner Intelligence и инсайты.
-                        Ниже можно открыть полную картину по этому вопросу или задать уточнение агенту.
+                        Карточка собрана из данных ресторана: продажи, потери, заказы, отзывы, смены и инсайты.
+                        Можно открыть узкий разбор этой метрики или задать уточнение агенту.
                     </p>
                 </div>
             </div>

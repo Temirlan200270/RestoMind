@@ -597,6 +597,33 @@ async def admin_page(request: Request) -> HTMLResponse:
     return response
 
 
+@app.get("/hub", response_class=HTMLResponse, tags=["Admin Panel"])
+@app.get("/executive-hub", response_class=HTMLResponse, tags=["Admin Panel"])
+async def executive_hub_page(request: Request) -> HTMLResponse:
+    """Отдельная owner-поверхность Executive Hub с переходом в админку."""
+    def _asset_ver() -> str:
+        git_sha_local = (os.environ.get("RENDER_GIT_COMMIT") or os.environ.get("GIT_COMMIT") or "").strip()
+        sha7_local = git_sha_local[:7] if git_sha_local else ""
+        if sha7_local:
+            return settings.app_version + f"-{sha7_local}"
+        try:
+            base_dir = Path(__file__).resolve().parent
+            js_p = base_dir / "static" / "js" / "admin-app.js"
+            css_p = base_dir / "static" / "css" / "admin.css"
+            mt = int(max(js_p.stat().st_mtime, css_p.stat().st_mtime))
+            return settings.app_version + f"-m{mt}"
+        except Exception:
+            return settings.app_version
+
+    response = templates.TemplateResponse(
+        request,
+        "hub.html",
+        {"asset_ver": _asset_ver()},
+    )
+    response.headers["Cache-Control"] = "no-store, max-age=0, must-revalidate"
+    return response
+
+
 @app.get("/admin/_/components", response_class=HTMLResponse, include_in_schema=False)
 async def admin_components_storybook(request: Request) -> HTMLResponse:
     """

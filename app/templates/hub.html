@@ -1,0 +1,31 @@
+{% from "components/_empty_state.html" import empty_state %}
+{% from "components/_button.html" import btn %}
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#4f46e5">
+    <link rel="manifest" href="/static/manifest.webmanifest">
+    <title>RestoMind — Executive Hub</title>
+    <link rel="stylesheet" href="/static/css/admin.css?v={{ asset_ver }}">
+    <script defer src="/static/js/admin-brand-tokens.js?v={{ asset_ver }}"></script>
+    <script defer src="/static/js/admin-app.js?v={{ asset_ver }}"></script>
+    <script defer src="/static/vendor/alpine-3.min.js?v={{ asset_ver }}"></script>
+</head>
+<body class="admin-root bg-slate-50 min-h-screen font-sans text-slate-900"
+    data-surface="executive-hub"
+    x-data="adminApp()"
+    x-init="init()"
+    @keydown.window="handleCommandBarKeydown($event); handleGlobalKeydown($event)">
+
+{% include "screens/_login.html" %}
+
+<main x-show="authenticated" x-cloak class="min-h-[100dvh] bg-slate-50">
+    {% include "screens/_executive_hub.html" %}
+</main>
+
+{% include "screens/_modals.html" %}
+
+</body>
+</html>

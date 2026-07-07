@@ -19,7 +19,7 @@
                 <div x-show="analyticsDensity === 'normal'" x-cloak class="space-y-6">
                 <div class="flex flex-wrap items-end justify-between gap-4">
                     <div class="min-w-0 flex-1">
-                        {{ section_header('Command Center', subtitle='Выручка, гости, ИИ, риски и действия.', extra_class='!mb-0') }}
+                        {{ section_header('Продажи', subtitle='Выручка, средний чек, динамика и действия.', extra_class='!mb-0') }}
                         <div class="mt-3" x-show="canOpenExecutiveHub()" x-cloak>
                             <button type="button" @click="openExecutiveHub()"
                                 class="inline-flex items-center gap-2 rounded-xl border border-indigo-200 bg-gradient-to-r from-indigo-50 to-white px-4 py-2.5 text-sm font-semibold text-indigo-900 hover:border-indigo-300 hover:from-indigo-100 transition shadow-sm">
@@ -44,8 +44,8 @@
                         <div class="p-4 sm:p-5">
                             <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
                                 <div>
-                                    <div class="text-[10px] font-bold uppercase tracking-wide text-slate-500">Owner Command Center</div>
-                                    <h3 class="text-base sm:text-lg font-bold text-slate-950 mt-0.5">Деньги, гости, ИИ и действия в одном месте</h3>
+                                    <div class="text-[10px] font-bold uppercase tracking-wide text-slate-500">Рабочий слой продаж</div>
+                                    <h3 class="text-base sm:text-lg font-bold text-slate-950 mt-0.5">Деньги, гости, ИИ и действия по продажам</h3>
                                 </div>
                                 <button type="button" class="ds-btn ds-btn-secondary ds-btn-sm"
                                     @click="navigateToTab('dashboard', { dashboardTab: 'analytics' })">
