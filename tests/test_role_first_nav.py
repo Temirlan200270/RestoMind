@@ -47,8 +47,9 @@ def test_dashboard_analytics_density_toggle():
 def test_owner_command_center_and_dashboard_drilldown():
     dash = (REPO / "app" / "templates" / "screens" / "_tab_dashboard.html").read_text(encoding="utf-8")
     js = (REPO / "app" / "static" / "js" / "admin-app.js").read_text(encoding="utf-8")
-    assert "data-owner-command-center" in dash
-    assert "Рабочий слой продаж" in dash
+    assert "data-owner-command-center" not in dash
+    assert "data-owner-legacy-sales-summary" not in dash
+    assert "Рабочий слой продаж" not in dash
     assert "openDashboardDrilldown('money')" in dash
     assert "openDashboardDrilldown('guests')" in dash
     assert "openDashboardDrilldown('ai')" in dash
@@ -61,9 +62,23 @@ def test_owner_command_center_and_dashboard_drilldown():
 
 def test_ai_center_is_source_layer_not_daily_landing():
     ai_center = (REPO / "app" / "templates" / "screens" / "_tab_ai_center.html").read_text(encoding="utf-8")
-    assert "data-ai-center-source-lab" in ai_center
-    assert "Source layer" in ai_center
+    assert "data-ai-center-source-lab" not in ai_center
+    assert "Source layer" not in ai_center
+    assert "data-ai-center-business-archive" in ai_center
     assert "navigateToTab('dashboard', { dashboardTab: 'overview' })" in ai_center
+
+
+def test_executive_hub_has_owner_scope_switcher():
+    hub = (REPO / "app" / "templates" / "screens" / "_executive_hub.html").read_text(encoding="utf-8")
+    api = (REPO / "app" / "api" / "admin" / "intelligence.py").read_text(encoding="utf-8")
+    assert "executive-hub-location-scope" in hub
+    assert "selectedLocationId" in hub
+    assert "setSelectedLocation($event.target.value); loadExecutiveHub()" in hub
+    assert "Вся сеть" in hub
+    assert "Все точки" in hub
+    assert '"summary": payload.get("summary") or {}' in api
+    assert '"next_actions": payload.get("next_actions") or []' in api
+    assert '"readiness": payload.get("readiness") or {}' in api
 
 
 def test_operator_keeps_only_execution_tabs():

@@ -7,6 +7,7 @@ import base64
 import json
 import logging
 import sys
+import warnings
 from typing import Any
 
 from fastapi import WebSocket
@@ -24,10 +25,16 @@ _FALLBACK_SAY = "Извините, голосовой ассистент вре�
 
 
 def _audioop():
-    try:
-        import audioop
-    except ImportError:
-        audioop = None  # type: ignore[misc, assignment]
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="'audioop' is deprecated.*",
+            category=DeprecationWarning,
+        )
+        try:
+            import audioop
+        except ImportError:
+            audioop = None  # type: ignore[misc, assignment]
     if audioop is None:
         raise RuntimeError(
             f"audioop required for voice realtime (Python {sys.version_info.major}.{sys.version_info.minor})"

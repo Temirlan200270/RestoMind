@@ -4,22 +4,32 @@ Python 3.11–3.12: stdlib `audioop`. Python 3.13+: пакет `audioop-lts` (с
 """
 
 import io
+import importlib
 import sys
+import warnings
 import wave
+
+
+def _import_audioop_module(module_name: str):
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="'audioop' is deprecated.*",
+            category=DeprecationWarning,
+        )
+        return importlib.import_module(module_name)
+
 
 if sys.version_info >= (3, 13):
     audioop = None  # type: ignore[misc, assignment]
     for _mod in ("audioop_lts", "audioop"):
         try:
-            if _mod == "audioop_lts":
-                import audioop_lts as audioop  # type: ignore[import-untyped, no-redef]
-            else:
-                import audioop  # type: ignore[import-untyped, no-redef]
+            audioop = _import_audioop_module(_mod)
             break
         except ImportError:
             continue
 else:
-    import audioop  # type: ignore[deprecated]
+    audioop = _import_audioop_module("audioop")
 
 
 def mulaw_to_linear_pcm16(mulaw_data: bytes) -> bytes:

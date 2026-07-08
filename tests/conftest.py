@@ -448,7 +448,7 @@ def _tenant_rls_test_bypass():
     reset_tenant_rls_bypass(token)
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
 def migrated_postgres_schema() -> None:
     """Тестовая схема поднимается на Postgres и помечается текущим Alembic head."""
     asyncio.run(_ensure_postgres_database(_TEST_DATABASE_URL))
@@ -472,7 +472,7 @@ def migrated_postgres_schema() -> None:
 
 
 @pytest_asyncio.fixture
-async def db_session() -> AsyncGenerator[AsyncSession, None]:
+async def db_session(migrated_postgres_schema: None) -> AsyncGenerator[AsyncSession, None]:
     """Postgres-сессия с откатом всей работы теста."""
     engine = make_postgres_engine()
     connection = await engine.connect()
@@ -511,7 +511,9 @@ async def db_with_menu(db_session: AsyncSession) -> AsyncSession:
 
 
 @pytest_asyncio.fixture
-async def postgres_session_factory() -> AsyncGenerator[async_sessionmaker[AsyncSession], None]:
+async def postgres_session_factory(
+    migrated_postgres_schema: None,
+) -> AsyncGenerator[async_sessionmaker[AsyncSession], None]:
     """Фабрика реальных Postgres-сессий для тестов с несколькими commit/HTTP-сессиями."""
     engine = make_postgres_engine()
     await _truncate_tables(engine)
@@ -528,7 +530,7 @@ async def postgres_session_factory() -> AsyncGenerator[async_sessionmaker[AsyncS
 
 
 @pytest_asyncio.fixture
-async def asgi_memory_client(monkeypatch):
+async def asgi_memory_client(monkeypatch, migrated_postgres_schema: None):
     """
     FastAPI-приложение с Postgres test DB и переопределённым get_db.
 

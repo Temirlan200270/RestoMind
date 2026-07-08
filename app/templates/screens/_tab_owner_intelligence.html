@@ -1,11 +1,11 @@
-{# Owner Intelligence — STAGE 1 (AI Center sub-tab) #}
+{# Разборы владельца — STAGE 1 (AI Center sub-tab) #}
 {% from "components/_kitchen_gate_panel.html" import kitchen_gate_panel %}
 <div x-show="currentTab === 'ai_center' && aiCenterTab === 'owner_intel'" x-cloak class="fade-in space-y-6 pb-16">
     <div class="flex flex-col gap-4">
-        {{ section_header('Owner Intelligence', subtitle='Потери, восстановления, допродажи и контроль смены за выбранный период.', extra_class='!mb-0') }}
+        {{ section_header('Разборы владельца', subtitle='Потери, восстановления, допродажи и контроль смены за выбранный период.', extra_class='!mb-0') }}
         <div class="flex flex-wrap items-center gap-3">
             {% call segmented(extra_class='border border-slate-200 bg-white shrink-0') %}
-            <div class="contents" role="tablist" aria-label="Период Owner Intelligence">
+            <div class="contents" role="tablist" aria-label="Период Разборы владельца">
                 <template x-for="p in [{id:'today', label:'Сегодня'}, {id:'7d', label:'7д'}, {id:'30d', label:'30д'}]" :key="p.id">
                     <button type="button" @click="setOwnerIntelPeriod(p.id)"
                         :class="ownerIntelPeriod === p.id ? 'ds-segmented-active' : ''"

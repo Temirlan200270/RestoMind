@@ -1,18 +1,11 @@
-"""
-Пакет админ-API. E0.1 завершён: маршруты вынесены в подмодули;
-_monolith.py — compatibility shim; protected REST — demo / settings_ops / export + core.router.
-"""
+"""Public exports for the split admin API package."""
 
-from ._monolith import (
-    _check_mixed_payment_split,
-    require_admin_session,
-    require_admin_session_active,
-    router,
-)
 from .analytics import admin_ai_value, admin_incidents, admin_readiness, analytics
 from .auth import LoginBody, admin_demo_login, admin_login, auth_router
 from .chats import resend_failed_chat_message, send_message
-from .orders import admin_order_timeline, retry_failed_task
+from .core import router
+from .deps import require_admin_session, require_admin_session_active
+from .orders import _check_mixed_payment_split, admin_order_timeline, retry_failed_task
 from .ws import _ws_event_allowed_for_org, ws_router
 
 __all__ = [

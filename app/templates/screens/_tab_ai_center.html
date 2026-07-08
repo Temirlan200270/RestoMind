@@ -8,11 +8,11 @@
                             <button type="button"
                                 class="min-h-[44px] px-3 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap"
                                 :class="aiCenterTab === 'value' ? 'ds-segmented-active' : ''"
-                                @click="navigateToTab('ai_center', { aiCenterTab: 'value' })">Вклад ИИ</button>
+                                @click="navigateToTab('ai_center', { aiCenterTab: 'value' })">Эффект ИИ</button>
                             <button type="button"
                                 class="min-h-[44px] px-3 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap"
                                 :class="aiCenterTab === 'owner_intel' ? 'ds-segmented-active' : ''"
-                                @click="navigateOwnerIntelligence()">Owner Intelligence</button>
+                                @click="navigateOwnerIntelligence()">Разборы владельца</button>
                             <button type="button"
                                 class="min-h-[44px] px-3 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap"
                                 x-show="userData?.is_network"
@@ -25,18 +25,18 @@
                             <button type="button"
                                 class="min-h-[44px] px-3 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap"
                                 :class="aiCenterTab === 'insights' ? 'ds-segmented-active' : ''"
-                                @click="navigateToTab('ai_center', { aiCenterTab: 'insights' })">Инсайты</button>
+                                @click="navigateToTab('ai_center', { aiCenterTab: 'insights' })">Сигналы</button>
                             <button type="button"
                                 class="min-h-[44px] px-3 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap"
                                 :class="aiCenterTab === 'load' ? 'ds-segmented-active' : ''"
                                 x-show="aiCenterShowExtendedTabs"
-                                @click="navigateToTab('ai_center', { aiCenterTab: 'load' })">Нагрузка</button>
+                                @click="navigateToTab('ai_center', { aiCenterTab: 'load' })">Смена</button>
                             <button type="button"
                                 class="min-h-[44px] px-3 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap"
                                 :class="aiCenterTab === 'os' ? 'ds-segmented-active' : ''"
                                 x-show="aiCenterShowExtendedTabs"
                                 @click="navigateToTab('ai_center', { aiCenterTab: 'os' }); loadOsDashboard()">
-                                <span class="text-indigo-600">⚡</span> Автопилот
+                                <span class="text-indigo-600">⚡</span> Решения
                             </button>
                             <button type="button"
                                 class="min-h-[44px] px-3 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap"
@@ -50,7 +50,7 @@
                                 :class="aiCenterTab === 'final_mile' ? 'ds-segmented-active' : ''"
                                 x-show="aiCenterShowExtendedTabs"
                                 @click="navigateToTab('ai_center', { aiCenterTab: 'final_mile' }); loadFinalMileUi()">
-                                Финал
+                                Закупки и голос
                             </button>
                             <button type="button"
                                 x-show="!aiCenterShowExtendedTabs"
@@ -63,10 +63,10 @@
                         {% endcall %}
                     </div>
                 </div>
-                <div data-ai-center-source-lab class="rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div data-ai-center-business-archive class="rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <div class="min-w-0">
-                        <div class="text-[10px] font-bold uppercase tracking-wide text-slate-500">Source layer</div>
-                        <p class="text-sm text-slate-700 mt-0.5">Глубокие отчёты, аудит рекомендаций, отзывы, нагрузка и финальные модули.</p>
+                        <div class="text-[10px] font-bold uppercase tracking-wide text-slate-500">Архив разборов</div>
+                        <p class="text-sm text-slate-700 mt-0.5">Глубокие отчёты, аудит рекомендаций, отзывы, нагрузка и операционные разборы.</p>
                     </div>
                     <button type="button" class="ds-btn ds-btn-secondary ds-btn-sm shrink-0"
                         @click="navigateToTab('dashboard', { dashboardTab: 'overview' })">
@@ -80,7 +80,7 @@
 
             <div x-show="currentTab === 'ai_center' && aiCenterTab === 'sales_data'" x-cloak class="fade-in space-y-4">
                 <div class="flex items-center justify-between gap-3">
-                    {{ section_header('Единый слой продаж', subtitle='iiko OLAP: зал, доставка, блюда, категории и baseline.', extra_class='!mb-0') }}
+                    {{ section_header('Продажи и блюда', subtitle='Данные по залу, доставке, блюдам и категориям.', extra_class='!mb-0') }}
                     <button type="button" class="ds-btn-secondary text-sm" @click="loadSalesDataLayer()" :disabled="salesDataLoading">
                         Обновить
                     </button>
@@ -110,7 +110,7 @@
                             <div class="ds-card p-4">
                                 <div class="text-[11px] font-bold uppercase text-slate-500">Выручка</div>
                                 <div class="text-2xl font-black text-slate-900 tabular-nums mt-1" x-text="fmt.money(salesDataOverview.total_revenue || 0)"></div>
-                                <div class="text-xs text-slate-400 mt-0.5">OLAP за период</div>
+                                <div class="text-xs text-slate-400 mt-0.5">за выбранный период</div>
                             </div>
                             <div class="ds-card p-4">
                                 <div class="text-[11px] font-bold uppercase text-slate-500">Чеки</div>
@@ -140,7 +140,7 @@
                                         </div>
                                     </template>
                                     <div x-show="!(salesDataTopDishes?.items || []).length" class="text-sm text-slate-500">
-                                        Нет OLAP-данных. Запустите backfill или проверьте права iiko.
+                                        Данных по блюдам пока нет. Запустите синхронизацию или проверьте права iiko.
                                     </div>
                                 </div>
                             </div>
@@ -154,7 +154,7 @@
                                         </div>
                                     </template>
                                     <div x-show="!(salesDataCategories?.items || []).length" class="text-sm text-slate-500">
-                                        Категории появятся после OLAP-синхронизации.
+                                        Категории появятся после синхронизации продаж.
                                     </div>
                                 </div>
                             </div>
@@ -163,12 +163,12 @@
                 </template>
             </div>
 
-            <!-- Phase 5 OS: OS Autopilot tab -->
+            <!-- Phase 5 OS: Решения смены tab -->
             <div x-show="currentTab === 'ai_center' && aiCenterTab === 'os'" x-cloak class="fade-in space-y-4">
                 <div class="flex items-center gap-2">
                     <span class="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-200 px-2.5 py-1 rounded-full">
                         <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd"/></svg>
-                        Данные ОС · без прямых запросов к заказам и чатам
+                        События смены · без прямых запросов к заказам и чатам
                     </span>
                     <span x-show="osDashboardLoading" class="text-xs text-slate-400">Загрузка…</span>
                 </div>
@@ -182,7 +182,7 @@
                             <div class="ds-card p-4">
                                 <div class="text-[11px] font-bold uppercase text-slate-500">Заказов</div>
                                 <div class="text-2xl font-black text-slate-900 tabular-nums mt-1" x-text="osDashboardData.today?.orders_confirmed ?? 0"></div>
-                                <div class="text-xs text-slate-400 mt-0.5">по событиям ОС</div>
+                                <div class="text-xs text-slate-400 mt-0.5">по событиям смены</div>
                             </div>
                             <div class="ds-card p-4">
                                 <div class="text-[11px] font-bold uppercase text-slate-500">Выручка</div>
@@ -260,7 +260,7 @@
                                             'border-sky-300':    osDashboardData.overload_risk.risk_level === 'low',
                                             'border-slate-200':  osDashboardData.overload_risk.risk_level === 'unknown'
                                         }">
-                                        <div class="text-xs font-semibold text-slate-700 mb-1">Нагрузка на кухню</div>
+                                        <div class="text-xs font-semibold text-slate-700 mb-1">Смена на кухню</div>
                                         <div class="text-lg font-black tabular-nums"
                                             :class="{
                                                 'text-red-600':   osDashboardData.overload_risk.risk_level === 'high',
@@ -392,11 +392,11 @@
                             </template>
                         </div>
 
-                        <!-- Control Plane: trace timeline -->
-                        <div class="ds-card p-4">
+                        <!-- Diagnostic timeline: hidden from the business AI Center surface. -->
+                        <div class="ds-card p-4 hidden" aria-hidden="true">
                             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
                                 <div>
-                                    <div class="text-xs font-semibold text-slate-700">Цепочка trace_id</div>
+                                    <div class="text-xs font-semibold text-slate-700">Диагностика событий</div>
                                     <div class="text-[10px] text-slate-400">SystemEvent + ChatLog по одному trace</div>
                                 </div>
                                 <button type="button" class="ds-btn ds-btn-secondary ds-btn-sm shrink-0"
@@ -408,13 +408,13 @@
                             <div class="flex gap-2 mb-3">
                                 <input type="text"
                                     class="ds-input flex-1 text-sm font-mono"
-                                    placeholder="trace_id из логов или заказа"
+                                    placeholder="ID диагностики из заказа"
                                     x-model="traceTimelineQuery"
                                     @keydown.enter.prevent="loadTraceTimeline()">
                             </div>
                             <div x-show="traceTimelineLoading" class="h-12 rounded-lg bg-slate-100 animate-pulse"></div>
                             <template x-if="!traceTimelineLoading && traceTimeline && !(traceTimeline.entries || []).length">
-                                <div class="text-xs text-slate-400 py-2 text-center">Событий по этому trace_id не найдено</div>
+                                <div class="text-xs text-slate-400 py-2 text-center">Событий по этому ID не найдено</div>
                             </template>
                             <div class="space-y-2 max-h-72 overflow-y-auto admin-sidebar-scroll">
                                 <template x-for="(entry, idx) in (traceTimeline?.entries || [])" :key="'trace-' + idx + '-' + (entry.at || '')">
@@ -502,7 +502,7 @@
                                 <option value="realtime">Потоковый диалог</option>
                             </select>
                             <div x-show="voiceAiModeDraft === 'realtime'" x-cloak class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                                Потоковый режим — премиальный. Для массовых заведений оставляйте резервное распознавание речи до тестового звонка и оценки стоимости минуты.
+                                Потоковый режим требует контроля стоимости. Для массовых заведений оставляйте резервное распознавание речи до тестового звонка и оценки стоимости минуты.
                             </div>
                             <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[11px]">
                                 <div class="rounded-lg bg-slate-50 px-3 py-2">
@@ -760,7 +760,7 @@
                                 (<code class="text-slate-600">review_url_2gis</code>).
                                 Авто-sync только 2GIS; Google — только ручной импорт по URL ниже.
                                 Если 2GIS отдаёт защитную страницу,
-                                авто-sync покажет ошибку и потребуется scraper/API-интеграция.
+                                авто-sync покажет ошибку и потребуется дополнительная интеграция.
                             </p>
                             <p x-show="guestCareSyncMeta?.last_at" class="text-[10px] text-slate-400 mt-1"
                                 x-text="'Последняя синхронизация: ' + (guestCareSyncMeta?.last_at || '')"></p>

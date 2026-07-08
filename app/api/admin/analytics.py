@@ -20,6 +20,7 @@ from app.db.models import (
     CustomerFeedback,
     EscalationEvent,
     FailedTask,
+    InventoryStockSnapshot,
     MenuItem,
     Order,
     OrderStatus,
@@ -28,6 +29,7 @@ from app.db.models import (
     SalesDailyAgg,
     SalesFactItem,
     SalesFactOrder,
+    SupplyPurchaseDraft,
     User,
 )
 from app.db.session import get_db
@@ -53,6 +55,7 @@ from app.services.analytics_consumer import (
 )
 from app.services.owner_dashboard import (
     build_recommendation_target,
+    build_stock_alerts_from_inventory,
     build_week_forecast,
     event_revenue_history_usable,
     fetch_daily_revenue_history,
@@ -247,6 +250,18 @@ def _build_hero_actions(groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
         st = action.get("settingsTab") or action.get("settings_tab")
         if st:
             target["settingsTab"] = st
+        ac = action.get("aiCenterTab") or action.get("ai_center_tab")
+        if ac:
+            target["aiCenterTab"] = ac
+        it = action.get("inboxTab") or action.get("inbox_tab")
+        if it:
+            target["inboxTab"] = it
+        dt = action.get("dashboardTab") or action.get("dashboard_tab")
+        if dt:
+            target["dashboardTab"] = dt
+        mv = action.get("menuView") or action.get("menu_view")
+        if mv:
+            target["menuView"] = mv
         title = str(g.get("title") or g.get("id") or "incident")
         ranked.append(
             (
@@ -262,6 +277,124 @@ def _build_hero_actions(groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
         )
     ranked.sort(key=lambda x: x[0])
     return [x[1] for x in ranked[:4]]
+
+
+def _apply_nullable_location_scope(stmt: Any, column: Any, allowed_location_ids: set[int] | None, location_id: int | None) -> Any:
+    if location_id is not None:
+        return stmt.where(column == int(location_id))
+    if allowed_location_ids is not None:
+        return stmt.where(column.in_(list(allowed_location_ids)))
+    return stmt
+
+
+async def _build_supply_purchase_incident_group(
+    db: AsyncSession,
+    *,
+    org_id: int,
+    allowed_location_ids: set[int] | None,
+    location_id: int | None,
+    summary_mode: bool,
+) -> dict[str, Any] | None:
+    action = {
+        "tab": "ai_center",
+        "aiCenterTab": "final_mile",
+        "label": "Открыть закупку",
+    }
+    active_statuses = ("draft", "approved")
+    draft_count_stmt = select(func.count(SupplyPurchaseDraft.id)).where(
+        SupplyPurchaseDraft.organization_id == org_id,
+        SupplyPurchaseDraft.status.in_(active_statuses),
+    )
+    draft_count_stmt = _apply_nullable_location_scope(
+        draft_count_stmt,
+        SupplyPurchaseDraft.location_id,
+        allowed_location_ids,
+        location_id,
+    )
+    draft_count = int(await db.scalar(draft_count_stmt) or 0)
+
+    stock_stmt = select(InventoryStockSnapshot).where(InventoryStockSnapshot.organization_id == org_id)
+    stock_stmt = _apply_nullable_location_scope(
+        stock_stmt,
+        InventoryStockSnapshot.location_id,
+        allowed_location_ids,
+        location_id,
+    )
+    stock_rows = (
+        await db.execute(stock_stmt.order_by(InventoryStockSnapshot.updated_at.desc()).limit(200))
+    ).scalars().all()
+    alerts = build_stock_alerts_from_inventory(stock_rows)
+    alert_count = len(alerts)
+
+    if draft_count <= 0 and alert_count <= 0:
+        return None
+
+    items: list[dict[str, Any]] = []
+    if not summary_mode:
+        drafts_stmt = select(SupplyPurchaseDraft).where(
+            SupplyPurchaseDraft.organization_id == org_id,
+            SupplyPurchaseDraft.status.in_(active_statuses),
+        )
+        drafts_stmt = _apply_nullable_location_scope(
+            drafts_stmt,
+            SupplyPurchaseDraft.location_id,
+            allowed_location_ids,
+            location_id,
+        )
+        drafts = (
+            await db.execute(
+                drafts_stmt.order_by(SupplyPurchaseDraft.updated_at.desc(), SupplyPurchaseDraft.id.desc()).limit(3),
+            )
+        ).scalars().all()
+        for draft in drafts:
+            item_count = len(draft.items_json or [])
+            items.append(
+                {
+                    "id": f"supply_draft:{draft.id}",
+                    "title": draft.title or f"Чеклист закупки #{draft.id}",
+                    "subtitle": f"{item_count} позиций · статус: {draft.status}",
+                    "detail": "Подтвердите закупку или отметьте позиции, которые уже заказаны.",
+                    "created_at": _incident_dt_iso(draft.updated_at or draft.created_at),
+                    "meta": [
+                        {"label": "Позиций", "value": item_count},
+                        {"label": "Статус", "value": draft.status},
+                    ],
+                    "target": action,
+                },
+            )
+        for alert in alerts[: max(0, INCIDENT_SAMPLE_LIMIT - len(items))]:
+            days = alert.get("days_until_runout")
+            ingredient = alert.get("ingredient") or alert.get("sku") or "Позиция"
+            items.append(
+                {
+                    "id": f"stock_alert:{alert.get('sku') or ingredient}",
+                    "title": str(ingredient),
+                    "subtitle": "Запасы могут закончиться" + (f" через {days} дн." if days is not None else ""),
+                    "detail": str(alert.get("message") or "Добавьте позицию в чеклист закупки."),
+                    "created_at": None,
+                    "meta": [
+                        {"label": "Остаток", "value": alert.get("quantity")},
+                        {"label": "Ед.", "value": alert.get("unit")},
+                    ],
+                    "target": action,
+                },
+            )
+
+    count = draft_count if draft_count > 0 else alert_count
+    description = (
+        "Есть черновик закупки, который нужно подтвердить."
+        if draft_count > 0
+        else "По складу есть позиции, которые пора вынести в чеклист закупки."
+    )
+    return _incident_group(
+        group_id="purchase_checklist",
+        title="Закупка требует подтверждения",
+        severity="warning",
+        count=count,
+        description=description,
+        action=action,
+        items=items,
+    )
 
 
 # ─── Routes ──────────────────────────────────────────────
@@ -566,6 +699,16 @@ async def admin_incidents(
                 items=items_pay,
             ),
         )
+
+    supply_group = await _build_supply_purchase_incident_group(
+        db,
+        org_id=org_id,
+        allowed_location_ids=allowed_location_ids,
+        location_id=location_id,
+        summary_mode=summary_mode,
+    )
+    if supply_group is not None:
+        groups.append(supply_group)
 
     iiko_configured = await iiko_effective_configured(db, org_id)
     wa_configured = await whatsapp_effective_configured(db, org_id)

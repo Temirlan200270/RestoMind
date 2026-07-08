@@ -1373,7 +1373,7 @@ function adminMixinState() {
         aiValueData: null,
         aiValueSource: '',
 
-        // ========== Owner Intelligence (STAGE 1) — state ==========
+        // ========== Разборы владельца (STAGE 1) — state ==========
         ownerIntelPeriod: '7d',
         ownerIntelLoading: false,
         ownerIntelData: null,
@@ -1396,7 +1396,7 @@ function adminMixinState() {
         kitchenGate: null,
         kitchenGateLoading: false,
         kitchenGateSaving: false,
-        // ========== / Owner Intelligence — state ==========
+        // ========== / Разборы владельца — state ==========
 
         // ========== Order QA Audit (shift focus) — state ==========
         orderAuditForFocus: null,
@@ -1457,7 +1457,7 @@ function adminMixinState() {
         aiSnapshots: [],
         aiSnapshotsLoading: false,
         aiSnapshotFeedbackLoading: null,
-        /** Phase 5 OS: OS Autopilot dashboard data from /intelligence/os-dashboard */
+        /** Phase 5 OS: Решения смены dashboard data from /intelligence/os-dashboard */
         osDashboardData: null,
         osDashboardLoading: false,
         /** Phase 5 Final Mile UI */
@@ -1538,6 +1538,9 @@ function adminMixinState() {
         executiveHubLoading: false,
         executiveHubCards: [],
         executiveHubDimensions: {},
+        executiveHubSummary: null,
+        executiveHubNextActions: [],
+        executiveHubReadiness: null,
         executiveHubActiveCard: null,
         executiveHubChatOpen: true,
         executiveHubBusinessQuestions: [],
@@ -1722,7 +1725,7 @@ function adminMixinState() {
         iikoOnboardTerminal: '',
         iikoOnboardVerifyLoading: false,
         iikoOnboardSetupLoading: false,
-        /** iiko Office (SupplyMind inventory) — GET/PATCH /api/admin/organization/iiko-office */
+        /** iiko Office (Закупки inventory) — GET/PATCH /api/admin/organization/iiko-office */
         iikoOfficeConfig: null,
         iikoOfficeDraft: {
             host: '',
@@ -2412,7 +2415,7 @@ function adminMixinMenuOrdersUi() {
             });
         },
 
-        /** Раньше добавляли «Вклад ИИ» динамически — после P1.5.0 пункты фиксированы в navItems. */
+        /** Раньше добавляли «Эффект ИИ» динамически — после P1.5.0 пункты фиксированы в navItems. */
         ensureAi2NavItems() {},
 
         async init() {
@@ -6330,7 +6333,7 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                 this.iikoOfficeConfig = data;
                 this.iikoOfficeDraft.password = '';
                 this.iikoOfficeDirty = false;
-                void this.showUiAlert('Настройки iiko Office сохранены.', 'SupplyMind');
+                void this.showUiAlert('Настройки iiko Office сохранены.', 'Закупки');
                 if (this.currentTab === 'ai_center' && this.aiCenterTab === 'final_mile') {
                     await this.loadInventorySyncStatus();
                 }
@@ -6355,7 +6358,7 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
             }
         },
 
-        // RC-E: Smart Sales — upsell impact from Owner Intelligence API
+        // RC-E: Smart Sales — upsell impact from Разборы владельца API
         async loadSmartSalesImpact() {
             this.smartSalesLoading = true;
             try {
@@ -7268,7 +7271,7 @@ function adminMixinWebSocketEvents() {
                 return 'Live Pulse: клиент ждёт < 2 мин';
             }
             if (s === 'red') return 'Live Pulse: чат помечен как просроченный';
-            if (chat?.botShortMode) return 'Нагрузка: бот в кратком режиме';
+            if (chat?.botShortMode) return 'Смена: бот в кратком режиме';
             return 'Live Pulse: ответ дан, ожидания нет';
         },
 
@@ -10766,7 +10769,10 @@ function adminMixinDataChartsSettings() {
                 if (!ok) return;
                 this.executiveHubCards = Array.isArray(data.cards) ? data.cards : [];
                 this.executiveHubDimensions = data.dimensions && typeof data.dimensions === 'object' ? data.dimensions : {};
-                this.executiveHubRole = data.role || this.executiveHubRole || 'owner';
+                this.executiveHubSummary = data.summary && typeof data.summary === 'object' ? data.summary : null;
+                this.executiveHubNextActions = Array.isArray(data.next_actions) ? data.next_actions : [];
+                this.executiveHubReadiness = data.readiness && typeof data.readiness === 'object' ? data.readiness : null;
+                this.executiveHubRole = data.chat?.role || data.role || this.executiveHubRole || 'owner';
                 this.executiveHubBusinessQuestions = Array.isArray(data.chat?.business_questions)
                     ? data.chat.business_questions
                     : [];
@@ -10896,6 +10902,29 @@ function adminMixinDataChartsSettings() {
         executiveHubDimensionLabel(key) {
             const map = { health: 'Здоровье', money: 'Деньги', quality: 'Качество', ops: 'Операции' };
             return map[key] || key;
+        },
+
+        executiveHubStatBadgeClass(severity) {
+            const s = String(severity || 'info').toLowerCase();
+            if (s === 'critical') return 'bg-red-50 text-red-800 ring-1 ring-red-100';
+            if (s === 'warning') return 'bg-amber-50 text-amber-900 ring-1 ring-amber-100';
+            return 'bg-slate-50 text-slate-700 ring-1 ring-slate-100';
+        },
+
+        executiveHubReadinessLabel(mode) {
+            return String(mode || '') === 'runtime' ? 'Рабочий режим' : 'Подготовка данных';
+        },
+
+        executiveHubReadinessClass(status) {
+            const s = String(status || '').toLowerCase();
+            if (s === 'ok') return 'bg-emerald-50 text-emerald-800 ring-1 ring-emerald-100';
+            if (s === 'action') return 'bg-amber-50 text-amber-900 ring-1 ring-amber-100';
+            return 'bg-slate-50 text-slate-700 ring-1 ring-slate-100';
+        },
+
+        executiveHubFindCard(cardId) {
+            if (!cardId) return null;
+            return (this.executiveHubCards || []).find((card) => String(card.id) === String(cardId)) || null;
         },
 
         async executiveHubRunAction(action, card) {
@@ -11188,7 +11217,7 @@ function adminMixinDataChartsSettings() {
             }
         },
 
-        // ========== Owner Intelligence (STAGE 1) — methods ==========
+        // ========== Разборы владельца (STAGE 1) — methods ==========
         navigateOwnerIntelligence() {
             this.navigateToTab('ai_center', { aiCenterTab: 'owner_intel' });
             void this.loadOwnerIntelligence();
@@ -11623,7 +11652,7 @@ function adminMixinDataChartsSettings() {
             }
         },
         // ========== / Order QA Audit — methods ==========
-        // ========== / Owner Intelligence — methods ==========
+        // ========== / Разборы владельца — methods ==========
 
         async loadDashActivity() {
             this.dashActivityLoading = true;
@@ -11914,7 +11943,7 @@ function adminMixinDataChartsSettings() {
 
         async runInventorySyncIiko() {
             if (!this.canStaffManageSupply()) {
-                void this.showUiAlert(this.staffRbacHint('manager') || 'Недостаточно прав', 'SupplyMind');
+                void this.showUiAlert(this.staffRbacHint('manager') || 'Недостаточно прав', 'Закупки');
                 return;
             }
             if (this.inventorySyncRunning) return;
@@ -11932,11 +11961,11 @@ function adminMixinDataChartsSettings() {
                         this.loadSupplyMind(),
                     ]);
                 } else {
-                    void this.showUiAlert(this.formatApiError(data?.detail) || 'Не удалось синхронизировать остатки iiko Office', 'SupplyMind');
+                    void this.showUiAlert(this.formatApiError(data?.detail) || 'Не удалось синхронизировать остатки iiko Office', 'Закупки');
                 }
             } catch (e) {
                 adminLogger.error('[admin] inventory iiko sync', e);
-                void this.showUiAlert('Ошибка сети. Проверьте соединение.', 'SupplyMind');
+                void this.showUiAlert('Ошибка сети. Проверьте соединение.', 'Закупки');
             } finally {
                 this.inventorySyncRunning = false;
             }
@@ -11953,7 +11982,7 @@ function adminMixinDataChartsSettings() {
 
         async createSupplyMindDraft() {
             if (!this.canStaffManageSupply()) {
-                void this.showUiAlert(this.staffRbacHint('manager') || 'Недостаточно прав', 'SupplyMind');
+                void this.showUiAlert(this.staffRbacHint('manager') || 'Недостаточно прав', 'Закупки');
                 return;
             }
             if (this.supplyMindCreateLoading) return;
@@ -11970,9 +11999,9 @@ function adminMixinDataChartsSettings() {
                 });
                 if (ok && data?.item) {
                     this.supplyMindDrafts = [data.item, ...(this.supplyMindDrafts || [])];
-                    this.setToast('SupplyMind создал чеклист закупки');
+                    this.setToast('Закупки создал чеклист закупки');
                 } else {
-                    void this.showUiAlert(this.formatApiError(data?.detail) || 'Не удалось создать чеклист закупки', 'SupplyMind');
+                    void this.showUiAlert(this.formatApiError(data?.detail) || 'Не удалось создать чеклист закупки', 'Закупки');
                 }
             } finally {
                 this.supplyMindCreateLoading = false;
@@ -12046,7 +12075,7 @@ function adminMixinDataChartsSettings() {
                 } else {
                     void this.showUiAlert(
                         this.formatApiError(data?.detail) || 'Не удалось сохранить отметку',
-                        'SupplyMind',
+                        'Закупки',
                     );
                     await this.loadSupplyMind();
                 }
@@ -12072,7 +12101,7 @@ function adminMixinDataChartsSettings() {
 
         async updateSupplyMindDraft(draftId, status) {
             if (!this.canStaffManageSupply()) {
-                void this.showUiAlert(this.staffRbacHint('manager') || 'Недостаточно прав', 'SupplyMind');
+                void this.showUiAlert(this.staffRbacHint('manager') || 'Недостаточно прав', 'Закупки');
                 return;
             }
             if (this.supplyMindUpdateLoading) return;
@@ -12094,7 +12123,7 @@ function adminMixinDataChartsSettings() {
                 } else {
                     void this.showUiAlert(
                         this.formatApiError(data?.detail) || 'Не удалось обновить чеклист',
-                        'SupplyMind',
+                        'Закупки',
                     );
                 }
             } finally {
@@ -12104,7 +12133,7 @@ function adminMixinDataChartsSettings() {
 
         async exportSupplyMindDraft(draftId) {
             if (!this.canStaffManageSupply()) {
-                void this.showUiAlert(this.staffRbacHint('manager') || 'Недостаточно прав', 'SupplyMind');
+                void this.showUiAlert(this.staffRbacHint('manager') || 'Недостаточно прав', 'Закупки');
                 return;
             }
             if (this.supplyMindExportLoading) return;
@@ -12115,7 +12144,7 @@ function adminMixinDataChartsSettings() {
                 );
                 if (!res.ok) {
                     const data = await res.json().catch(() => ({}));
-                    void this.showUiAlert(this.formatApiError(data?.detail) || 'Ошибка выгрузки CSV', 'SupplyMind');
+                    void this.showUiAlert(this.formatApiError(data?.detail) || 'Ошибка выгрузки CSV', 'Закупки');
                     return;
                 }
                 const blob = await res.blob();
@@ -12127,7 +12156,7 @@ function adminMixinDataChartsSettings() {
                 URL.revokeObjectURL(u);
             } catch (e) {
                 adminLogger.error('[admin] supplymind export csv', e);
-                void this.showUiAlert('Ошибка сети. Проверьте соединение.', 'SupplyMind');
+                void this.showUiAlert('Ошибка сети. Проверьте соединение.', 'Закупки');
             } finally {
                 this.supplyMindExportLoading = null;
             }
@@ -12190,7 +12219,7 @@ function adminMixinDataChartsSettings() {
             if (this.applyPricingBulkLoading) return;
             const ap = this.osDashboardData?.autopilot_pricing;
             if (!ap || ap.tactic === 'stable' || !ap.price_adj_pct) {
-                void this.showUiAlert('Нет активной ценовой рекомендации для применения.', 'Автопилот');
+                void this.showUiAlert('Нет активной ценовой рекомендации для применения.', 'Решения');
                 return;
             }
             const okConfirm = window.confirm(
@@ -12205,12 +12234,12 @@ function adminMixinDataChartsSettings() {
                       body: JSON.stringify({ price_adj_pct: ap.price_adj_pct }) },
                 );
                 if (!ok) {
-                    void this.showUiAlert((data && data.detail) || 'Не удалось применить цены', 'Автопилот');
+                    void this.showUiAlert((data && data.detail) || 'Не удалось применить цены', 'Решения');
                     return;
                 }
                 void this.showUiAlert(
                     `Обновлено позиций: ${data.items_updated || 0}`,
-                    'Автопилот',
+                    'Решения',
                 );
                 await this.loadOsDashboard();
                 void this.loadAuditLog();
@@ -12384,7 +12413,7 @@ function adminMixinDataChartsSettings() {
         async loadTraceTimeline(traceId) {
             const tid = String(traceId ?? this.traceTimelineQuery ?? '').trim();
             if (tid.length < 8) {
-                void this.showUiAlert('Введите trace_id (минимум 8 символов)', 'Control Plane');
+                void this.showUiAlert('Введите ID диагностики (минимум 8 символов)', 'Control Plane');
                 return;
             }
             if (this.traceTimelineLoading) return;
@@ -12403,7 +12432,7 @@ function adminMixinDataChartsSettings() {
                 } else {
                     this.traceTimeline = { trace_id: tid, entries: [], total: 0 };
                     void this.showUiAlert(
-                        this.formatApiError(data?.detail) || 'Не удалось загрузить цепочку trace',
+                        this.formatApiError(data?.detail) || 'Не удалось загрузить события диагностики',
                         'Control Plane',
                     );
                 }

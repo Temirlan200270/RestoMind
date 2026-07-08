@@ -38,78 +38,7 @@
                     </div>
                 </div>
 
-                <section data-owner-command-center x-show="canToggleAnalyticsDensity()" x-cloak
-                    class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-                    <div class="grid grid-cols-1 xl:grid-cols-[1fr_320px]">
-                        <div class="p-4 sm:p-5">
-                            <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
-                                <div>
-                                    <div class="text-[10px] font-bold uppercase tracking-wide text-slate-500">Рабочий слой продаж</div>
-                                    <h3 class="text-base sm:text-lg font-bold text-slate-950 mt-0.5">Деньги, гости, ИИ и действия по продажам</h3>
-                                </div>
-                                <button type="button" class="ds-btn ds-btn-secondary ds-btn-sm"
-                                    @click="navigateToTab('dashboard', { dashboardTab: 'analytics' })">
-                                    Полный отчёт
-                                </button>
-                            </div>
-                            <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
-                                <button type="button" class="text-left rounded-xl border border-slate-200 bg-slate-50/80 hover:bg-white px-4 py-3 min-h-[120px] transition"
-                                    @click="openDashboardDrilldown('money')">
-                                    <div class="text-[10px] font-bold uppercase tracking-wide text-slate-500">Деньги</div>
-                                    <div class="mt-2 text-2xl font-black text-slate-950 tabular-nums" x-text="fmt.money(dashStats.today_revenue || 0)"></div>
-                                    <div class="mt-1 text-xs text-slate-500">
-                                        <span class="tabular-nums" x-text="dashStats.today_orders || 0"></span> заказов
-                                        <span x-show="dashStats.week_forecast" x-cloak>
-                                            · прогноз <span class="tabular-nums" x-text="fmt.money(dashStats.week_forecast?.forecast_revenue ?? 0)"></span>
-                                        </span>
-                                    </div>
-                                </button>
-                                <button type="button" class="text-left rounded-xl border border-slate-200 bg-slate-50/80 hover:bg-white px-4 py-3 min-h-[120px] transition"
-                                    @click="openDashboardDrilldown('guests')">
-                                    <div class="text-[10px] font-bold uppercase tracking-wide text-slate-500">Гости</div>
-                                    <div class="mt-2 text-2xl font-black text-slate-950 tabular-nums" x-text="dashFunnel?.funnel?.dialogs ?? 0"></div>
-                                    <div class="mt-1 text-xs text-slate-500">
-                                        заказов <span class="tabular-nums" x-text="dashFunnel?.funnel?.completed ?? 0"></span>
-                                        · без заказа <span class="tabular-nums" x-text="dashFunnel?.funnel?.dialog_no_order ?? 0"></span>
-                                    </div>
-                                </button>
-                                <button type="button" class="text-left rounded-xl border border-violet-200 bg-violet-50/80 hover:bg-white px-4 py-3 min-h-[120px] transition"
-                                    @click="openDashboardDrilldown('ai')">
-                                    <div class="text-[10px] font-bold uppercase tracking-wide text-violet-900/70">ИИ и команда</div>
-                                    <div class="mt-2 text-2xl font-black text-violet-950 tabular-nums" x-text="fmt.money(dashStats.ai_revenue_today ?? dashStats.upsell_revenue_today ?? 0)"></div>
-                                    <div class="mt-1 text-xs text-violet-900/75">
-                                        <span class="tabular-nums" x-text="dashStats.ai_time_saved_hours ?? 0"></span> ч сэкономлено
-                                        · оператору <span class="tabular-nums" x-text="dashStats.escalations_today ?? 0"></span>
-                                    </div>
-                                </button>
-                                <button type="button" class="text-left rounded-xl border border-amber-200 bg-amber-50/80 hover:bg-white px-4 py-3 min-h-[120px] transition"
-                                    @click="openDashboardDrilldown('ops')">
-                                    <div class="text-[10px] font-bold uppercase tracking-wide text-amber-900/75">Операции</div>
-                                    <div class="mt-2 text-2xl font-black text-amber-950 tabular-nums" x-text="inboxTotalOpen()"></div>
-                                    <div class="mt-1 text-xs text-amber-900/75">
-                                        открыто · iiko <span class="tabular-nums" x-text="dashStats.iiko_errors_today ?? 0"></span>
-                                        · чаты <span class="tabular-nums" x-text="unreadChats || 0"></span>
-                                    </div>
-                                </button>
-                            </div>
-                        </div>
-                        <form class="border-t xl:border-t-0 xl:border-l border-slate-200 bg-slate-50/70 p-4 sm:p-5 flex flex-col gap-3"
-                            @submit.prevent="askIntelligence()">
-                            <div>
-                                <div class="text-[10px] font-bold uppercase tracking-wide text-slate-500">Copilot</div>
-                                <div class="text-sm font-semibold text-slate-900 mt-0.5">Спросить по данным ресторана</div>
-                            </div>
-                            <textarea x-model="intelligenceQuestion" rows="3"
-                                class="ds-input resize-none text-sm"
-                                placeholder="Почему просела выручка сегодня?"></textarea>
-                            <button type="submit" class="ds-btn ds-btn-primary ds-btn-sm self-start" :disabled="intelligenceAsking">
-                                <span x-show="!intelligenceAsking">Спросить</span>
-                                <span x-show="intelligenceAsking">Считаю…</span>
-                            </button>
-                        </form>
-                    </div>
-                </section>
-
+                
                 <!-- Wow Layer: today impact for owner -->
                 <template x-if="revenueLeak && (revenueLeak.recovered_today_kzt ?? 0) > 0">
                     <div class="rounded-2xl bg-emerald-50 ring-1 ring-emerald-200/80 px-5 py-4 flex flex-wrap items-center justify-between gap-3"
@@ -226,9 +155,9 @@
                     </button>
                     <button type="button" class="text-left rounded-2xl bg-violet-50 ring-1 ring-violet-200/80 shadow-sm px-4 py-3 min-h-[96px]"
                         @click="openDashboardDrilldown('ai')">
-                        <div class="text-[11px] font-bold uppercase text-violet-900/75">Вклад ИИ</div>
+                        <div class="text-[11px] font-bold uppercase text-violet-900/75">Эффект ИИ</div>
                         <div class="mt-2 text-xl font-black text-violet-950 tabular-nums" x-text="fmt.money(dashStats.ai_revenue_today ?? dashStats.upsell_revenue_today ?? 0)"></div>
-                        <div class="mt-1 text-[11px] font-semibold text-violet-800">Открыть вклад ИИ</div>
+                        <div class="mt-1 text-[11px] font-semibold text-violet-800">Открыть эффект ИИ</div>
                     </button>
                     <button type="button" class="text-left rounded-2xl bg-white ring-1 ring-slate-200/80 shadow-sm px-4 py-3 min-h-[96px]"
                         @click="openDashboardDrilldown('ai')">
@@ -274,7 +203,7 @@
                     <template x-if="!(dashLiveFeed || []).length">
                         <div class="flex items-start gap-2 text-xs text-emerald-800 bg-emerald-50/80 border border-emerald-100 rounded-lg px-3 py-2.5">
                             <span class="shrink-0 w-2 h-2 rounded-full bg-emerald-500 mt-1" aria-hidden="true"></span>
-                            <span>Автопилот запущен. Система ожидает входящих заказов и сообщений — всё под контролем.</span>
+                            <span>Решения готовы. Система ожидает входящих заказов и сообщений — всё под контролем.</span>
                         </div>
                     </template>
                     <div class="space-y-1.5 max-h-48 overflow-y-auto">
@@ -315,9 +244,9 @@
                     <!-- Phase 2.3: индикатор event-driven источника данных -->
                     <template x-if="dashStats.event_driven_stats?.source === 'event_driven'">
                         <div class="flex items-center gap-1 text-[10px] font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100 ml-auto shrink-0"
-                            :title="'Запросы оператору (данные ОС): ' + (dashStats.event_driven_stats?.escalations ?? 0)">
+                            :title="'Запросы оператору (события смены): ' + (dashStats.event_driven_stats?.escalations ?? 0)">
                             <svg class="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd"/></svg>
-                            <span>данные ОС</span>
+                            <span>события смены</span>
                             <span class="tabular-nums text-indigo-800"
                                 x-text="(dashStats.event_driven_stats?.payments_completed ?? 0) > 0 ? '· ' + dashStats.event_driven_stats.payments_completed + ' оплат' : ''"></span>
                         </div>
@@ -485,7 +414,7 @@
                 {% endcall %}
 
                 <div class="hidden sm:block">
-                {% call card(title='Вклад ИИ за сегодня', subtitle='KPI бота: допродажи, диалоги и сэкономленное время.', padding_class='p-5 sm:p-6') %}
+                {% call card(title='Эффект ИИ за сегодня', subtitle='KPI бота: допродажи, диалоги и сэкономленное время.', padding_class='p-5 sm:p-6') %}
                     <div x-show="dashStatsLoading && !dashStatsLoadedOnce" class="h-24 rounded-xl bg-slate-100 animate-pulse"></div>
                     <div x-show="!(dashStatsLoading && !dashStatsLoadedOnce)" x-cloak class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                         {% set dash_kpi_offered %}

@@ -1,4 +1,4 @@
-"""Phase 5 Pilot: OS Autopilot — event-only dashboard, demand forecast, self-healing."""
+"""Phase 5 Pilot: Решения смены — event-only dashboard, demand forecast, self-healing."""
 
 from __future__ import annotations
 
@@ -202,21 +202,21 @@ class TestSelfHealingWiring:
         assert refreshed.severity == "critical"
 
 
-# ─── P5.4: OS Autopilot UI ────────────────────────────────────────────────────
+# ─── P5.4: Решения смены UI ────────────────────────────────────────────────────
 
 
 class TestOsAutopilotUI:
     def test_os_tab_button_in_ai_center(self):
-        """Кнопка «Автопилот» добавлена в AI-центр."""
+        """Кнопка «Решения» добавлена в AI-центр."""
         import pathlib
         html = pathlib.Path(
             "app/templates/screens/_tab_ai_center.html"
         ).read_text(encoding="utf-8")
         assert "aiCenterTab === 'os'" in html
-        assert "Автопилот" in html
+        assert "Решения" in html
 
     def test_os_dashboard_section_in_template(self):
-        """Секция OS Autopilot присутствует в шаблоне."""
+        """Секция Решения смены присутствует в шаблоне."""
         import pathlib
         html = pathlib.Path(
             "app/templates/screens/_tab_ai_center.html"
@@ -236,7 +236,7 @@ class TestOsAutopilotUI:
         assert "/api/admin/intelligence/os-dashboard" in js
 
     def test_final_mile_ui_wired_to_backend_contracts(self):
-        """Final Mile UI keeps digest, SupplyMind, and Voice AI wired to backend APIs."""
+        """Final Mile UI keeps digest, Закупки, and Voice AI wired to backend APIs."""
         import pathlib
 
         html = pathlib.Path("app/templates/screens/_tab_ai_center.html").read_text(encoding="utf-8")
@@ -248,7 +248,7 @@ class TestOsAutopilotUI:
         assert "Сводка дня" in html
         assert "Закупки" in html
         assert "Голосовой бот" in html
-        assert "премиальный" in html.lower()
+        assert "контроля стоимости" in html.lower()
         assert "aiCenterTab === 'final_mile'" in header
 
         assert "loadFinalMileUi" in js
@@ -300,21 +300,21 @@ class TestOsAutopilotUI:
         assert "/api/admin/intelligence/staffmind/onboarding" in js
 
     def test_control_plane_trace_timeline_ui_wired(self):
-        """Control Plane trace timeline panel in AI Center OS tab."""
+        """Technical timeline stays wired but hidden from the business AI Center surface."""
         import pathlib
 
         html = pathlib.Path("app/templates/screens/_tab_ai_center.html").read_text(encoding="utf-8")
         js = pathlib.Path("app/static/js/admin-app.js").read_text(encoding="utf-8")
 
-        assert "Цепочка trace_id" in html
+        assert "Диагностика событий" in html
         assert "loadTraceTimeline()" in html
         assert "traceTimelineEntryLabel" in js
         assert "/api/admin/intelligence/trace-timeline" in js
 
     def test_event_bus_badge_in_ui(self):
-        """Индикатор event-driven источника в OS Autopilot (язык оператора, не dev-жаргон)."""
+        """Индикатор event-driven источника в Решения смены (язык оператора, не dev-жаргон)."""
         import pathlib
         html = pathlib.Path(
             "app/templates/screens/_tab_ai_center.html"
         ).read_text(encoding="utf-8")
-        assert "Данные ОС" in html or "по событиям ОС" in html
+        assert "События смены" in html or "по событиям смены" in html

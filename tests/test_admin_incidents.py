@@ -6,12 +6,14 @@ from app.api.admin import admin_incidents
 from app.db.models import (
     ChatLog,
     FailedTask,
+    InventoryStockSnapshot,
     Order,
     Organization,
     OrganizationIntegrationSync,
     PaymentEvent,
     StaffRole,
     StaffUser,
+    SupplyPurchaseDraft,
     User,
 )
 
@@ -147,6 +149,52 @@ async def test_admin_incidents_summary_mode_skips_sample_rows(db_session):
     assert data["total_open"] >= 1
     assert isinstance(data.get("hero_actions"), list)
     assert any(a.get("id") == "iiko_failed" for a in data["hero_actions"])
+
+
+@pytest.mark.asyncio
+async def test_admin_incidents_surfaces_purchase_checklist_task(db_session):
+    org = Organization(id=202, name="Supply Org", slug="supply-org")
+    db_session.add(org)
+    await db_session.flush()
+    db_session.add_all(
+        [
+            SupplyPurchaseDraft(
+                organization_id=202,
+                status="draft",
+                source="supplymind",
+                title="Чеклист закупки на сегодня",
+                items_json=[{"ingredient": "Milk", "recommended_quantity": 5}],
+            ),
+            InventoryStockSnapshot(
+                organization_id=202,
+                source="manual",
+                sku="milk",
+                ingredient="Milk",
+                unit="l",
+                quantity=1,
+                min_quantity=3,
+                reorder_quantity=8,
+                daily_usage_estimate=1,
+            ),
+        ],
+    )
+    await db_session.flush()
+
+    req = DummyRequest({"admin_ok": True, "organization_id": 202})
+    data = await admin_incidents(req, db_session)
+    group = next((g for g in data["groups"] if g["id"] == "purchase_checklist"), None)
+
+    assert group is not None
+    assert group["title"] == "Закупка требует подтверждения"
+    assert group["action"]["tab"] == "ai_center"
+    assert group["action"]["aiCenterTab"] == "final_mile"
+    assert group["items"]
+
+    summary = await admin_incidents(req, db_session, "summary")
+    action = next((a for a in summary["hero_actions"] if a["id"] == "purchase_checklist"), None)
+    assert action is not None
+    assert action["target"]["tab"] == "ai_center"
+    assert action["target"]["aiCenterTab"] == "final_mile"
 
 
 @pytest.mark.asyncio

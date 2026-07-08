@@ -109,9 +109,9 @@
                         :open="!iikoOfficeConfig?.configured">
                         <summary class="cursor-pointer select-none list-none flex flex-wrap items-center justify-between gap-3">
                             <div>
-                                <h4 class="text-sm font-bold text-gray-900">iiko Office (склад / SupplyMind)</h4>
+                                <h4 class="text-sm font-bold text-gray-900">iiko Office (склад)</h4>
                                 <p class="text-xs text-gray-600 mt-1"
-                                    x-text="iikoOfficeConfig?.configured ? 'Подключено — остатки синхронизируются в ИИ-аналитик → Финал.' : 'Укажите хост, логин и склад (store_id) для синхронизации остатков.'"></p>
+                                    x-text="iikoOfficeConfig?.configured ? 'Подключено — остатки синхронизируются в закупки.' : 'Укажите хост, логин и склад (store_id) для синхронизации остатков.'"></p>
                             </div>
                             <span class="inline-flex min-h-[44px] items-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700">
                                 Настроить

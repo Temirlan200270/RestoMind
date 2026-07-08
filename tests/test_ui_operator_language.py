@@ -106,6 +106,30 @@ def test_ai_center_more_expands_tabs_without_clipped_dropdown():
     assert "aiCenterExtendedTabs" in js
 
 
+def test_ai_center_uses_business_language_not_module_names():
+    ai_center = _read("app", "templates", "screens", "_tab_ai_center.html")
+    header = _read("app", "templates", "screens", "_header.html")
+    dashboard = _read("app", "templates", "screens", "_tab_dashboard.html")
+    settings_bot = _read("app", "templates", "screens", "_tab_settings_bot_test.html")
+    business_surface = "\n".join([ai_center, header, dashboard, settings_bot])
+    for term in ["Owner Intelligence", "Вклад ИИ", "Автопилот", "Финал", "Gemini"]:
+        assert term not in business_surface
+    assert "Разборы владельца" in business_surface
+    assert "Эффект ИИ" in business_surface
+    assert "Решения" in business_surface
+    assert "Закупки и голос" in business_surface
+    assert "AI API через ваш бэкенд" in business_surface
+
+
+def test_purchase_checklist_lives_in_attention_queue_contract():
+    analytics_api = _read("app", "api", "admin", "analytics.py")
+    assert 'group_id="purchase_checklist"' in analytics_api
+    assert 'title="Закупка требует подтверждения"' in analytics_api
+    assert '"tab": "ai_center"' in analytics_api
+    assert '"aiCenterTab": "final_mile"' in analytics_api
+    assert 'target["aiCenterTab"] = ac' in analytics_api
+
+
 def test_team_settings_operator_language():
     team = _read("app", "templates", "screens", "_tab_settings_team.html")
     assert "StaffMind onboarding" not in team
@@ -127,8 +151,11 @@ def test_analytics_no_dev_field_names_in_tooltips():
 
 def test_dashboard_sales_peak_opens_analytics_subtab():
     dash = _read("app", "templates", "screens", "_tab_dashboard.html")
+    js = JS.read_text(encoding="utf-8")
     assert "Пик продаж сегодня" in dash
-    assert "navigateToTab('dashboard', { dashboardTab: 'analytics' })" in dash
+    assert "openDashboardDrilldown('sales_peak')" in dash
+    assert "this.dashboardDrilldownKey === 'sales_peak'" in js
+    assert "return { tab: 'dashboard', dashboardTab: 'analytics' }" in js
     assert "setAnalyticsDensity('advanced'); navigateToTab('dashboard')" not in dash
 
 

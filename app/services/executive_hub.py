@@ -36,6 +36,14 @@ def _format_trend(pct: float | None) -> str:
     return "на уровне прошлого периода"
 
 
+def _money(value: float | int | None) -> str:
+    return f"{float(value or 0):,.0f} ₸".replace(",", " ")
+
+
+def _metric(label: str, value: str, *, hint: str = "", severity: str = "info") -> dict[str, str]:
+    return {"label": label, "value": value, "hint": hint, "severity": severity}
+
+
 def _action_item(
     *,
     action_id: str,
@@ -87,6 +95,157 @@ def _card(
         "evidence": evidence or {},
         "drilldown": drilldown or {},
         "chat_prompt": chat_prompt or headline,
+    }
+
+
+def _business_summary(
+    summary: dict[str, Any],
+    leak: dict[str, Any],
+    owner_summary: dict[str, Any],
+) -> dict[str, Any]:
+    current = summary.get("current") or {}
+    changes = summary.get("changes") or {}
+    revenue = float(current.get("revenue") or 0)
+    orders = int(current.get("orders") or 0)
+    avg_check = float(current.get("avg_check") or 0)
+    revenue_pct = changes.get("revenue_pct")
+    total_leak = float(leak.get("total_leak_kzt") or 0)
+    net_roi = float(owner_summary.get("net_roi") or 0)
+
+    has_orders = orders > 0 or revenue > 0
+    severity = _severity_from_delta(revenue_pct if isinstance(revenue_pct, (int, float)) else None)
+    if total_leak >= 30_000:
+        severity = "critical"
+    elif total_leak >= 10_000 and severity != "critical":
+        severity = "warning"
+
+    if not has_orders:
+        headline = "Сегодня пока нет заказов"
+        narrative = (
+            "Это может быть нормой до начала смены. Если ресторан уже работает, проверьте подключение продаж, "
+            "очередь клиентов и первый тестовый заказ."
+        )
+        status = "Нужно понять, это тишина или проблема с данными"
+    else:
+        headline = f"Сегодня {_money(revenue)} — {_format_trend(revenue_pct)}"
+        narrative = (
+            f"{orders} заказов, средний чек {_money(avg_check)}. "
+            f"Деньги на кону: {_money(total_leak)}. Чистый эффект ИИ: {_money(net_roi)}."
+        )
+        status = "Есть что смотреть по деньгам" if severity in {"warning", "critical"} else "День под контролем"
+
+    return {
+        "headline": headline,
+        "status": status,
+        "narrative": narrative,
+        "severity": severity,
+        "has_orders": has_orders,
+        "stats": [
+            _metric(
+                "Выручка",
+                _money(revenue),
+                _format_trend(revenue_pct),
+                severity=severity if revenue_pct is not None else "info",
+            ),
+            _metric("Заказы", str(orders), "текущий поток"),
+            _metric("Средний чек", _money(avg_check), "качество чека"),
+            _metric(
+                "Деньги на кону",
+                _money(total_leak),
+                "потери, зависшие действия и риски",
+                severity="warning" if total_leak > 0 else "info",
+            ),
+            _metric("Эффект ИИ", _money(net_roi), "принято, допродано и потеряно"),
+        ],
+    }
+
+
+def _next_actions_from_cards(cards: list[dict[str, Any]], business_summary: dict[str, Any]) -> list[dict[str, Any]]:
+    actions: list[dict[str, Any]] = []
+    if not business_summary.get("has_orders"):
+        actions.extend(
+            [
+                {
+                    "id": "create_test_order",
+                    "title": "Создать тестовый заказ",
+                    "reason": "Проверить, что продажи и бот попадают в аналитику.",
+                    "severity": "warning",
+                    "action_item": _action_item(
+                        action_id="open_orders_for_test",
+                        label="Открыть заказы",
+                        action_type="navigate",
+                        drilldown={"tab": "orders"},
+                    ),
+                },
+                {
+                    "id": "check_integrations",
+                    "title": "Проверить подключение продаж",
+                    "reason": "Если смена уже идёт, нули могут означать проблему с синхронизацией.",
+                    "severity": "warning",
+                    "action_item": _action_item(
+                        action_id="open_integrations",
+                        label="Проверить интеграции",
+                        action_type="navigate",
+                        drilldown={"tab": "settings", "settingsTab": "connections"},
+                    ),
+                },
+            ]
+        )
+
+    ranked = sorted(
+        cards,
+        key=lambda card: _score_from_severity(str(card.get("severity") or "info")),
+    )
+    for card in ranked:
+        card_actions = [a for a in (card.get("action_items") or []) if isinstance(a, dict)]
+        if not card_actions:
+            continue
+        action = card_actions[0]
+        actions.append(
+            {
+                "id": f"card_{card.get('id')}",
+                "title": str(card.get("headline") or card.get("title") or "Разобрать сигнал"),
+                "reason": str(card.get("summary") or card.get("narrative") or ""),
+                "severity": str(card.get("severity") or "info"),
+                "card_id": card.get("id"),
+                "action_item": action,
+            }
+        )
+        if len(actions) >= 5:
+            break
+    return actions[:5]
+
+
+def _readiness_state(
+    summary: dict[str, Any],
+    owner_summary: dict[str, Any],
+    cards: list[dict[str, Any]],
+) -> dict[str, Any]:
+    current = summary.get("current") or {}
+    orders = int(current.get("orders") or 0)
+    revenue = float(current.get("revenue") or 0)
+    margin_gap = next((card for card in cards if card.get("id") == "margin_data_gap"), None)
+    mode = "runtime" if orders > 0 or revenue > 0 else "onboarding"
+    ai_has_money = float(owner_summary.get("accepted_revenue") or 0) or float(owner_summary.get("upsell_revenue") or 0)
+    return {
+        "mode": mode,
+        "items": [
+            {
+                "label": "Продажи приходят",
+                "status": "ok" if orders > 0 or revenue > 0 else "action",
+                "text": "Есть заказы за период." if orders > 0 or revenue > 0 else "Нет заказов за период — проверьте смену или создайте тестовый заказ.",
+            },
+            {
+                "label": "Себестоимость заполнена",
+                "status": "action" if margin_gap else "ok",
+                "text": str(margin_gap.get("summary")) if margin_gap else "Маржа готова к ежедневному контролю.",
+            },
+            {
+                "label": "ИИ считает вклад",
+                "status": "ok" if ai_has_money else "watch",
+                "text": "Есть финансовый след ИИ." if ai_has_money else "Пока мало событий, эффект ИИ будет точнее после заказов.",
+            },
+        ],
     }
 
 
@@ -428,9 +587,14 @@ async def build_executive_hub_payload(
     if ops_card is not None:
         cards.insert(2, ops_card)
     dimensions = _build_dimension_widgets(cards)
+    business_summary = _business_summary(summary, leak, owner_summary)
+    next_actions = _next_actions_from_cards(cards, business_summary)
 
     return {
-        "version": 2,
+        "version": 3,
+        "summary": business_summary,
+        "next_actions": next_actions,
+        "readiness": _readiness_state(summary, owner_summary, cards),
         "cards": cards[:6],
         "dimensions": dimensions,
         "chat": {
