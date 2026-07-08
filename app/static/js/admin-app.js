@@ -678,9 +678,9 @@ function adminReadUiHintsDismissed() {
 }
 
 const ADMIN_ROLE_TABS = Object.freeze({
-    operator: Object.freeze(['shift', 'inbox', 'orders', 'chats', 'bookings']),
+    operator: Object.freeze(['shift', 'inbox', 'chats', 'orders', 'menu', 'bookings']),
     manager: Object.freeze(['shift', 'inbox', 'orders', 'chats', 'bookings', 'menu', 'dashboard', 'ai_center']),
-    admin: null,
+    admin: Object.freeze(['ai_center', 'dashboard', 'menu', 'marketing', 'settings']),
 });
 
 /** Wow Layer: primary sidebar/bottom nav for operator (secondary via «Ещё»). */
@@ -690,7 +690,7 @@ const ADMIN_ROLE_PRIMARY_NAV = Object.freeze({
     admin: null,
 });
 
-const ADMIN_OPERATOR_SECONDARY_TABS = Object.freeze(['orders', 'chats', 'bookings']);
+const ADMIN_OPERATOR_SECONDARY_TABS = Object.freeze(['chats', 'orders', 'menu', 'bookings']);
 
 /** G10.6 golden UX flow — complete/skip choreography (ms). */
 const SHIFT_CHOREO_MS = Object.freeze({
@@ -1202,7 +1202,7 @@ function adminMixinState() {
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 01-.825-.242m9.345-8.334a21.05 21.05 0 00-1.889-2.403 19.7 19.7 0 00-1.6-1.562c-.642-.522-1.397-.957-2.23-1.25C16.247 1.872 14.747 1.5 12 1.5c-2.747 0-4.247.372-5.63.99-.833.293-1.588.728-2.23 1.25-.563.459-1.082 1-1.6 1.562A21.05 21.05 0 003.75 8.511"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5.25 8.511c-.884.284-1.5 1.128-1.5 2.097v4.286c0 1.136.847 2.1 1.98 2.193.34.027.68.052 1.02.072v3.091l3-3a11.63 11.63 0 014.02-.163 2.115 2.115 0 001.825-.242M9.378 5.378A21.05 21.05 0 0018.72 3.728"/></svg>' },
             { id: 'bookings', section: 'operations', label: 'Бронирования', desc: 'Столики и резервации',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/></svg>' },
-            { id: 'dashboard', section: 'management', label: 'Продажи', desc: 'Выручка, средний чек, динамика и drill-down',
+            { id: 'dashboard', section: 'management', label: 'Продажи', desc: 'Выручка, средний чек, динамика и разбор причин',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25A2.25 2.25 0 018.25 10.5H6A2.25 2.25 0 013.75 8.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z"/></svg>' },
             { id: 'marketing', section: 'management', label: 'Маркетинг', desc: 'Рассылки и программа лояльности',
               icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10.34 15.84c-.688-.06-1.386-.09-2.09-.09H7.5a4.5 4.5 0 110-9h.75c.704 0 1.402-.03 2.09-.09m0 9.18c.253.962.584 1.892.985 2.783.247.55.06 1.21-.463 1.511l-.657.38c-.551.318-1.26.117-1.527-.461a20.845 20.845 0 01-1.44-4.282m3.102.069a18.03 18.03 0 01-.59-4.59c0-1.586.205-3.124.59-4.59m0 9.18a23.848 23.848 0 018.835 2.535M10.34 6.66a23.847 23.847 0 008.835-2.535m0 0A23.74 23.74 0 0018.795 3m.38 1.125a23.91 23.91 0 011.014 5.395m-1.014 8.855c-.118.38-.245.754-.38 1.125m.38-1.125a23.91 23.91 0 001.014-5.395m0-3.46c.495.413.811 1.035.811 1.73 0 .695-.316 1.317-.811 1.73m0-3.46a24.347 24.347 0 010 3.46"/></svg>' },
@@ -1536,19 +1536,34 @@ function adminMixinState() {
         ],
         executiveHubOpen: false,
         executiveHubLoading: false,
+        executiveHubError: '',
         executiveHubCards: [],
         executiveHubDimensions: {},
         executiveHubSummary: null,
+        executiveHubTodayPicture: null,
+        executiveHubOwnerCards: [],
+        executiveHubMoneyDrivers: [],
+        executiveHubMoneyAtRisk: null,
+        executiveHubNetworkBranch: null,
+        executiveHubPrioritySignals: [],
+        executiveHubAgentContext: null,
+        executiveHubOwnerReadiness: null,
         executiveHubNextActions: [],
         executiveHubReadiness: null,
         executiveHubActiveCard: null,
+        executiveHubActiveSignal: null,
         executiveHubChatOpen: true,
+        executiveHubChatFullscreen: false,
         executiveHubBusinessQuestions: [],
         executiveHubRole: 'owner',
         executiveHubActionBusy: false,
         executiveHubActionPreview: null,
         executiveHubActionPreviewProposalId: '',
         intelligencePendingActions: [],
+        intelligenceArchive: [],
+        intelligenceArchiveLoading: false,
+        intelligenceArchiveQuery: '',
+        intelligenceArchiveActive: null,
         digitalTwinLoading: false,
         digitalTwin: { snapshot: {} },
         digitalTwinSim: { orders_per_hour: 30, operators: 2, avg_check: 5000, base_cancel_rate_pct: 5 },
@@ -1565,6 +1580,7 @@ function adminMixinState() {
         },
         incidentsLoading: false,
         incidentsLoadedOnce: false,
+        incidentFocusedItem: null,
         /** GET /incidents?mode=summary — блок «Сейчас» на дашборде и счётчик в сайдбаре без тяжёлых групп */
         attentionSummary: null,
         attentionSummaryLoading: false,
@@ -2855,6 +2871,35 @@ function adminMixinMenuOrdersUi() {
             return items.slice(0, 4);
         },
 
+        openIncidentItem(item, group = null) {
+            if (item?.kind === 'supply_purchase_draft') {
+                this.incidentFocusedItem = item;
+                return;
+            }
+            this.incidentGo(item?.target || group?.action || {});
+        },
+
+        closeIncidentFocusedItem() {
+            this.incidentFocusedItem = null;
+        },
+
+        incidentFocusedRows() {
+            const rows = this.incidentFocusedItem?.purchase_items;
+            if (!Array.isArray(rows)) return [];
+            return rows.map((row, idx) => {
+                const r = row && typeof row === 'object' ? row : {};
+                const name = r.ingredient || r.name || r.sku || `Позиция ${idx + 1}`;
+                const qty = r.recommended_quantity ?? r.quantity ?? r.qty ?? r.reorder_quantity ?? '';
+                const unit = r.unit || '';
+                return {
+                    name: String(name || `Позиция ${idx + 1}`),
+                    quantity: qty === '' || qty == null ? '—' : `${qty}${unit ? ` ${unit}` : ''}`,
+                    note: r.reason || r.message || r.supplier || '',
+                    checked: !!r.checked,
+                };
+            });
+        },
+
         integrationErrorBadge() {
             const s = this.integrationStatus;
             if (!s || typeof s !== 'object') return 0;
@@ -3945,6 +3990,45 @@ function adminMixinSearchBookings() {
             return human || op || 'Смена загружается…';
         },
 
+        shiftLifecycleState() {
+            const state = String(this.shiftState?.state || '');
+            const op = String(this.orgProfile?.operational_label || '').toLowerCase();
+            if (op.includes('закры') || op.includes('не рабоч') || op.includes('вне')) {
+                return {
+                    label: 'Вне рабочих часов',
+                    text: 'Можно принимать ночные предзаказы, но отправку в iiko держим под контролем смены.',
+                    tone: 'slate',
+                };
+            }
+            if (!this.shiftState?.focus && (state === 'S0' || state === 'S3')) {
+                return {
+                    label: 'Смена активна',
+                    text: 'Срочных задач нет. Следите за очередью и диалогами.',
+                    tone: 'emerald',
+                };
+            }
+            if (!this.shiftState?.focus && this.shiftStateFetchedAt > 0) {
+                return {
+                    label: 'Ожидание оператора',
+                    text: 'Есть сигналы смены. Откройте очередь или обновите состояние.',
+                    tone: 'amber',
+                };
+            }
+            return {
+                label: 'Смена активна',
+                text: 'В работе один фокус. Завершите действие и переходите к следующему.',
+                tone: 'indigo',
+            };
+        },
+
+        shiftLifecycleClass() {
+            const tone = this.shiftLifecycleState().tone;
+            if (tone === 'emerald') return 'bg-emerald-50 text-emerald-900 ring-emerald-100';
+            if (tone === 'amber') return 'bg-amber-50 text-amber-900 ring-amber-100';
+            if (tone === 'indigo') return 'bg-indigo-50 text-indigo-900 ring-indigo-100';
+            return 'bg-slate-50 text-slate-800 ring-slate-100';
+        },
+
         activeOrderFiltersCount() {
             let n = 0;
             if ((this.orderFilter || '').trim()) n += 1;
@@ -4747,6 +4831,10 @@ function adminMixinAuthKnowledge() {
 
         async applyRoleDefaultLanding(fromHashTab) {
             if (fromHashTab) return;
+            if (!this.isExecutiveHubSurface && this.shouldDefaultExecutiveHub()) {
+                window.location.href = '/hub';
+                return;
+            }
             if (this.effectiveStaffRole() === 'operator') {
                 await this.loadShiftState(true);
                 this.currentTab = this.resolveOperatorLandingTab();
@@ -4755,9 +4843,6 @@ function adminMixinAuthKnowledge() {
             }
             this._bootstrapAdminMode({ tabFromHash: null });
             this._pushAdminHash();
-            if (this.shouldDefaultExecutiveHub()) {
-                await this.openExecutiveHub();
-            }
         },
 
         /** Подсказка RBAC для UI: '' если доступ есть, иначе текст для operator/manager. */
@@ -5028,6 +5113,10 @@ function adminMixinAuthKnowledge() {
                 if (me.is_superadmin && !window.location.pathname.startsWith('/superadmin')) {
                     adminClearLocationHash();
                     window.location.href = '/superadmin';
+                    return;
+                }
+                if (!this.isExecutiveHubSurface && this.shouldDefaultExecutiveHub() && !window.location.hash) {
+                    window.location.href = '/hub';
                     return;
                 }
                 if (this.isExecutiveHubSurface) {
@@ -10725,6 +10814,7 @@ function adminMixinDataChartsSettings() {
                 if (deliveriesRes.ok) this.intelligenceDeliveries = Array.isArray(deliveriesRes.data?.items) ? deliveriesRes.data.items : [];
                 if (settingsRes.ok) this.intelligenceDeliverySettings = settingsRes.data?.settings || null;
                 if (roiRes.ok) this.intelligenceRoiOutcomes = Array.isArray(roiRes.data?.items) ? roiRes.data.items : [];
+                void this.loadIntelligenceArchive();
             } catch (e) {
                 adminLogger.error('[admin] loadIntelligence', e);
             } finally {
@@ -10760,16 +10850,67 @@ function adminMixinDataChartsSettings() {
             }
         },
 
+        async loadIntelligenceArchive() {
+            this.intelligenceArchiveLoading = true;
+            try {
+                const q = String(this.intelligenceArchiveQuery || '').trim();
+                const url = `/api/admin/intelligence/conversations${q ? `?q=${encodeURIComponent(q)}` : ''}`;
+                const { ok, data } = await this.apiJsonResponse(url);
+                if (!ok) return;
+                this.intelligenceArchive = Array.isArray(data.items) ? data.items : [];
+            } catch (e) {
+                adminLogger.error('[admin] loadIntelligenceArchive', e);
+            } finally {
+                this.intelligenceArchiveLoading = false;
+            }
+        },
+
+        async openIntelligenceArchiveItem(item) {
+            const id = Number(item?.id || 0);
+            if (!id) return;
+            this.intelligenceArchiveLoading = true;
+            try {
+                const { ok, data } = await this.apiJsonResponse(`/api/admin/intelligence/conversations/${id}`);
+                if (!ok) return;
+                this.intelligenceArchiveActive = data.conversation || item;
+                this.intelligenceConversationId = id;
+                const messages = Array.isArray(this.intelligenceArchiveActive?.messages) ? this.intelligenceArchiveActive.messages : [];
+                const lastAssistant = [...messages].reverse().find((m) => String(m.role || '') === 'assistant');
+                this.intelligenceAnswer = lastAssistant?.content || this.intelligenceArchiveActive?.preview || '';
+            } catch (e) {
+                adminLogger.error('[admin] openIntelligenceArchiveItem', e);
+            } finally {
+                this.intelligenceArchiveLoading = false;
+            }
+        },
+
+        intelligenceArchiveContinuePrompt(item) {
+            const title = String(item?.title || this.intelligenceArchiveActive?.title || 'этот разбор').trim();
+            return `Продолжи разбор "${title}" и обнови выводы по свежим данным.`;
+        },
+
         async loadExecutiveHub() {
             this.executiveHubLoading = true;
             try {
                 const { ok, data } = await this.apiJsonResponse(
                     `/api/admin/intelligence/executive-hub${this.locationQueryString('?')}`,
                 );
-                if (!ok) return;
+                if (!ok) {
+                    this.executiveHubError = data?.detail || data?.error || 'Executive Hub не загрузился. Проверьте подключение продаж, базу данных и очередь задач.';
+                    return;
+                }
+                this.executiveHubError = '';
                 this.executiveHubCards = Array.isArray(data.cards) ? data.cards : [];
                 this.executiveHubDimensions = data.dimensions && typeof data.dimensions === 'object' ? data.dimensions : {};
                 this.executiveHubSummary = data.summary && typeof data.summary === 'object' ? data.summary : null;
+                this.executiveHubTodayPicture = data.today_picture && typeof data.today_picture === 'object' ? data.today_picture : null;
+                this.executiveHubOwnerCards = Array.isArray(data.owner_cards) ? data.owner_cards : [];
+                this.executiveHubMoneyDrivers = Array.isArray(data.money_drivers) ? data.money_drivers : [];
+                this.executiveHubMoneyAtRisk = data.money_at_risk && typeof data.money_at_risk === 'object' ? data.money_at_risk : null;
+                this.executiveHubNetworkBranch = data.network_branch && typeof data.network_branch === 'object' ? data.network_branch : null;
+                this.executiveHubPrioritySignals = Array.isArray(data.priority_signals) ? data.priority_signals : [];
+                this.executiveHubAgentContext = data.agent_context && typeof data.agent_context === 'object' ? data.agent_context : null;
+                this.executiveHubOwnerReadiness = data.owner_readiness && typeof data.owner_readiness === 'object' ? data.owner_readiness : null;
                 this.executiveHubNextActions = Array.isArray(data.next_actions) ? data.next_actions : [];
                 this.executiveHubReadiness = data.readiness && typeof data.readiness === 'object' ? data.readiness : null;
                 this.executiveHubRole = data.chat?.role || data.role || this.executiveHubRole || 'owner';
@@ -10803,11 +10944,34 @@ function adminMixinDataChartsSettings() {
         openExecutiveHubCard(card) {
             if (!card || typeof card !== 'object') return;
             this.executiveHubActiveCard = card;
+            this.executiveHubActiveSignal = {
+                title: card.title || card.headline || 'Сигнал',
+                summary: card.summary || card.narrative || '',
+                chat_prompt: card.chat_prompt || card.headline || '',
+            };
+            this.executiveHubChatOpen = true;
+        },
+
+        openExecutiveHubSignal(signal) {
+            if (!signal || typeof signal !== 'object') return;
+            this.executiveHubActiveSignal = signal;
+            const card = signal.card_id ? this.executiveHubFindCard(signal.card_id) : null;
+            if (card) this.executiveHubActiveCard = card;
             this.executiveHubChatOpen = true;
         },
 
         closeExecutiveHubDrill() {
             this.executiveHubActiveCard = null;
+            this.executiveHubActiveSignal = null;
+        },
+
+        openExecutiveHubChatFullscreen() {
+            this.executiveHubChatOpen = true;
+            this.executiveHubChatFullscreen = true;
+        },
+
+        closeExecutiveHubChatFullscreen() {
+            this.executiveHubChatFullscreen = false;
         },
 
         executiveHubAskCard(card) {
@@ -10816,6 +10980,20 @@ function adminMixinDataChartsSettings() {
             this.executiveHubChatOpen = true;
             this.intelligenceQuestion = prompt;
             void this.askIntelligence(prompt);
+        },
+
+        executiveHubAgentTitle() {
+            return this.executiveHubActiveSignal?.title
+                || this.executiveHubActiveCard?.title
+                || this.executiveHubAgentContext?.title
+                || 'Разбор выбранного сигнала';
+        },
+
+        executiveHubAgentSummary() {
+            return this.executiveHubActiveSignal?.summary
+                || this.executiveHubActiveCard?.summary
+                || this.executiveHubAgentContext?.empty_state
+                || 'Выберите карточку или задайте вопрос.';
         },
 
         executiveHubDrillGo() {
@@ -10899,6 +11077,34 @@ function adminMixinDataChartsSettings() {
             return [...why, ...evidenceRows].slice(0, 8);
         },
 
+        executiveHubFocusedView() {
+            const card = this.executiveHubActiveCard;
+            const view = card?.focused_view;
+            return view && typeof view === 'object' ? view : null;
+        },
+
+        executiveHubFocusedDrivers() {
+            const rows = this.executiveHubFocusedView()?.drivers;
+            if (!Array.isArray(rows)) return [];
+            return rows.map((row) => {
+                if (row && typeof row === 'object') {
+                    return {
+                        label: row.label || row.title || row.name || 'Сигнал',
+                        value: row.value || row.summary || row.reason || '',
+                        severity: row.severity || 'info',
+                        chat_prompt: row.chat_prompt || '',
+                        card_id: row.card_id || this.executiveHubActiveCard?.id || '',
+                    };
+                }
+                return { label: String(row || ''), value: '', severity: 'info', chat_prompt: '' };
+            }).filter((row) => row.label);
+        },
+
+        executiveHubFocusedRows() {
+            const rows = this.executiveHubFocusedView()?.table;
+            return Array.isArray(rows) ? rows.filter((row) => row && typeof row === 'object') : [];
+        },
+
         executiveHubDimensionLabel(key) {
             const map = { health: 'Здоровье', money: 'Деньги', quality: 'Качество', ops: 'Операции' };
             return map[key] || key;
@@ -10954,6 +11160,30 @@ function adminMixinDataChartsSettings() {
                     summary: spec.summary || '',
                     payload: spec.payload || {},
                 });
+            }
+        },
+
+        async executiveHubRunReadinessAction(action) {
+            if (!action || typeof action !== 'object') return;
+            const type = String(action.type || action.action_type || '').toLowerCase();
+            if (type === 'navigate') {
+                this.goToAdminTarget(action.target || action.drilldown || {});
+                return;
+            }
+            if (type === 'chat') {
+                await this.executiveHubAskCard({ chat_prompt: action.prompt || action.label || '' });
+                return;
+            }
+            if (type === 'api' && action.endpoint) {
+                this.executiveHubActionBusy = true;
+                try {
+                    const { ok } = await this.apiJsonResponse(String(action.endpoint), { method: 'POST' });
+                    if (ok) await this.loadExecutiveHub();
+                } catch (e) {
+                    adminLogger.error('[admin] executiveHubRunReadinessAction', e);
+                } finally {
+                    this.executiveHubActionBusy = false;
+                }
             }
         },
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +25,8 @@ from app.db.models import (
     BusinessRecommendation,
     ExternalReview,
     InventoryStockSnapshot,
+    IntelligenceConversation,
+    IntelligenceMessage,
     MenuItem,
     OperationalInsight,
     Organization,
@@ -56,6 +58,7 @@ from app.services.insight_delivery import (
 )
 from app.services.copilot.business_questions import questions_for_role
 from app.services.executive_hub import build_executive_hub_payload
+from app.services.iiko_olap_sales_sync import olap_sales_backfill_org
 from app.services.intelligence import (
     SimulationInput,
     answer_intelligence_query,
@@ -103,6 +106,54 @@ async def _location_scope_for_request(
 class IntelligenceQueryBody(BaseModel):
     question: str = Field(..., min_length=2, max_length=1000)
     conversation_id: int | None = None
+
+
+def _conversation_tags(text: str) -> list[str]:
+    lowered = (text or "").lower()
+    pairs = [
+        ("выручка", ("выруч", "продаж", "заказ")),
+        ("маржа", ("марж", "фудкост", "себесто")),
+        ("смена", ("смен", "оператор", "доставка", "кухн")),
+        ("отзывы", ("отзыв", "жалоб", "рейтинг", "2gis", "google")),
+        ("меню", ("меню", "блюд", "стоп", "позици")),
+    ]
+    return [label for label, needles in pairs if any(n in lowered for n in needles)]
+
+
+def _message_public(row: IntelligenceMessage) -> dict[str, Any]:
+    payload = row.payload_json or {}
+    return {
+        "id": int(row.id),
+        "role": row.role,
+        "content": row.content,
+        "payload": payload,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
+
+
+async def _conversation_public(db: AsyncSession, row: IntelligenceConversation) -> dict[str, Any]:
+    last_messages = (
+        await db.execute(
+            select(IntelligenceMessage)
+            .where(
+                IntelligenceMessage.organization_id == int(row.organization_id),
+                IntelligenceMessage.conversation_id == int(row.id),
+            )
+            .order_by(IntelligenceMessage.created_at.desc(), IntelligenceMessage.id.desc())
+            .limit(4),
+        )
+    ).scalars().all()
+    ordered = list(reversed(last_messages))
+    text = " ".join([row.title, *[m.content for m in ordered]])
+    return {
+        "id": int(row.id),
+        "title": row.title or "Разбор владельца",
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        "tags": _conversation_tags(text),
+        "preview": (ordered[-1].content if ordered else row.title or "")[:240],
+        "messages": [_message_public(m) for m in ordered],
+    }
 
 
 class AgentActionProposeBody(BaseModel):
@@ -313,6 +364,14 @@ async def intelligence_executive_hub(
         "version": payload.get("version", 1),
         "period": payload["period"],
         "summary": payload.get("summary") or {},
+        "today_picture": payload.get("today_picture") or {},
+        "owner_cards": payload.get("owner_cards") or [],
+        "money_drivers": payload.get("money_drivers") or [],
+        "money_at_risk": payload.get("money_at_risk") or {},
+        "network_branch": payload.get("network_branch") or {},
+        "priority_signals": payload.get("priority_signals") or [],
+        "agent_context": payload.get("agent_context") or {},
+        "owner_readiness": payload.get("owner_readiness") or {},
         "next_actions": payload.get("next_actions") or [],
         "readiness": payload.get("readiness") or {},
         "dimensions": payload.get("dimensions") or {},
@@ -323,6 +382,83 @@ async def intelligence_executive_hub(
             "source": "sql_location" if location_scoped else "org",
         },
     }
+
+
+@router.post("/iiko-olap-sync")
+async def intelligence_iiko_olap_sync(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    days: Annotated[int, Query(ge=1, le=31)] = 3,
+) -> dict:
+    org_id = admin_org_from_session(request)
+    background_tasks.add_task(olap_sales_backfill_org, int(org_id), days=int(days))
+    return {
+        "ok": True,
+        "queued": True,
+        "organization_id": int(org_id),
+        "days": int(days),
+        "message": "iiko OLAP sync queued in web background; ARQ cron will continue scheduled refreshes.",
+    }
+
+
+@router.get("/conversations")
+async def intelligence_conversations(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    q: Annotated[str | None, Query(max_length=120)] = None,
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+) -> dict:
+    org_id = admin_org_from_session(request)
+    stmt = select(IntelligenceConversation).where(IntelligenceConversation.organization_id == int(org_id))
+    query = (q or "").strip()
+    if query:
+        matching_ids = (
+            await db.execute(
+                select(IntelligenceMessage.conversation_id)
+                .where(
+                    IntelligenceMessage.organization_id == int(org_id),
+                    IntelligenceMessage.content.ilike(f"%{query}%"),
+                )
+                .distinct(),
+            )
+        ).scalars().all()
+        stmt = stmt.where(
+            (IntelligenceConversation.title.ilike(f"%{query}%"))
+            | (IntelligenceConversation.id.in_([int(x) for x in matching_ids] or [-1]))
+        )
+    rows = (
+        await db.execute(
+            stmt.order_by(IntelligenceConversation.updated_at.desc(), IntelligenceConversation.id.desc()).limit(int(limit)),
+        )
+    ).scalars().all()
+    items = [await _conversation_public(db, row) for row in rows]
+    return {"ok": True, "items": items, "query": query}
+
+
+@router.get("/conversations/{conversation_id}")
+async def intelligence_conversation_detail(
+    conversation_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    org_id = admin_org_from_session(request)
+    row = await db.get(IntelligenceConversation, int(conversation_id))
+    if row is None or int(row.organization_id) != int(org_id):
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    messages = (
+        await db.execute(
+            select(IntelligenceMessage)
+            .where(
+                IntelligenceMessage.organization_id == int(org_id),
+                IntelligenceMessage.conversation_id == int(row.id),
+            )
+            .order_by(IntelligenceMessage.created_at.asc(), IntelligenceMessage.id.asc()),
+        )
+    ).scalars().all()
+    item = await _conversation_public(db, row)
+    item["messages"] = [_message_public(m) for m in messages]
+    item["tags"] = _conversation_tags(" ".join([row.title, *[m.content for m in messages]]))
+    return {"ok": True, "conversation": item}
 
 
 @router.post("/agent-actions/propose")

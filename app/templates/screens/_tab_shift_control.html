@@ -138,6 +138,20 @@
 
                 <template x-if="shiftStateFetchedAt > 0">
                     <div class="space-y-5" :class="shiftSceneAttentionClass()" x-show="!demoSceneResolveVisible()">
+                        <div class="rounded-2xl px-4 py-3 ring-1" :class="shiftLifecycleClass()">
+                            <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                <div class="min-w-0">
+                                    <div class="text-[10px] font-bold uppercase tracking-wide opacity-70">Жизненный цикл смены</div>
+                                    <div class="mt-1 text-base font-bold" x-text="shiftLifecycleState().label"></div>
+                                    <p class="mt-0.5 text-sm opacity-80" x-text="shiftLifecycleState().text"></p>
+                                </div>
+                                <button type="button" class="ds-btn ds-btn-secondary ds-btn-sm shrink-0"
+                                    @click="loadShiftState(true)" :disabled="shiftStateRefreshing">
+                                    <span x-show="!shiftStateRefreshing">Обновить смену</span>
+                                    <span x-show="shiftStateRefreshing" x-cloak>Обновляем…</span>
+                                </button>
+                            </div>
+                        </div>
                         <!-- Metrics strip (hidden in calm empty — operator sees CTA instead) -->
                         <div class="grid grid-cols-2 lg:grid-cols-5 gap-3 ds-shift-metrics-dim transition-all duration-300"
                             data-demo-hide

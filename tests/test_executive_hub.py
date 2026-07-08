@@ -66,9 +66,22 @@ async def test_build_executive_hub_payload_returns_scoped_cards(db_session):
     assert payload["cards"][0]["id"] == "revenue_pulse"
     assert payload["cards"][0]["metrics"]["revenue_kzt"] == 12000
     assert any(card["id"].startswith("insight_") for card in payload["cards"])
-    assert payload["version"] == 3
+    assert payload["version"] == 4
     assert payload["summary"]["stats"]
     assert payload["summary"]["has_orders"] is True
+    assert payload["today_picture"]["has_orders"] is True
+    assert payload["today_picture"]["forecast"]
+    assert len(payload["owner_cards"]) == 3
+    assert {card["id"] for card in payload["owner_cards"]} == {"owner_money", "owner_ops", "owner_ai_clients"}
+    assert payload["money_drivers"]
+    assert payload["money_at_risk"]["rows"]
+    assert payload["network_branch"] == {"enabled": False, "rows": [], "actions": []}
+    assert payload["priority_signals"]
+    assert payload["agent_context"]["title"] == "Разбор выбранного сигнала"
+    assert payload["owner_readiness"]["mode"] in {"runtime", "onboarding"}
+    assert payload["owner_readiness"]["onboarding"]
+    assert all("focused_view" in card for card in payload["cards"])
+    assert next(card for card in payload["cards"] if card["id"] == "revenue_pulse")["focused_view"]["kpis"]
     assert payload["next_actions"]
     assert payload["readiness"]["mode"] == "runtime"
     assert payload["dimensions"]["money"]["card_ids"]
@@ -105,4 +118,7 @@ async def test_build_executive_hub_payload_is_org_scoped(db_session):
 
     assert revenue_card["metrics"]["revenue_kzt"] == 0
     assert payload["summary"]["has_orders"] is False
+    assert payload["today_picture"]["has_orders"] is False
+    assert payload["today_picture"]["forecast"]["available"] is False
+    assert payload["today_picture"]["headline"] == "Сегодня ещё нет заказов"
     assert any(row["id"] == "create_test_order" for row in payload["next_actions"])

@@ -59,7 +59,7 @@ flowchart LR
   - `WHATSAPP_VERIFY_TOKEN` — произвольная строка для Meta webhook verify
 - [ ] Понятен план: **staging** (`APP_ENV=staging`) или **production** (`APP_ENV=production`).
 
-> **Важно:** Blueprint [`render.yaml`](../render.yaml) уже включает `REDIS_ENABLED=true`, `ARQ_ENABLED=true`, `APP_ENV=production` и worker. В Dashboard **обязательно** задайте **`REDIS_URL`** и **`DATABASE_URL`**. Для dev/sandbox можно временно выставить `REDIS_MEMORY_ONLY=true` (не для prod).
+> **Важно:** Blueprint [`render.yaml`](../render.yaml) настроен под Render Free: один Docker Web Service запускает и `uvicorn`, и embedded ARQ worker через [`start_render_free.sh`](../start_render_free.sh). В Dashboard **обязательно** задайте **`REDIS_URL`** и **`DATABASE_URL`**. Для dev/sandbox можно временно выставить `REDIS_MEMORY_ONLY=true` (не для prod).
 
 ---
 
@@ -72,13 +72,30 @@ flowchart LR
 | Runtime | Docker (`Dockerfile` в корне) |
 | Region | `frankfurt` (или ближе к Supabase/клиентам) |
 | Health check | `GET /health` |
-| Pre-deploy | `alembic upgrade head` (уже в `render.yaml`; дублируется в `start.sh` как `alembic upgrade heads`) |
-| Start command | из Dockerfile / `start.sh` → `uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
+| Pre-deploy | не требуется на Free; миграции выполняет `start_render_free.sh` до запуска worker/web |
+| Start command | `/app/start_render_free.sh` |
 
 Blueprint: **New → Blueprint** → репозиторий с `render.yaml`.  
 Вручную: см. [`DEPLOY_RENDER.md`](../DEPLOY_RENDER.md) вариант B.
 
-### 1.2 Background Worker (`restomind-worker`)
+### 1.2 Worker mode
+
+#### Render Free: embedded worker внутри Web Service
+
+На бесплатном Render отдельный Background Worker недоступен как free instance type. Поэтому web-контейнер запускает ARQ worker рядом с `uvicorn`.
+
+| Env | Значение |
+|-----|----------|
+| `START_EMBEDDED_WORKER` | `true` |
+| `RUN_MIGRATIONS_ON_START` | `true` |
+| `REDIS_URL` | Upstash TCP `rediss://default:…@….upstash.io:6379` |
+| `REDIS_ENABLED` | `true` |
+| `REDIS_MEMORY_ONLY` | `false` |
+| `ARQ_ENABLED` | `true` |
+
+Порядок старта: миграции → ARQ worker → uvicorn. Если worker падает, стартовый скрипт останавливает web-процесс, чтобы Render перезапустил сервис.
+
+#### Paid production: отдельный Background Worker (`restomind-worker`)
 
 | Параметр | Значение |
 |----------|----------|
@@ -93,9 +110,9 @@ Worker не слушает HTTP; healthcheck Render для него — по л�
 
 ## 2. Матрица переменных окружения
 
-### 2.1 Обязательные (web + worker)
+### 2.1 Обязательные
 
-Задайте **одинаково** на обоих сервисах.
+На Render Free задаются на Web Service. В paid mode задайте **одинаково** на web и worker.
 
 | Variable | Пример / формат | Зачем |
 |----------|-----------------|-------|

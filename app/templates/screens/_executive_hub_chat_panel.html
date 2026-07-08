@@ -1,21 +1,35 @@
 <div class="flex flex-col h-full p-4 gap-4">
-    <div>
-        <div class="text-sm font-bold text-slate-900">Агент RestoMind</div>
-        <p class="mt-1 text-xs text-slate-500">Спросите, почему упала выручка, где просела маржа или что сделать сегодня. Ответ строится через tools/API, не через HTML.</p>
+    <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0">
+            <div class="text-sm font-bold text-slate-900">Агент RestoMind</div>
+            <p class="mt-1 text-xs text-slate-500">Разбирает выбранный сигнал: деньги, причины, риски и следующий шаг владельца.</p>
+        </div>
+        <button type="button" class="ds-btn ds-btn-secondary ds-btn-sm shrink-0"
+            x-show="!executiveHubChatFullscreen"
+            @click="openExecutiveHubChatFullscreen()">
+            Во весь экран
+        </button>
+    </div>
+
+    <div class="rounded-xl border border-indigo-100 bg-indigo-50 p-3">
+        <div class="text-[10px] font-bold uppercase tracking-wide text-indigo-700">Сейчас в разборе</div>
+        <div class="mt-1 text-sm font-bold text-slate-950" x-text="executiveHubAgentTitle()"></div>
+        <p class="mt-1 text-xs leading-relaxed text-slate-600" x-text="executiveHubAgentSummary()"></p>
     </div>
 
     <form class="flex flex-col gap-2" @submit.prevent="askIntelligence()">
-        <textarea rows="3"
+        <textarea :rows="executiveHubChatFullscreen ? 5 : 3"
             class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100 resize-none"
             x-model="intelligenceQuestion"
-            placeholder="Почему упала выручка? Как поднять маржу?"></textarea>
+            placeholder="Почему упала выручка? Как поднять маржу? Покажи по часам."></textarea>
         <button type="submit" class="ds-btn ds-btn-primary ds-btn-sm self-start" :disabled="intelligenceAsking">
             <span x-show="!intelligenceAsking">Спросить агента</span>
             <span x-show="intelligenceAsking">Считаю…</span>
         </button>
     </form>
 
-    <div class="rounded-xl bg-slate-50 border border-slate-100 p-3 min-h-[120px] text-sm text-slate-800">
+    <div class="rounded-xl bg-slate-50 border border-slate-100 p-3 text-sm text-slate-800"
+        :class="executiveHubChatFullscreen ? 'min-h-[280px]' : 'min-h-[120px]'">
         <template x-if="intelligenceAnswer">
             <div>
                 <div class="text-[10px] font-bold uppercase text-slate-400">Ответ</div>
@@ -23,7 +37,7 @@
             </div>
         </template>
         <template x-if="!intelligenceAnswer">
-            <p class="text-slate-500">Выберите карточку или задайте вопрос. Каждый ответ можно проверить в нижнем слое данных.</p>
+            <p class="text-slate-500" x-text="executiveHubAgentSummary()"></p>
         </template>
     </div>
 

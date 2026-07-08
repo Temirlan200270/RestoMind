@@ -14,5 +14,5 @@ COPY . .
 EXPOSE 8000
 
 # Render и др. задают PORT; локально по умолчанию 8000
-RUN chmod +x /app/start.sh
+RUN chmod +x /app/start.sh /app/start_render_free.sh
 CMD ["/app/start.sh"]

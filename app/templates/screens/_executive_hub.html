@@ -13,7 +13,7 @@
             <div class="shrink-0 flex items-center justify-between gap-3 px-4 md:px-6 py-4 border-b border-slate-200/80 bg-white/90 backdrop-blur">
                 <div class="min-w-0">
                     <div class="text-[10px] font-bold uppercase tracking-[0.18em] text-indigo-600">Executive Hub</div>
-                    <h2 class="text-lg md:text-xl font-bold text-slate-900 truncate">Кратко, понятно, с проваливанием в детали</h2>
+                    <h2 class="text-lg md:text-xl font-bold text-slate-900 truncate">Сегодняшняя картина бизнеса</h2>
                     <p class="text-xs md:text-sm text-slate-500 mt-0.5"
                         x-text="isExecutiveHubSurface ? 'Ежедневная owner-сводка: деньги, риски, ИИ-вопросы и действия. В админку переходите только для операционной работы.' : 'Ежедневная owner-сводка: деньги, риски, ИИ-вопросы и действия.'"></p>
                 </div>
@@ -74,12 +74,12 @@
                             <div class="flex flex-wrap items-center gap-2">
                                 <span class="rounded-full px-2.5 py-1 text-[11px] font-bold uppercase"
                                     :class="executiveHubSeverityBadge(executiveHubSummary?.severity)"
-                                    x-text="executiveHubSummary?.status || 'Сводка дня'"></span>
+                                x-text="executiveHubTodayPicture?.status || executiveHubSummary?.status || 'Сводка дня'"></span>
                                 <span class="text-xs font-semibold text-slate-500"
                                     x-text="executiveHubReadinessLabel(executiveHubReadiness?.mode)"></span>
                             </div>
                             <h1 class="mt-3 text-2xl md:text-3xl font-bold tracking-normal text-slate-950 leading-tight"
-                                x-text="executiveHubSummary?.headline || ''"></h1>
+                                x-text="executiveHubTodayPicture?.headline || executiveHubSummary?.headline || ''"></h1>
                             <p class="mt-2 text-sm md:text-base text-slate-600 leading-relaxed"
                                 x-text="executiveHubSummary?.narrative || ''"></p>
                         </div>
@@ -97,6 +97,181 @@
                         </div>
                     </div>
                 </section>
+
+                <section class="mb-4 grid gap-4 md:grid-cols-3" x-show="(executiveHubOwnerCards || []).length" x-cloak>
+                    <template x-for="card in executiveHubOwnerCards" :key="'owner-card-' + card.id">
+                        <article
+                            class="rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-indigo-200 hover:shadow-md">
+                            <div class="flex items-start justify-between gap-3">
+                                <div class="min-w-0">
+                                    <div class="text-[10px] font-bold uppercase tracking-wide text-slate-500" x-text="card.title"></div>
+                                    <h3 class="mt-1 text-lg font-bold leading-snug text-slate-950" x-text="card.headline"></h3>
+                                </div>
+                                <span class="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase"
+                                    :class="executiveHubSeverityBadge(card.severity)"
+                                    x-text="executiveHubSeverityLabel(card.severity)"></span>
+                            </div>
+                            <p class="mt-2 text-sm leading-relaxed text-slate-600" x-text="card.summary"></p>
+                            <div class="mt-3 space-y-1.5">
+                                <template x-for="fact in (card.facts || []).slice(0, 3)" :key="card.id + '-fact-' + fact">
+                                    <div class="rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-slate-700" x-text="fact"></div>
+                                </template>
+                            </div>
+                            <div class="mt-4 flex items-center gap-2">
+                                <button type="button" class="ds-btn ds-btn-secondary ds-btn-sm"
+                                    @click="openExecutiveHubSignal(card)">Разобрать</button>
+                                <button type="button" class="ds-btn ds-btn-primary ds-btn-sm"
+                                    @click="executiveHubAskCard(card)">Спросить ИИ</button>
+                            </div>
+                        </article>
+                    </template>
+                </section>
+
+                <div class="mb-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                    <section class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+                        x-show="(executiveHubMoneyDrivers || []).length" x-cloak>
+                        <div class="text-[10px] font-bold uppercase tracking-wide text-slate-500">Почему изменились деньги</div>
+                        <h2 class="mt-1 text-lg font-bold text-slate-950">Разложение по причинам</h2>
+                        <div class="mt-3 divide-y divide-slate-100">
+                            <template x-for="driver in executiveHubMoneyDrivers" :key="'money-driver-' + driver.id">
+                                <button type="button" class="flex w-full items-center justify-between gap-3 py-3 text-left"
+                                    @click="openExecutiveHubSignal(driver)">
+                                    <div class="min-w-0">
+                                        <div class="text-sm font-bold text-slate-950" x-text="driver.label"></div>
+                                        <p class="mt-1 text-xs text-slate-600" x-text="driver.value"></p>
+                                    </div>
+                                    <span class="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase"
+                                        :class="executiveHubSeverityBadge(driver.severity)"
+                                        x-text="executiveHubSeverityLabel(driver.severity)"></span>
+                                </button>
+                            </template>
+                        </div>
+                    </section>
+
+                    <section class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+                        x-show="executiveHubMoneyAtRisk" x-cloak>
+                        <div class="text-[10px] font-bold uppercase tracking-wide text-slate-500">Деньги на кону</div>
+                        <h2 class="mt-1 text-lg font-bold text-slate-950" x-text="executiveHubMoneyAtRisk?.headline"></h2>
+                        <div class="mt-3 divide-y divide-slate-100">
+                            <template x-for="row in (executiveHubMoneyAtRisk?.rows || [])" :key="'risk-row-' + row.id">
+                                <button type="button" class="flex w-full items-center justify-between gap-3 py-3 text-left"
+                                    @click="openExecutiveHubSignal(row)">
+                                    <div class="min-w-0">
+                                        <div class="text-sm font-bold text-slate-950" x-text="row.label"></div>
+                                        <p class="mt-1 text-xs text-slate-600">Нажмите, чтобы агент показал причины и действие.</p>
+                                    </div>
+                                    <div class="shrink-0 text-sm font-bold text-slate-950" x-text="row.value"></div>
+                                </button>
+                            </template>
+                        </div>
+                        <button type="button" class="mt-3 ds-btn ds-btn-primary ds-btn-sm"
+                            @click="executiveHubAskCard(executiveHubMoneyAtRisk)">
+                            Разобрать деньги на кону
+                        </button>
+                    </section>
+                </div>
+
+                <section class="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+                    x-show="executiveHubNetworkBranch?.enabled" x-cloak>
+                    <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                        <div class="min-w-0 xl:max-w-xl">
+                            <div class="text-[10px] font-bold uppercase tracking-wide text-slate-500">Филиалы сети</div>
+                            <h2 class="mt-1 text-lg font-bold text-slate-950" x-text="executiveHubNetworkBranch?.headline"></h2>
+                            <p class="mt-2 text-sm leading-relaxed text-slate-600" x-text="executiveHubNetworkBranch?.summary"></p>
+                            <div class="mt-3 flex flex-wrap gap-2">
+                                <button type="button" class="ds-btn ds-btn-primary ds-btn-sm"
+                                    @click="openExecutiveHubCard(executiveHubFindCard('network_branch_intelligence'))">
+                                    Разобрать филиалы
+                                </button>
+                                <button type="button" class="ds-btn ds-btn-secondary ds-btn-sm"
+                                    @click="executiveHubRunAction((executiveHubNetworkBranch?.actions || [])[0], executiveHubFindCard('network_branch_intelligence'))">
+                                    Сравнение филиалов
+                                </button>
+                            </div>
+                        </div>
+                        <div class="grid min-w-0 gap-3 md:grid-cols-2 xl:w-[640px]">
+                            <div class="rounded-xl bg-slate-50 px-3 py-3 ring-1 ring-slate-100"
+                                x-show="(executiveHubNetworkBranch?.drivers || []).length">
+                                <div class="text-[10px] font-bold uppercase text-slate-500">Почему проседает</div>
+                                <div class="mt-2 space-y-2">
+                                    <template x-for="driver in (executiveHubNetworkBranch?.drivers || []).slice(0, 3)"
+                                        :key="'eh-network-driver-' + driver.id">
+                                        <button type="button" class="w-full text-left"
+                                            @click="openExecutiveHubSignal(driver)">
+                                            <div class="text-sm font-bold text-slate-900" x-text="driver.label"></div>
+                                            <p class="mt-0.5 text-xs text-slate-600" x-text="driver.value"></p>
+                                        </button>
+                                    </template>
+                                </div>
+                            </div>
+                            <div class="overflow-hidden rounded-xl border border-slate-200"
+                                x-show="(executiveHubNetworkBranch?.rows || []).length">
+                                <template x-for="row in (executiveHubNetworkBranch?.rows || []).slice(0, 4)"
+                                    :key="'eh-network-row-' + row.name + row.metric">
+                                    <button type="button" class="grid w-full grid-cols-[minmax(0,1fr)_auto] gap-2 border-b border-slate-100 px-3 py-2 text-left last:border-b-0 hover:bg-slate-50"
+                                        @click="openExecutiveHubCard(executiveHubFindCard('network_branch_intelligence'))">
+                                        <div class="min-w-0">
+                                            <div class="truncate text-sm font-semibold text-slate-900" x-text="row.name"></div>
+                                            <div class="text-[11px] text-slate-500" x-text="row.metric"></div>
+                                        </div>
+                                        <div class="text-sm font-bold tabular-nums text-slate-950" x-text="row.value"></div>
+                                    </button>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <div class="mb-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]"
+                    x-show="executiveHubOwnerReadiness" x-cloak>
+                    <section class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                        <div class="text-[10px] font-bold uppercase tracking-wide text-slate-500">Подключение данных</div>
+                        <h2 class="mt-1 text-lg font-bold text-slate-950">Checklist доверия к аналитике</h2>
+                        <div class="mt-3 space-y-2">
+                            <template x-for="row in (executiveHubOwnerReadiness?.onboarding || [])" :key="'eh-onboarding-' + row.id">
+                                <div class="rounded-xl px-3 py-2" :class="executiveHubReadinessClass(row.status)">
+                                    <div class="flex items-start justify-between gap-3">
+                                        <div class="min-w-0">
+                                            <div class="text-sm font-bold" x-text="row.title"></div>
+                                            <p class="mt-1 text-xs leading-relaxed" x-text="row.text"></p>
+                                        </div>
+                                        <button type="button" class="ds-btn ds-btn-secondary ds-btn-sm shrink-0"
+                                            x-show="row.status !== 'ok' && row.action"
+                                            :disabled="executiveHubActionBusy"
+                                            @click="executiveHubRunReadinessAction(row.action)"
+                                            x-text="row.action?.label || 'Открыть'"></button>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </section>
+
+                    <section class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                        <div class="text-[10px] font-bold uppercase tracking-wide text-slate-500">Runtime-инциденты</div>
+                        <h2 class="mt-1 text-lg font-bold text-slate-950">Что может искажать картину</h2>
+                        <div class="mt-3 space-y-2" x-show="(executiveHubOwnerReadiness?.runtime || []).length">
+                            <template x-for="row in (executiveHubOwnerReadiness?.runtime || [])" :key="'eh-runtime-' + row.id">
+                                <div class="rounded-xl bg-amber-50 px-3 py-2 text-amber-900 ring-1 ring-amber-100">
+                                    <div class="flex items-start justify-between gap-3">
+                                        <div class="min-w-0">
+                                            <div class="text-sm font-bold" x-text="row.title"></div>
+                                            <p class="mt-1 text-xs leading-relaxed" x-text="row.text"></p>
+                                        </div>
+                                        <button type="button" class="ds-btn ds-btn-secondary ds-btn-sm shrink-0"
+                                            x-show="row.action"
+                                            :disabled="executiveHubActionBusy"
+                                            @click="executiveHubRunReadinessAction(row.action)"
+                                            x-text="row.action?.label || 'Открыть'"></button>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                        <div class="mt-3 rounded-xl bg-emerald-50 px-3 py-3 text-sm font-semibold text-emerald-800 ring-1 ring-emerald-100"
+                            x-show="!(executiveHubOwnerReadiness?.runtime || []).length">
+                            Критичных проблем с данными сейчас не видно.
+                        </div>
+                    </section>
+                </div>
 
                 <div class="mb-4 grid gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.8fr)]">
                     <section class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
@@ -166,7 +341,7 @@
                     </template>
                 </div>
 
-                <template x-if="executiveHubLoading && !(executiveHubCards || []).length">
+                <template x-if="executiveHubLoading && !(executiveHubCards || []).length && !(executiveHubOwnerCards || []).length">
                     <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                         <template x-for="i in 6" :key="'eh-skel-' + i">
                             <div class="ds-card p-5 animate-pulse">
@@ -178,9 +353,30 @@
                     </div>
                 </template>
 
-                <template x-if="!executiveHubLoading && !(executiveHubCards || []).length">
-                    <div class="ds-card p-8 text-center text-slate-500">
-                        Пока нет карточек для Executive Hub. Проверьте данные продаж и инсайты.
+                <template x-if="!executiveHubLoading && executiveHubError">
+                    <div class="ds-card p-8 text-center text-amber-700 bg-amber-50 border-amber-200">
+                        <div class="font-bold">Executive Hub не загрузился</div>
+                        <p class="mt-2 text-sm" x-text="executiveHubError"></p>
+                    </div>
+                </template>
+
+                <template x-if="!executiveHubLoading && !executiveHubError && !(executiveHubCards || []).length && !(executiveHubOwnerCards || []).length">
+                    <div class="rounded-2xl border border-amber-200 bg-amber-50 p-8 text-center text-amber-900">
+                        <div class="text-lg font-bold">Нужны первые данные для сводки владельца</div>
+                        <p class="mx-auto mt-2 max-w-xl text-sm leading-relaxed text-amber-800">
+                            Если ресторан уже работает, запустите синхронизацию продаж или создайте тестовый заказ.
+                            После первых заказов появятся деньги, причины изменений и действия.
+                        </p>
+                        <div class="mt-4 flex flex-wrap justify-center gap-2">
+                            <button type="button" class="ds-btn ds-btn-primary ds-btn-sm"
+                                @click="executiveHubRunReadinessAction({ action_type: 'iiko_olap_sync', label: 'Синхронизировать продажи' })">
+                                Синхронизировать продажи
+                            </button>
+                            <button type="button" class="ds-btn ds-btn-secondary ds-btn-sm"
+                                @click="goToAdminTarget({ tab: 'orders' })">
+                                Создать тестовый заказ
+                            </button>
+                        </div>
                     </div>
                 </template>
 
@@ -244,6 +440,21 @@
             </div>
         </div>
 
+        <div class="absolute inset-0 z-[6] bg-white flex flex-col"
+            x-show="executiveHubChatFullscreen" x-cloak x-transition>
+            <div class="shrink-0 flex items-center justify-between gap-3 border-b border-slate-200 px-4 md:px-6 py-4">
+                <div class="min-w-0">
+                    <div class="text-[10px] font-bold uppercase tracking-wide text-indigo-600">ИИ-аналитик</div>
+                    <h3 class="text-lg font-bold text-slate-950 truncate">Полноэкранный разбор ресторана</h3>
+                </div>
+                <button type="button" class="ds-btn ds-btn-secondary ds-btn-sm"
+                    @click="closeExecutiveHubChatFullscreen()">Вернуться в Hub</button>
+            </div>
+            <div class="mx-auto flex w-full max-w-5xl flex-1 min-h-0 flex-col overflow-y-auto px-4 md:px-6 py-5">
+                {% include "screens/_executive_hub_chat_panel.html" %}
+            </div>
+        </div>
+
         <div class="absolute inset-y-0 right-0 z-[4] w-full max-w-md bg-white shadow-2xl border-l border-slate-200 flex flex-col"
             x-show="executiveHubActionPreview" x-cloak
             x-transition:enter="transition ease-out duration-200"
@@ -282,12 +493,55 @@
             <div class="shrink-0 flex items-center justify-between gap-3 px-5 py-4 border-b border-slate-100">
                 <div class="min-w-0">
                     <div class="text-[10px] font-bold uppercase tracking-wide text-slate-500" x-text="executiveHubActiveCard?.title || 'Детали'"></div>
-                    <h3 class="text-base font-bold text-slate-900 truncate" x-text="executiveHubActiveCard?.headline || ''"></h3>
+                    <h3 class="text-base font-bold text-slate-900 truncate" x-text="executiveHubFocusedView()?.title || executiveHubActiveCard?.headline || ''"></h3>
                 </div>
                 <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" @click="closeExecutiveHubDrill()">×</button>
             </div>
             <div class="flex-1 min-h-0 overflow-y-auto px-5 py-4 space-y-4">
-                <p class="text-sm text-slate-700 leading-relaxed" x-text="executiveHubActiveCard?.summary || ''"></p>
+                <p class="text-sm text-slate-700 leading-relaxed" x-text="executiveHubFocusedView()?.summary || executiveHubActiveCard?.summary || ''"></p>
+
+                <div class="grid grid-cols-2 gap-2" x-show="(executiveHubFocusedView()?.kpis || []).length">
+                    <template x-for="kpi in (executiveHubFocusedView()?.kpis || [])" :key="'fv-kpi-' + kpi.label">
+                        <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                            <div class="text-[10px] font-bold uppercase text-slate-500" x-text="kpi.label"></div>
+                            <div class="mt-1 text-base font-black text-slate-950 tabular-nums leading-tight" x-text="kpi.value"></div>
+                            <div class="mt-0.5 text-[11px] text-slate-500" x-text="kpi.hint"></div>
+                        </div>
+                    </template>
+                </div>
+
+                <div x-show="executiveHubFocusedDrivers().length">
+                    <div class="text-[10px] font-bold uppercase text-slate-400">Почему изменилось</div>
+                    <div class="mt-2 space-y-2">
+                        <template x-for="row in executiveHubFocusedDrivers()" :key="'fv-driver-' + row.label">
+                            <button type="button" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-left hover:border-indigo-200"
+                                @click="openExecutiveHubSignal(row)">
+                                <div class="flex items-center justify-between gap-2">
+                                    <div class="min-w-0 text-sm font-bold text-slate-900" x-text="row.label"></div>
+                                    <span class="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase"
+                                        :class="executiveHubSeverityBadge(row.severity)"
+                                        x-text="executiveHubSeverityLabel(row.severity)"></span>
+                                </div>
+                                <p class="mt-1 text-xs text-slate-600" x-text="row.value"></p>
+                            </button>
+                        </template>
+                    </div>
+                </div>
+
+                <div x-show="executiveHubFocusedRows().length">
+                    <div class="text-[10px] font-bold uppercase text-slate-400" x-text="executiveHubFocusedView()?.table_title || 'Данные'"></div>
+                    <div class="mt-2 overflow-hidden rounded-xl border border-slate-200">
+                        <template x-for="row in executiveHubFocusedRows()" :key="'fv-row-' + row.name + row.metric + row.value">
+                            <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-2 border-b border-slate-100 px-3 py-2 last:border-b-0">
+                                <div class="min-w-0">
+                                    <div class="truncate text-sm font-semibold text-slate-900" x-text="row.name"></div>
+                                    <div class="text-[11px] text-slate-500" x-text="row.metric"></div>
+                                </div>
+                                <div class="text-right text-sm font-bold text-slate-950 tabular-nums" x-text="row.value"></div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
 
                 <div x-show="executiveHubActiveCardEvidence().length">
                     <div class="text-[10px] font-bold uppercase text-slate-400">Основания</div>
@@ -314,17 +568,18 @@
                 <div class="rounded-xl bg-indigo-50 border border-indigo-100 p-4">
                     <div class="text-[10px] font-bold uppercase text-indigo-700">Почему система так решила</div>
                     <p class="mt-2 text-sm text-indigo-950/90">
-                        Карточка собрана из данных ресторана: продажи, потери, заказы, отзывы, смены и инсайты.
-                        Можно открыть узкий разбор этой метрики или задать уточнение агенту.
+                        Это focused-разбор выбранной метрики внутри Executive Hub. В админку переходите только для операционного действия:
+                        изменить меню, открыть заказ, проверить диалог или настройки.
                     </p>
                 </div>
             </div>
             <div class="shrink-0 flex flex-wrap gap-2 px-5 py-4 border-t border-slate-100 bg-slate-50/80">
-                <button type="button" class="ds-btn ds-btn-primary ds-btn-sm"
-                    @click="executiveHubDrillGo()">
-                    <span x-text="executiveHubActiveCard?.drilldown?.label || 'Открыть детали'"></span>
-                </button>
                 <button type="button" class="ds-btn ds-btn-secondary ds-btn-sm"
+                    x-show="executiveHubActiveCard?.drilldown"
+                    @click="executiveHubDrillGo()">
+                    <span x-text="executiveHubActiveCard?.drilldown?.label || 'Открыть рабочий раздел'"></span>
+                </button>
+                <button type="button" class="ds-btn ds-btn-primary ds-btn-sm"
                     @click="executiveHubAskCard(executiveHubActiveCard)">Спросить ИИ</button>
             </div>
         </div>

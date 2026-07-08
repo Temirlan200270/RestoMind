@@ -189,6 +189,12 @@ async def test_admin_incidents_surfaces_purchase_checklist_task(db_session):
     assert group["action"]["tab"] == "ai_center"
     assert group["action"]["aiCenterTab"] == "final_mile"
     assert group["items"]
+    draft_item = next((item for item in group["items"] if item["id"].startswith("supply_draft:")), None)
+    assert draft_item is not None
+    assert draft_item["kind"] == "supply_purchase_draft"
+    assert draft_item["supply_draft_id"]
+    assert draft_item["purchase_items"]
+    assert draft_item["target"]["supplyDraftId"] == draft_item["supply_draft_id"]
 
     summary = await admin_incidents(req, db_session, "summary")
     action = next((a for a in summary["hero_actions"] if a["id"] == "purchase_checklist"), None)

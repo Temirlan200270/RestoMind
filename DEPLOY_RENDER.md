@@ -65,9 +65,9 @@
    - `SESSION_SECRET` — случайная длинная строка (`openssl rand -hex 32`).
    - (временно, если нужно “разблокировать деплой”): `ALLOW_INSECURE_PROD_SETTINGS=true` — **небезопасно**, потом убрать.
    - `OPENAI_API_KEY`, `ADMIN_PASSWORD`, при необходимости WhatsApp/iiko.
-4. Создайте **Background Worker** с тем же Docker-образом: Start Command `python -m arq app.worker.WorkerSettings`, те же env (минимум `DATABASE_URL`, `REDIS_*`, `ARQ_*`, `APP_ENV`, AI keys).
-5. В настройках web-сервиса укажите **Pre-Deploy Command**: `alembic upgrade head`.
-6. **Start Command** оставьте из Dockerfile (uvicorn с `$PORT`) или пусто, если используется только `CMD` образа.
+4. Для Render Free укажите Docker Command / Start Command: `/app/start_render_free.sh`. Он выполнит миграции, поднимет embedded ARQ worker и затем `uvicorn`.
+5. Добавьте `START_EMBEDDED_WORKER=true`, `RUN_MIGRATIONS_ON_START=true`, `REDIS_ENABLED=true`, `REDIS_MEMORY_ONLY=false`, `ARQ_ENABLED=true`, `REDIS_URL=…`.
+6. Для paid production можно вместо embedded worker создать **Background Worker** с тем же Docker-образом: Start Command `python -m arq app.worker.WorkerSettings`, те же env.
 
 ---
 
@@ -86,9 +86,9 @@
 
 ### Redis (обязателен для prod/staging)
 
-Blueprint [`render.yaml`](render.yaml) по умолчанию: **`REDIS_ENABLED=true`**, **`REDIS_MEMORY_ONLY=false`**, **`ARQ_ENABLED=true`**, **`APP_ENV=production`**, worker **`restomind-worker`**. В Dashboard всё равно нужно задать секрет **`REDIS_URL`** (Upstash TCP).
+Blueprint [`render.yaml`](render.yaml) по умолчанию: **`REDIS_ENABLED=true`**, **`REDIS_MEMORY_ONLY=false`**, **`ARQ_ENABLED=true`**, **`APP_ENV=production`**, embedded worker внутри Web Service. В Dashboard всё равно нужно задать секрет **`REDIS_URL`** (Upstash TCP).
 
-Без внешнего Redis и worker входящие WhatsApp не обрабатываются (очередь ARQ), live WebSocket админки не шарится между инстансами.
+Без внешнего Redis и worker входящие WhatsApp/фоновые sync-задачи не обрабатываются через ARQ, live WebSocket админки не шарится между инстансами.
 
 **Только для локальных тестов / исчерпанной квоты Upstash:** **`REDIS_MEMORY_ONLY=true`** — внешний Redis не вызывается; in-memory в процессе web (не для prod).
 

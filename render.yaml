@@ -5,8 +5,9 @@
 #
 # База данных не создаётся этим файлом — используйте Supabase или вставьте URL существующего Postgres (см. docs/SUPABASE_MIGRATION.md).
 #
-# Production/staging: после Blueprint в Dashboard задайте REDIS_URL (Upstash TCP rediss://…),
-# включите worker-сервис ниже. См. docs/DEPLOY_RUNBOOK.md §2.
+# Free Render: после Blueprint задайте REDIS_URL (Upstash TCP rediss://…).
+# Web Service запускает uvicorn и embedded ARQ worker внутри одного контейнера.
+# Для paid production можно вынести worker в отдельный Background Worker.
 
 services:
   - type: web
@@ -18,11 +19,7 @@ services:
     dockerContext: .
     healthCheckPath: /health
     
-    # Сначала выполняем миграции БД в отдельном слое
-    preDeployCommand: alembic upgrade head
-    
-    # Затем запускаем сервер (без alembic, чтобы не было конфликта аргументов)
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port 10000
+    startCommand: /app/start_render_free.sh
 
     envVars:
       - key: APP_ENV
@@ -47,6 +44,10 @@ services:
         value: "true"
       - key: ARQ_QUEUE_NAME
         value: restomind
+      - key: START_EMBEDDED_WORKER
+        value: "true"
+      - key: RUN_MIGRATIONS_ON_START
+        value: "true"
       # Upstash / Render Redis — задайте в Dashboard (sync: false):
       - key: REDIS_URL
         sync: false
@@ -79,61 +80,3 @@ services:
         sync: false
       - key: IIKO_ORGANIZATION_ID
         sync: false
-
-  - type: worker
-    name: restomind-worker
-    runtime: docker
-    plan: free
-    region: frankfurt
-    dockerfilePath: ./Dockerfile
-    dockerContext: .
-    startCommand: python -m arq app.worker.WorkerSettings
-
-    envVars:
-      - key: APP_ENV
-        value: production
-      - key: APP_DEBUG
-        value: "false"
-      - key: DB_MODE
-        value: postgres
-      - key: SUPABASE_PREFER_TRANSACTION_POOLER
-        value: "true"
-      - key: DB_POOL_SIZE
-        value: "3"
-      - key: DB_MAX_OVERFLOW
-        value: "2"
-      - key: REDIS_ENABLED
-        value: "true"
-      - key: REDIS_MEMORY_ONLY
-        value: "false"
-      - key: ARQ_ENABLED
-        value: "true"
-      - key: ARQ_QUEUE_NAME
-        value: restomind
-      - key: REDIS_URL
-        sync: false
-      - key: DATABASE_URL
-        sync: false
-      - key: OPENAI_API_KEY
-        sync: false
-      - key: GEMINI_API_KEY
-        sync: false
-      - key: AI_PROVIDER
-        sync: false
-      - key: WHATSAPP_API_TOKEN
-        sync: false
-      - key: WHATSAPP_PHONE_NUMBER_ID
-        sync: false
-      - key: WHATSAPP_VERIFY_TOKEN
-        sync: false
-      - key: IIKO_API_LOGIN
-        sync: false
-      - key: IIKO_ORGANIZATION_ID
-        sync: false
-      - key: IIKO_API_BASE_URL
-        sync: false
-      - key: SESSION_SECRET
-        fromService:
-          type: web
-          name: restomind
-          envVarKey: SESSION_SECRET

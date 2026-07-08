@@ -49,7 +49,8 @@ def test_owner_command_center_and_dashboard_drilldown():
     js = (REPO / "app" / "static" / "js" / "admin-app.js").read_text(encoding="utf-8")
     assert "data-owner-command-center" not in dash
     assert "data-owner-legacy-sales-summary" not in dash
-    assert "Рабочий слой продаж" not in dash
+    assert "Рабочий слой продаж" in dash
+    assert "сводка владельца" in dash
     assert "openDashboardDrilldown('money')" in dash
     assert "openDashboardDrilldown('guests')" in dash
     assert "openDashboardDrilldown('ai')" in dash
@@ -77,20 +78,134 @@ def test_executive_hub_has_owner_scope_switcher():
     assert "Вся сеть" in hub
     assert "Все точки" in hub
     assert '"summary": payload.get("summary") or {}' in api
+    assert '"today_picture": payload.get("today_picture") or {}' in api
+    assert '"owner_cards": payload.get("owner_cards") or []' in api
+    assert '"money_drivers": payload.get("money_drivers") or []' in api
+    assert '"money_at_risk": payload.get("money_at_risk") or {}' in api
+    assert '"network_branch": payload.get("network_branch") or {}' in api
+    assert '"agent_context": payload.get("agent_context") or {}' in api
+    assert '"owner_readiness": payload.get("owner_readiness") or {}' in api
     assert '"next_actions": payload.get("next_actions") or []' in api
     assert '"readiness": payload.get("readiness") or {}' in api
+    assert '@router.post("/iiko-olap-sync")' in api
+    assert "olap_sales_backfill_org" in api
+
+
+def test_owner_landing_uses_separate_hub_page_not_admin_overlay():
+    js = (REPO / "app" / "static" / "js" / "admin-app.js").read_text(encoding="utf-8")
+    main = (REPO / "app" / "main.py").read_text(encoding="utf-8")
+    hub = (REPO / "app" / "templates" / "hub.html").read_text(encoding="utf-8")
+
+    assert '@app.get("/hub"' in main
+    assert 'data-surface="executive-hub"' in hub
+    assert "window.location.href = '/hub';" in js
+    apply_block = js.split("async applyRoleDefaultLanding(fromHashTab)")[1].split("/** Подсказка RBAC")[0]
+    assert "window.location.href = '/hub';" in apply_block
+    assert "await this.openExecutiveHub()" not in apply_block
+
+
+def test_executive_hub_owner_grade_surface_contract():
+    hub = (REPO / "app" / "templates" / "screens" / "_executive_hub.html").read_text(encoding="utf-8")
+    chat = (REPO / "app" / "templates" / "screens" / "_executive_hub_chat_panel.html").read_text(encoding="utf-8")
+    js = (REPO / "app" / "static" / "js" / "admin-app.js").read_text(encoding="utf-8")
+
+    assert "Сегодняшняя картина бизнеса" in hub
+    assert "executiveHubTodayPicture?.headline" in hub
+    assert "executiveHubOwnerCards" in hub
+    assert "Почему изменились деньги" in hub
+    assert "executiveHubMoneyDrivers" in hub
+    assert "Деньги на кону" in hub
+    assert "executiveHubMoneyAtRisk" in hub
+    assert "Филиалы сети" in hub
+    assert "executiveHubNetworkBranch" in hub
+    assert "Нужны первые данные для сводки владельца" in hub
+    assert "Синхронизировать продажи" in hub
+    assert "Полноэкранный разбор ресторана" in hub
+    assert "openExecutiveHubChatFullscreen()" in chat
+    assert "executiveHubError" in hub
+    assert "executiveHubOwnerReadiness" in hub
+    assert "Checklist доверия к аналитике" in hub
+    assert "Runtime-инциденты" in hub
+    assert "executiveHubFocusedView()" in hub
+    assert "executiveHubFocusedRows()" in hub
+    assert "openExecutiveHubSignal" in hub
+    assert "Сейчас в разборе" in chat
+    assert "executiveHubAgentTitle()" in chat
+    assert "executiveHubAgentSummary()" in chat
+    assert "data.today_picture" in js
+    assert "data.owner_cards" in js
+    assert "data.money_drivers" in js
+    assert "data.money_at_risk" in js
+    assert "data.network_branch" in js
+    assert "executiveHubChatFullscreen" in js
+    assert "executiveHubActiveSignal" in js
+    assert "executiveHubError:" in js
+    assert "data.owner_readiness" in js
+    assert "executiveHubFocusedView()" in js
+
+
+def test_ai_analyst_archive_contract():
+    ai_center = (REPO / "app" / "templates" / "screens" / "_tab_ai_center.html").read_text(encoding="utf-8")
+    js = (REPO / "app" / "static" / "js" / "admin-app.js").read_text(encoding="utf-8")
+    api = (REPO / "app" / "api" / "admin" / "intelligence.py").read_text(encoding="utf-8")
+
+    assert "История вопросов" in ai_center
+    assert "intelligenceArchiveQuery" in ai_center
+    assert "openIntelligenceArchiveItem(item)" in ai_center
+    assert "Продолжить" in ai_center
+    assert "loadIntelligenceArchive()" in js
+    assert "openIntelligenceArchiveItem(item)" in js
+    assert '@router.get("/conversations")' in api
+    assert '@router.get("/conversations/{conversation_id}")' in api
+    assert "Источник данных" not in ai_center
+    assert "без прямых запросов" not in ai_center
+
+
+def test_supplymind_lives_in_attention_queue_with_csv_action():
+    incidents = (REPO / "app" / "templates" / "screens" / "_tab_incidents.html").read_text(encoding="utf-8")
+    analytics_api = (REPO / "app" / "api" / "admin" / "analytics.py").read_text(encoding="utf-8")
+
+    assert "item.kind === 'supply_purchase_draft'" in incidents
+    assert "openIncidentItem(item, group)" in incidents
+    assert "incidentFocusedRows()" in incidents
+    assert "Чеклист закупки" in incidents
+    assert "exportSupplyMindDraft(incidentFocusedItem.supply_draft_id)" in incidents
+    assert "Скачать CSV" in incidents
+    assert '"kind": "supply_purchase_draft"' in analytics_api
+    assert '"supply_draft_id": int(draft.id)' in analytics_api
+    assert '"purchase_items": draft.items_json or []' in analytics_api
 
 
 def test_operator_keeps_only_execution_tabs():
     js = (REPO / "app" / "static" / "js" / "admin-app.js").read_text(encoding="utf-8")
-    assert "operator: Object.freeze(['shift', 'inbox', 'orders', 'chats', 'bookings'])" in js
-    assert "const ADMIN_OPERATOR_SECONDARY_TABS = Object.freeze(['orders', 'chats', 'bookings'])" in js
+    assert "operator: Object.freeze(['shift', 'inbox', 'chats', 'orders', 'menu', 'bookings'])" in js
+    assert "const ADMIN_OPERATOR_SECONDARY_TABS = Object.freeze(['chats', 'orders', 'menu', 'bookings'])" in js
     assert "canOpenExecutiveHub()" in js
     assert "return this.effectiveStaffRole() !== 'operator';" in js
 
 
+def test_business_surfaces_hide_dev_terms_and_more_labels():
+    files = [
+        REPO / "app" / "templates" / "screens" / "_executive_hub.html",
+        REPO / "app" / "templates" / "screens" / "_executive_hub_chat_panel.html",
+        REPO / "app" / "templates" / "screens" / "_tab_ai_center.html",
+        REPO / "app" / "templates" / "screens" / "_tab_ai_value.html",
+        REPO / "app" / "templates" / "screens" / "_tab_dashboard.html",
+    ]
+    text = "\n".join(path.read_text(encoding="utf-8") for path in files)
+    for forbidden in ["Source Layer", "Gemini", "HMAC", "trace_id", "scraper/API", "Пока нет карточек", "Подробнее"]:
+        assert forbidden not in text
+
+
 def test_shift_calm_empty_cta():
     shift = (REPO / "app" / "templates" / "screens" / "_tab_shift_control.html").read_text(encoding="utf-8")
+    js = (REPO / "app" / "static" / "js" / "admin-app.js").read_text(encoding="utf-8")
+    assert "Жизненный цикл смены" in shift
+    assert "shiftLifecycleState().label" in shift
+    assert "shiftLifecycleState()" in js
+    assert "Вне рабочих часов" in js
+    assert "Ожидание оператора" in js
+    assert "Смена активна" in js
     assert "shiftIsCalmEmpty()" in shift
     assert "navigateToTab('inbox')" in shift
     assert "navigateToTab('chats')" in shift

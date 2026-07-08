@@ -351,6 +351,9 @@ async def _build_supply_purchase_incident_group(
             items.append(
                 {
                     "id": f"supply_draft:{draft.id}",
+                    "kind": "supply_purchase_draft",
+                    "supply_draft_id": int(draft.id),
+                    "purchase_items": draft.items_json or [],
                     "title": draft.title or f"Чеклист закупки #{draft.id}",
                     "subtitle": f"{item_count} позиций · статус: {draft.status}",
                     "detail": "Подтвердите закупку или отметьте позиции, которые уже заказаны.",
@@ -359,7 +362,7 @@ async def _build_supply_purchase_incident_group(
                         {"label": "Позиций", "value": item_count},
                         {"label": "Статус", "value": draft.status},
                     ],
-                    "target": action,
+                    "target": {**action, "supplyDraftId": int(draft.id)},
                 },
             )
         for alert in alerts[: max(0, INCIDENT_SAMPLE_LIMIT - len(items))]:

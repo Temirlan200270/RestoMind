@@ -321,6 +321,7 @@ class WorkerSettings:
     # Это имена задач, которые мы enqueue_job("name", **kwargs) будем вызывать.
     # Важно: web-процесс ставит задачи в эту же очередь через task_queue._queue_name().
     queue_name = (settings.arq_queue_name or "restomind").strip() or "restomind"
+    health_check_interval = 60
     functions = [
         whatsapp_process_text,
         whatsapp_process_voice,
