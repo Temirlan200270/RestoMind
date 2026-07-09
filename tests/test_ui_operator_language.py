@@ -76,6 +76,20 @@ def test_owner_screens_no_escalation_word():
         assert "эскалац" not in text, f"dev term in {path.name}"
 
 
+def test_chat_diagnostic_id_is_action_not_visible_raw_trace():
+    guest = (COMPONENTS / "_chat_guest_context.html").read_text(encoding="utf-8")
+    js = JS.read_text(encoding="utf-8")
+    assert "Скопировать ID диагностики" in guest
+    assert "copyActiveChatDiagnosticId()" in guest
+    assert 'x-text="activeChatTraceId"' not in guest
+    assert ':title="activeChatTraceId"' not in guest
+    assert "Control Plane" not in guest
+    assert "Цепочка trace" not in guest
+    assert "copyActiveChatDiagnosticId()" in js
+    assert "navigator.clipboard.writeText(id)" in js
+    assert "'Control Plane'" not in js
+
+
 def test_admin_js_event_labels_operator_language():
     js = JS.read_text(encoding="utf-8")
     assert "'ai.escalated': 'Бот позвал оператора'" in js
@@ -149,6 +163,16 @@ def test_analytics_no_dev_field_names_in_tooltips():
     assert "принятые рекомендации" in analytics
 
 
+def test_analytics_sales_heatmap_uses_business_language():
+    analytics = _read("app", "templates", "screens", "_tab_analytics.html")
+    assert "ETL" not in analytics
+    assert "heatmap выручки" not in analytics
+    assert "запустите worker" not in analytics
+    assert "ночного sync" not in analytics
+    assert "Нет почасовых продаж из iiko" in analytics
+    assert "Последнее обновление" in analytics
+
+
 def test_dashboard_sales_peak_opens_analytics_subtab():
     dash = _read("app", "templates", "screens", "_tab_dashboard.html")
     js = JS.read_text(encoding="utf-8")
@@ -173,6 +197,35 @@ def test_settings_restaurant_human_integration_labels():
     assert "Чат команды в Telegram" in html
     assert "Для техспециалиста" in html
     assert "WhatsApp Phone ID" not in html.split("Для техспециалиста")[0]
+
+
+def test_settings_connections_hide_background_job_jargon():
+    html = _read("app", "templates", "screens", "_tab_settings_connections.html")
+    for term in [
+        "Очередь задач",
+        "Воркер:",
+        "MENU_RAG_ENABLED",
+        "menu_items",
+        "эмбеддинг",
+        "БД",
+        "store_id)",
+        "department_id (",
+        "Пароль API",
+        "JSON (только для dev/staging)",
+    ]:
+        assert term not in html
+    assert "Фоновые обновления" in html
+    assert "Обновить меню и стоп-листы сейчас" in html
+    assert "Для техспециалиста: поиск по меню" in html
+    assert "История обновлений" in html
+
+
+def test_settings_purge_modal_uses_business_names_not_table_names():
+    html = _read("app", "templates", "screens", "_modals.html")
+    purge_block = html.split('id="settings-purge-title"', 1)[1].split('x-show="settingsPurgeError"', 1)[0]
+    assert "users" not in purge_block
+    assert "menu_items" not in purge_block
+    assert "Не удаляются:</strong> клиенты, меню и организации." in purge_block
 
 
 def test_shift_control_no_raw_state_leak():

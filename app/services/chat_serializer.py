@@ -56,6 +56,8 @@ class ChatMessagePayload:
     voice_audio: tuple[bytes, str] | None = None
     channel: str = "whatsapp"
     telegram_chat_id: int = 0
+    channel_connection_id: int = 0
+    external_chat_id: str = ""
 
     def to_json(self) -> str:
         voice_b64 = None
@@ -73,6 +75,8 @@ class ChatMessagePayload:
                 "voice_mime": voice_mime,
                 "channel": self.channel,
                 "telegram_chat_id": self.telegram_chat_id,
+                "channel_connection_id": self.channel_connection_id,
+                "external_chat_id": self.external_chat_id,
             },
             ensure_ascii=False,
         )
@@ -94,6 +98,8 @@ class ChatMessagePayload:
             voice_audio=voice_audio,
             channel=str(data.get("channel") or "whatsapp"),
             telegram_chat_id=int(data.get("telegram_chat_id") or 0),
+            channel_connection_id=int(data.get("channel_connection_id") or 0),
+            external_chat_id=str(data.get("external_chat_id") or ""),
         )
 
 

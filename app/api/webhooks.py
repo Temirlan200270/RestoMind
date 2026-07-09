@@ -91,7 +91,14 @@ from app.services.faq_cache import (
 )
 from app.services.org_resolve import organization_id_for_whatsapp_value
 from app.services.prompt_metrics import apply_prompt_size_controls
-from app.services.quick_replies import QuickReplyHit, load_quick_reply_preload, try_quick_reply
+from app.services.quick_replies import (
+    QuickReplyHit,
+    _build_menu_probe_reply_from_items,
+    build_recommendation_quick_reply_from_items,
+    load_quick_reply_preload,
+    peek_quick_reply_trigger,
+    try_quick_reply,
+)
 from app.services.tenant_scope import ensure_default_location
 from app.services.trace_context import (
     build_conversation_id,
@@ -146,6 +153,7 @@ from app.services.whatsapp_idempotency import (
 )
 from app.services.tts_edge import synthesize_speech_mp3
 from app.services.chat_serializer import ChatMessagePayload, run_serialized_chat_pipeline
+from app.schemas.ai_schemas import AIBrainResponse
 
 logger = logging.getLogger(__name__)
 
@@ -332,6 +340,69 @@ def _start_slow_processing_feedback(
         )
     except RuntimeError:
         return None
+
+
+def _soft_ai_unavailable_response(
+    *,
+    message_text: str,
+    menu_items: list[Any] | None,
+    has_draft: bool,
+) -> AIBrainResponse:
+    """Useful guest-facing answer when the AI provider exhausted retries."""
+    trigger = peek_quick_reply_trigger(message_text)
+    available_menu = [
+        item
+        for item in (menu_items or [])
+        if bool(getattr(item, "is_available", True)) and str(getattr(item, "name", "") or "").strip()
+    ]
+
+    if trigger == "menu_probe":
+        probe = _build_menu_probe_reply_from_items(available_menu, message_text)
+        if probe:
+            return AIBrainResponse(intent="faq", reply_text=probe)
+
+    if trigger in {"recommendation_request", "menu_request"}:
+        if trigger == "menu_request":
+            sample = "\n".join(
+                f"• {str(getattr(item, 'name', '')).strip()}"
+                + (f" — {float(getattr(item, 'price', 0) or 0):.0f} ₸" if float(getattr(item, "price", 0) or 0) > 0 else "")
+                for item in available_menu[:6]
+            )
+            if sample:
+                return AIBrainResponse(
+                    intent="faq",
+                    reply_text=f"Вот что могу подсказать по меню сейчас:\n{sample}\n\nЧто добавить в заказ?",
+                )
+        recommendation = build_recommendation_quick_reply_from_items(available_menu)
+        return AIBrainResponse(intent="faq", reply_text=recommendation)
+
+    if has_draft:
+        return AIBrainResponse(
+            intent="faq",
+            reply_text=(
+                "Я на связи и продолжу заказ. Напишите одним сообщением, что нужно изменить: "
+                "добавить или убрать блюдо, количество, получение и оплату."
+            ),
+        )
+
+    return AIBrainResponse(
+        intent="faq",
+        reply_text=(
+            "Я помогу с заказом. Напишите, что хотите: блюдо или категорию, например "
+            "«плов», «мясное», «напитки», либо сразу количество и получение."
+        ),
+    )
+
+
+def _quick_reply_allowed_before_llm(trigger: str | None) -> bool:
+    """Only service-like shortcuts bypass the agent; menu/order talk stays LLM-first."""
+    if not trigger:
+        return False
+    return trigger not in {
+        "recommendation_request",
+        "menu_request",
+        "menu_probe",
+    }
 
 
 _POLITE_ACK_RE = re.compile(
@@ -1088,6 +1159,8 @@ async def process_inbound_message(
     voice_audio: tuple[bytes, str] | None = None,
     webhook_value: dict[str, Any] | None = None,
     trace_id: str | None = None,
+    channel_connection_id: int | None = None,
+    external_chat_id: str | None = None,
 ) -> None:
     """
     Shared inbound pipeline for customer channels (WhatsApp, Telegram, …).
@@ -1155,6 +1228,8 @@ async def process_inbound_message(
         tokens = customer_channel_context(
             item_channel,
             telegram_chat_id=int(getattr(item, "telegram_chat_id", 0) or 0),
+            channel_connection_id=int(getattr(item, "channel_connection_id", 0) or 0),
+            external_chat_id=str(getattr(item, "external_chat_id", "") or ""),
         )
         try:
             for attempt in range(MAX_RETRIES):
@@ -1217,6 +1292,8 @@ async def process_inbound_message(
         voice_audio=voice_audio,
         channel=msg_channel,
         telegram_chat_id=current_telegram_chat_id() if msg_channel == "telegram" else 0,
+        channel_connection_id=int(channel_connection_id or 0),
+        external_chat_id=(external_chat_id or "").strip(),
     )
     last_exc: BaseException | None = None
     acquired = await run_serialized_chat_pipeline(
@@ -2170,6 +2247,12 @@ async def _process_message_inner(
         slow_feedback_task = _start_slow_processing_feedback(phone, wmid, delay_sec=0.0)
 
         if settings.quick_replies_enabled and message_text.strip() and not had_voice:
+            qr_trigger = peek_quick_reply_trigger(message_text)
+            quick_reply_pre_llm_allowed = _quick_reply_allowed_before_llm(qr_trigger)
+        else:
+            quick_reply_pre_llm_allowed = False
+
+        if quick_reply_pre_llm_allowed:
             async with async_session_factory() as db_qr:
                 qr_preload = await load_quick_reply_preload(
                     db_qr,
@@ -2186,6 +2269,7 @@ async def _process_message_inner(
                 org=qr_preload.org,
                 menu_preview=qr_preload.menu_preview,
                 recommendation_preview=qr_preload.recommendation_preview,
+                menu_probe_text=qr_preload.menu_probe_text,
                 order_status_text=qr_preload.order_status_text,
             )
             if qr_hit is not None:
@@ -2391,14 +2475,31 @@ async def _process_message_inner(
         if settings.pipeline_timing_enabled:
             pipe_sw.split("llm")
 
+        ai_provider_soft_fallback = False
+        if is_openai_fallback_escalation_reply(ai_response.reply_text):
+            ai_provider_soft_fallback = True
+            logger.warning(
+                "%sAI provider fallback softened org=%s phone=%s trigger=%s has_draft=%s",
+                trace_log_prefix(),
+                organization_id,
+                _redact_msisdn_for_log(phone),
+                peek_quick_reply_trigger(message_text) or "generic",
+                draft_row is not None,
+            )
+            ai_response = _soft_ai_unavailable_response(
+                message_text=message_text,
+                menu_items=menu_items,
+                has_draft=draft_row is not None,
+            )
+
         log_pipeline_stage(
             "llm_ok",
             phone=phone,
-            extra={"intent": ai_response.intent, "voice": had_voice},
+            extra={"intent": ai_response.intent, "voice": had_voice, "soft_fallback": ai_provider_soft_fallback},
         )
         schedule_log_ai_usage(organization_id, getattr(ai_response, "_usage", None))
         # P4: регистрируем транзиентную AI-ошибку (fallback = провайдер недоступен)
-        if is_openai_fallback_escalation_reply(ai_response.reply_text):
+        if ai_provider_soft_fallback:
             schedule_log_ai_error(organization_id)
 
         from app.services.fulfillment_infer import enrich_ai_fulfillment_from_message
@@ -2568,6 +2669,8 @@ async def _process_message_inner(
                     "Ответ сформирован моделью (OpenAI)."
                 ),
             }
+            if ai_provider_soft_fallback:
+                assistant_meta["ai_provider_soft_fallback"] = True
             if is_openai_fallback_escalation_reply(result.reply_text):
                 assistant_meta["technical_fallback"] = True
             if ai_snapshot_id:

@@ -58,7 +58,7 @@ def test_owner_command_center_and_dashboard_drilldown():
     assert "dashboardDrilldownGoFull()" in dash
     assert "openDashboardDrilldown(key" in js
     assert "dashboardDrilldownMetrics()" in js
-    assert "return flag === true" in js
+    assert "return flag !== false" in js
 
 
 def test_ai_center_is_source_layer_not_daily_landing():
@@ -178,8 +178,13 @@ def test_supplymind_lives_in_attention_queue_with_csv_action():
 
 def test_operator_keeps_only_execution_tabs():
     js = (REPO / "app" / "static" / "js" / "admin-app.js").read_text(encoding="utf-8")
-    assert "operator: Object.freeze(['shift', 'inbox', 'chats', 'orders', 'menu', 'bookings'])" in js
-    assert "const ADMIN_OPERATOR_SECONDARY_TABS = Object.freeze(['chats', 'orders', 'menu', 'bookings'])" in js
+    role_tabs_block = js.split("const ADMIN_ROLE_TABS = Object.freeze({", 1)[1].split("});", 1)[0]
+    primary_nav_block = js.split("const ADMIN_ROLE_PRIMARY_NAV = Object.freeze({", 1)[1].split("});", 1)[0]
+    assert "operator: Object.freeze(['shift', 'inbox', 'orders', 'chats', 'bookings', 'menu'])" in role_tabs_block
+    assert "admin: null" in role_tabs_block
+    assert "manager:" not in role_tabs_block
+    assert "operator: Object.freeze(['shift', 'inbox', 'orders', 'chats', 'bookings', 'menu'])" in primary_nav_block
+    assert "const ADMIN_OPERATOR_SECONDARY_TABS = Object.freeze(['orders', 'chats', 'bookings', 'menu'])" in js
     assert "canOpenExecutiveHub()" in js
     assert "return this.effectiveStaffRole() !== 'operator';" in js
 
@@ -193,8 +198,31 @@ def test_business_surfaces_hide_dev_terms_and_more_labels():
         REPO / "app" / "templates" / "screens" / "_tab_dashboard.html",
     ]
     text = "\n".join(path.read_text(encoding="utf-8") for path in files)
-    for forbidden in ["Source Layer", "Gemini", "HMAC", "trace_id", "scraper/API", "Пока нет карточек", "Подробнее"]:
+    for forbidden in [
+        "Source Layer",
+        "Gemini",
+        "HMAC",
+        "trace_id",
+        "scraper/API",
+        "SystemEvent",
+        "ChatLog",
+        "по одному trace",
+        "caused_by:",
+        "Пока нет карточек",
+        "Подробнее",
+        "Preview / diff",
+        "focused-разбор",
+    ]:
         assert forbidden not in text
+
+
+def test_executive_hub_readiness_copy_hides_internal_sync_terms():
+    service = (REPO / "app" / "services" / "executive_hub.py").read_text(encoding="utf-8")
+    assert "Запустить OLAP sync" not in service
+    assert "iiko OLAP требует проверки" not in service
+    assert "Последняя OLAP-синхронизация" not in service
+    assert "Запустить sync" not in service
+    assert "очередь задач" not in service
 
 
 def test_shift_calm_empty_cta():

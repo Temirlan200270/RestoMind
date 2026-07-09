@@ -215,7 +215,7 @@
                 {% endcall %}
 
                 <div x-show="analyticsDensity === 'advanced' || !canToggleAnalyticsDensity()" x-cloak>
-                {% call card(title='Продажи iiko (почасово)', subtitle='ETL из iiko Cloud — heatmap выручки по дням недели и часам (расширенная аналитика).', padding_class='p-5', extra_class='mb-6 overflow-x-auto') %}
+                {% call card(title='Продажи iiko (почасово)', subtitle='Почасовая выручка по дням недели: помогает увидеть пики кухни и зала.', padding_class='p-5', extra_class='mb-6 overflow-x-auto') %}
                     <p x-show="analyticsData.sales_heatmap_iiko?.peak_hours_local?.length"
                         class="text-xs text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2 mb-3"
                         x-text="'Пики iiko: ' + (analyticsData.sales_heatmap_iiko?.peak_hours_local || []).map(h => String(h).padStart(2,'0') + ':00').join(', ')"></p>
@@ -248,7 +248,7 @@
                             </tbody>
                         </table>
                     </div>
-                    <p x-show="!analyticsData.sales_heatmap_iiko?.has_data" class="text-center py-6 text-gray-400 text-sm">Нет данных iiko ETL — подключите iiko и дождитесь ночного sync (23:15 UTC) или запустите worker.</p>
+                    <p x-show="!analyticsData.sales_heatmap_iiko?.has_data" class="text-center py-6 text-gray-400 text-sm">Нет почасовых продаж из iiko. Подключите iiko и дождитесь обновления данных или запустите обновление вручную.</p>
                 {% endcall %}
                 </div>
 
@@ -477,7 +477,7 @@
                                 :disabled="waiterKpiSyncLoading"
                                 class="ds-btn ds-btn-secondary ds-btn-sm min-h-9">
                                 <span x-show="!waiterKpiSyncLoading">Обновить из iiko</span>
-                                <span x-show="waiterKpiSyncLoading">Синхронизация…</span>
+                                <span x-show="waiterKpiSyncLoading">Обновляем…</span>
                             </button>
                             <a x-show="canStaffManageSupply() && (waiterKpi.items || []).length"
                                 :href="waiterKpiExportHref()"
@@ -527,7 +527,7 @@
                     </table>
                     <p x-show="waiterKpi.last_sync?.finished_at && !waiterKpiLoading"
                         class="text-[11px] text-slate-400 mt-3"
-                        x-text="waiterKpi.last_sync?.finished_at ? 'Последняя синхронизация: ' + fmt.date(waiterKpi.last_sync.finished_at) + ', ' + fmt.time(waiterKpi.last_sync.finished_at) : ''"></p>
+                        x-text="waiterKpi.last_sync?.finished_at ? 'Последнее обновление: ' + fmt.date(waiterKpi.last_sync.finished_at) + ', ' + fmt.time(waiterKpi.last_sync.finished_at) : ''"></p>
                 {% endcall %}
 
                 <!-- Help slide-over (replaces heavy details blocks) -->

@@ -8,6 +8,9 @@
     "dev:stagewise": "stagewise -- python -m uvicorn app.main:app --reload",
     "build:admin-css": "tailwindcss -i ./src/css/admin-input.css -o ./app/static/css/admin.css --minify",
     "check:admin-js": "node --check ./app/static/js/admin-app.js",
+    "gateway:install": "npm install --prefix services/messaging-gateway",
+    "gateway:start": "npm start --prefix services/messaging-gateway",
+    "gateway:check": "npm run check --prefix services/messaging-gateway",
     "lint:js": "eslint \"app/static/js/**/*.js\"",
     "lh:admin": "node scripts/run_admin_lighthouse.mjs"
   },

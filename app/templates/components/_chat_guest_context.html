@@ -79,13 +79,20 @@
     </div>
 
     <div x-show="activeChatTraceId" class="rounded-xl border border-slate-200 bg-slate-50/80 p-3 shadow-sm">
-        <p class="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Control Plane</p>
-        <p class="text-[11px] font-mono text-slate-600 truncate" :title="activeChatTraceId" x-text="activeChatTraceId"></p>
-        <button type="button"
-            @click="openActiveChatTraceTimeline()"
-            class="mt-2 w-full min-h-[40px] rounded-lg text-xs font-bold bg-white border border-slate-300 text-slate-800 hover:bg-slate-100">
-            Цепочка trace →
-        </button>
+        <p class="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Диагностика</p>
+        <p class="text-xs text-slate-700 leading-snug">Если поддержке нужно проверить этот диалог, передайте ID диагностики.</p>
+        <div class="mt-2 grid gap-2">
+            <button type="button"
+                @click="copyActiveChatDiagnosticId()"
+                class="w-full min-h-[40px] rounded-lg text-xs font-bold bg-white border border-slate-300 text-slate-800 hover:bg-slate-100">
+                Скопировать ID диагностики
+            </button>
+            <button type="button"
+                @click="openActiveChatTraceTimeline()"
+                class="w-full min-h-[40px] rounded-lg text-xs font-bold bg-white border border-slate-300 text-slate-800 hover:bg-slate-100">
+                Открыть цепочку событий
+            </button>
+        </div>
     </div>
 </div>
 {%- endmacro %}

@@ -82,6 +82,38 @@ async def whatsapp_process_statuses(
     await _process_whatsapp_status_batch(statuses)
 
 
+async def channel_process_inbound(
+    ctx: dict[str, Any],
+    *,
+    channel_message_id: int,
+) -> None:
+    from app.services.messaging_gateway import process_channel_message
+
+    await process_channel_message(int(channel_message_id))
+
+
+async def channel_dispatch_outbound(
+    ctx: dict[str, Any],
+    *,
+    channel_message_id: int,
+) -> None:
+    from app.services.messaging_gateway import dispatch_outbound_message
+
+    await dispatch_outbound_message(int(channel_message_id))
+
+
+async def channel_dispatch_due_outbound(ctx: dict[str, Any], *, limit: int = 50) -> None:
+    from app.services.messaging_gateway import dispatch_due_outbound_messages
+
+    await dispatch_due_outbound_messages(limit=int(limit or 50))
+
+
+async def channel_process_due_inbound(ctx: dict[str, Any], *, limit: int = 50) -> None:
+    from app.services.messaging_gateway import process_due_inbound_messages
+
+    await process_due_inbound_messages(limit=int(limit or 50))
+
+
 async def payment_notify_customer(
     ctx: dict[str, Any],
     *,
@@ -326,6 +358,10 @@ class WorkerSettings:
         whatsapp_process_text,
         whatsapp_process_voice,
         whatsapp_process_statuses,
+        channel_process_inbound,
+        channel_dispatch_outbound,
+        channel_dispatch_due_outbound,
+        channel_process_due_inbound,
         payment_notify_customer,
         send_review_request,
         send_blast_batch,
@@ -360,6 +396,8 @@ class WorkerSettings:
             cron(draft_recovery_scheduled_tick, minute={2, 12, 22, 32, 42, 52}),
             cron(scheduled_blasts_tick, minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55}),
             cron(ai_incidents_hourly_tick, minute=5),
+            cron(channel_process_due_inbound, minute={0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59}),
+            cron(channel_dispatch_due_outbound, minute={0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59}),
             cron(iiko_inventory_sync_scheduled_tick, hour={0, 6, 12, 18}, minute=20),
             cron(waiter_kpi_sync_scheduled_tick, hour=22, minute=30),
             cron(sales_hourly_iiko_scheduled_tick, hour=23, minute=15),

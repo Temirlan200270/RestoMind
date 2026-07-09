@@ -35,6 +35,7 @@ services:
       REDIS_ENABLED: "true"
       REDIS_HOST: redis
       ARQ_ENABLED: "true"
+      MESSAGING_GATEWAY_URL: http://messaging-gateway:3107
     depends_on:
       db:
         condition: service_healthy
@@ -50,6 +51,22 @@ services:
       - "traefik.http.services.restomind.loadbalancer.server.port=8000"
     restart: unless-stopped
 
+  # ─── Messaging Gateway (WhatsApp Web / Baileys) ─────
+  messaging-gateway:
+    build:
+      context: ./services/messaging-gateway
+    env_file: .env
+    environment:
+      PORT: "3107"
+      RESTOMIND_API_URL: http://app:8000
+      RESTOMIND_GATEWAY_SECRET: ${MESSAGING_GATEWAY_SECRET}
+      SESSION_ROOT: /sessions
+    volumes:
+      - messaging_sessions:/sessions
+    depends_on:
+      - app
+    restart: unless-stopped
+
   # ─── PostgreSQL ──────────────────────────────────────
   worker:
     build: .
@@ -62,6 +79,7 @@ services:
       REDIS_ENABLED: "true"
       REDIS_HOST: redis
       ARQ_ENABLED: "true"
+      MESSAGING_GATEWAY_URL: http://messaging-gateway:3107
     depends_on:
       db:
         condition: service_healthy
@@ -97,3 +115,4 @@ services:
 volumes:
   pgdata:
   letsencrypt:
+  messaging_sessions:

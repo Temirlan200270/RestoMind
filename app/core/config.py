@@ -301,6 +301,22 @@ class Settings(BaseSettings):
         le=5,
         validation_alias=AliasChoices("WHATSAPP_SEND_MAX_RETRIES", "whatsapp_send_max_retries"),
     )
+    messaging_gateway_secret: str = Field(
+        default="",
+        validation_alias=AliasChoices("MESSAGING_GATEWAY_SECRET", "messaging_gateway_secret"),
+        description="Shared secret for internal Messaging Gateway endpoints",
+    )
+    messaging_gateway_url: str = Field(
+        default="",
+        validation_alias=AliasChoices("MESSAGING_GATEWAY_URL", "messaging_gateway_url"),
+        description="Base URL of the Node.js Messaging Gateway service",
+    )
+    messaging_gateway_send_timeout_sec: float = Field(
+        default=8.0,
+        ge=1.0,
+        le=30.0,
+        validation_alias=AliasChoices("MESSAGING_GATEWAY_SEND_TIMEOUT_SEC", "messaging_gateway_send_timeout_sec"),
+    )
     pipeline_timing_enabled: bool = Field(
         default=True,
         validation_alias=AliasChoices(

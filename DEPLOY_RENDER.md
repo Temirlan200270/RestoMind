@@ -71,6 +71,45 @@
 
 ---
 
+## Messaging Gateway для WhatsApp Web
+
+Для WhatsApp Web/Baileys нужен отдельный долгоживущий Node.js сервис:
+
+- Dockerfile path: `services/messaging-gateway/Dockerfile`
+- Root/context: `services/messaging-gateway`
+- Healthcheck: `/health`
+- Plan на текущем бесплатном этапе: `free`
+- Production-вариант позже: VPS с volume для `/sessions` или платный Render `starter`/выше с persistent disk
+- Env:
+  - `RESTOMIND_API_URL=https://<ваш-restomind-домен>`
+  - `RESTOMIND_GATEWAY_SECRET=<тот же секрет, что MESSAGING_GATEWAY_SECRET в RestoMind>`
+  - `SESSION_ROOT=/sessions`
+
+В основном RestoMind сервисе задайте:
+
+- `MESSAGING_GATEWAY_URL=https://<домен-messaging-gateway>`
+- `MESSAGING_GATEWAY_SECRET=<тот же секрет>`
+
+Ограничение бесплатного Render: файловая система сервиса эфемерная, а сам web service может засыпать. Поэтому Baileys-сессия в `/sessions` может потеряться после redeploy/restart/spin-down, и WhatsApp снова попросит QR. На бесплатном этапе это приемлемо только для smoke/демо проверки: QR появился, телефон подключился, входящее сообщение дошло до AI, ответ ушел обратно.
+
+Для стабильной работы с клиентами лучше позже вынести `restomind-messaging-gateway` на VPS с постоянным volume. Тогда основной `restomind` может оставаться на Render, а gateway будет жить отдельно и держать WhatsApp Web-сессию без сна.
+
+Минимальный smoke после деплоя:
+
+```bash
+curl -sS https://<домен-messaging-gateway>/health
+```
+
+Ожидаемый ответ:
+
+```json
+{"ok":true,"provider":"whatsapp_baileys","active_connections":0}
+```
+
+После этого в админке RestoMind откройте `Настройки -> Подключения`, создайте WhatsApp Web подключение и проверьте, что QR появился. После сканирования статус должен стать `connected`.
+
+---
+
 ## После деплоя
 
 - URL приложения: `https://<имя-сервиса>.onrender.com` (или свой домен в **Settings** → **Custom Domain**).

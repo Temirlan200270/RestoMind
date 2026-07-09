@@ -91,9 +91,35 @@ async def send_customer_text(
             asyncio.ensure_future(_bg_finalize_twilio(outbound_chat_log_id, ok))
         return
 
-    from app.services.telegram_customer import current_customer_channel, current_telegram_chat_id, send_telegram_customer_text
+    from app.services.telegram_customer import (
+        current_channel_connection_id,
+        current_customer_channel,
+        current_external_chat_id,
+        current_telegram_chat_id,
+        send_telegram_customer_text,
+    )
 
-    if current_customer_channel() == "telegram":
+    active_channel = current_customer_channel()
+    if active_channel == "whatsapp_baileys":
+        connection_id = current_channel_connection_id()
+        external_chat_id = current_external_chat_id()
+        if connection_id and external_chat_id:
+            from app.services.messaging_gateway import send_channel_text
+
+            await send_channel_text(
+                channel_connection_id=connection_id,
+                external_chat_id=external_chat_id,
+                text=text,
+                outbound_chat_log_id=outbound_chat_log_id,
+            )
+            return
+        logger.warning(
+            "whatsapp_baileys reply context missing connection_id=%s external_chat_id=%s",
+            connection_id,
+            bool(external_chat_id),
+        )
+
+    if active_channel == "telegram":
         tg_chat_id = current_telegram_chat_id()
         tg_result = await send_telegram_customer_text(tg_chat_id, text) if tg_chat_id else {"ok": False}
         tg_ok = bool(tg_result.get("ok"))

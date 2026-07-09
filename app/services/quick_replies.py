@@ -62,6 +62,18 @@ _ORDER_STATUS_PHRASES = frozenset({
     "как мой заказ",
     "проверь заказ",
 })
+_MORE_RECOMMENDATION_PHRASES = frozenset({
+    "что еще",
+    "что ещё",
+    "еще",
+    "ещё",
+    "а еще",
+    "а ещё",
+    "еще варианты",
+    "ещё варианты",
+    "что-нибудь еще",
+    "что-нибудь ещё",
+})
 
 _ACTIVE_ORDER_STATUSES = (
     OrderStatus.CONFIRMED.value,
@@ -98,6 +110,7 @@ class QuickReplyPreload:
     has_open_draft: bool
     menu_preview: str | None = None
     recommendation_preview: str | None = None
+    menu_probe_text: str | None = None
     order_status_text: str | None = None
 
 
@@ -144,7 +157,11 @@ def _match_trigger(text: str) -> str | None:
         return "greeting_plain"
     from app.services.upsell_safety_gate import is_recommendation_request
 
-    if len(norm) <= 80 and is_recommendation_request(text):
+    if len(norm) <= 80 and (
+        is_recommendation_request(text)
+        or norm in {"подскажите", "подскажи"}
+        or norm in _MORE_RECOMMENDATION_PHRASES
+    ):
         return "recommendation_request"
     if len(norm) > 40:
         return None
@@ -160,7 +177,27 @@ def _match_trigger(text: str) -> str | None:
         return "menu_request"
     if norm in _ORDER_STATUS_PHRASES:
         return "order_status"
+    if _looks_like_menu_probe(norm):
+        return "menu_probe"
     return None
+
+
+def _looks_like_menu_probe(norm: str) -> bool:
+    """Short menu/item/category clarification that should not wait for LLM."""
+    words = [w for w in re.split(r"\s+", norm) if w]
+    if not words or len(words) > 5:
+        return False
+    if norm in {"да", "нет", "не", "ок", "ладно"}:
+        return False
+    food_hints = (
+        "плов", "мяс", "говяд", "баран", "кебаб", "шашлык", "лагман", "манты",
+        "самса", "салат", "суп", "напит", "чай", "лимонад", "десерт", "сытн",
+        "легк", "лёгк",
+    )
+    question_hints = ("есть", "какой", "какая", "какие", "давай")
+    if any(h in norm for h in food_hints):
+        return True
+    return any(h in norm for h in question_hints) and len(words) <= 4
 
 
 def _format_working_hours_reply(org: Organization) -> str:
@@ -248,7 +285,15 @@ async def build_recommendation_quick_reply_text(db: AsyncSession, organization_i
         organization_id=organization_id,
         include_unavailable=False,
     )
-    available = [i for i in items if i.is_available and (i.name or "").strip()]
+    return build_recommendation_quick_reply_from_items(items)
+
+
+def build_recommendation_quick_reply_from_items(items: list[object]) -> str:
+    available = [
+        i
+        for i in items
+        if bool(getattr(i, "is_available", True)) and str(getattr(i, "name", "") or "").strip()
+    ]
     if not available:
         return "Могу подсказать по меню, но список блюд сейчас обновляется. Напишите, что любите: сытное, лёгкое, мясное или напиток."
 
@@ -275,6 +320,95 @@ async def build_recommendation_quick_reply_text(db: AsyncSession, organization_i
         + "\n".join(lines)
         + "\n\nЧто добавить в заказ? Если хотите, подберу под вкус: сытное, лёгкое, мясное или напиток."
     )
+
+
+def _menu_item_line(item) -> str:
+    name = str(item.name or "").strip()
+    price = float(item.price or 0)
+    return f"• {name} — {price:.0f} ₸" if price > 0 else f"• {name}"
+
+
+def _probe_terms(text: str) -> list[str]:
+    norm = _normalize(text)
+    stop = {
+        "есть", "какой", "какая", "какие", "что", "давай", "дайте", "хочу",
+        "можно", "у", "вас", "мне", "пожалуйста", "подскажите", "подскажи",
+    }
+    return [w for w in re.split(r"\s+", norm) if len(w) >= 3 and w not in stop]
+
+
+async def build_menu_probe_quick_reply_text(
+    db: AsyncSession,
+    organization_id: int,
+    message_text: str,
+) -> str | None:
+    items = await load_available_menu(
+        db,
+        organization_id=organization_id,
+        include_unavailable=False,
+    )
+    available = [i for i in items if i.is_available and (i.name or "").strip()]
+    return _build_menu_probe_reply_from_items(available, message_text)
+
+
+def _build_menu_probe_reply_from_items(items: list[object], message_text: str) -> str | None:
+    available = [i for i in items if bool(getattr(i, "is_available", True)) and str(getattr(i, "name", "") or "").strip()]
+    if not available:
+        return None
+
+    norm = _normalize(message_text)
+    terms = _probe_terms(message_text)
+
+    category_title = ""
+    category_needles: tuple[str, ...] = ()
+    if "мяс" in norm:
+        category_title = "Из мясного могу предложить"
+        category_needles = ("мяс", "говяд", "баран", "кебаб", "шашлык", "манты", "дапанжи", "казан")
+    elif "сытн" in norm:
+        category_title = "Из сытного могу предложить"
+        category_needles = ("плов", "лагман", "манты", "кебаб", "дапанжи", "казан", "говяд", "баран")
+    elif "легк" in norm or "лёгк" in norm:
+        category_title = "Из лёгкого могу предложить"
+        category_needles = ("салат", "суп", "овощ", "чай", "напит")
+    elif "напит" in norm or "чай" in norm or "лимонад" in norm:
+        category_title = "Из напитков могу предложить"
+        category_needles = ("напит", "чай", "лимонад", "сок", "компот", "кофе")
+
+    def blob(item) -> str:
+        return f"{getattr(item, 'name', '') or ''} {getattr(item, 'category', '') or ''} {getattr(item, 'tags', '') or ''}".lower()
+
+    candidates = []
+    if category_needles:
+        candidates = [item for item in available if any(k in blob(item) for k in category_needles)]
+    elif terms:
+        candidates = [
+            item
+            for item in available
+            if all(term in blob(item) for term in terms) or " ".join(terms) in blob(item)
+        ]
+
+    seen: set[str] = set()
+    unique = []
+    for item in candidates:
+        key = str(item.name or "").strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+        if len(unique) >= 5:
+            break
+
+    if not unique:
+        return None
+
+    lines = "\n".join(_menu_item_line(item) for item in unique[:5])
+    if category_title:
+        return f"{category_title}:\n{lines}\n\nЧто добавить в заказ?"
+
+    query_label = " ".join(terms).strip() or norm
+    if len(unique) == 1:
+        return f"Да, есть:\n{lines}\n\nДобавить в заказ?"
+    return f"По «{query_label}» есть варианты:\n{lines}\n\nКакой добавить в заказ?"
 
 
 async def build_order_status_quick_reply_text(
@@ -339,11 +473,14 @@ async def load_quick_reply_preload(
     trigger = peek_quick_reply_trigger(message_text)
     menu_preview: str | None = None
     recommendation_preview: str | None = None
+    menu_probe_text: str | None = None
     order_status_text: str | None = None
     if trigger == "menu_request":
         menu_preview = await build_menu_quick_reply_text(db, organization_id)
     elif trigger == "recommendation_request":
         recommendation_preview = await build_recommendation_quick_reply_text(db, organization_id)
+    elif trigger == "menu_probe":
+        menu_probe_text = await build_menu_probe_quick_reply_text(db, organization_id, message_text)
     elif trigger == "order_status":
         order_status_text = await build_order_status_quick_reply_text(
             db,
@@ -356,6 +493,7 @@ async def load_quick_reply_preload(
         has_open_draft=draft_row is not None,
         menu_preview=menu_preview,
         recommendation_preview=recommendation_preview,
+        menu_probe_text=menu_probe_text,
         order_status_text=order_status_text,
     )
 
@@ -381,6 +519,7 @@ async def try_quick_reply(
     org: Organization | None = None,
     menu_preview: str | None = None,
     recommendation_preview: str | None = None,
+    menu_probe_text: str | None = None,
     order_status_text: str | None = None,
     user_locale: str = "ru",
 ) -> QuickReplyHit | None:
@@ -440,6 +579,10 @@ async def try_quick_reply(
         if state != UserState.CHATTING or not recommendation_preview:
             return None
         hit = QuickReplyHit(template_id=template_id, reply_text=recommendation_preview)
+    elif template_id == "menu_probe":
+        if state != UserState.CHATTING or not menu_probe_text:
+            return None
+        hit = QuickReplyHit(template_id=template_id, reply_text=menu_probe_text)
     elif template_id == "order_status":
         if not order_status_text:
             return None

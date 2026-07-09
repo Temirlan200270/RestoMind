@@ -1,12 +1,17 @@
 """Тесты quick_replies (LLM bypass)."""
 
+from types import SimpleNamespace
+
 import pytest
 
 from app.db.models import Organization
 from app.services.dialog_mgr import UserState
 from app.services.quick_replies import (
+    _build_menu_probe_reply_from_items,
+    build_menu_probe_quick_reply_text,
     build_recommendation_quick_reply_text,
     is_plain_greeting,
+    peek_quick_reply_trigger,
     try_quick_reply,
 )
 
@@ -113,6 +118,62 @@ def test_is_plain_greeting_rejects_menu_intent() -> None:
     assert is_plain_greeting("привет, меню") is False
 
 
+def test_problem_dialog_short_messages_trigger_quick_reply_paths() -> None:
+    assert peek_quick_reply_trigger("Здравствуйте, что посоветуешь?") == "recommendation_request"
+    assert peek_quick_reply_trigger("Что ещё?") == "recommendation_request"
+    assert peek_quick_reply_trigger("Что еще?") == "recommendation_request"
+    assert peek_quick_reply_trigger("Подскажите") == "recommendation_request"
+    assert peek_quick_reply_trigger("Мясное давай") == "menu_probe"
+    assert peek_quick_reply_trigger("Плов") == "menu_probe"
+    assert peek_quick_reply_trigger("Плов есть?") == "menu_probe"
+    assert peek_quick_reply_trigger("Плов какой есть?") == "menu_probe"
+
+
+def test_menu_probe_reply_from_items_for_problem_dialog() -> None:
+    items = [
+        SimpleNamespace(
+            name="Плов праздничный баранина",
+            category="Традиционная кухня",
+            tags="",
+            price=2790,
+            is_available=True,
+        ),
+        SimpleNamespace(
+            name="Плов праздничный говядина",
+            category="Традиционная кухня",
+            tags="",
+            price=2890,
+            is_available=True,
+        ),
+        SimpleNamespace(
+            name="Казан кебаб с говядина",
+            category="Мясные блюда",
+            tags="",
+            price=4490,
+            is_available=True,
+        ),
+        SimpleNamespace(
+            name="Лимонад",
+            category="Напитки",
+            tags="",
+            price=990,
+            is_available=True,
+        ),
+    ]
+
+    plov_reply = _build_menu_probe_reply_from_items(items, "Плов какой есть?")
+    meat_reply = _build_menu_probe_reply_from_items(items, "Мясное давай")
+
+    assert plov_reply is not None
+    assert "Плов праздничный баранина" in plov_reply
+    assert "Плов праздничный говядина" in plov_reply
+    assert "Какой добавить" in plov_reply
+    assert "не успел обработать" not in plov_reply
+    assert meat_reply is not None
+    assert "Из мясного" in meat_reply
+    assert "Казан кебаб" in meat_reply
+
+
 @pytest.mark.asyncio
 async def test_menu_request_uses_human_category_labels(db_with_menu) -> None:
     from app.db.models import MenuItem
@@ -169,6 +230,97 @@ async def test_recommendation_request_returns_real_menu_items(db_with_menu) -> N
     assert "Плов" in hit.reply_text
     assert "Что добавить в заказ" in hit.reply_text
     assert "С радостью помогу оформить заказ" not in hit.reply_text
+
+
+@pytest.mark.asyncio
+async def test_short_hint_podskazhite_returns_recommendations(db_with_menu) -> None:
+    preview = await build_recommendation_quick_reply_text(db_with_menu, 1)
+    hit = await try_quick_reply(
+        phone="+77001112233",
+        organization_id=1,
+        message_text="Подскажите",
+        state=UserState.CHATTING,
+        has_open_draft=False,
+        recommendation_preview=preview,
+    )
+
+    assert hit is not None
+    assert hit.template_id == "recommendation_request"
+    assert "Из популярного могу посоветовать" in hit.reply_text
+
+
+@pytest.mark.asyncio
+async def test_more_recommendations_followup_uses_preloaded_preview_without_db() -> None:
+    hit = await try_quick_reply(
+        phone="+77001112233",
+        organization_id=1,
+        message_text="Что ещё?",
+        state=UserState.CHATTING,
+        has_open_draft=False,
+        recommendation_preview="Из популярного могу посоветовать:\n• Плов — 2790 ₸",
+    )
+
+    assert hit is not None
+    assert hit.template_id == "recommendation_request"
+    assert "Плов" in hit.reply_text
+    assert "не успел обработать" not in hit.reply_text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("message", ["Что ещё?", "Что еще?", "Ещё варианты"])
+async def test_more_recommendations_followup_does_not_use_llm(db_with_menu, message: str) -> None:
+    preview = await build_recommendation_quick_reply_text(db_with_menu, 1)
+    hit = await try_quick_reply(
+        phone="+77001112233",
+        organization_id=1,
+        message_text=message,
+        state=UserState.CHATTING,
+        has_open_draft=False,
+        recommendation_preview=preview,
+    )
+
+    assert hit is not None
+    assert hit.template_id == "recommendation_request"
+    assert "Из популярного могу посоветовать" in hit.reply_text
+    assert "не успел обработать" not in hit.reply_text
+
+
+@pytest.mark.asyncio
+async def test_meat_hint_returns_menu_probe_without_llm(db_with_menu) -> None:
+    text = await build_menu_probe_quick_reply_text(db_with_menu, 1, "Мясное давай")
+    hit = await try_quick_reply(
+        phone="+77001112233",
+        organization_id=1,
+        message_text="Мясное давай",
+        state=UserState.CHATTING,
+        has_open_draft=False,
+        menu_probe_text=text,
+    )
+
+    assert hit is not None
+    assert hit.template_id == "menu_probe"
+    assert "Из мясного" in hit.reply_text
+    assert "Что добавить" in hit.reply_text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("message", ["Плов", "Плов есть?", "Плов какой есть?"])
+async def test_plov_probe_returns_variants_without_llm(db_with_menu, message: str) -> None:
+    text = await build_menu_probe_quick_reply_text(db_with_menu, 1, message)
+    hit = await try_quick_reply(
+        phone="+77001112233",
+        organization_id=1,
+        message_text=message,
+        state=UserState.CHATTING,
+        has_open_draft=False,
+        menu_probe_text=text,
+    )
+
+    assert hit is not None
+    assert hit.template_id == "menu_probe"
+    assert "Плов" in hit.reply_text
+    assert "Добавить" in hit.reply_text or "Какой добавить" in hit.reply_text
+    assert "не успел обработать" not in hit.reply_text
 
 
 @pytest.mark.asyncio

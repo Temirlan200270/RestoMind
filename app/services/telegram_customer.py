@@ -18,7 +18,7 @@ from app.db.models import Organization, User
 
 logger = logging.getLogger(__name__)
 
-CUSTOMER_CHANNELS = frozenset({"whatsapp", "telegram", "operator", "voice"})
+CUSTOMER_CHANNELS = frozenset({"whatsapp", "whatsapp_baileys", "telegram", "operator", "voice"})
 
 _active_customer_channel: contextvars.ContextVar[str] = contextvars.ContextVar(
     "active_customer_channel",
@@ -27,6 +27,14 @@ _active_customer_channel: contextvars.ContextVar[str] = contextvars.ContextVar(
 _active_telegram_chat_id: contextvars.ContextVar[int] = contextvars.ContextVar(
     "active_telegram_chat_id",
     default=0,
+)
+_active_channel_connection_id: contextvars.ContextVar[int] = contextvars.ContextVar(
+    "active_channel_connection_id",
+    default=0,
+)
+_active_external_chat_id: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "active_external_chat_id",
+    default="",
 )
 
 
@@ -139,23 +147,31 @@ def telegram_webhook_authorized(incoming_secret: str, org: Organization | None) 
 class CustomerChannelTokens:
     channel: contextvars.Token[str]
     telegram_chat_id: contextvars.Token[int]
+    channel_connection_id: contextvars.Token[int]
+    external_chat_id: contextvars.Token[str]
 
 
 def customer_channel_context(
     channel: str,
     *,
     telegram_chat_id: int | None = None,
+    channel_connection_id: int | None = None,
+    external_chat_id: str | None = None,
 ) -> CustomerChannelTokens:
     """Set reply channel for ``send_customer_text`` for the duration of a pipeline."""
     return CustomerChannelTokens(
         _active_customer_channel.set(normalize_customer_channel(channel)),
         _active_telegram_chat_id.set(int(telegram_chat_id or 0)),
+        _active_channel_connection_id.set(int(channel_connection_id or 0)),
+        _active_external_chat_id.set((external_chat_id or "").strip()),
     )
 
 
 def reset_customer_channel_context(tokens: CustomerChannelTokens) -> None:
     _active_customer_channel.reset(tokens.channel)
     _active_telegram_chat_id.reset(tokens.telegram_chat_id)
+    _active_channel_connection_id.reset(tokens.channel_connection_id)
+    _active_external_chat_id.reset(tokens.external_chat_id)
 
 
 def current_customer_channel() -> str:
@@ -164,6 +180,14 @@ def current_customer_channel() -> str:
 
 def current_telegram_chat_id() -> int:
     return int(_active_telegram_chat_id.get() or 0)
+
+
+def current_channel_connection_id() -> int:
+    return int(_active_channel_connection_id.get() or 0)
+
+
+def current_external_chat_id() -> str:
+    return (_active_external_chat_id.get() or "").strip()
 
 
 def _tg_api_url(method: str) -> str:

@@ -887,8 +887,8 @@ def _owner_readiness_blocks(summary: dict[str, Any], owner_summary: dict[str, An
             "id": "connect_iiko",
             "title": "Подключить iiko и продажи",
             "status": "ok" if source == SOURCE_IIKO_OLAP or has_sales else "action",
-            "text": "OLAP продажи приходят в Executive Hub." if source == SOURCE_IIKO_OLAP else "Запустите iiko OLAP sync или примите первый заказ.",
-            "action": {"label": "Запустить OLAP sync", "type": "api", "endpoint": "/api/admin/intelligence/iiko-olap-sync?days=3"},
+            "text": "Продажи из iiko приходят в сводку владельца." if source == SOURCE_IIKO_OLAP else "Запустите синхронизацию продаж или примите первый заказ.",
+            "action": {"label": "Синхронизировать продажи", "type": "api", "endpoint": "/api/admin/intelligence/iiko-olap-sync?days=3"},
         },
         {
             "id": "first_order",
@@ -910,10 +910,10 @@ def _owner_readiness_blocks(summary: dict[str, Any], owner_summary: dict[str, An
         runtime.append(
             {
                 "id": "olap_sync_failed",
-                "title": "iiko OLAP требует проверки",
+                "title": "Данные продаж iiko требуют проверки",
                 "severity": "warning",
-                "text": str(olap.get("last_sync_error") or "Последняя OLAP-синхронизация не подтверждена."),
-                "action": {"label": "Запустить sync", "type": "api", "endpoint": "/api/admin/intelligence/iiko-olap-sync?days=3"},
+                "text": str(olap.get("last_sync_error") or "Последняя синхронизация продаж не подтверждена."),
+                "action": {"label": "Синхронизировать продажи", "type": "api", "endpoint": "/api/admin/intelligence/iiko-olap-sync?days=3"},
             }
         )
     if not has_sales:
@@ -922,8 +922,8 @@ def _owner_readiness_blocks(summary: dict[str, Any], owner_summary: dict[str, An
                 "id": "no_sales_data",
                 "title": "Нет продаж за период",
                 "severity": "warning",
-                "text": "Если ресторан уже работает, проверьте iiko, WhatsApp и очередь задач.",
-                "action": {"label": "Системные инциденты", "type": "navigate", "target": {"tab": "incidents"}},
+                "text": "Если ресторан уже работает, проверьте iiko, WhatsApp и фоновые процессы.",
+                "action": {"label": "Проверить проблемы с данными", "type": "navigate", "target": {"tab": "incidents"}},
             }
         )
     if float(owner_summary.get("lost_revenue") or 0) > 0:
@@ -1070,40 +1070,56 @@ def _money_risk_card(leak: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def _insight_card(insight: OperationalInsight) -> dict[str, Any]:
-    payload = insight.payload_json or {}
+def _snapshot_insight(insight: OperationalInsight) -> dict[str, Any]:
+    """Copy ORM insight fields before later fallback rollbacks can expire it."""
+    return {
+        "id": insight.id,
+        "title": insight.title,
+        "summary": insight.summary,
+        "severity": insight.severity,
+        "confidence_score": insight.confidence_score,
+        "payload_json": insight.payload_json or {},
+        "evidence_json": insight.evidence_json or {},
+    }
+
+
+def _insight_card(insight: dict[str, Any]) -> dict[str, Any]:
+    payload = insight.get("payload_json") or {}
     hypotheses = payload.get("cause_hypotheses") or []
     actions = payload.get("recommended_actions") or []
+    insight_id = insight.get("id")
+    title = str(insight.get("title") or "")
+    summary = str(insight.get("summary") or "")
     return _card(
-        card_id=f"insight_{insight.id}",
+        card_id=f"insight_{insight_id}",
         title="Главный инсайт",
-        headline=insight.title,
-        summary=insight.summary,
+        headline=title,
+        summary=summary,
         dimension="quality",
-        narrative=insight.summary,
-        severity=str(insight.severity or "info"),
+        narrative=summary,
+        severity=str(insight.get("severity") or "info"),
         action_items=[
             _action_item(
-                action_id=f"insight_open_{insight.id}",
+                action_id=f"insight_open_{insight_id}",
                 label="Открыть инсайт",
                 action_type="navigate",
-                drilldown={"tab": "ai_center", "aiCenterTab": "insights", "insight_id": insight.id},
+                drilldown={"tab": "ai_center", "aiCenterTab": "insights", "insight_id": insight_id},
             ),
         ],
         metrics={
-            "insight_id": insight.id,
-            "confidence_score": insight.confidence_score,
+            "insight_id": insight_id,
+            "confidence_score": insight.get("confidence_score"),
         },
         why=[str(x) for x in hypotheses[:3]],
         actions=[str(x) for x in actions[:3]],
-        evidence=insight.evidence_json or payload.get("evidence") or {},
+        evidence=insight.get("evidence_json") or payload.get("evidence") or {},
         drilldown={
             "tab": "ai_center",
             "aiCenterTab": "insights",
-            "insight_id": insight.id,
+            "insight_id": insight_id,
             "label": "Все инсайты",
         },
-        chat_prompt=f"Объясни подробнее: {insight.title}",
+        chat_prompt=f"Объясни подробнее: {title}",
     )
 
 
@@ -1284,6 +1300,7 @@ async def build_executive_hub_payload(
         [],
         timeout=_INSIGHTS_TIMEOUT_SEC,
     )
+    insight_snapshots = [_snapshot_insight(insight) for insight in insights[:2]]
     owner_summary = await _wait_or_fallback(
         db,
         "owner_summary",
@@ -1306,7 +1323,7 @@ async def build_executive_hub_payload(
     margin_card = _margin_risk_card(owner_summary)
     if margin_card is not None:
         cards.append(margin_card)
-    for insight in insights[:2]:
+    for insight in insight_snapshots:
         cards.append(_insight_card(insight))
 
     ops_card = _ops_status_card(summary, leak, owner_summary)

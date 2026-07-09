@@ -647,6 +647,104 @@ class ChatLog(Base):
         return f"<ChatLog id={self.id} role={self.role}>"
 
 
+class Conversation(Base):
+    """Provider-agnostic customer conversation."""
+
+    __tablename__ = "conversations"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "customer_id",
+            "status",
+            name="uq_conversations_org_customer_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    customer_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    active_order_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("orders.id", ondelete="SET NULL"), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active", server_default="active")
+    last_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    def __repr__(self) -> str:
+        return f"<Conversation id={self.id} org={self.organization_id} customer={self.customer_id}>"
+
+
+class ChannelConnection(Base):
+    """A restaurant account connected to a customer messaging provider."""
+
+    __tablename__ = "channel_connections"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "provider",
+            "external_account_id",
+            name="uq_channel_connections_org_provider_external",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="qr_required", server_default="qr_required", index=True)
+    external_account_id: Mapped[str] = mapped_column(String(128), nullable=False, default="", server_default="")
+    phone: Mapped[str] = mapped_column(String(32), nullable=False, default="", server_default="")
+    display_name: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default="")
+    session_ref: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default="")
+    last_qr: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    health_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    last_error: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    def __repr__(self) -> str:
+        return f"<ChannelConnection id={self.id} provider={self.provider!r} status={self.status!r}>"
+
+
+class ChannelMessage(Base):
+    """Durable normalized inbound/outbound provider message."""
+
+    __tablename__ = "channel_messages"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "idempotency_key", name="uq_channel_messages_org_idempotency"),
+        Index("ix_channel_messages_pending", "direction", "status", "next_attempt_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    conversation_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True, index=True)
+    channel_connection_id: Mapped[int] = mapped_column(Integer, ForeignKey("channel_connections.id", ondelete="CASCADE"), nullable=False, index=True)
+    chat_log_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("chat_logs.id", ondelete="SET NULL"), nullable=True, index=True)
+    trace_id: Mapped[str] = mapped_column(String(120), nullable=False, default="", server_default="", index=True)
+    correlation_id: Mapped[str] = mapped_column(String(120), nullable=False, default="", server_default="", index=True)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    direction: Mapped[str] = mapped_column(String(8), nullable=False, index=True)
+    external_chat_id: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default="", index=True)
+    external_message_id: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default="", index=True)
+    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", server_default="pending", index=True)
+    message_type: Mapped[str] = mapped_column(String(32), nullable=False, default="text", server_default="text")
+    text: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    payload_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    error_code: Mapped[str] = mapped_column(String(100), nullable=False, default="", server_default="")
+    error_message: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    processing_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    failed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<ChannelMessage id={self.id} provider={self.provider!r} direction={self.direction!r}>"
+
+
 class WhatsappInboundDedupe(Base):
     """
     Идемпотентность входящих сообщений WhatsApp по message_id от Meta.

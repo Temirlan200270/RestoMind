@@ -9,11 +9,29 @@ services:
       POSTGRES_HOST: db
       REDIS_ENABLED: "true"
       REDIS_HOST: redis
+      MESSAGING_GATEWAY_URL: http://messaging-gateway:3107
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
+    restart: unless-stopped
+
+  messaging-gateway:
+    build:
+      context: ./services/messaging-gateway
+    env_file: .env
+    environment:
+      PORT: "3107"
+      RESTOMIND_API_URL: http://app:8000
+      RESTOMIND_GATEWAY_SECRET: ${MESSAGING_GATEWAY_SECRET:-}
+      SESSION_ROOT: /sessions
+    ports:
+      - "3107:3107"
+    volumes:
+      - messaging_sessions:/sessions
+    depends_on:
+      - app
     restart: unless-stopped
 
   db:
@@ -44,3 +62,4 @@ services:
 
 volumes:
   pgdata:
+  messaging_sessions:

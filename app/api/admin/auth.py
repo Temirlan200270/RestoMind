@@ -48,6 +48,12 @@ logger = logging.getLogger(__name__)
 auth_router = APIRouter(prefix="/admin/auth", tags=["Admin Auth"])
 
 
+def _public_staff_role(role: str | None) -> str:
+    """Collapse legacy manager/admin into the owner role exposed to the UI."""
+    r = (role or StaffRole.ADMIN.value).strip().lower()
+    return StaffRole.OPERATOR.value if r == StaffRole.OPERATOR.value else StaffRole.ADMIN.value
+
+
 async def _resolve_network_info(
     db: AsyncSession,
     org_id: int,
@@ -184,12 +190,13 @@ async def admin_login(request: Request, body: LoginBody, db: AsyncSession = Depe
                 email=staff.email,
                 staff_id=int(staff.id),
             )
+            public_role = _public_staff_role(staff.role)
             return {
                 "ok": True,
                 "username": staff.email,
                 "organization_id": int(staff.organization_id),
-                "staff_role": (staff.role or StaffRole.ADMIN.value).strip().lower(),
-                "role": (staff.role or StaffRole.ADMIN.value).strip().lower(),
+                "staff_role": public_role,
+                "role": public_role,
                 "is_superadmin": bool(staff.is_superadmin),
                 "ws_token": ws_token,
             }
@@ -399,7 +406,7 @@ async def _admin_auth_me_payload(request: Request, db: AsyncSession) -> dict[str
     if sid is not None:
         staff_me = await db.get(StaffUser, int(sid))
         if staff_me is not None:
-            staff_role = (staff_me.role or StaffRole.ADMIN.value).strip().lower()
+            staff_role = _public_staff_role(staff_me.role)
             is_superadmin = bool(staff_me.is_superadmin)
     org_me = await db.get(Organization, int(oid))
     if not is_superadmin:

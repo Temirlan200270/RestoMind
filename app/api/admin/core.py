@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends
 from .bookings import bookings_router
 from .branding import branding_router
 from .chats import chats_router
+from app.api.channels import admin_router as channel_connections_router
 from .customers import customers_router
 from .demo import demo_router
 from .deps import (
@@ -34,6 +35,7 @@ router.include_router(branding_router)
 router.include_router(bookings_router)
 router.include_router(customers_router)
 router.include_router(chats_router)
+router.include_router(channel_connections_router)
 router.include_router(system_router)
 # NOTE: rules_router, analytics_router, menu_router, organization_router, orders_router
 # have their own prefix="/admin" — they are mounted directly in app.main at /api level.

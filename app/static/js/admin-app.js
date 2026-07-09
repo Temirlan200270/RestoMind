@@ -678,19 +678,17 @@ function adminReadUiHintsDismissed() {
 }
 
 const ADMIN_ROLE_TABS = Object.freeze({
-    operator: Object.freeze(['shift', 'inbox', 'chats', 'orders', 'menu', 'bookings']),
-    manager: Object.freeze(['shift', 'inbox', 'orders', 'chats', 'bookings', 'menu', 'dashboard', 'ai_center']),
-    admin: Object.freeze(['ai_center', 'dashboard', 'menu', 'marketing', 'settings']),
-});
-
-/** Wow Layer: primary sidebar/bottom nav for operator (secondary via «Ещё»). */
-const ADMIN_ROLE_PRIMARY_NAV = Object.freeze({
-    operator: Object.freeze(['shift', 'inbox']),
-    manager: null,
+    operator: Object.freeze(['shift', 'inbox', 'orders', 'chats', 'bookings', 'menu']),
     admin: null,
 });
 
-const ADMIN_OPERATOR_SECONDARY_TABS = Object.freeze(['chats', 'orders', 'menu', 'bookings']);
+/** Two-role admin: operator sees operations, owner/admin sees the full console. */
+const ADMIN_ROLE_PRIMARY_NAV = Object.freeze({
+    operator: Object.freeze(['shift', 'inbox', 'orders', 'chats', 'bookings', 'menu']),
+    admin: null,
+});
+
+const ADMIN_OPERATOR_SECONDARY_TABS = Object.freeze(['orders', 'chats', 'bookings', 'menu']);
 
 /** G10.6 golden UX flow — complete/skip choreography (ms). */
 const SHIFT_CHOREO_MS = Object.freeze({
@@ -809,7 +807,7 @@ function adminLiveImpactReasonOnly(liveImpact) {
 
 function adminNormalizeStaffRole(role) {
     const r = String(role || 'admin').trim().toLowerCase();
-    if (r === 'operator' || r === 'manager' || r === 'admin') return r;
+    if (r === 'operator') return 'operator';
     return 'admin';
 }
 
@@ -1733,6 +1731,11 @@ function adminMixinState() {
         integrationStatus: defaultIntegrationStatus(),
         integrationSyncLoading: false,
         integrationEvents: [],
+        channelConnections: [],
+        channelHealth: null,
+        channelConnectionsLoading: false,
+        channelConnectionsSaving: false,
+        channelConnectionMessages: {},
         /** Онбординг (GET /api/admin/setup-status). */
         setupStatus: { score: 0, steps: [], menu_items: 0, upsell_rules: 0, packaging_rules: 0, knowledge_items: 0 },
         iikoOnboardApiLogin: '',
@@ -4660,7 +4663,7 @@ function adminMixinAuthKnowledge() {
         },
 
         effectiveStaffRole() {
-            return String(this.staffRole || 'admin').trim().toLowerCase();
+            return adminNormalizeStaffRole(this.staffRole || 'admin');
         },
 
         canStaffManageSupply() {
@@ -4675,7 +4678,7 @@ function adminMixinAuthKnowledge() {
             return this.canStaffManageSupply();
         },
 
-        /** Role-first sidebar: operator / manager / admin tab matrix. */
+        /** Role-first sidebar: operator / owner tab matrix. */
         isTabVisibleForRole(tabId) {
             return adminTabVisibleForRole(tabId, this.effectiveStaffRole());
         },
@@ -4821,20 +4824,23 @@ function adminMixinAuthKnowledge() {
         /** После auth: умный landing оператора (shift при риске/focus, иначе inbox). */
         shouldDefaultExecutiveHub() {
             try {
-                if (localStorage.getItem('rm_executive_hub_landing_off') === '1') return false;
+                if (sessionStorage.getItem('rm_executive_hub_bypass_once') === '1') {
+                    sessionStorage.removeItem('rm_executive_hub_bypass_once');
+                    return false;
+                }
             } catch (_e) { /* ignore */ }
             const role = this.effectiveStaffRole();
-            if (role !== 'admin' && role !== 'manager') return false;
+            if (role === 'operator') return false;
             const flag = this.userData?.executive_hub_default_enabled;
-            return flag === true;
+            return flag !== false;
         },
 
         async applyRoleDefaultLanding(fromHashTab) {
-            if (fromHashTab) return;
             if (!this.isExecutiveHubSurface && this.shouldDefaultExecutiveHub()) {
                 window.location.href = '/hub';
                 return;
             }
+            if (fromHashTab) return;
             if (this.effectiveStaffRole() === 'operator') {
                 await this.loadShiftState(true);
                 this.currentTab = this.resolveOperatorLandingTab();
@@ -4849,10 +4855,10 @@ function adminMixinAuthKnowledge() {
         staffRbacHint(level) {
             const role = this.effectiveStaffRole();
             if (level === 'admin') {
-                return role === 'admin' ? '' : 'Только для admin';
+                return role === 'admin' ? '' : 'Только для владельца';
             }
             if (level === 'manager') {
-                return role === 'operator' ? 'Только для admin/manager' : '';
+                return role === 'operator' ? 'Только для владельца' : '';
             }
             return '';
         },
@@ -4862,7 +4868,7 @@ function adminMixinAuthKnowledge() {
             return {
                 id: root.id ?? null,
                 email: root.email || '',
-                role: String(root.role || root.staff_role || 'admin').toLowerCase(),
+                role: adminNormalizeStaffRole(root.role || root.staff_role || 'admin'),
                 is_superadmin: !!root.is_superadmin,
                 tenant_owner_id: root.tenant_owner_id ?? null,
                 active_organization_id: root.active_organization_id ?? null,
@@ -5115,7 +5121,7 @@ function adminMixinAuthKnowledge() {
                     window.location.href = '/superadmin';
                     return;
                 }
-                if (!this.isExecutiveHubSurface && this.shouldDefaultExecutiveHub() && !window.location.hash) {
+                if (!this.isExecutiveHubSurface && this.shouldDefaultExecutiveHub()) {
                     window.location.href = '/hub';
                     return;
                 }
@@ -6283,7 +6289,120 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
                 ]);
                 if (st.ok && !st.notModified) this.mergeIntegrationStatus(st.data);
                 if (ev.ok) this.integrationEvents = ev.data.events || [];
+                void this.loadChannelConnections();
             } catch { /* ignore */ }
+        },
+
+        async loadChannelConnections() {
+            if (this.channelConnectionsLoading) return;
+            this.channelConnectionsLoading = true;
+            try {
+                const [connections, health] = await Promise.all([
+                    this.apiJsonResponse('/api/admin/channel-connections'),
+                    this.apiJsonResponse('/api/admin/channel-connections/health'),
+                ]);
+                if (connections.ok && Array.isArray(connections.data)) this.channelConnections = connections.data;
+                if (health.ok && health.data && typeof health.data === 'object') this.channelHealth = health.data;
+            } catch (_e) { /* noop */ } finally {
+                this.channelConnectionsLoading = false;
+            }
+        },
+
+        channelHealthLabel(status) {
+            const s = String(status || '').toLowerCase();
+            return {
+                works: 'работает',
+                needs_reconnect: 'нужно подключить',
+                degraded: 'есть задержки',
+                blocked: 'остановлено',
+                failed: 'ошибка',
+            }[s] || 'проверяется';
+        },
+
+        channelHealthBadgeClass(status) {
+            const s = String(status || '').toLowerCase();
+            if (s === 'works') return 'ds-badge-success';
+            if (s === 'needs_reconnect' || s === 'degraded') return 'ds-badge-warning';
+            if (s === 'blocked' || s === 'failed') return 'ds-badge-danger';
+            return 'ds-badge-neutral';
+        },
+
+        channelConnectionStatusLabel(status) {
+            const s = String(status || '').toLowerCase();
+            return {
+                connected: 'Подключен',
+                qr_required: 'Нужен QR',
+                connecting: 'Подключается',
+                disconnected: 'Отключен',
+                expired: 'Сессия истекла',
+                rate_limited: 'Лимит',
+                banned: 'Заблокирован',
+                error: 'Ошибка',
+                disabled: 'Выключен',
+            }[s] || 'Неизвестно';
+        },
+
+        channelConnectionDotClass(status) {
+            const s = String(status || '').toLowerCase();
+            if (s === 'connected') return 'bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.25)]';
+            if (['qr_required', 'connecting'].includes(s)) return 'bg-amber-400 shadow-[0_0_0_3px_rgba(245,158,11,0.22)]';
+            if (['error', 'banned', 'expired', 'rate_limited'].includes(s)) return 'bg-red-500 shadow-[0_0_0_3px_rgba(239,68,68,0.2)]';
+            return 'bg-gray-300';
+        },
+
+        async createBaileysConnection() {
+            if (this.channelConnectionsSaving) return;
+            this.channelConnectionsSaving = true;
+            try {
+                const { ok, data } = await this.apiJsonResponse('/api/admin/channel-connections', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ provider: 'whatsapp_baileys' }),
+                });
+                if (!ok) {
+                    void this.showUiAlert(this.formatApiError(data?.detail) || 'Не удалось создать подключение', 'Ошибка');
+                    return;
+                }
+                await this.loadChannelConnections();
+                void this.showUiAlert('Подключение создано. Если gateway запущен, QR появится автоматически.', 'WhatsApp Web');
+            } catch (e) {
+                adminLogger.error(e);
+                void this.showUiAlert('Ошибка сети', 'Ошибка');
+            } finally {
+                this.channelConnectionsSaving = false;
+            }
+        },
+
+        async reconnectChannelConnection(id) {
+            try {
+                const { ok, data } = await this.apiJsonResponse(`/api/admin/channel-connections/${id}/reconnect`, {
+                    method: 'POST',
+                });
+                if (!ok) {
+                    void this.showUiAlert(this.formatApiError(data?.detail) || 'Не удалось запросить QR', 'Ошибка');
+                    return;
+                }
+                await this.loadChannelConnections();
+            } catch (e) {
+                adminLogger.error(e);
+                void this.showUiAlert('Ошибка сети', 'Ошибка');
+            }
+        },
+
+        async disableChannelConnection(id) {
+            try {
+                const { ok, data } = await this.apiJsonResponse(`/api/admin/channel-connections/${id}/disable`, {
+                    method: 'POST',
+                });
+                if (!ok) {
+                    void this.showUiAlert(this.formatApiError(data?.detail) || 'Не удалось отключить канал', 'Ошибка');
+                    return;
+                }
+                await this.loadChannelConnections();
+            } catch (e) {
+                adminLogger.error(e);
+                void this.showUiAlert('Ошибка сети', 'Ошибка');
+            }
         },
 
         async iikoVerifyOnboard() {
@@ -6986,6 +7105,15 @@ function adminMixinWebSocketEvents() {
                 if (this.currentTab === 'dashboard' && this.dashboardTab === 'overview') {
                     // Редко, но полезно: лента событий должна быть “живой”.
                     void this.loadDashActivity();
+                }
+            } else if (type === 'channel_connection_updated') {
+                const conn = data?.connection || null;
+                if (conn && conn.id) {
+                    const idx = this.channelConnections.findIndex((c) => Number(c.id) === Number(conn.id));
+                    if (idx >= 0) this.channelConnections.splice(idx, 1, conn);
+                    else this.channelConnections.unshift(conn);
+                } else {
+                    void this.loadChannelConnections();
                 }
             } else if (type === 'order_updated') {
                 this.onOrderUpdated(data);
@@ -10896,7 +11024,7 @@ function adminMixinDataChartsSettings() {
                     `/api/admin/intelligence/executive-hub${this.locationQueryString('?')}`,
                 );
                 if (!ok) {
-                    this.executiveHubError = data?.detail || data?.error || 'Executive Hub не загрузился. Проверьте подключение продаж, базу данных и очередь задач.';
+                    this.executiveHubError = data?.detail || data?.error || 'Executive Hub не загрузился. Проверьте подключение продаж, базу данных и фоновые процессы.';
                     return;
                 }
                 this.executiveHubError = '';
@@ -10919,6 +11047,7 @@ function adminMixinDataChartsSettings() {
                     : [];
             } catch (e) {
                 adminLogger.error('[admin] loadExecutiveHub', e);
+                this.executiveHubError = 'Executive Hub не загрузился. Проверьте подключение к серверу и попробуйте обновить страницу.';
             } finally {
                 this.executiveHubLoading = false;
             }
@@ -11042,6 +11171,9 @@ function adminMixinDataChartsSettings() {
         },
 
         goToAdminHome() {
+            try {
+                sessionStorage.setItem('rm_executive_hub_bypass_once', '1');
+            } catch (_e) { /* ignore */ }
             window.location.href = '/admin';
         },
 
@@ -12643,7 +12775,7 @@ function adminMixinDataChartsSettings() {
         async loadTraceTimeline(traceId) {
             const tid = String(traceId ?? this.traceTimelineQuery ?? '').trim();
             if (tid.length < 8) {
-                void this.showUiAlert('Введите ID диагностики (минимум 8 символов)', 'Control Plane');
+                void this.showUiAlert('Введите ID диагностики (минимум 8 символов)', 'Диагностика');
                 return;
             }
             if (this.traceTimelineLoading) return;
@@ -12663,12 +12795,12 @@ function adminMixinDataChartsSettings() {
                     this.traceTimeline = { trace_id: tid, entries: [], total: 0 };
                     void this.showUiAlert(
                         this.formatApiError(data?.detail) || 'Не удалось загрузить события диагностики',
-                        'Control Plane',
+                        'Диагностика',
                     );
                 }
             } catch (e) {
                 adminLogger.error('[admin] trace timeline', e);
-                void this.showUiAlert('Ошибка сети. Проверьте соединение.', 'Control Plane');
+                void this.showUiAlert('Ошибка сети. Проверьте соединение.', 'Диагностика');
             } finally {
                 this.traceTimelineLoading = false;
             }
@@ -12705,6 +12837,17 @@ function adminMixinDataChartsSettings() {
         openActiveChatTraceTimeline() {
             if (!this.activeChatTraceId) return;
             this.openTraceTimeline(this.activeChatTraceId);
+        },
+
+        async copyActiveChatDiagnosticId() {
+            const id = String(this.activeChatTraceId || '').trim();
+            if (!id) return;
+            try {
+                await navigator.clipboard.writeText(id);
+                void this.showUiAlert('ID диагностики скопирован', 'Диагностика');
+            } catch (e) {
+                adminLogger.error('[admin] copyActiveChatDiagnosticId', e);
+            }
         },
 
         _osActionLabel(action) {

@@ -74,9 +74,34 @@ services:
         sync: false
       - key: WHATSAPP_PHONE_NUMBER_ID
         sync: false
+      - key: MESSAGING_GATEWAY_URL
+        sync: false
+      - key: MESSAGING_GATEWAY_SECRET
+        sync: false
       
       # Дополнительные настройки iiko (если есть)
       - key: IIKO_API_LOGIN
         sync: false
       - key: IIKO_ORGANIZATION_ID
         sync: false
+
+  - type: web
+    name: restomind-messaging-gateway
+    runtime: docker
+    # Free-preview mode: enough to test QR/inbound/outbound, but not stable.
+    # Render Free has an ephemeral filesystem and can spin down, so Baileys
+    # sessions under /sessions may be lost after restart/redeploy/sleep.
+    # For production, move this service to a VPS or paid Render with a disk.
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./services/messaging-gateway/Dockerfile
+    dockerContext: ./services/messaging-gateway
+    healthCheckPath: /health
+
+    envVars:
+      - key: RESTOMIND_API_URL
+        sync: false
+      - key: RESTOMIND_GATEWAY_SECRET
+        sync: false
+      - key: SESSION_ROOT
+        value: /sessions

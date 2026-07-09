@@ -51,6 +51,7 @@ from app.api.payment_webhook import router as payment_webhook_router
 from app.api.superadmin import router as superadmin_router
 from app.api.telegram_webhook import router as telegram_webhook_router
 from app.api.webhooks import router as webhooks_router
+from app.api.channels import router as channels_router
 from app.core.config import settings
 from app.db.models import Organization
 from app.integrations.whatsapp import close_whatsapp_http_client, init_whatsapp_http_client
@@ -459,6 +460,7 @@ app.add_middleware(
 app.include_router(demo_public_router)
 app.include_router(public_agent_actions_router, prefix="/api")
 app.include_router(webhooks_router, prefix="/api")
+app.include_router(channels_router, prefix="/api")
 app.include_router(payment_webhook_router, prefix="/api")
 app.include_router(admin_auth_router, prefix="/api")
 app.include_router(admin_router, prefix="/api")

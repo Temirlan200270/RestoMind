@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app.db.models import OperationalInsight, Order, OrderStatus, Organization, User
+from app.api.admin.intelligence import _executive_hub_degraded_payload
 from app.services.executive_hub import build_executive_hub_payload
 
 
@@ -90,6 +91,53 @@ async def test_build_executive_hub_payload_returns_scoped_cards(db_session):
     assert payload["chat"]["endpoint"] == "/api/admin/intelligence/query"
     assert payload["chat"]["agent_actions_endpoint"] == "/api/admin/intelligence/agent-actions"
     assert payload["chat"]["business_questions"]
+
+
+def test_executive_hub_degraded_payload_keeps_surface_loadable():
+    payload = _executive_hub_degraded_payload(period="today", role="owner")
+
+    assert payload["version"] == 4
+    assert payload["period"] == "today"
+    assert payload["cards"]
+    assert payload["cards"][0]["id"] == "hub_degraded"
+    assert payload["readiness"]["mode"] == "degraded"
+    assert payload["chat"]["endpoint"] == "/api/admin/intelligence/query"
+    assert payload["chat"]["business_questions"]
+
+
+@pytest.mark.asyncio
+async def test_build_executive_hub_payload_keeps_insights_after_later_rollback(db_session, monkeypatch):
+    from app.services import executive_hub
+
+    db_session.add_all(
+        [
+            Organization(id=1, name="Org 1"),
+            OperationalInsight(
+                organization_id=1,
+                insight_type="revenue_drop",
+                severity="warning",
+                title="Revenue lower than usual",
+                summary="Orders are lower than the comparable window",
+                status="new",
+                payload_json={
+                    "cause_hypotheses": ["orders_drop"],
+                    "recommended_actions": ["Check top menu items"],
+                },
+            ),
+        ]
+    )
+    await db_session.flush()
+
+    async def fail_owner_summary(*args, **kwargs):
+        raise RuntimeError("owner summary failed after insights loaded")
+
+    monkeypatch.setattr(executive_hub, "build_owner_intelligence_summary", fail_owner_summary)
+
+    payload = await build_executive_hub_payload(db_session, 1, role="owner")
+
+    insight_card = next(card for card in payload["cards"] if card["id"].startswith("insight_"))
+    assert insight_card["headline"] == "Revenue lower than usual"
+    assert insight_card["why"] == ["orders_drop"]
 
 
 @pytest.mark.asyncio

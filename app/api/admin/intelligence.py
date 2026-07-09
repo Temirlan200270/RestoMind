@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, timezone
 from typing import Annotated, Any
 
@@ -76,6 +77,8 @@ from app.services.recommendation_outcomes import (
     recommendation_outcome_public,
 )
 from app.services.tenant_scope import allowed_location_ids_for_staff
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/admin/intelligence",
@@ -245,10 +248,8 @@ def _delivery_settings_public(org: Organization) -> dict[str, Any]:
 async def _copilot_role_from_request(request: Request, db: AsyncSession, org_id: int) -> str:
     staff = await _session_staff_user(request, db)
     raw = str(getattr(staff, "role", "") or "").strip().lower()
-    if raw == "manager":
-        return "manager"
     if raw == "operator":
-        return "manager"
+        return "owner"
     if getattr(request, "session", {}).get("is_network"):
         return "network"
     org = await db.get(Organization, int(org_id))
@@ -277,6 +278,54 @@ def _insight_public(row: OperationalInsight) -> dict:
         "notes": getattr(row, "notes", None),
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "resolved_at": row.resolved_at.isoformat() if row.resolved_at else None,
+    }
+
+
+def _executive_hub_degraded_payload(*, period: str, role: str) -> dict[str, Any]:
+    now = datetime.now(timezone.utc).isoformat()
+    questions = questions_for_role(role)
+    card = {
+        "id": "hub_degraded",
+        "dimension": "operations",
+        "severity": "warning",
+        "headline": "Executive Hub временно показывает базовый режим",
+        "title": "Executive Hub временно показывает базовый режим",
+        "summary": "Данные ресторана не потеряны. Один из источников аналитики временно недоступен, поэтому Hub открылся в резервном режиме.",
+        "why": ["Нужно проверить подключение продаж, базу данных или фоновые задачи."],
+        "metrics": {},
+        "action_items": [
+            {"id": "open_settings", "label": "Проверить подключения", "action_type": "navigate", "target": "settings"},
+            {"id": "open_dialogs", "label": "Открыть диалоги", "action_type": "navigate", "target": "chats"},
+        ],
+        "chat_prompt": "Проверь, почему Executive Hub открылся в резервном режиме.",
+        "focused_view": {
+            "kpis": [],
+            "rows": [],
+            "explanation": "Резервный режим защищает первый экран владельца от полного падения аналитики.",
+        },
+    }
+    return {
+        "version": 4,
+        "period": period,
+        "summary": {"generated_at": now, "has_orders": False, "stats": []},
+        "today_picture": {"has_orders": False, "headline": "Hub открыт в резервном режиме", "forecast": {"available": False}},
+        "owner_cards": [],
+        "money_drivers": [],
+        "money_at_risk": {"rows": []},
+        "network_branch": {"enabled": False, "rows": [], "actions": []},
+        "priority_signals": [],
+        "agent_context": {"title": "Разбор выбранного сигнала", "summary": card["summary"]},
+        "owner_readiness": {"mode": "degraded", "onboarding": []},
+        "next_actions": card["action_items"],
+        "readiness": {"mode": "degraded", "generated_at": now},
+        "dimensions": {},
+        "cards": [card],
+        "chat": {
+            "role": role,
+            "endpoint": "/api/admin/intelligence/query",
+            "agent_actions_endpoint": "/api/admin/intelligence/agent-actions",
+            "business_questions": questions,
+        },
     }
 
 
@@ -348,15 +397,25 @@ async def intelligence_executive_hub(
         location_id,
     )
     role = await _copilot_role_from_request(request, db, org_id)
-    payload = await build_executive_hub_payload(
-        db,
-        org_id,
-        period=period,
-        location_id=location_id,
-        allowed_location_ids=allowed_location_ids,
-        role=role,
-    )
-    await db.commit()
+    try:
+        payload = await build_executive_hub_payload(
+            db,
+            org_id,
+            period=period,
+            location_id=location_id,
+            allowed_location_ids=allowed_location_ids,
+            role=role,
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        logger.exception(
+            "executive hub payload failed; returning degraded payload org_id=%s period=%s location_id=%s",
+            org_id,
+            period,
+            location_id,
+        )
+        payload = _executive_hub_degraded_payload(period=period, role=role)
     return {
         "ok": True,
         "organization_id": org_id,
@@ -375,8 +434,8 @@ async def intelligence_executive_hub(
         "next_actions": payload.get("next_actions") or [],
         "readiness": payload.get("readiness") or {},
         "dimensions": payload.get("dimensions") or {},
-        "cards": payload["cards"],
-        "chat": payload["chat"],
+        "cards": payload.get("cards") or [],
+        "chat": payload.get("chat") or {},
         "location_scope": {
             "location_id": int(location_id) if location_id is not None else None,
             "source": "sql_location" if location_scoped else "org",
