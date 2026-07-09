@@ -154,6 +154,7 @@ external_account_id
 phone
 display_name
 session_ref
+is_default_outbound
 last_seen_at
 last_error
 created_at
@@ -189,6 +190,8 @@ disabled
 `session_ref` указывает на место хранения сессии. Не стоит хранить крупные Baileys credentials напрямую в основной строке `ChannelConnection`, чтобы не усложнять бэкапы, миграции и перенос серверов.
 
 `ChannelConnection` также находится под tenant isolation по `organization_id`. Gateway не получает произвольный список всех подключений без проверки `X-RestoMind-Gateway-Secret`; admin endpoints дополнительно фильтруются текущей организацией админ-сессии.
+
+`is_default_outbound` определяет канал для новых системных исходящих сообщений без входящего channel context: recovery брошенных черновиков, автосбор отзывов, уведомления и будущие рассылки. Для одной организации должен быть только один default outbound channel. В PostgreSQL это фиксируется partial unique index по `organization_id`, где `is_default_outbound = true`.
 
 ### ChannelMessage
 
@@ -381,6 +384,30 @@ MVP implementation note:
 ```
 
 Это пример формы, а не окончательная схема на годы. Новые блоки контекста добавляются через providers, чтобы AI не зависел от таблиц, webhook payload и provider-specific деталей. Для AI это всегда один и тот же диалоговый контекст.
+
+## Outbound Channel Resolution
+
+Для ответа внутри активного диалога приоритет задает входящий channel context:
+
+```text
+inbound ChannelMessage
+  -> channel_connection_id + external_chat_id
+  -> send reply through the same provider connection
+```
+
+Для новых системных исходящих сообщений входящего контекста может не быть. В этом случае MVP использует explicit default outbound channel:
+
+1. Если текущая обработка имеет channel context, ответ идет через этот канал.
+2. Если context нет, но у организации есть `ChannelConnection.is_default_outbound = true` и канал `connected`, сообщение идет через него.
+3. Если default channel не найден или недоступен, система сохраняет обратную совместимость и использует старый Meta/WhatsApp fallback, если он настроен.
+
+Admin UI должен позволять владельцу выбрать default channel кнопкой "Для новых рассылок". Это закрывает сценарий, где обычные диалоги уже идут через QR/Baileys, а проактивные сообщения могли бы случайно уйти через старый `WHATSAPP_*` Meta ENV.
+
+Текущее MVP-поведение:
+
+- `whatsapp_baileys` default используется для proactive outbound, когда есть `outbound_chat_log_id` и из него можно определить `organization_id`;
+- external chat id для WhatsApp Web строится из номера гостя как `{digits}@s.whatsapp.net`;
+- если default Baileys не задан или не connected, поведение откатывается к прежнему `send_message(phone, text)` через Meta integration.
 
 ## Health Layer
 

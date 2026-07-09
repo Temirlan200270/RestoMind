@@ -82,6 +82,7 @@ class ChannelConnectionOut(BaseModel):
     phone: str = ""
     display_name: str = ""
     session_ref: str = ""
+    is_default_outbound: bool = False
     last_qr: str = ""
     health: dict[str, Any] = Field(default_factory=dict)
     last_error: str = ""

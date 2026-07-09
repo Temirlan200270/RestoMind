@@ -6405,6 +6405,23 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
             }
         },
 
+        async setDefaultChannelConnection(id) {
+            try {
+                const { ok, data } = await this.apiJsonResponse(`/api/admin/channel-connections/${id}/set-default`, {
+                    method: 'PATCH',
+                });
+                if (!ok) {
+                    void this.showUiAlert(this.formatApiError(data?.detail) || 'Не удалось выбрать основной канал', 'Ошибка');
+                    return;
+                }
+                await this.loadChannelConnections();
+                void this.showUiAlert('Новые рассылки и уведомления будут идти через выбранный канал.', 'Основной канал');
+            } catch (e) {
+                adminLogger.error(e);
+                void this.showUiAlert('Ошибка сети', 'Ошибка');
+            }
+        },
+
         async iikoVerifyOnboard() {
             const login = (this.iikoOnboardApiLogin || '').trim();
             if (!login) {

@@ -67,6 +67,52 @@ async def _bg_finalize_twilio(outbound_chat_log_id: int, ok: bool) -> None:
         logger.exception("_bg_finalize_twilio: ошибка обновления chat_log id=%d", outbound_chat_log_id)
 
 
+def _whatsapp_jid_from_phone(phone: str) -> str:
+    digits = "".join(ch for ch in (phone or "") if ch.isdigit())
+    return f"{digits}@s.whatsapp.net" if digits else ""
+
+
+async def _try_send_via_default_baileys(
+    phone: str,
+    text: str,
+    *,
+    outbound_chat_log_id: int | None,
+) -> bool:
+    if outbound_chat_log_id is None:
+        return False
+    from app.db.models import ChatLog
+    from app.db.session import async_session_factory
+    from app.services.messaging_gateway import (
+        BAILEYS_PROVIDER,
+        resolve_default_outbound_connection,
+        send_channel_text,
+    )
+
+    async with async_session_factory() as db:
+        log = await db.get(ChatLog, int(outbound_chat_log_id))
+        if log is None:
+            return False
+        conn = await resolve_default_outbound_connection(
+            db,
+            organization_id=int(log.organization_id),
+            provider=BAILEYS_PROVIDER,
+        )
+        if conn is None:
+            return False
+        connection_id = int(conn.id)
+
+    external_chat_id = _whatsapp_jid_from_phone(phone)
+    if not external_chat_id:
+        return False
+    await send_channel_text(
+        channel_connection_id=connection_id,
+        external_chat_id=external_chat_id,
+        text=text,
+        outbound_chat_log_id=outbound_chat_log_id,
+    )
+    return True
+
+
 async def send_customer_text(
     phone: str,
     text: str,
@@ -136,6 +182,9 @@ async def send_customer_text(
                     None if tg_ok else {"channel": "telegram", "detail": tg_result.get("error")},
                 )
             )
+        return
+
+    if await _try_send_via_default_baileys(phone, text, outbound_chat_log_id=outbound_chat_log_id):
         return
 
     wa = await send_message(phone, text)

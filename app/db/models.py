@@ -694,6 +694,7 @@ class ChannelConnection(Base):
     phone: Mapped[str] = mapped_column(String(32), nullable=False, default="", server_default="")
     display_name: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default="")
     session_ref: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default="")
+    is_default_outbound: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
     last_qr: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
     health_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     last_error: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")

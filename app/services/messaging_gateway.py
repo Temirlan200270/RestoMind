@@ -54,6 +54,7 @@ def channel_connection_to_out(row: ChannelConnection) -> ChannelConnectionOut:
         phone=row.phone or "",
         display_name=row.display_name or "",
         session_ref=row.session_ref or "",
+        is_default_outbound=bool(row.is_default_outbound),
         last_qr=row.last_qr or "",
         health=dict(row.health_json or {}),
         last_error=row.last_error or "",
@@ -137,6 +138,57 @@ async def ensure_channel_connection(
     db.add(row)
     await db.flush()
     return row
+
+
+async def set_default_outbound_connection(
+    db: AsyncSession,
+    *,
+    organization_id: int,
+    channel_connection_id: int,
+) -> ChannelConnection:
+    row = await db.get(ChannelConnection, int(channel_connection_id))
+    if row is None or int(row.organization_id) != int(organization_id):
+        raise ValueError("connection_not_found")
+    if row.status == "disabled":
+        raise ValueError("connection_disabled")
+
+    rows = (
+        await db.execute(
+            select(ChannelConnection).where(ChannelConnection.organization_id == int(organization_id))
+        )
+    ).scalars().all()
+    for item in rows:
+        item.is_default_outbound = int(item.id) == int(row.id)
+    await db.flush()
+    return row
+
+
+async def resolve_default_outbound_connection(
+    db: AsyncSession,
+    *,
+    organization_id: int,
+    provider: str | None = None,
+) -> ChannelConnection | None:
+    stmt = select(ChannelConnection).where(
+        ChannelConnection.organization_id == int(organization_id),
+        ChannelConnection.is_default_outbound.is_(True),
+        ChannelConnection.status == "connected",
+    )
+    if provider:
+        stmt = stmt.where(ChannelConnection.provider == normalize_provider(provider))
+    row = await db.scalar(stmt.order_by(ChannelConnection.id.asc()).limit(1))
+    if row is not None:
+        return row
+
+    fallback = select(ChannelConnection).where(
+        ChannelConnection.organization_id == int(organization_id),
+        ChannelConnection.status == "connected",
+    )
+    if provider:
+        fallback = fallback.where(ChannelConnection.provider == normalize_provider(provider))
+    return await db.scalar(
+        fallback.order_by(ChannelConnection.is_default_outbound.desc(), ChannelConnection.id.asc()).limit(1)
+    )
 
 
 async def find_or_create_conversation(

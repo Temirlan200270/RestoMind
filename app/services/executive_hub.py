@@ -52,8 +52,21 @@ def _money(value: float | int | None) -> str:
     return f"{float(value or 0):,.0f} ₸".replace(",", " ")
 
 
-def _metric(label: str, value: str, *, hint: str = "", severity: str = "info") -> dict[str, str]:
+def _metric(label: str, value: str, hint: str = "", *, severity: str = "info") -> dict[str, str]:
     return {"label": label, "value": value, "hint": hint, "severity": severity}
+
+
+def _as_list(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    if isinstance(value, dict):
+        rows = value.get("rows") or value.get("items") or value.get("data")
+        if isinstance(rows, list):
+            return rows
+        return list(value.values())
+    return []
 
 
 def _pct_change(current: float, previous: float) -> float | None:
@@ -475,8 +488,8 @@ def _focused_view_for_card(card: dict[str, Any], summary: dict[str, Any], leak: 
         }
     if card_id in {"margin_data_gap", "margin_risk"}:
         preview = owner_summary.get("menu_profit_preview") or {}
-        missing = preview.get("missing_cost_checklist") or []
-        candidates = preview.get("price_increase_candidates") or preview.get("promote_today") or []
+        missing = _as_list(preview.get("missing_cost_checklist"))
+        candidates = _as_list(preview.get("price_increase_candidates") or preview.get("promote_today"))
         return {
             "title": "Разбор маржи и себестоимости",
             "summary": "Показываем, какие позиции мешают точному контролю маржи и фудкоста.",

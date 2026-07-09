@@ -9,3 +9,4 @@ def test_app_imports_with_channel_routes() -> None:
     assert "/api/channels/gateway/connections" in paths
     assert "/api/admin/channel-connections" in paths
     assert "/api/admin/channel-connections/health" in paths
+    assert "/api/admin/channel-connections/{connection_id}/set-default" in paths

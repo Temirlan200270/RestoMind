@@ -29,6 +29,7 @@ from app.services.messaging_gateway import (
     list_due_outbound_messages,
     process_channel_message,
     record_inbound_event,
+    set_default_outbound_connection,
 )
 from app.services.channel_health import build_channel_health_summary
 
@@ -281,6 +282,31 @@ async def admin_disable_channel_connection(
         raise HTTPException(status_code=404, detail="Connection not found")
     row.status = "disabled"
     row.last_error = ""
+    await db.commit()
+    await db.refresh(row)
+    return channel_connection_to_out(row)
+
+
+@admin_router.patch("/{connection_id}/set-default", response_model=ChannelConnectionOut)
+async def admin_set_default_channel_connection(
+    request: Request,
+    connection_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> ChannelConnectionOut:
+    from app.api.admin.deps import admin_org_from_session
+
+    org_id = admin_org_from_session(request)
+    try:
+        row = await set_default_outbound_connection(
+            db,
+            organization_id=int(org_id),
+            channel_connection_id=int(connection_id),
+        )
+    except ValueError as exc:
+        code = str(exc)
+        if code == "connection_disabled":
+            raise HTTPException(status_code=409, detail="Disabled connection cannot be default")
+        raise HTTPException(status_code=404, detail="Connection not found") from exc
     await db.commit()
     await db.refresh(row)
     return channel_connection_to_out(row)

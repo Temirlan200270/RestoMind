@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 from app.schemas.messaging import ChannelInboundEvent
 from app.services.messaging_gateway import (
@@ -76,3 +77,26 @@ def test_gateway_delegates_inbound_processing_to_conversation_service(monkeypatc
     asyncio.run(process_channel_message(42))
 
     assert calls == [42]
+
+
+def test_default_outbound_channel_policy_is_wired() -> None:
+    model = Path("app/db/models.py").read_text(encoding="utf-8")
+    schema = Path("app/schemas/messaging.py").read_text(encoding="utf-8")
+    api = Path("app/api/channels.py").read_text(encoding="utf-8")
+    service = Path("app/services/messaging_gateway.py").read_text(encoding="utf-8")
+    reply = Path("app/services/customer_reply.py").read_text(encoding="utf-8")
+    ui = Path("app/static/js/admin-app.js").read_text(encoding="utf-8")
+    tpl = Path("app/templates/screens/_tab_settings_connections.html").read_text(encoding="utf-8")
+    migration = Path("alembic/versions/20260709_default_outbound_channel.py").read_text(encoding="utf-8")
+
+    assert "is_default_outbound" in model
+    assert "is_default_outbound: bool = False" in schema
+    assert '@admin_router.patch("/{connection_id}/set-default"' in api
+    assert "set_default_outbound_connection" in service
+    assert "resolve_default_outbound_connection" in service
+    assert "_try_send_via_default_baileys" in reply
+    assert "send_message(phone, text)" in reply
+    assert "setDefaultChannelConnection" in ui
+    assert "Для новых рассылок" in tpl
+    assert "uq_default_channel_per_org" in migration
+    assert "postgresql_where=sa.text(\"is_default_outbound = true\")" in migration
