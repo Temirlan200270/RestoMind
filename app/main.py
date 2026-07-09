@@ -25,9 +25,9 @@ from app.middleware.admin_org_rate_limit import admin_org_rate_limit_middleware
 from app.middleware.tenant_rls import tenant_rls_middleware
 
 from app.api.demo_public import demo_public_router
-from app.api.admin import auth_router as admin_auth_router
-from app.api.admin import router as admin_router
-from app.api.admin import ws_router as admin_ws_router
+from app.api.admin.auth import auth_router as admin_auth_router
+from app.api.admin.core import router as admin_router
+from app.api.admin.ws import ws_router as admin_ws_router
 from app.api.admin.analytics import router as admin_analytics_router
 from app.api.admin.menu import router as admin_menu_router
 from app.api.admin.orders import router as admin_orders_router
@@ -485,6 +485,32 @@ app.include_router(admin_ws_router, prefix="/api")
 app.include_router(superadmin_router, prefix="/api")
 app.include_router(telegram_webhook_router, prefix="/api")
 app.include_router(iiko_webhook_router)  # prefix="/api/iiko" уже задан внутри роутера
+
+
+def _route_registered(path: str, method: str | None = None) -> bool:
+    for route in app.routes:
+        if getattr(route, "path", "") != path:
+            continue
+        if method is None or method in getattr(route, "methods", set()):
+            return True
+    return False
+
+
+def _ensure_required_api_routes() -> None:
+    """Guard against partial router registration during package-level imports."""
+    if not _route_registered("/api/channels/inbound", "POST"):
+        app.include_router(channels_router, prefix="/api")
+    admin_core_paths = (
+        ("/api/admin/bookings", "GET"),
+        ("/api/admin/customers/{phone}/summary", "GET"),
+        ("/api/admin/system/task-queue-health", "GET"),
+        ("/api/admin/channel-connections", "GET"),
+    )
+    if any(not _route_registered(path, method) for path, method in admin_core_paths):
+        app.include_router(admin_router, prefix="/api")
+
+
+_ensure_required_api_routes()
 
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/static", LongCacheStaticFiles(directory=str(STATIC_DIR)), name="static")
