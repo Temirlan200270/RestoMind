@@ -141,6 +141,25 @@ async def test_build_executive_hub_payload_keeps_insights_after_later_rollback(d
 
 
 @pytest.mark.asyncio
+async def test_build_executive_hub_payload_fast_skips_owner_summary(db_session, monkeypatch):
+    from app.services import executive_hub
+
+    db_session.add(Organization(id=1, name="Org 1"))
+    await db_session.flush()
+
+    async def fail_owner_summary(*args, **kwargs):
+        raise AssertionError("fast Hub should not block on owner summary")
+
+    monkeypatch.setattr(executive_hub, "build_owner_intelligence_summary", fail_owner_summary)
+
+    payload = await build_executive_hub_payload(db_session, 1, role="owner", fast=True)
+
+    assert payload["mode"] == "fast"
+    assert payload["version"] == 4
+    assert payload["cards"]
+
+
+@pytest.mark.asyncio
 async def test_build_executive_hub_payload_is_org_scoped(db_session):
     now = datetime.now(timezone.utc)
     db_session.add_all(

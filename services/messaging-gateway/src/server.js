@@ -156,8 +156,22 @@ async function publishInbound(connectionId, msg) {
   })
 }
 
-async function startConnection(connectionId, sessionRef = '') {
+async function stopConnection(connectionId) {
   const key = String(connectionId)
+  const entry = sockets.get(key)
+  sockets.delete(key)
+  try {
+    entry?.sock?.end?.()
+  } catch (error) {
+    logger.warn({ err: error, connectionId: key }, 'socket end failed')
+  }
+}
+
+async function startConnection(connectionId, sessionRef = '', options = {}) {
+  const key = String(connectionId)
+  if (options.force) {
+    await stopConnection(connectionId)
+  }
   if (sockets.has(key)) {
     return { ok: true, reused: true }
   }
@@ -266,7 +280,9 @@ app.post('/v1/connections/start', async (req, res) => {
     return
   }
   try {
-    const out = await startConnection(connectionId, req.body?.session_ref || '')
+    const out = await startConnection(connectionId, req.body?.session_ref || '', {
+      force: Boolean(req.body?.force)
+    })
     res.json(out)
   } catch (error) {
     await publishConnectionStatus(connectionId, 'error', { error: error.message || String(error) })
@@ -276,13 +292,7 @@ app.post('/v1/connections/start', async (req, res) => {
 
 app.post('/v1/connections/:id/stop', async (req, res) => {
   const key = String(req.params.id)
-  const entry = sockets.get(key)
-  sockets.delete(key)
-  try {
-    entry?.sock?.end?.()
-  } catch (error) {
-    logger.warn({ err: error, connectionId: key }, 'socket end failed')
-  }
+  await stopConnection(key)
   await publishConnectionStatus(key, 'disabled', { health: { provider: 'whatsapp_baileys', health: 'blocked' } })
   res.json({ ok: true })
 })

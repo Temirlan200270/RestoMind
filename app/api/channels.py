@@ -87,7 +87,7 @@ async def _ensure_meta_connection_for_org(db: AsyncSession, org_id: int) -> None
         row.last_error = "Не заданы ключ доступа или ID номера WhatsApp Meta"
 
 
-async def _request_gateway_start(connection: ChannelConnection) -> None:
+async def _request_gateway_start(connection: ChannelConnection, *, force: bool = False) -> None:
     base = (settings.messaging_gateway_url or "").strip().rstrip("/")
     if not base:
         return
@@ -98,6 +98,7 @@ async def _request_gateway_start(connection: ChannelConnection) -> None:
         "channel_connection_id": int(connection.id),
         "provider": connection.provider,
         "session_ref": connection.session_ref or "",
+        "force": bool(force),
     }
     async with httpx.AsyncClient(timeout=settings.messaging_gateway_send_timeout_sec) as client:
         await client.post(f"{base}/v1/connections/start", json=payload, headers=headers)
@@ -218,7 +219,7 @@ async def admin_create_channel_connection(
     await db.commit()
     await db.refresh(row)
     try:
-        await _request_gateway_start(row)
+        await _request_gateway_start(row, force=True)
     except Exception:
         row.status = "error"
         row.last_error = "Не удалось связаться с Messaging Gateway"
@@ -246,7 +247,7 @@ async def admin_reconnect_channel_connection(
     await db.commit()
     await db.refresh(row)
     try:
-        await _request_gateway_start(row)
+        await _request_gateway_start(row, force=True)
     except Exception:
         row.status = "error"
         row.last_error = "Не удалось связаться с Messaging Gateway"

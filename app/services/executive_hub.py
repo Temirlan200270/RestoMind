@@ -1269,6 +1269,7 @@ async def build_executive_hub_payload(
     location_id: int | None = None,
     allowed_location_ids: set[int] | None = None,
     role: str = "owner",
+    fast: bool = False,
 ) -> dict[str, Any]:
     owner_period = period if period in {"today", "7d", "30d"} else "today"
     summary = await _wait_or_fallback(
@@ -1282,14 +1283,14 @@ async def build_executive_hub_payload(
             allowed_location_ids=allowed_location_ids,
         ),
         _empty_sales_summary(period),
-        timeout=_SUMMARY_TIMEOUT_SEC,
+        timeout=0.8 if fast else _SUMMARY_TIMEOUT_SEC,
     )
     olap_summary = await _wait_or_fallback(
         db,
         "olap_summary",
         _olap_sales_summary(db, organization_id, period),
         None,
-        timeout=_OLAP_TIMEOUT_SEC,
+        timeout=0.6 if fast else _OLAP_TIMEOUT_SEC,
     )
     if olap_summary is not None:
         summary = olap_summary
@@ -1304,29 +1305,32 @@ async def build_executive_hub_payload(
             allowed_location_ids=allowed_location_ids,
         ),
         _empty_leak(),
-        timeout=_LEAK_TIMEOUT_SEC,
+        timeout=0.6 if fast else _LEAK_TIMEOUT_SEC,
     )
     insights = await _wait_or_fallback(
         db,
         "insights",
         list_insights(db, organization_id, limit=5),
         [],
-        timeout=_INSIGHTS_TIMEOUT_SEC,
+        timeout=0.4 if fast else _INSIGHTS_TIMEOUT_SEC,
     )
     insight_snapshots = [_snapshot_insight(insight) for insight in insights[:2]]
-    owner_summary = await _wait_or_fallback(
-        db,
-        "owner_summary",
-        build_owner_intelligence_summary(
+    if fast:
+        owner_summary = _empty_owner_summary(owner_period)
+    else:
+        owner_summary = await _wait_or_fallback(
             db,
-            organization_id,
-            location_id=location_id,
-            period=owner_period,
-            allowed_location_ids=allowed_location_ids,
-        ),
-        _empty_owner_summary(owner_period),
-        timeout=_OWNER_TIMEOUT_SEC,
-    )
+            "owner_summary",
+            build_owner_intelligence_summary(
+                db,
+                organization_id,
+                location_id=location_id,
+                period=owner_period,
+                allowed_location_ids=allowed_location_ids,
+            ),
+            _empty_owner_summary(owner_period),
+            timeout=_OWNER_TIMEOUT_SEC,
+        )
 
     cards: list[dict[str, Any]] = [
         _revenue_pulse_card(summary),
@@ -1386,6 +1390,7 @@ async def build_executive_hub_payload(
 
     return {
         "version": 4,
+        "mode": "fast" if fast else "full",
         "summary": business_summary,
         "today_picture": today_picture,
         "owner_cards": owner_cards,

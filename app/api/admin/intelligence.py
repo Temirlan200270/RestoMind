@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Annotated, Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
@@ -34,7 +35,8 @@ from app.db.models import (
     StaffOnboardingSession,
     SupplyPurchaseDraft,
 )
-from app.db.session import get_db
+from app.db.session import async_session_factory, get_db
+from app.db.tenant_rls import apply_tenant_rls, reset_tenant_rls_context, set_tenant_rls_context
 from app.services.analytics_consumer import get_event_stats, get_today_event_summary
 from app.services.owner_dashboard import (
     build_autopilot_pricing,
@@ -80,11 +82,101 @@ from app.services.tenant_scope import allowed_location_ids_for_staff
 
 logger = logging.getLogger(__name__)
 
+_EXECUTIVE_HUB_CACHE_TTL = timedelta(seconds=90)
+_EXECUTIVE_HUB_STALE_TTL = timedelta(minutes=15)
+_EXECUTIVE_HUB_CACHE: dict[tuple[Any, ...], dict[str, Any]] = {}
+_EXECUTIVE_HUB_REFRESHING: set[tuple[Any, ...]] = set()
+_EXECUTIVE_HUB_CACHE_LOCK = asyncio.Lock()
+
 router = APIRouter(
     prefix="/admin/intelligence",
     tags=["Restaurant Intelligence"],
     dependencies=[Depends(require_admin_session_active)],
 )
+
+
+def _executive_hub_cache_key(
+    *,
+    org_id: int,
+    period: str,
+    location_id: int | None,
+    allowed_location_ids: set[int] | None,
+    role: str,
+) -> tuple[Any, ...]:
+    allowed_key: tuple[int, ...] | None = None
+    if allowed_location_ids is not None:
+        allowed_key = tuple(sorted(int(x) for x in allowed_location_ids))
+    return (int(org_id), period or "today", int(location_id) if location_id is not None else None, allowed_key, role or "owner")
+
+
+async def _get_executive_hub_cached_payload(
+    key: tuple[Any, ...],
+) -> tuple[dict[str, Any] | None, str]:
+    now = datetime.now(timezone.utc)
+    async with _EXECUTIVE_HUB_CACHE_LOCK:
+        entry = _EXECUTIVE_HUB_CACHE.get(key)
+        if not entry:
+            return None, "miss"
+        created_at = entry.get("created_at")
+        if not isinstance(created_at, datetime):
+            return None, "miss"
+        age = now - created_at
+        if age <= _EXECUTIVE_HUB_CACHE_TTL:
+            return entry.get("payload"), "fresh"
+        if age <= _EXECUTIVE_HUB_STALE_TTL:
+            return entry.get("payload"), "stale"
+        _EXECUTIVE_HUB_CACHE.pop(key, None)
+        return None, "expired"
+
+
+async def _store_executive_hub_cached_payload(key: tuple[Any, ...], payload: dict[str, Any]) -> None:
+    async with _EXECUTIVE_HUB_CACHE_LOCK:
+        _EXECUTIVE_HUB_CACHE[key] = {
+            "created_at": datetime.now(timezone.utc),
+            "payload": payload,
+        }
+
+
+async def _refresh_executive_hub_cache(
+    key: tuple[Any, ...],
+    *,
+    org_id: int,
+    period: str,
+    location_id: int | None,
+    allowed_location_ids: set[int] | None,
+    role: str,
+) -> None:
+    async with _EXECUTIVE_HUB_CACHE_LOCK:
+        if key in _EXECUTIVE_HUB_REFRESHING:
+            return
+        _EXECUTIVE_HUB_REFRESHING.add(key)
+    try:
+        token = set_tenant_rls_context(int(org_id))
+        try:
+            async with async_session_factory() as db:
+                await apply_tenant_rls(db)
+                payload = await build_executive_hub_payload(
+                    db,
+                    int(org_id),
+                    period=period,
+                    location_id=location_id,
+                    allowed_location_ids=set(allowed_location_ids) if allowed_location_ids is not None else None,
+                    role=role,
+                )
+                await db.commit()
+        finally:
+            reset_tenant_rls_context(token)
+        await _store_executive_hub_cached_payload(key, payload)
+    except Exception:
+        logger.exception(
+            "executive hub cache refresh failed org_id=%s period=%s location_id=%s",
+            org_id,
+            period,
+            location_id,
+        )
+    finally:
+        async with _EXECUTIVE_HUB_CACHE_LOCK:
+            _EXECUTIVE_HUB_REFRESHING.discard(key)
 
 
 async def _location_scope_for_request(
@@ -385,6 +477,7 @@ async def intelligence_overview(
 @router.get("/executive-hub")
 async def intelligence_executive_hub(
     request: Request,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     period: Annotated[str, Query(pattern="^(today|7d|30d)$")] = "today",
     location_id: Annotated[int | None, Query(ge=1)] = None,
@@ -397,30 +490,63 @@ async def intelligence_executive_hub(
         location_id,
     )
     role = await _copilot_role_from_request(request, db, org_id)
-    try:
-        payload = await build_executive_hub_payload(
-            db,
-            org_id,
+    cache_key = _executive_hub_cache_key(
+        org_id=org_id,
+        period=period,
+        location_id=location_id,
+        allowed_location_ids=allowed_location_ids,
+        role=role,
+    )
+    cached_payload, cache_status = await _get_executive_hub_cached_payload(cache_key)
+    if cached_payload is not None:
+        if cache_status == "stale":
+            background_tasks.add_task(
+                _refresh_executive_hub_cache,
+                cache_key,
+                org_id=int(org_id),
+                period=period,
+                location_id=location_id,
+                allowed_location_ids=set(allowed_location_ids) if allowed_location_ids is not None else None,
+                role=role,
+            )
+        payload = cached_payload
+    else:
+        background_tasks.add_task(
+            _refresh_executive_hub_cache,
+            cache_key,
+            org_id=int(org_id),
             period=period,
             location_id=location_id,
-            allowed_location_ids=allowed_location_ids,
+            allowed_location_ids=set(allowed_location_ids) if allowed_location_ids is not None else None,
             role=role,
         )
-        await db.commit()
-    except Exception:
-        await db.rollback()
-        logger.exception(
-            "executive hub payload failed; returning degraded payload org_id=%s period=%s location_id=%s",
-            org_id,
-            period,
-            location_id,
-        )
-        payload = _executive_hub_degraded_payload(period=period, role=role)
+        try:
+            payload = await build_executive_hub_payload(
+                db,
+                org_id,
+                period=period,
+                location_id=location_id,
+                allowed_location_ids=allowed_location_ids,
+                role=role,
+                fast=True,
+            )
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            logger.exception(
+                "executive hub fast payload failed; returning degraded payload org_id=%s period=%s location_id=%s",
+                org_id,
+                period,
+                location_id,
+            )
+            payload = _executive_hub_degraded_payload(period=period, role=role)
     return {
         "ok": True,
         "organization_id": org_id,
         "role": role,
         "version": payload.get("version", 1),
+        "mode": payload.get("mode") or ("full" if cache_status in {"fresh", "stale"} else "fast"),
+        "cache": cache_status,
         "period": payload["period"],
         "summary": payload.get("summary") or {},
         "today_picture": payload.get("today_picture") or {},

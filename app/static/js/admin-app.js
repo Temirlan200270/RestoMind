@@ -1554,6 +1554,8 @@ function adminMixinState() {
         executiveHubChatFullscreen: false,
         executiveHubBusinessQuestions: [],
         executiveHubRole: 'owner',
+        executiveHubRefreshTimer: null,
+        executiveHubRefreshAttempts: 0,
         executiveHubActionBusy: false,
         executiveHubActionPreview: null,
         executiveHubActionPreviewProposalId: '',
@@ -11034,8 +11036,9 @@ function adminMixinDataChartsSettings() {
             return `Продолжи разбор "${title}" и обнови выводы по свежим данным.`;
         },
 
-        async loadExecutiveHub() {
-            this.executiveHubLoading = true;
+        async loadExecutiveHub(options = {}) {
+            const silent = Boolean(options?.silent);
+            if (!silent) this.executiveHubLoading = true;
             try {
                 const { ok, data } = await this.apiJsonResponse(
                     `/api/admin/intelligence/executive-hub${this.locationQueryString('?')}`,
@@ -11062,11 +11065,26 @@ function adminMixinDataChartsSettings() {
                 this.executiveHubBusinessQuestions = Array.isArray(data.chat?.business_questions)
                     ? data.chat.business_questions
                     : [];
+                const mode = String(data.mode || '');
+                const cache = String(data.cache || '');
+                const shouldRefresh = (mode === 'fast' || cache === 'miss' || cache === 'expired')
+                    && this.executiveHubRefreshAttempts < 2;
+                if (shouldRefresh && !this.executiveHubRefreshTimer) {
+                    this.executiveHubRefreshAttempts += 1;
+                    this.executiveHubRefreshTimer = window.setTimeout(async () => {
+                        this.executiveHubRefreshTimer = null;
+                        if (this.isExecutiveHubSurface || this.executiveHubOpen) {
+                            await this.loadExecutiveHub({ silent: true });
+                        }
+                    }, 2500);
+                } else if (mode === 'full' || cache === 'fresh' || cache === 'stale') {
+                    this.executiveHubRefreshAttempts = 0;
+                }
             } catch (e) {
                 adminLogger.error('[admin] loadExecutiveHub', e);
                 this.executiveHubError = 'Executive Hub не загрузился. Проверьте подключение к серверу и попробуйте обновить страницу.';
             } finally {
-                this.executiveHubLoading = false;
+                if (!silent) this.executiveHubLoading = false;
             }
         },
 
@@ -11083,6 +11101,10 @@ function adminMixinDataChartsSettings() {
 
         closeExecutiveHub() {
             if (this.isExecutiveHubSurface) return;
+            if (this.executiveHubRefreshTimer) {
+                window.clearTimeout(this.executiveHubRefreshTimer);
+                this.executiveHubRefreshTimer = null;
+            }
             this.executiveHubOpen = false;
             this.closeExecutiveHubDrill();
         },
