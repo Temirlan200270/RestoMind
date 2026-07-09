@@ -200,14 +200,25 @@ async function startConnection(connectionId, sessionRef = '', options = {}) {
       await publishConnectionStatus(connectionId, 'qr_required', {
         qr,
         session_ref: sessionRef,
-        health: { provider: 'whatsapp_baileys', health: 'needs_reconnect', qr_data_url: qrDataUrl }
+        health: {
+          provider: 'whatsapp_baileys',
+          health: 'needs_reconnect',
+          auth_state: 'awaiting_scan',
+          message: 'Ожидаем сканирование QR в WhatsApp',
+          qr_data_url: qrDataUrl
+        }
       })
     }
 
     if (connection === 'open') {
       await publishConnectionStatus(connectionId, 'connected', {
         session_ref: sessionRef,
-        health: { provider: 'whatsapp_baileys', health: 'works' }
+        health: {
+          provider: 'whatsapp_baileys',
+          health: 'works',
+          auth_state: 'connected',
+          message: 'WhatsApp Web подключён'
+        }
       })
       logger.info({ connectionId }, 'baileys connected')
     }
@@ -217,10 +228,26 @@ async function startConnection(connectionId, sessionRef = '', options = {}) {
       const statusCode = lastDisconnect?.error instanceof Boom
         ? lastDisconnect.error.output?.statusCode
         : undefined
+      const errorMessage = lastDisconnect?.error?.message || ''
       const loggedOut = statusCode === DisconnectReason.loggedOut
+      const qrExpired = errorMessage.includes('QR refs attempts ended')
+      if (qrExpired) {
+        await publishConnectionStatus(connectionId, 'qr_required', {
+          session_ref: sessionRef,
+          error: 'QR истёк. Нажмите «QR заново» и отсканируйте свежий код.',
+          health: {
+            provider: 'whatsapp_baileys',
+            health: 'needs_reconnect',
+            auth_state: 'qr_expired',
+            message: 'QR истёк, нужен новый код',
+            status_code: statusCode || null
+          }
+        })
+        return
+      }
       await publishConnectionStatus(connectionId, loggedOut ? 'expired' : 'disconnected', {
         session_ref: sessionRef,
-        error: lastDisconnect?.error?.message || '',
+        error: errorMessage,
         health: { provider: 'whatsapp_baileys', health: loggedOut ? 'blocked' : 'degraded', status_code: statusCode || null }
       })
       if (!loggedOut) {

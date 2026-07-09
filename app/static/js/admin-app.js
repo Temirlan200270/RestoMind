@@ -6344,6 +6344,19 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
             }[s] || 'Неизвестно';
         },
 
+        channelConnectionHealthHint(conn) {
+            const health = conn?.health && typeof conn.health === 'object' ? conn.health : {};
+            const authState = String(health.auth_state || '').toLowerCase();
+            if (authState === 'connected') return health.message || 'WhatsApp Web подключён.';
+            if (authState === 'awaiting_scan') {
+                return health.message || 'Откройте WhatsApp → Связанные устройства → Связывание устройства и отсканируйте QR.';
+            }
+            if (authState === 'qr_expired') {
+                return health.message || 'QR истёк. Нажмите «QR заново» и отсканируйте свежий код.';
+            }
+            return health.message || '';
+        },
+
         channelConnectionDotClass(status) {
             const s = String(status || '').toLowerCase();
             if (s === 'connected') return 'bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.25)]';
