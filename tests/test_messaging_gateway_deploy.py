@@ -45,3 +45,13 @@ def test_baileys_gateway_avoids_heavy_bootstrap_sync_by_default() -> None:
     assert "shouldSyncHistoryMessage: () => false" in text
     assert "syncFullHistory: false" in text
     assert "baileys messages upsert" in text
+
+
+def test_baileys_gateway_reconciles_connections_on_free_render_wakeups() -> None:
+    text = Path("services/messaging-gateway/src/server.js").read_text(encoding="utf-8")
+
+    assert "const CONNECTION_RECONCILE_INTERVAL_MS" in text
+    assert "reconcileConnections('health')" in text
+    assert "reconcileConnections('startup')" in text
+    assert "reconcileConnections('interval')" in text
+    assert "connection reconcile complete" in text

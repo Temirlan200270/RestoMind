@@ -17,6 +17,7 @@ const RESTOMIND_GATEWAY_SECRET = process.env.RESTOMIND_GATEWAY_SECRET || ''
 const SESSION_ROOT = process.env.SESSION_ROOT || path.join(process.cwd(), 'sessions')
 const BAILEYS_FIRE_INIT_QUERIES = process.env.BAILEYS_FIRE_INIT_QUERIES === 'true'
 const BAILEYS_MARK_ONLINE = process.env.BAILEYS_MARK_ONLINE === 'true'
+const CONNECTION_RECONCILE_INTERVAL_MS = Number(process.env.CONNECTION_RECONCILE_INTERVAL_MS || 60000)
 const AUTO_START_CONNECTION_IDS = (process.env.AUTO_START_CONNECTION_IDS || '')
   .split(',')
   .map((x) => x.trim())
@@ -41,6 +42,7 @@ app.use('/v1', (req, res, next) => {
 
 const sockets = new Map()
 const reconnectTimers = new Map()
+let lastReconcileStartedAt = 0
 
 function headers() {
   return RESTOMIND_GATEWAY_SECRET ? { 'X-RestoMind-Gateway-Secret': RESTOMIND_GATEWAY_SECRET } : {}
@@ -360,11 +362,17 @@ async function startConnection(connectionId, sessionRef = '', options = {}) {
 }
 
 app.get('/health', (_req, res) => {
+  if (sockets.size === 0) {
+    reconcileConnections('health').catch((error) => {
+      logger.warn({ err: error }, 'connection reconcile from health failed')
+    })
+  }
   res.json({
     ok: true,
     provider: 'whatsapp_baileys',
     active_connections: sockets.size,
-    connection_ids: Array.from(sockets.keys())
+    connection_ids: Array.from(sockets.keys()),
+    reconcile_interval_ms: CONNECTION_RECONCILE_INTERVAL_MS
   })
 })
 
@@ -435,17 +443,13 @@ app.post('/v1/send', async (req, res) => {
 
 app.listen(PORT, async () => {
   logger.info({ PORT, RESTOMIND_API_URL, SESSION_ROOT }, 'messaging gateway listening')
-  try {
-    const rows = await getFromRestoMind('/api/channels/gateway/connections?provider=whatsapp_baileys')
-    for (const conn of Array.isArray(rows) ? rows : []) {
-      if (conn?.id && conn?.status !== 'disabled') {
-        startConnection(conn.id, conn.session_ref || '').catch((error) => {
-          logger.error({ err: error, connectionId: conn.id }, 'backend connection auto-start failed')
-        })
-      }
-    }
-  } catch (error) {
-    logger.warn({ err: error }, 'failed to load connections from RestoMind')
+  await reconcileConnections('startup')
+  if (CONNECTION_RECONCILE_INTERVAL_MS > 0) {
+    setInterval(() => {
+      reconcileConnections('interval').catch((error) => {
+        logger.warn({ err: error }, 'connection reconcile interval failed')
+      })
+    }, CONNECTION_RECONCILE_INTERVAL_MS).unref?.()
   }
   for (const id of AUTO_START_CONNECTION_IDS) {
     startConnection(id).catch((error) => {
@@ -453,3 +457,31 @@ app.listen(PORT, async () => {
     })
   }
 })
+
+async function reconcileConnections(reason = 'manual') {
+  const now = Date.now()
+  if (now - lastReconcileStartedAt < 5000) {
+    return { ok: true, skipped: true, reason: 'rate_limited' }
+  }
+  lastReconcileStartedAt = now
+  try {
+    const rows = await getFromRestoMind('/api/channels/gateway/connections?provider=whatsapp_baileys')
+    let started = 0
+    for (const conn of Array.isArray(rows) ? rows : []) {
+      if (conn?.id && conn?.status !== 'disabled') {
+        const key = String(conn.id)
+        if (!sockets.has(key)) {
+          started += 1
+          startConnection(conn.id, conn.session_ref || '').catch((error) => {
+            logger.error({ err: error, connectionId: conn.id, reason }, 'backend connection auto-start failed')
+          })
+        }
+      }
+    }
+    logger.info({ reason, knownConnections: Array.isArray(rows) ? rows.length : 0, started, activeConnections: sockets.size }, 'connection reconcile complete')
+    return { ok: true, started }
+  } catch (error) {
+    logger.warn({ err: error, reason }, 'failed to load connections from RestoMind')
+    return { ok: false, error: error.message || String(error) }
+  }
+}
