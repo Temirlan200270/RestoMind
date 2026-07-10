@@ -97,7 +97,7 @@
                             <p x-show="!(smartSalesImpact.rejected_items || []).length" class="mt-2 text-xs text-gray-400">Отказов за период нет.</p>
                         </div>
                         <div class="rounded-xl border border-gray-100 p-4">
-                            <h4 class="text-sm font-bold text-gray-900">Лучшие фразы (A/B CR)</h4>
+                            <h4 class="text-sm font-bold text-gray-900">Лучшие фразы по конверсии</h4>
                             <template x-if="(smartSalesImpact.best_variants || []).length">
                                 <ul class="mt-2 space-y-1.5 text-sm">
                                     <template x-for="(v, vi) in (smartSalesImpact.best_variants || []).slice(0, 5)" :key="vi">

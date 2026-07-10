@@ -7214,7 +7214,7 @@ function adminMixinWebSocketEvents() {
                 const orgId = Number(this.orgProfile?.organization_id || 0);
                 if (!orgId || Number(data?.org_id) === orgId) {
                     this._prependAuditEntry(data);
-                    this._pushDashLiveFeed(type, data?.title || data?.action || 'ОС');
+                    this._pushDashLiveFeed(type, data?.title || data?.action || 'Решение');
                     this.scheduleDashStatsRefreshDebounced();
                 }
             } else if (type === 'shift.focus_completed' || type === 'order.draft_recovered') {
@@ -11971,11 +11971,11 @@ function adminMixinDataChartsSettings() {
                     this.kitchenGate = data.mode;
                 } else {
                     const detail = data?.detail ? String(data.detail) : 'проверьте права и значение';
-                    this.showToast?.(`Kitchen Gate не сохранён: ${detail}`, 'error');
+                    this.showToast?.(`Режим кухни не сохранён: ${detail}`, 'error');
                 }
             } catch (e) {
                 adminLogger.error('[admin] patchKitchenGate', e);
-                this.showToast?.('Ошибка сохранения Kitchen Gate', 'error');
+                this.showToast?.('Ошибка сохранения режима кухни', 'error');
             } finally {
                 this.kitchenGateSaving = false;
             }
@@ -12049,7 +12049,7 @@ function adminMixinDataChartsSettings() {
                 if (ok) {
                     const orderId = this.shiftState?.focus?.order_id;
                     await this.loadOrderAuditForFocus(orderId || null);
-                    void this.flashToast('QA audit отмечен', 'success');
+                    void this.flashToast('Проверка качества отмечена', 'success');
                 }
             } catch (e) {
                 adminLogger.error('[admin] orderAuditReview', e);
@@ -12068,7 +12068,7 @@ function adminMixinDataChartsSettings() {
                 );
                 if (ok) {
                     this.orderAuditForFocus = null;
-                    void this.flashToast('QA audit скрыт', 'success');
+                    void this.flashToast('Проверка качества скрыта', 'success');
                 }
             } catch (e) {
                 adminLogger.error('[admin] orderAuditDismiss', e);

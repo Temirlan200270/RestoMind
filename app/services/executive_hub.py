@@ -1505,6 +1505,6 @@ def _ops_status_card(
                 drilldown={"tab": "inbox"},
             ),
         ],
-        drilldown={"tab": "dashboard", "label": "Дашборд смены"},
+        drilldown={"tab": "dashboard", "label": "Продажи смены"},
         chat_prompt="Что сейчас мешает смене работать стабильно?",
     )

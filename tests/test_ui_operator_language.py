@@ -124,13 +124,35 @@ def test_ai_center_uses_business_language_not_module_names():
     ai_center = _read("app", "templates", "screens", "_tab_ai_center.html")
     header = _read("app", "templates", "screens", "_header.html")
     dashboard = _read("app", "templates", "screens", "_tab_dashboard.html")
+    analytics = _read("app", "templates", "screens", "_tab_analytics.html")
     settings_bot = _read("app", "templates", "screens", "_tab_settings_bot_test.html")
     intelligence = _read("app", "templates", "screens", "_tab_intelligence.html")
     owner_intel = _read("app", "templates", "screens", "_tab_owner_intelligence.html")
     smart_sales = _read("app", "templates", "screens", "_tab_settings_smart_sales.html")
     menu = _read("app", "templates", "screens", "_tab_menu.html")
-    business_surface = "\n".join([ai_center, header, dashboard, settings_bot, intelligence, owner_intel, smart_sales, menu])
-    for term in ["Owner Intelligence", "Menu Profit Lab", "Живая ОС", "Вклад ИИ", "Автопилот", "Финал", "Gemini"]:
+    network = _read("app", "templates", "screens", "_tab_network_benchmark.html")
+    chats = _read("app", "templates", "screens", "_tab_chats.html")
+    shift = _read("app", "templates", "screens", "_tab_shift_control.html")
+    business_surface = "\n".join([ai_center, header, dashboard, analytics, settings_bot, intelligence, owner_intel, smart_sales, menu, network, chats, shift])
+    for term in [
+        "Owner Intelligence",
+        "Menu Profit Lab",
+        "Owner Hub",
+        "Живая ОС",
+        "Лента решений ОС",
+        "Действия ОС",
+        "Kitchen Gate",
+        "QA",
+        "LLM",
+        "A/B CR",
+        "% CR",
+        "AI QA",
+        "ROI",
+        "Вклад ИИ",
+        "Автопилот",
+        "Финал",
+        "Gemini",
+    ]:
         assert term not in business_surface
     for phrase in ["Основания и drilldown", "co-occurrence", "Топ связок (upsell)", "Пока нет принятых связок"]:
         assert phrase not in business_surface

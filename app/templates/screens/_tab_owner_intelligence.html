@@ -26,7 +26,7 @@
     {% call card(title='Еженедельный отчёт владельцу', padding_class='p-5') %}
         <div class="flex flex-col gap-4">
             <p class="text-sm ds-text-muted">
-                Telegram-дайджест за прошлую неделю: ROI, допродажи, QA и Kitchen Gate.
+                Telegram-дайджест за прошлую неделю: окупаемость ИИ, допродажи, качество заказов и режим кухни.
                 Автоотправка — понедельник 10:00 по часовому поясу заведения.
             </p>
             <div x-show="ownerIntelDigestLastSent?.created_at" class="text-xs ds-text-muted">
@@ -104,19 +104,19 @@
             <div class="mt-2 text-3xl font-black tabular-nums"
                 :class="(ownerIntelData?.kpi?.roi ?? 0) >= 1 ? 'text-emerald-600' : 'text-slate-900'"
                 x-text="ownerIntelData?.kpi?.roi == null ? '—' : (Number(ownerIntelData.kpi.roi).toFixed(1) + '×')"></div>
-            <p class="mt-1 text-xs ds-text-muted">ROI (выручка / cost)</p>
+            <p class="mt-1 text-xs ds-text-muted">окупаемость: выручка / стоимость</p>
         {% endset %}
-        {{ kpi_card('ROI', value_html=oi_kpi_roi, extra_class='!p-5') }}
+        {{ kpi_card('Окупаемость ИИ', value_html=oi_kpi_roi, extra_class='!p-5') }}
     </div>
 
     {{ kitchen_gate_panel(
-        title='Kitchen Gate — контроль смены',
+        title='Режим кухни — контроль смены',
         subtitle='Те же переключатели доступны на вкладке «Смена».',
     ) }}
 
     {% call card(title='Надёжность ИИ-оператора', padding_class='p-5') %}
         <p class="text-sm ds-text-muted mb-4">
-            Технические сбои и эскалации по ответам ассистента за период — для контроля регрессий LLM.
+            Сбои и обращения к оператору по ответам ассистента за период — для контроля качества.
         </p>
         <div x-show="ownerIntelData?.llm_reliability" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
             <div class="rounded-xl bg-slate-50 px-4 py-3">
@@ -188,13 +188,13 @@
                 </div>
             </template>
             <template x-if="!(ownerIntelData?.top_actions || []).length && !ownerIntelLoading">
-                {{ empty_state('Рекомендаций пока нет', 'Когда появятся инсайты с ROI, они отобразятся здесь.', extra_class='!py-8') }}
+                {{ empty_state('Рекомендаций пока нет', 'Когда появятся инсайты с эффектом в деньгах, они отобразятся здесь.', extra_class='!py-8') }}
             </template>
         {% endcall %}
     </div>
 
-    <!-- QA Audits -->
-    {% call card(title='Проверьте рискованные AI-заказы', padding_class='p-5') %}
+    <!-- Аудит качества -->
+    {% call card(title='Проверьте рискованные ИИ-заказы', padding_class='p-5') %}
         <div class="flex flex-wrap items-center gap-2 mb-4">
             <button type="button" class="ds-btn ds-btn-sm"
                 :class="ownerIntelAuditFilters.riskHighCritical ? 'ds-btn-primary' : 'ds-btn-secondary'"
@@ -285,7 +285,7 @@
                                 <div class="flex justify-between gap-2 text-sm py-1">
                                     <span class="truncate" x-text="v.variant || v.variant_key"></span>
                                     <span class="shrink-0 font-semibold tabular-nums text-emerald-700"
-                                        x-text="v.conversion_rate != null ? (Number(v.conversion_rate * 100).toFixed(0) + '% CR') : ''"></span>
+                                        x-text="v.conversion_rate != null ? (Number(v.conversion_rate * 100).toFixed(0) + '% конверсия') : ''"></span>
                                 </div>
                             </template>
                         </div>
