@@ -126,16 +126,18 @@ def test_ai_center_uses_business_language_not_module_names():
     dashboard = _read("app", "templates", "screens", "_tab_dashboard.html")
     settings_bot = _read("app", "templates", "screens", "_tab_settings_bot_test.html")
     intelligence = _read("app", "templates", "screens", "_tab_intelligence.html")
+    owner_intel = _read("app", "templates", "screens", "_tab_owner_intelligence.html")
     smart_sales = _read("app", "templates", "screens", "_tab_settings_smart_sales.html")
-    business_surface = "\n".join([ai_center, header, dashboard, settings_bot, intelligence, smart_sales])
-    for term in ["Owner Intelligence", "Вклад ИИ", "Автопилот", "Финал", "Gemini"]:
+    menu = _read("app", "templates", "screens", "_tab_menu.html")
+    business_surface = "\n".join([ai_center, header, dashboard, settings_bot, intelligence, owner_intel, smart_sales, menu])
+    for term in ["Owner Intelligence", "Menu Profit Lab", "Живая ОС", "Вклад ИИ", "Автопилот", "Финал", "Gemini"]:
         assert term not in business_surface
     for phrase in ["Основания и drilldown", "co-occurrence", "Топ связок (upsell)", "Пока нет принятых связок"]:
         assert phrase not in business_surface
     assert "Разборы владельца" in business_surface
     assert "Эффект ИИ" in business_surface
     assert "Решения" in business_surface
-    assert "Закупки и голос" in business_surface
+    assert "Операционные задачи" in business_surface
     assert "AI API через ваш бэкенд" in business_surface
 
 

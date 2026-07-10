@@ -1160,7 +1160,7 @@ def _owner_roi_card(owner_summary: dict[str, Any]) -> dict[str, Any]:
         action_items=[
             _action_item(
                 action_id="open_owner_intel",
-                label="Owner Intelligence",
+                label="Разборы владельца",
                 action_type="navigate",
                 drilldown={"tab": "ai_center", "aiCenterTab": "owner_intel"},
             ),
@@ -1171,12 +1171,12 @@ def _owner_roi_card(owner_summary: dict[str, Any]) -> dict[str, Any]:
             "upsell_revenue_kzt": round(upsell, 2),
         },
         why=[str(x.get("label") or x.get("title") or x) for x in (owner_summary.get("top_losses") or [])[:2]],
-        actions=["Открыть Owner Intelligence", "Посмотреть ROI-цепочку"],
+        actions=["Открыть разборы владельца", "Посмотреть цепочку эффекта"],
         evidence={"source": "owner_intelligence", "period": owner_summary.get("period")},
         drilldown={
             "tab": "ai_center",
             "aiCenterTab": "owner_intel",
-            "label": "Owner Intelligence",
+            "label": "Разборы владельца",
         },
         chat_prompt="Какой чистый эффект дал ИИ за сегодня?",
     )
@@ -1206,7 +1206,7 @@ def _margin_risk_card(owner_summary: dict[str, Any]) -> dict[str, Any] | None:
                 ),
             ],
             metrics={"missing_cost_count": len(missing)},
-            why=["без себестоимости Menu Profit Lab занижает риск по марже"],
+            why=["без себестоимости маржа и фудкост считаются неточно"],
             actions=["Открыть меню и импорт себестоимости"],
             evidence={"source": "menu_profit_lab"},
             drilldown={
@@ -1232,7 +1232,7 @@ def _margin_risk_card(owner_summary: dict[str, Any]) -> dict[str, Any] | None:
         action_items=[
             _action_item(
                 action_id="open_menu_margin",
-                label="Menu Profit Lab",
+                label="Маржа меню",
                 action_type="navigate",
                 drilldown={"tab": "menu"},
             ),
@@ -1251,7 +1251,7 @@ def _margin_risk_card(owner_summary: dict[str, Any]) -> dict[str, Any] | None:
         ],
         metrics={"candidate_count": len(low_margin)},
         why=[str((row or {}).get("name") or row) for row in low_margin[:3] if row],
-        actions=["Открыть Menu Profit Lab", "Спросить ИИ про цену и маржу"],
+        actions=["Открыть маржу меню", "Спросить ИИ про цену и маржу"],
         evidence={"source": "menu_profit_lab"},
         drilldown={
             "tab": "menu",

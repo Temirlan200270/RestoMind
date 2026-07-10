@@ -19,7 +19,7 @@
                                 <span x-text="menuProfitData.missing_cost_checklist.total_items"></span>
                                 <span> позиций (</span>
                                 <span class="font-semibold tabular-nums" x-text="(menuProfitData.missing_cost_checklist.missing_pct || 0) + '%'"></span>
-                                <span>). Menu Profit Lab считает маржу и рекомендации по цене точнее с заполненной с/с.</span>
+                                <span>). С заполненной себестоимостью маржа и рекомендации по цене будут точнее.</span>
                             </p>
                             <ul class="mt-2 space-y-1" x-show="(menuProfitData.missing_cost_checklist.top_missing || []).length">
                                 <template x-for="(row, mi) in (menuProfitData.missing_cost_checklist.top_missing || []).slice(0, 5)" :key="'mc-' + (row.menu_item_id || mi)">
@@ -45,7 +45,7 @@
                     <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
                         <div>
                             <h3 class="text-sm font-bold text-slate-900">Рекомендации по цене</h3>
-                            <p class="text-xs ds-text-muted mt-0.5">Menu Profit Lab · период 7 дней</p>
+                            <p class="text-xs ds-text-muted mt-0.5">Маржа меню · период 7 дней</p>
                         </div>
                         <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" @click="navigateOwnerIntelligence()">
                             Разборы владельца →
@@ -533,7 +533,7 @@
                             <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Себестоимость (₸)</label>
                             <input type="number" min="0" step="1" x-model.number="menuEditForm.cost_price"
                                 class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-                                placeholder="Для Menu Profit Lab">
+                                placeholder="Для расчёта маржи">
                             <p class="mt-1 text-[11px] text-gray-400 leading-snug">Нужна для расчёта маржи и рекомендаций по меню.</p>
                         </div>
                         <div>

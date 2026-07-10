@@ -13595,7 +13595,7 @@ function adminMixinDataChartsSettings() {
                 );
                 this.menuProfitData = ok && data ? data : null;
             } catch (e) {
-                adminLogger.warn('Menu Profit Lab: optional load failed', e);
+                adminLogger.warn('menu margin: optional load failed', e);
                 this.menuProfitData = null;
             } finally {
                 this.menuProfitLoading = false;
