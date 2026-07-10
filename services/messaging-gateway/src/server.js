@@ -38,6 +38,7 @@ app.use('/v1', (req, res, next) => {
 })
 
 const sockets = new Map()
+const reconnectTimers = new Map()
 
 function headers() {
   return RESTOMIND_GATEWAY_SECRET ? { 'X-RestoMind-Gateway-Secret': RESTOMIND_GATEWAY_SECRET } : {}
@@ -129,7 +130,7 @@ async function publishInbound(connectionId, msg) {
   const participant = msg?.key?.participant || remoteJid
   const phone = senderPhoneFromJid(participant)
   const externalMessageId = msg?.key?.id || ''
-  await postToRestoMind('/api/channels/inbound', {
+  const result = await postToRestoMind('/api/channels/inbound', {
     trace_id: externalMessageId ? `baileys:${externalMessageId}` : '',
     correlation_id: '',
     idempotency_key: externalMessageId ? `whatsapp_baileys:${connectionId}:${externalMessageId}` : '',
@@ -154,10 +155,19 @@ async function publishInbound(connectionId, msg) {
     },
     received_at: new Date().toISOString()
   })
+  logger.info(
+    { connectionId, externalMessageId, externalChatId: remoteJid, phone, channelMessageId: result?.channel_message_id },
+    'published inbound message'
+  )
 }
 
 async function stopConnection(connectionId) {
   const key = String(connectionId)
+  const timer = reconnectTimers.get(key)
+  if (timer) {
+    clearTimeout(timer)
+    reconnectTimers.delete(key)
+  }
   const entry = sockets.get(key)
   sockets.delete(key)
   try {
@@ -169,6 +179,11 @@ async function stopConnection(connectionId) {
 
 async function startConnection(connectionId, sessionRef = '', options = {}) {
   const key = String(connectionId)
+  const timer = reconnectTimers.get(key)
+  if (timer) {
+    clearTimeout(timer)
+    reconnectTimers.delete(key)
+  }
   if (options.force) {
     await stopConnection(connectionId)
   }
@@ -195,7 +210,9 @@ async function startConnection(connectionId, sessionRef = '', options = {}) {
   sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update
     if (qr) {
-      qrcode.generate(qr, { small: true })
+      if (process.env.LOG_QR_IN_TERMINAL === 'true') {
+        qrcode.generate(qr, { small: true })
+      }
       const qrDataUrl = await QRCode.toDataURL(qr, { margin: 2, scale: 6 })
       await publishConnectionStatus(connectionId, 'qr_required', {
         qr,
@@ -243,6 +260,13 @@ async function startConnection(connectionId, sessionRef = '', options = {}) {
             status_code: statusCode || null
           }
         })
+        const timer = setTimeout(() => {
+          reconnectTimers.delete(key)
+          startConnection(connectionId, sessionRef, { force: true }).catch((error) => {
+            logger.error({ err: error, connectionId }, 'baileys qr refresh failed')
+          })
+        }, 3000)
+        reconnectTimers.set(key, timer)
         return
       }
       await publishConnectionStatus(connectionId, loggedOut ? 'expired' : 'disconnected', {
@@ -296,7 +320,8 @@ app.get('/health', (_req, res) => {
   res.json({
     ok: true,
     provider: 'whatsapp_baileys',
-    active_connections: sockets.size
+    active_connections: sockets.size,
+    connection_ids: Array.from(sockets.keys())
   })
 })
 
