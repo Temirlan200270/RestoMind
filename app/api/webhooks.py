@@ -355,9 +355,14 @@ def _soft_ai_unavailable_response(
         for item in (menu_items or [])
         if bool(getattr(item, "is_available", True)) and str(getattr(item, "name", "") or "").strip()
     ]
+    menu_probe_candidates = [
+        item
+        for item in (menu_items or [])
+        if str(getattr(item, "name", "") or "").strip()
+    ]
 
     if trigger == "menu_probe":
-        probe = _build_menu_probe_reply_from_items(available_menu, message_text)
+        probe = _build_menu_probe_reply_from_items(menu_probe_candidates, message_text)
         if probe:
             return AIBrainResponse(intent="faq", reply_text=probe)
 

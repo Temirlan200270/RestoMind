@@ -74,6 +74,13 @@ _MORE_RECOMMENDATION_PHRASES = frozenset({
     "что-нибудь еще",
     "что-нибудь ещё",
 })
+_GENERAL_RECOMMENDATION_PHRASES = frozenset({
+    "что предложишь",
+    "что предложите",
+    "что можете предложить",
+    "что предложишь сегодня",
+    "что предложите сегодня",
+})
 
 _ACTIVE_ORDER_STATUSES = (
     OrderStatus.CONFIRMED.value,
@@ -157,8 +164,11 @@ def _match_trigger(text: str) -> str | None:
         return "greeting_plain"
     from app.services.upsell_safety_gate import is_recommendation_request
 
+    if _looks_like_menu_probe(norm) or _looks_like_specific_menu_probe(norm):
+        return "menu_probe"
     if len(norm) <= 80 and (
         is_recommendation_request(text)
+        or norm in _GENERAL_RECOMMENDATION_PHRASES
         or norm in {"подскажите", "подскажи"}
         or norm in _MORE_RECOMMENDATION_PHRASES
     ):
@@ -198,6 +208,23 @@ def _looks_like_menu_probe(norm: str) -> bool:
     if any(h in norm for h in food_hints):
         return True
     return any(h in norm for h in question_hints) and len(words) <= 4
+
+
+def _looks_like_specific_menu_probe(norm: str) -> bool:
+    """Composite menu question: concrete food/category beats generic recommendation words."""
+    words = [w for w in re.split(r"\s+", norm) if w]
+    if not words or len(words) > 22:
+        return False
+    food_hints = (
+        "плов", "мяс", "говяд", "баран", "кебаб", "шашлык", "лагман", "манты",
+        "самса", "салат", "суп", "напит", "чай", "лимонад", "десерт", "сытн",
+        "легк", "лёгк",
+    )
+    question_hints = (
+        "есть", "какой", "какая", "какие", "вид", "виды", "посовет",
+        "порекоменду", "предлож", "подскаж", "давай", "хочу",
+    )
+    return any(h in norm for h in food_hints) and any(h in norm for h in question_hints)
 
 
 def _format_working_hours_reply(org: Organization) -> str:
@@ -345,19 +372,74 @@ async def build_menu_probe_quick_reply_text(
     items = await load_available_menu(
         db,
         organization_id=organization_id,
-        include_unavailable=False,
+        include_unavailable=True,
     )
-    available = [i for i in items if i.is_available and (i.name or "").strip()]
-    return _build_menu_probe_reply_from_items(available, message_text)
+    return _build_menu_probe_reply_from_items(items, message_text)
 
 
 def _build_menu_probe_reply_from_items(items: list[object], message_text: str) -> str | None:
-    available = [i for i in items if bool(getattr(i, "is_available", True)) and str(getattr(i, "name", "") or "").strip()]
-    if not available:
+    named = [i for i in items if str(getattr(i, "name", "") or "").strip()]
+    available = [i for i in named if bool(getattr(i, "is_available", True))]
+    unavailable = [i for i in named if not bool(getattr(i, "is_available", True))]
+    if not named:
         return None
 
     norm = _normalize(message_text)
     terms = _probe_terms(message_text)
+
+    def blob(item) -> str:
+        return f"{getattr(item, 'name', '') or ''} {getattr(item, 'category', '') or ''} {getattr(item, 'tags', '') or ''}".lower()
+
+    def unique(items_in: list[object], *, limit: int = 5) -> list[object]:
+        seen: set[str] = set()
+        out: list[object] = []
+        for item in items_in:
+            key = str(getattr(item, "name", "") or "").strip().lower()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            out.append(item)
+            if len(out) >= limit:
+                break
+        return out
+
+    def by_needles(source: list[object], needles: tuple[str, ...], *, limit: int = 5) -> list[object]:
+        return unique([item for item in source if any(k in blob(item) for k in needles)], limit=limit)
+
+    def section(title: str, rows: list[object]) -> str:
+        lines = "\n".join(_menu_item_line(item) for item in rows)
+        return f"{title}:\n{lines}" if lines else ""
+
+    mentions_plov = "плов" in norm
+    mentions_salad = "салат" in norm
+    if mentions_plov or mentions_salad:
+        parts: list[str] = []
+        if mentions_plov:
+            plov_rows = by_needles(available, ("плов",), limit=6)
+            if plov_rows:
+                parts.append(section("По плову есть", plov_rows))
+            stopped_plov = by_needles(unavailable, ("плов",), limit=4)
+            if stopped_plov:
+                stopped_names = ", ".join(str(getattr(item, "name", "") or "").strip() for item in stopped_plov)
+                parts.append(f"Сейчас на стопе: {stopped_names}.")
+        if mentions_salad:
+            salad_rows = by_needles(available, ("салат",), limit=8)
+            if "сытн" in norm:
+                hearty = (
+                    "мяс", "говяд", "баран", "кур", "цыпл", "тауык", "люля",
+                    "плов", "нут", "сыр", "яйц", "хрустящ",
+                )
+                salad_rows = sorted(
+                    salad_rows,
+                    key=lambda item: 0 if any(k in blob(item) for k in hearty) else 1,
+                )
+            salad_rows = unique(salad_rows, limit=3)
+            if salad_rows:
+                title = "Из сытных салатов могу предложить" if "сытн" in norm else "По салатам есть"
+                parts.append(section(title, salad_rows))
+        if parts:
+            cta = "Какой добавить в заказ?" if mentions_plov and not mentions_salad else "Что добавить в заказ?"
+            return "\n\n".join(parts) + f"\n\n{cta}"
 
     category_title = ""
     category_needles: tuple[str, ...] = ()
@@ -374,9 +456,6 @@ def _build_menu_probe_reply_from_items(items: list[object], message_text: str) -
         category_title = "Из напитков могу предложить"
         category_needles = ("напит", "чай", "лимонад", "сок", "компот", "кофе")
 
-    def blob(item) -> str:
-        return f"{getattr(item, 'name', '') or ''} {getattr(item, 'category', '') or ''} {getattr(item, 'tags', '') or ''}".lower()
-
     candidates = []
     if category_needles:
         candidates = [item for item in available if any(k in blob(item) for k in category_needles)]
@@ -387,26 +466,17 @@ def _build_menu_probe_reply_from_items(items: list[object], message_text: str) -
             if all(term in blob(item) for term in terms) or " ".join(terms) in blob(item)
         ]
 
-    seen: set[str] = set()
-    unique = []
-    for item in candidates:
-        key = str(item.name or "").strip().lower()
-        if not key or key in seen:
-            continue
-        seen.add(key)
-        unique.append(item)
-        if len(unique) >= 5:
-            break
+    unique_items = unique(candidates, limit=5)
 
-    if not unique:
+    if not unique_items:
         return None
 
-    lines = "\n".join(_menu_item_line(item) for item in unique[:5])
+    lines = "\n".join(_menu_item_line(item) for item in unique_items[:5])
     if category_title:
         return f"{category_title}:\n{lines}\n\nЧто добавить в заказ?"
 
     query_label = " ".join(terms).strip() or norm
-    if len(unique) == 1:
+    if len(unique_items) == 1:
         return f"Да, есть:\n{lines}\n\nДобавить в заказ?"
     return f"По «{query_label}» есть варианты:\n{lines}\n\nКакой добавить в заказ?"
 

@@ -120,6 +120,7 @@ def test_is_plain_greeting_rejects_menu_intent() -> None:
 
 def test_problem_dialog_short_messages_trigger_quick_reply_paths() -> None:
     assert peek_quick_reply_trigger("Здравствуйте, что посоветуешь?") == "recommendation_request"
+    assert peek_quick_reply_trigger("Что предложишь?") == "recommendation_request"
     assert peek_quick_reply_trigger("Что ещё?") == "recommendation_request"
     assert peek_quick_reply_trigger("Что еще?") == "recommendation_request"
     assert peek_quick_reply_trigger("Подскажите") == "recommendation_request"
@@ -127,6 +128,8 @@ def test_problem_dialog_short_messages_trigger_quick_reply_paths() -> None:
     assert peek_quick_reply_trigger("Плов") == "menu_probe"
     assert peek_quick_reply_trigger("Плов есть?") == "menu_probe"
     assert peek_quick_reply_trigger("Плов какой есть?") == "menu_probe"
+    assert peek_quick_reply_trigger("Плов есть? Какие виды? Какой салат сытный есть?") == "menu_probe"
+    assert peek_quick_reply_trigger("Так какие виды плова есть? И какой салат посоветуешь?") == "menu_probe"
 
 
 def test_menu_probe_reply_from_items_for_problem_dialog() -> None:
@@ -172,6 +175,61 @@ def test_menu_probe_reply_from_items_for_problem_dialog() -> None:
     assert meat_reply is not None
     assert "Из мясного" in meat_reply
     assert "Казан кебаб" in meat_reply
+
+
+def test_composite_plov_and_salad_probe_uses_menu_specific_reply() -> None:
+    items = [
+        SimpleNamespace(
+            name="Плов Праздничный баранина",
+            category="Традиционная кухня",
+            tags="",
+            price=2790,
+            is_available=True,
+        ),
+        SimpleNamespace(
+            name="Плов Праздничный говядина",
+            category="Традиционная кухня",
+            tags="",
+            price=2890,
+            is_available=True,
+        ),
+        SimpleNamespace(
+            name="Фитнес плов",
+            category="Традиционная кухня",
+            tags="",
+            price=2490,
+            is_available=False,
+        ),
+        SimpleNamespace(
+            name="Салат с хрустящими баклажанами",
+            category="Салаты",
+            tags="сытный хит",
+            price=2590,
+            is_available=True,
+        ),
+        SimpleNamespace(
+            name="Ачучук",
+            category="Салаты",
+            tags="легкий",
+            price=990,
+            is_available=True,
+        ),
+    ]
+
+    reply = _build_menu_probe_reply_from_items(
+        items,
+        "Плов есть? Какие виды? Какой салат сытный есть?",
+    )
+
+    assert reply is not None
+    assert "По плову есть" in reply
+    assert "Плов Праздничный баранина" in reply
+    assert "Плов Праздничный говядина" in reply
+    assert "Сейчас на стопе: Фитнес плов." in reply
+    assert "Из сытных салатов" in reply
+    assert "Салат с хрустящими баклажанами" in reply
+    assert "Из популярного могу посоветовать" not in reply
+    assert "Напишите, что хотите" not in reply
 
 
 @pytest.mark.asyncio

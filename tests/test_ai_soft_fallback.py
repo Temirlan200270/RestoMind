@@ -21,6 +21,27 @@ def test_soft_ai_fallback_answers_menu_probe_without_operator() -> None:
     assert "техническ" not in response.reply_text.lower()
 
 
+def test_soft_ai_fallback_answers_composite_menu_question_from_menu() -> None:
+    response = _soft_ai_unavailable_response(
+        message_text="Плов есть? Какие виды? Какой салат сытный есть?",
+        menu_items=[
+            SimpleNamespace(name="Плов Праздничный баранина", category="Горячее", tags="", price=2790, is_available=True),
+            SimpleNamespace(name="Плов Праздничный говядина", category="Горячее", tags="", price=2890, is_available=True),
+            SimpleNamespace(name="Фитнес плов", category="Горячее", tags="", price=2490, is_available=False),
+            SimpleNamespace(name="Салат с хрустящими баклажанами", category="Салаты", tags="сытный", price=2590, is_available=True),
+        ],
+        has_draft=False,
+    )
+
+    assert response.intent == "faq"
+    assert "По плову есть" in response.reply_text
+    assert "Плов Праздничный баранина" in response.reply_text
+    assert "Сейчас на стопе: Фитнес плов." in response.reply_text
+    assert "Из сытных салатов" in response.reply_text
+    assert "Из популярного могу посоветовать" not in response.reply_text
+    assert "Напишите, что хотите" not in response.reply_text
+
+
 def test_soft_ai_fallback_answers_more_recommendations_without_operator() -> None:
     response = _soft_ai_unavailable_response(
         message_text="Что ещё?",
