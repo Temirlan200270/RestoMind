@@ -236,7 +236,7 @@ class TestOsAutopilotUI:
         assert "/api/admin/intelligence/os-dashboard" in js
 
     def test_final_mile_ui_wired_to_backend_contracts(self):
-        """Final Mile UI keeps digest, Закупки, and Voice AI wired to backend APIs."""
+        """Final Mile UI keeps digest, attention-routed purchase checklists, and voice wired."""
         import pathlib
 
         html = pathlib.Path("app/templates/screens/_tab_ai_center.html").read_text(encoding="utf-8")
@@ -246,7 +246,9 @@ class TestOsAutopilotUI:
         assert "aiCenterTab === 'final_mile'" in html
         assert "loadFinalMileUi()" in html
         assert "Сводка дня" in html
-        assert "Закупки" in html
+        assert "Закупочные чеклисты" in html
+        assert "navigateToTab('inbox', { inboxTab: 'system' })" in html
+        assert "Создать чеклист" not in html
         assert "Голосовой бот" in html
         assert "контроля стоимости" in html.lower()
         assert "aiCenterTab === 'final_mile'" in header
@@ -284,7 +286,8 @@ class TestOsAutopilotUI:
         assert (repo / "docs/VOICE_STAGING_CHECKLIST.md").is_file()
 
         html = (repo / "app/templates/screens/_tab_ai_center.html").read_text(encoding="utf-8")
-        assert "авто-sync только 2GIS" in html.lower() or "только 2GIS" in html
+        assert "2GIS — основной канал" in html
+        assert "Google — только ручной импорт" in html
 
     def test_staffmind_team_settings_ui_wired(self):
         """StaffMind team settings section calls the onboarding helpers."""

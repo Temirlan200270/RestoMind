@@ -12322,8 +12322,6 @@ function adminMixinDataChartsSettings() {
         async loadFinalMileUi() {
             await Promise.all([
                 this.loadDailyDigestPreview(),
-                this.loadSupplyMind(),
-                this.loadInventorySyncStatus(),
                 this.loadVoiceAiStatus(),
                 this.loadVoiceCallLogs(),
             ]);

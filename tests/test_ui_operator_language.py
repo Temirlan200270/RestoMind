@@ -105,7 +105,8 @@ def test_final_mile_tab_operator_language():
     assert "Сводка дня" in html
     assert "Голосовой бот" in html
     assert "Журнал звонков" in html
-    assert "Закупки" in html
+    assert "Закупочные чеклисты" in html
+    assert "Создать чеклист" not in html
     assert "voiceAiEnabledDraft ? 'вкл' : 'выкл'" in html
     assert "voiceCallModeLabel" in js
 
