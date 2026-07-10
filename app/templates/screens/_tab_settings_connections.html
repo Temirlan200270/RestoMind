@@ -303,6 +303,7 @@
                                                         <span x-show="conn.last_seen_at" class="text-gray-400" x-text="' · ' + fmt.date(conn.last_seen_at)"></span>
                                                     </p>
                                                     <p class="text-xs text-gray-500 mt-1" x-show="channelConnectionHealthHint(conn)" x-text="channelConnectionHealthHint(conn)"></p>
+                                                    <p class="text-xs text-emerald-700 mt-1" x-show="channelConnectionLastInboundHint(conn)" x-text="channelConnectionLastInboundHint(conn)"></p>
                                                     <p class="text-xs text-red-600 mt-1" x-show="conn.last_error" x-text="conn.last_error"></p>
                                                 </div>
                                                 <div class="flex flex-wrap gap-2">

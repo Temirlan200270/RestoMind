@@ -6368,6 +6368,14 @@ function adminMixinPackagingIntegrationsDemoWsUi() {
             return health.message || '';
         },
 
+        channelConnectionLastInboundHint(conn) {
+            const health = conn?.health && typeof conn.health === 'object' ? conn.health : {};
+            const at = health.last_inbound_at || '';
+            if (!at) return '';
+            const from = health.last_inbound_from ? ` от ${health.last_inbound_from}` : '';
+            return `Последнее входящее${from}: ${this.fmt.date(at)}`;
+        },
+
         channelConnectionDotClass(status) {
             const s = String(status || '').toLowerCase();
             if (s === 'connected') return 'bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.25)]';

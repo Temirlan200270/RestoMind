@@ -112,6 +112,10 @@ function senderPhoneFromJid(jid = '') {
   return String(jid).split('@')[0].replace(/\D+/g, '')
 }
 
+function phoneFromSocketUser(user = {}) {
+  return senderPhoneFromJid(user?.id || user?.lid || '')
+}
+
 function baileysStatusToDelivery(status) {
   const n = Number(status)
   if (n >= 4) return 'read'
@@ -183,6 +187,17 @@ async function publishInbound(connectionId, msg) {
     { connectionId, externalMessageId, externalChatId: remoteJid, phone, channelMessageId: result?.channel_message_id },
     'published inbound message'
   )
+  await publishConnectionStatus(connectionId, 'connected', {
+    health: {
+      provider: 'whatsapp_baileys',
+      health: 'works',
+      auth_state: 'connected',
+      message: 'WhatsApp Web connected',
+      last_inbound_at: new Date().toISOString(),
+      last_inbound_from: phone ? `+${phone}` : '',
+      last_inbound_message_id: externalMessageId || ''
+    }
+  })
 }
 
 async function stopConnection(connectionId) {
@@ -265,7 +280,12 @@ async function startConnection(connectionId, sessionRef = '', options = {}) {
     }
 
     if (connection === 'open') {
+      const accountPhone = phoneFromSocketUser(sock.user || {})
+      const accountName = String(sock.user?.name || '').trim()
       await publishConnectionStatus(connectionId, 'connected', {
+        phone: accountPhone ? `+${accountPhone}` : '',
+        external_account_id: accountPhone || '',
+        display_name: accountName || 'WhatsApp Web',
         session_ref: sessionRef,
         health: {
           provider: 'whatsapp_baileys',
@@ -274,7 +294,7 @@ async function startConnection(connectionId, sessionRef = '', options = {}) {
           message: 'WhatsApp Web подключён'
         }
       })
-      logger.info({ connectionId }, 'baileys connected')
+      logger.info({ connectionId, accountPhone, accountName }, 'baileys connected')
     }
 
     if (connection === 'close') {
