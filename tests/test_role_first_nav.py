@@ -254,6 +254,18 @@ def test_bottom_nav_role_aware():
     assert "@click=\"navigateToTab('inbox')\"" in bottom
 
 
+def test_bookings_are_feature_flagged_without_leaving_role_matrix():
+    js = (REPO / "app" / "static" / "js" / "admin-app.js").read_text(encoding="utf-8")
+    api = (REPO / "app" / "api" / "admin" / "organization.py").read_text(encoding="utf-8")
+    assert "bookingsFeatureEnabled()" in js
+    assert "tabId || '').trim() === 'bookings' && !this.bookingsFeatureEnabled()" in js
+    assert "bookings_enabled: data?.bookings_enabled !== false" in js
+    assert "bookings_enabled: this.orgProfile?.bookings_enabled !== false" in js
+    assert "navigateToTab('bookings')" in js
+    assert '"bookings_enabled": _bookings_enabled_from_org(org)' in api
+    assert "meta[\"bookings_enabled\"] = bool(body.bookings_enabled)" in api
+
+
 def test_shift_polling_helpers_in_js():
     js = (REPO / "app" / "static" / "js" / "admin-app.js").read_text(encoding="utf-8")
     assert "shouldPollShiftStateBadge()" in js

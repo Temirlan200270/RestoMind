@@ -1255,6 +1255,7 @@ function adminMixinState() {
             prepayment_legal_text: '',
             review_url_2gis: '',
             review_url_google: '',
+            bookings_enabled: true,
             schedule_json: null,
             schedule_json_text: '',
             operational_label: '',
@@ -4158,7 +4159,11 @@ function adminMixinSearchBookings() {
 
         globalSearchGoBooking(b) {
             this.globalSearchOpen = false;
-            this.currentTab = 'bookings';
+            this.navigateToTab('bookings');
+            if (this.currentTab !== 'bookings') {
+                void this.showUiAlert('Бронирования сейчас не включены для ресторана.', 'Раздел недоступен');
+                return;
+            }
             this.loadTabData().then(() => {
                 const found = this.bookings.find((x) => x.id === b.id);
                 const row = found || b;
@@ -4681,7 +4686,12 @@ function adminMixinAuthKnowledge() {
         },
 
         /** Role-first sidebar: operator / owner tab matrix. */
+        bookingsFeatureEnabled() {
+            return this.orgProfile?.bookings_enabled !== false;
+        },
+
         isTabVisibleForRole(tabId) {
+            if (String(tabId || '').trim() === 'bookings' && !this.bookingsFeatureEnabled()) return false;
             return adminTabVisibleForRole(tabId, this.effectiveStaffRole());
         },
 
@@ -4756,9 +4766,10 @@ function adminMixinAuthKnowledge() {
 
         /** Мобильный tab-bar «Ещё»: подсветка вторичных вкладок по роли. */
         bottomNavMoreTabActive() {
-            const tabs = ['bookings'];
+            const tabs = [];
+            if (this.isTabVisibleForRole('bookings')) tabs.push('bookings');
             if (this.effectiveStaffRole() === 'operator') {
-                tabs.push('orders', 'chats', 'bookings');
+                tabs.push('orders', 'chats');
             } else {
                 tabs.push('inbox');
             }
@@ -5228,6 +5239,7 @@ function adminMixinAuthKnowledge() {
                     prepayment_legal_text: String(data?.prepayment_legal_text ?? '').trim(),
                     review_url_2gis: String(data?.review_url_2gis ?? '').trim(),
                     review_url_google: String(data?.review_url_google ?? '').trim(),
+                    bookings_enabled: data?.bookings_enabled !== false,
                     schedule_json: scheduleObj,
                     schedule_json_text: JSON.stringify(scheduleObj, null, 2),
                     operational_label: String(data?.operational_label || '').trim(),
@@ -5264,6 +5276,7 @@ function adminMixinAuthKnowledge() {
                     prepayment_legal_text: String(this.orgProfile?.prepayment_legal_text ?? '').trim(),
                     review_url_2gis: String(this.orgProfile?.review_url_2gis ?? '').trim(),
                     review_url_google: String(this.orgProfile?.review_url_google ?? '').trim(),
+                    bookings_enabled: this.orgProfile?.bookings_enabled !== false,
                     schedule_json: scheduleJson,
                 };
                 const { ok, status, data } = await this.apiJsonResponse('/api/admin/organization/profile', {
@@ -5288,6 +5301,7 @@ function adminMixinAuthKnowledge() {
                     prepayment_legal_text: String(data?.prepayment_legal_text ?? '').trim(),
                     review_url_2gis: String(data?.review_url_2gis ?? '').trim(),
                     review_url_google: String(data?.review_url_google ?? '').trim(),
+                    bookings_enabled: data?.bookings_enabled !== false,
                     schedule_json: (data?.schedule_json && typeof data.schedule_json === 'object') ? data.schedule_json : scheduleJson,
                     schedule_json_text: JSON.stringify((data?.schedule_json && typeof data.schedule_json === 'object') ? data.schedule_json : scheduleJson, null, 2),
                     operational_label: String(data?.operational_label || '').trim(),

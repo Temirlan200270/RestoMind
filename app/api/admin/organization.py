@@ -113,6 +113,10 @@ class OrganizationProfilePatchBody(BaseModel):
         max_length=512,
         description="Ссылка на Google Maps/Reviews для GuestCare External (meta_json.review_url_google)",
     )
+    bookings_enabled: bool | None = Field(
+        default=None,
+        description="Показывать рабочий раздел бронирований в админке",
+    )
 
 
 def _org_meta_dict(org: Organization) -> dict:
@@ -122,6 +126,13 @@ def _org_meta_dict(org: Organization) -> dict:
 def _review_url_google_from_org(org: Organization) -> str:
     meta = _org_meta_dict(org)
     return str(meta.get("review_url_google") or meta.get("guestcare_google_url") or "").strip()
+
+
+def _bookings_enabled_from_org(org: Organization) -> bool:
+    meta = _org_meta_dict(org)
+    if meta.get("bookings_enabled") is False:
+        return False
+    return True
 
 
 _VALID_PAYMENT_PROVIDERS = frozenset({"freedom_pay", "kaspi", "cloudpayments"})
@@ -361,6 +372,7 @@ async def get_organization_profile(request: Request, db: AsyncSession = Depends(
         "prepayment_legal_text": (getattr(org, "prepayment_legal_text", None) or "").strip(),
         "review_url_2gis": (getattr(org, "review_url_2gis", None) or "").strip(),
         "review_url_google": _review_url_google_from_org(org),
+        "bookings_enabled": _bookings_enabled_from_org(org),
         "schedule_json": parse_schedule_json(getattr(org, "schedule_json", None)).model_dump(mode="json"),
         "operational_label": op.human_label,
         "is_business_open": op.is_business_open,
@@ -379,6 +391,7 @@ async def get_organization_profile(request: Request, db: AsyncSession = Depends(
         payload["prepayment_legal_text"],
         payload["review_url_2gis"],
         payload["review_url_google"],
+        payload["bookings_enabled"],
         payload["schedule_json"],
         payload["force_closed_until"],
         fc_reason,
@@ -494,6 +507,10 @@ async def patch_organization_profile(
             meta.pop("review_url_google", None)
             meta.pop("guestcare_google_url", None)
         org.meta_json = meta or None
+    if body.bookings_enabled is not None:
+        meta = _org_meta_dict(org)
+        meta["bookings_enabled"] = bool(body.bookings_enabled)
+        org.meta_json = meta or None
     await db.commit()
     await db.refresh(org)
     op = check_operational_status(
@@ -513,6 +530,7 @@ async def patch_organization_profile(
         "prepayment_legal_text": (getattr(org, "prepayment_legal_text", None) or "").strip(),
         "review_url_2gis": (getattr(org, "review_url_2gis", None) or "").strip(),
         "review_url_google": _review_url_google_from_org(org),
+        "bookings_enabled": _bookings_enabled_from_org(org),
         "schedule_json": parse_schedule_json(getattr(org, "schedule_json", None)).model_dump(mode="json"),
         "operational_label": op.human_label,
         "is_business_open": op.is_business_open,
