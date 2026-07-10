@@ -53,6 +53,9 @@ def test_gemini_response_schema_has_required_contract() -> None:
     assert schema["required"] == ["intent", "reply_text"]
     assert schema["properties"]["intent"]["enum"] == ["order", "book", "faq", "escalate"]
     assert schema["properties"]["payment_split"]["type"] == "object"
+    assert "" not in schema["properties"]["order_type"]["enum"]
+    assert "" not in schema["properties"]["payment_method"]["enum"]
+    assert "" not in schema["properties"]["items"]["items"]["properties"]["packaging_plov_1kg"]["enum"]
 
 
 @pytest.mark.asyncio

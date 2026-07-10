@@ -69,7 +69,9 @@ def _gemini_response_schema() -> dict[str, Any]:
                     "properties": {
                         "name": {"type": "string"},
                         "iiko_item_id": {"type": "string"},
-                        "packaging_plov_1kg": {"type": "string", "enum": ["", "tabak", "foil_kazan"]},
+                        # Gemini rejects empty-string enum values in response_schema.
+                        # Omit this field when packaging is unknown; Pydantic will restore "".
+                        "packaging_plov_1kg": {"type": "string", "enum": ["tabak", "foil_kazan"]},
                         "quantity": {"type": "integer"},
                         "modifiers_ids": string_array,
                         "modifiers": {"type": "array", "items": {"type": "object"}},
@@ -108,8 +110,10 @@ def _gemini_response_schema() -> dict[str, Any]:
                 },
                 "required": ["date", "time"],
             },
-            "order_type": {"type": "string", "enum": ["delivery", "pickup", "hall", ""]},
-            "payment_method": {"type": "string", "enum": ["cash", "card", "remote", ""]},
+            # Gemini rejects empty-string enum values in response_schema.
+            # Unknown values should be omitted; AIBrainResponse defaults them to "".
+            "order_type": {"type": "string", "enum": ["delivery", "pickup", "hall"]},
+            "payment_method": {"type": "string", "enum": ["cash", "card", "remote"]},
             "payment_mode": {"type": "string", "enum": ["single", "mixed"]},
             "payment_split": {
                 "type": "object",
