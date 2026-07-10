@@ -125,9 +125,13 @@ def test_ai_center_uses_business_language_not_module_names():
     header = _read("app", "templates", "screens", "_header.html")
     dashboard = _read("app", "templates", "screens", "_tab_dashboard.html")
     settings_bot = _read("app", "templates", "screens", "_tab_settings_bot_test.html")
-    business_surface = "\n".join([ai_center, header, dashboard, settings_bot])
+    intelligence = _read("app", "templates", "screens", "_tab_intelligence.html")
+    smart_sales = _read("app", "templates", "screens", "_tab_settings_smart_sales.html")
+    business_surface = "\n".join([ai_center, header, dashboard, settings_bot, intelligence, smart_sales])
     for term in ["Owner Intelligence", "Вклад ИИ", "Автопилот", "Финал", "Gemini"]:
         assert term not in business_surface
+    for phrase in ["Основания и drilldown", "co-occurrence", "Топ связок (upsell)", "Пока нет принятых связок"]:
+        assert phrase not in business_surface
     assert "Разборы владельца" in business_surface
     assert "Эффект ИИ" in business_surface
     assert "Решения" in business_surface
@@ -174,6 +178,9 @@ def test_analytics_sales_heatmap_uses_business_language():
     assert "heatmap выручки" not in analytics
     assert "запустите worker" not in analytics
     assert "ночного sync" not in analytics
+    assert "upsell ИИ" not in analytics
+    assert "вклад upsell" not in analytics
+    assert "допродажи ИИ" in analytics
     assert "Пока нет данных" not in analytics
     assert "Нужна синхронизация продаж" in analytics
     assert "Синхронизировать продажи" in analytics

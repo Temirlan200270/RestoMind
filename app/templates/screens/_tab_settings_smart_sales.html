@@ -51,10 +51,10 @@
                                     </template>
                                 </ul>
                             </template>
-                            <p x-show="!(smartSalesImpact.best_pairs || []).length" class="mt-2 text-xs text-gray-400">Недостаточно подтверждённых заказов для co-occurrence.</p>
+                            <p x-show="!(smartSalesImpact.best_pairs || []).length" class="mt-2 text-xs text-gray-500">Нужно больше подтверждённых заказов, чтобы увидеть сильные товарные связки.</p>
                         </div>
                         <div class="rounded-xl border border-gray-100 p-4">
-                            <h4 class="text-sm font-bold text-gray-900">Топ связок (upsell)</h4>
+                            <h4 class="text-sm font-bold text-gray-900">Лучшие связки для допродажи</h4>
                             <template x-if="(smartSalesImpact.top_pairs || []).length">
                                 <ul class="mt-2 space-y-1.5 text-sm">
                                     <template x-for="(row, idx) in (smartSalesImpact.top_pairs || []).slice(0, 5)" :key="idx">
@@ -65,7 +65,7 @@
                                     </template>
                                 </ul>
                             </template>
-                            <p x-show="!(smartSalesImpact.top_pairs || []).length" class="mt-2 text-xs text-gray-400">Пока нет принятых связок.</p>
+                            <p x-show="!(smartSalesImpact.top_pairs || []).length" class="mt-2 text-xs text-gray-500">Примите несколько заказов с рекомендациями — здесь появятся связки, которые гости реально добавляют.</p>
                         </div>
                         <div class="rounded-xl border border-gray-100 p-4">
                             <h4 class="text-sm font-bold text-gray-900">Худшие предложения</h4>
