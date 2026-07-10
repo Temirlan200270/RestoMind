@@ -100,3 +100,14 @@ def test_default_outbound_channel_policy_is_wired() -> None:
     assert "Для новых рассылок" in tpl
     assert "uq_default_channel_per_org" in migration
     assert "postgresql_where=sa.text(\"is_default_outbound = true\")" in migration
+
+
+def test_admin_chat_outbound_uses_customer_reply_router() -> None:
+    chats = Path("app/api/admin/chats.py").read_text(encoding="utf-8")
+    admin_init = Path("app/api/admin/__init__.py").read_text(encoding="utf-8")
+
+    assert "from app.services.customer_reply import send_customer_text" in chats
+    assert "send_customer_text(" in chats
+    assert "from app.integrations.whatsapp import send_message" not in chats
+    assert "await send_message(" not in chats
+    assert "send_message" not in admin_init

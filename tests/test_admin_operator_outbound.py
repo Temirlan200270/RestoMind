@@ -26,19 +26,13 @@ async def test_admin_send_message_persists_log_before_send_on_success(db_session
 
     captured_log_state: dict[str, str | None] = {}
 
-    class WaResult:
-        ok = True
-        message_id = "wamid.persist"
-        error = None
-
-    async def fake_send_message(phone: str, text: str) -> WaResult:
+    async def fake_send_customer_text(phone: str, text: str, **kwargs) -> None:
         rows = await db_session.execute(select(ChatLog))
         row = rows.scalars().first()
         captured_log_state["delivery_status"] = row.delivery_status if row else None
         captured_log_state["provider_message_id"] = row.provider_message_id if row else None
-        return WaResult()
 
-    monkeypatch.setattr("app.api.admin.chats.send_message", AsyncMock(side_effect=fake_send_message))
+    monkeypatch.setattr("app.api.admin.chats.send_customer_text", AsyncMock(side_effect=fake_send_customer_text))
 
     req = MagicMock()
     req.session = {"organization_id": 1}
@@ -54,7 +48,7 @@ async def test_admin_send_message_persists_log_before_send_on_success(db_session
     final_log = rows.scalars().first()
     assert final_log is not None
     assert final_log.delivery_status == "sent"
-    assert final_log.provider_message_id == "wamid.persist"
+    assert final_log.provider_message_id is None
 
     user = (await db_session.execute(select(User))).scalars().first()
     assert user is not None
@@ -68,14 +62,9 @@ async def test_admin_send_message_records_failed_on_provider_error(db_session, m
     db_session.add(Organization(id=1, name="Org", slug="org"))
     await db_session.flush()
 
-    class WaResult:
-        ok = False
-        message_id = None
-        error = {"code": 131000, "message": "boom"}
-
     monkeypatch.setattr(
-        "app.api.admin.chats.send_message",
-        AsyncMock(return_value=WaResult()),
+        "app.api.admin.chats.send_customer_text",
+        AsyncMock(side_effect=RuntimeError("boom")),
     )
 
     req = MagicMock()
@@ -88,4 +77,4 @@ async def test_admin_send_message_records_failed_on_provider_error(db_session, m
     log = rows.scalars().first()
     assert log is not None
     assert log.delivery_status == "failed"
-    assert log.error_details == {"code": 131000, "message": "boom"}
+    assert log.error_details == {"channel": "whatsapp_meta", "detail": "boom"}

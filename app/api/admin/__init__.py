@@ -2,7 +2,7 @@
 
 from .analytics import admin_ai_value, admin_incidents, admin_readiness, analytics
 from .auth import LoginBody, admin_demo_login, admin_login, auth_router
-from .chats import resend_failed_chat_message, send_message
+from .chats import resend_failed_chat_message
 from .core import router
 from .deps import require_admin_session, require_admin_session_active
 from .orders import _check_mixed_payment_split, admin_order_timeline, retry_failed_task
@@ -25,6 +25,5 @@ __all__ = [
     "resend_failed_chat_message",
     "retry_failed_task",
     "router",
-    "send_message",
     "ws_router",
 ]

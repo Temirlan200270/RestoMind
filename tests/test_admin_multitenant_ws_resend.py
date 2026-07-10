@@ -55,14 +55,9 @@ async def test_resend_failed_operator_message(db_session, monkeypatch) -> None:
     db_session.add(log)
     await db_session.flush()
 
-    class WaResult:
-        ok = True
-        message_id = "wamid.test"
-        error = None
-
     monkeypatch.setattr(
-        "app.api.admin.chats.send_message",
-        AsyncMock(return_value=WaResult()),
+        "app.api.admin.chats.send_customer_text",
+        AsyncMock(return_value=None),
     )
 
     req = MagicMock()
@@ -74,7 +69,7 @@ async def test_resend_failed_operator_message(db_session, monkeypatch) -> None:
 
     await db_session.refresh(log)
     assert log.delivery_status == "sent"
-    assert log.provider_message_id == "wamid.test"
+    assert log.provider_message_id is None
 
 
 @pytest.mark.asyncio
@@ -94,7 +89,7 @@ async def test_resend_wrong_org_404(db_session, monkeypatch) -> None:
     db_session.add(log)
     await db_session.flush()
 
-    monkeypatch.setattr("app.api.admin.chats.send_message", AsyncMock())
+    monkeypatch.setattr("app.api.admin.chats.send_customer_text", AsyncMock())
 
     req = MagicMock()
     req.session = {"organization_id": 2}

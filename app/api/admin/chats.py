@@ -22,8 +22,8 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.db.models import ChatLog, Organization, User
 from app.db.session import get_db, redis_client
-from app.integrations.whatsapp import send_message
 from app.services.chat_delivery import finalize_outbound_delivery
+from app.services.customer_reply import send_customer_text
 from app.services.telegram_customer import (
     customer_channel_context,
     customer_channel_for_user,
@@ -677,20 +677,30 @@ async def admin_send_message(
                 if not send_ok:
                     error_details = {"channel": "telegram", "detail": tg_result.get("error")}
             else:
-                wa = await send_message(phone, body.text)
-                send_ok = wa.ok
-                provider_message_id = wa.message_id
-                error_details = wa.error
+                try:
+                    await send_customer_text(
+                        phone,
+                        body.text,
+                        outbound_chat_log_id=log_id,
+                        organization_id=org_id,
+                    )
+                    send_ok = True
+                except Exception as exc:
+                    send_ok = False
+                    error_details = {"channel": msg_channel, "detail": str(exc)}
         finally:
             reset_customer_channel_context(channel_tokens)
 
-    evt = await finalize_outbound_delivery(
-        db,
-        log_id,
-        send_ok,
-        provider_message_id=provider_message_id,
-        error_details=error_details,
-    )
+    await db.refresh(op_log)
+    evt = None
+    if msg_channel == "telegram" or (op_log.delivery_status or "").lower() == "sending":
+        evt = await finalize_outbound_delivery(
+            db,
+            log_id,
+            send_ok,
+            provider_message_id=provider_message_id,
+            error_details=error_details,
+        )
     await db.commit()
     if evt is not None:
         await publish_event("message_status_updated", evt)
@@ -768,16 +778,26 @@ async def resend_failed_chat_message(
             if not send_ok:
                 error_details = {"channel": "telegram", "detail": tg_result.get("error")}
         else:
-            wa = await send_message(phone, text)
-            send_ok = wa.ok
-            provider_message_id = wa.message_id
-            error_details = wa.error
+            try:
+                await send_customer_text(
+                    phone,
+                    text,
+                    outbound_chat_log_id=chat_log_id,
+                    organization_id=org_id,
+                )
+                send_ok = True
+            except Exception as exc:
+                send_ok = False
+                error_details = {"channel": msg_channel, "detail": str(exc)}
     finally:
         reset_customer_channel_context(channel_tokens)
 
-    evt = await finalize_outbound_delivery(
-        db, chat_log_id, send_ok, provider_message_id=provider_message_id, error_details=error_details,
-    )
+    await db.refresh(log)
+    evt = None
+    if msg_channel == "telegram" or (log.delivery_status or "").lower() == "sending":
+        evt = await finalize_outbound_delivery(
+            db, chat_log_id, send_ok, provider_message_id=provider_message_id, error_details=error_details,
+        )
     await db.commit()
     if evt is not None:
         await publish_event("message_status_updated", evt)
