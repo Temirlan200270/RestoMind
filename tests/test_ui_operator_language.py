@@ -149,6 +149,11 @@ def test_team_settings_operator_language():
     assert "StaffMind onboarding" not in team
     assert "Должность (StaffMind)" not in team
     assert "Сессий StaffMind" not in team
+    assert '<option value="manager">' not in team
+    assert "Менеджер" not in team
+    assert "Администратор" not in team
+    assert "Оператор" in team
+    assert "Владелец" in team
     assert "Обучение сотрудников" in team
     assert "Сессий обучения пока нет" in team
     assert 'placeholder="cashier"' not in team
@@ -169,6 +174,9 @@ def test_analytics_sales_heatmap_uses_business_language():
     assert "heatmap выручки" not in analytics
     assert "запустите worker" not in analytics
     assert "ночного sync" not in analytics
+    assert "Пока нет данных" not in analytics
+    assert "Нужна синхронизация продаж" in analytics
+    assert "Синхронизировать продажи" in analytics
     assert "Нет почасовых продаж из iiko" in analytics
     assert "Последнее обновление" in analytics
 

@@ -178,12 +178,19 @@ def test_supplymind_lives_in_attention_queue_with_csv_action():
 
 def test_operator_keeps_only_execution_tabs():
     js = (REPO / "app" / "static" / "js" / "admin-app.js").read_text(encoding="utf-8")
+    team = (REPO / "app" / "templates" / "screens" / "_tab_settings_team.html").read_text(encoding="utf-8")
+    organization_api = (REPO / "app" / "api" / "admin" / "organization.py").read_text(encoding="utf-8")
     role_tabs_block = js.split("const ADMIN_ROLE_TABS = Object.freeze({", 1)[1].split("});", 1)[0]
     primary_nav_block = js.split("const ADMIN_ROLE_PRIMARY_NAV = Object.freeze({", 1)[1].split("});", 1)[0]
     assert "operator: Object.freeze(['shift', 'inbox', 'orders', 'chats', 'bookings', 'menu'])" in role_tabs_block
     assert "admin: null" in role_tabs_block
     assert "manager:" not in role_tabs_block
     assert "operator: Object.freeze(['shift', 'inbox', 'orders', 'chats', 'bookings', 'menu'])" in primary_nav_block
+    assert '<option value="manager">' not in team
+    assert "Менеджер" not in team
+    assert '"role": _public_staff_role(u.role)' in organization_api
+    assert "if raw == StaffRole.MANAGER.value:" in organization_api
+    assert "return StaffRole.ADMIN.value" in organization_api
     assert "const ADMIN_OPERATOR_SECONDARY_TABS = Object.freeze(['orders', 'chats', 'bookings', 'menu'])" in js
     assert "canOpenExecutiveHub()" in js
     assert "return this.effectiveStaffRole() !== 'operator';" in js

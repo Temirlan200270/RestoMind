@@ -562,7 +562,7 @@ function adminParseLocationHash() {
     return { ...empty };
 }
 
-/** Разрешён ли hash для роли staff (operator/manager/admin). */
+/** Разрешён ли hash для роли staff (operator/admin; legacy manager схлопывается во владельца). */
 function adminHashAllowedForRole(parsed, role, settingsTabIds) {
     if (!parsed?.tab) return true;
     const tab = parsed.tab;
@@ -1705,7 +1705,7 @@ function adminMixinState() {
             { label: 'Задержка', text: 'Приносим извинения — сейчас высокая загрузка. Время ожидания может увеличиться на 15–20 минут. Спасибо за понимание!' },
             { label: 'Меню', text: 'Сейчас пришлю актуальное меню. Позиции из стоп-листа сразу отмечу.' },
             { label: 'Оплата', text: 'Оплата при получении — картой или наличными, как вам удобнее.' },
-            { label: 'Менеджер', text: 'Подключаю менеджера — ответит в ближайшие минуты.' },
+            { label: 'Оператор', text: 'Подключаю оператора — ответит в ближайшие минуты.' },
         ],
 
         // Меню
@@ -4853,14 +4853,11 @@ function adminMixinAuthKnowledge() {
             this._pushAdminHash();
         },
 
-        /** Подсказка RBAC для UI: '' если доступ есть, иначе текст для operator/manager. */
+        /** Подсказка RBAC для UI: '' если доступ есть, иначе текст для оператора. */
         staffRbacHint(level) {
             const role = this.effectiveStaffRole();
             if (level === 'admin') {
                 return role === 'admin' ? '' : 'Только для владельца';
-            }
-            if (level === 'manager') {
-                return role === 'operator' ? 'Только для владельца' : '';
             }
             return '';
         },
@@ -12357,7 +12354,7 @@ function adminMixinDataChartsSettings() {
 
         async runInventorySyncIiko() {
             if (!this.canStaffManageSupply()) {
-                void this.showUiAlert(this.staffRbacHint('manager') || 'Недостаточно прав', 'Закупки');
+                void this.showUiAlert(this.staffRbacHint('admin') || 'Недостаточно прав', 'Закупки');
                 return;
             }
             if (this.inventorySyncRunning) return;
@@ -12396,7 +12393,7 @@ function adminMixinDataChartsSettings() {
 
         async createSupplyMindDraft() {
             if (!this.canStaffManageSupply()) {
-                void this.showUiAlert(this.staffRbacHint('manager') || 'Недостаточно прав', 'Закупки');
+                void this.showUiAlert(this.staffRbacHint('admin') || 'Недостаточно прав', 'Закупки');
                 return;
             }
             if (this.supplyMindCreateLoading) return;
@@ -12515,7 +12512,7 @@ function adminMixinDataChartsSettings() {
 
         async updateSupplyMindDraft(draftId, status) {
             if (!this.canStaffManageSupply()) {
-                void this.showUiAlert(this.staffRbacHint('manager') || 'Недостаточно прав', 'Закупки');
+                void this.showUiAlert(this.staffRbacHint('admin') || 'Недостаточно прав', 'Закупки');
                 return;
             }
             if (this.supplyMindUpdateLoading) return;
@@ -12547,7 +12544,7 @@ function adminMixinDataChartsSettings() {
 
         async exportSupplyMindDraft(draftId) {
             if (!this.canStaffManageSupply()) {
-                void this.showUiAlert(this.staffRbacHint('manager') || 'Недостаточно прав', 'Закупки');
+                void this.showUiAlert(this.staffRbacHint('admin') || 'Недостаточно прав', 'Закупки');
                 return;
             }
             if (this.supplyMindExportLoading) return;
@@ -13233,7 +13230,7 @@ function adminMixinDataChartsSettings() {
 
         async startStaffMindOnboarding() {
             if (!this.canStaffStartStaffMind()) {
-                void this.showUiAlert(this.staffRbacHint('manager') || 'Недостаточно прав', 'Обучение сотрудников');
+                void this.showUiAlert(this.staffRbacHint('admin') || 'Недостаточно прав', 'Обучение сотрудников');
                 return;
             }
             const phone = String(this.staffMindPhone || '').trim();
@@ -13267,7 +13264,7 @@ function adminMixinDataChartsSettings() {
 
         async askStaffMind(sessionId) {
             if (!this.canStaffStartStaffMind()) {
-                void this.showUiAlert(this.staffRbacHint('manager') || 'Недостаточно прав', 'Обучение сотрудников');
+                void this.showUiAlert(this.staffRbacHint('admin') || 'Недостаточно прав', 'Обучение сотрудников');
                 return;
             }
             const id = Number(sessionId);

@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.passwords import hash_password
 from app.db.models import Location, Organization, OrganizationPaymentConfig, StaffRole, StaffUser
 from app.db.session import get_db
-from app.services.tenant_scope import list_locations_for_org, tenant_org_ids_for_staff_home
+from app.services.tenant_scope import list_locations_for_org
 from app.services.time_context import check_operational_status, parse_schedule_json
 from app.services.timezones import normalize_timezone_name
 from .deps import (
@@ -146,15 +146,15 @@ class StaffRoleMetadataBody(BaseModel):
 
 class StaffCreateBody(BaseModel):
     email: str = Field(..., min_length=3, max_length=255)
-    role: str = Field(default=StaffRole.OPERATOR.value, description="admin | manager | operator")
+    role: str = Field(default=StaffRole.OPERATOR.value, description="admin | operator")
     password: str = Field(default="", max_length=128, description="Опционально: если пусто — сгенерируем временный")
     assigned_org_ids: list[int] | None = Field(
         default=None,
-        description="Филиалы для manager (подмножество сети); без списка — только домашний",
+        description="Legacy: больше не используется в двухролевой админке",
     )
     assigned_location_ids: list[int] | None = Field(
         default=None,
-        description="Точки/залы для operator/manager (подмножество locations org)",
+        description="Точки/залы для оператора (подмножество locations org)",
     )
     role_metadata: StaffRoleMetadataBody | None = Field(
         default=None,
@@ -163,7 +163,7 @@ class StaffCreateBody(BaseModel):
 
 
 class StaffUpdateBody(BaseModel):
-    role: str | None = Field(default=None, description="admin | manager | operator")
+    role: str | None = Field(default=None, description="admin | operator")
     is_active: bool | None = None
     assigned_org_ids: list[int] | None = None
     assigned_location_ids: list[int] | None = None
@@ -187,13 +187,30 @@ def _staff_user_public(u: StaffUser) -> dict:
     return {
         "id": int(u.id),
         "email": u.email,
-        "role": u.role,
+        "role": _public_staff_role(u.role),
         "is_active": bool(u.is_active),
         "assigned_org_ids": assigned_orgs,
         "assigned_location_ids": assigned_locs,
         "role_metadata": _staff_role_metadata_dict(meta),
         "created_at": u.created_at.isoformat() if u.created_at else None,
     }
+
+
+def _public_staff_role(role: str | None) -> str:
+    """UI has only two roles: operator and owner/admin. Legacy manager is owner/admin."""
+    raw = (role or StaffRole.ADMIN.value).strip().lower()
+    if raw == StaffRole.OPERATOR.value:
+        return StaffRole.OPERATOR.value
+    return StaffRole.ADMIN.value
+
+
+def _normalize_staff_write_role(role: str | None) -> str:
+    raw = (role or StaffRole.OPERATOR.value).strip().lower()
+    if raw in (StaffRole.ADMIN.value, StaffRole.OPERATOR.value):
+        return raw
+    if raw == StaffRole.MANAGER.value:
+        return StaffRole.ADMIN.value
+    raise HTTPException(status_code=400, detail="Некорректная роль")
 
 
 async def _valid_location_ids_for_org(db: AsyncSession, org_id: int) -> set[int]:
@@ -570,13 +587,7 @@ async def create_staff(
     email = (body.email or "").strip().lower()
     if not email or "@" not in email:
         raise HTTPException(status_code=400, detail="Укажите корректный email")
-    role = (body.role or "").strip().lower() or StaffRole.OPERATOR.value
-    if role not in (
-        StaffRole.ADMIN.value,
-        StaffRole.MANAGER.value,
-        StaffRole.OPERATOR.value,
-    ):
-        raise HTTPException(status_code=400, detail="Некорректная роль")
+    role = _normalize_staff_write_role(body.role)
     pwd = (body.password or "").strip()
     if not pwd:
         # временный пароль: покажем в UI один раз
@@ -591,14 +602,6 @@ async def create_staff(
     valid_locs = await _valid_location_ids_for_org(db, org_id)
     meta_json: dict | None = None
     assigned_orgs: list[int] | None = None
-    if role == StaffRole.MANAGER.value and body.assigned_org_ids is not None:
-        allowed = await tenant_org_ids_for_staff_home(db, org_id)
-        assigned_orgs = [int(x) for x in body.assigned_org_ids if int(x) in allowed]
-        if not assigned_orgs:
-            raise HTTPException(
-                status_code=400,
-                detail="assigned_org_ids должны быть активными филиалами вашей сети",
-            )
     assigned_locs: list[int] | None = None
     if body.assigned_location_ids is not None:
         assigned_locs = [int(x) for x in body.assigned_location_ids if int(x) in valid_locs]
@@ -647,14 +650,7 @@ async def update_staff(
         raise HTTPException(status_code=404, detail="Сотрудник не найден")
 
     if body.role is not None:
-        role = (body.role or "").strip().lower()
-        if role not in (
-            StaffRole.ADMIN.value,
-            StaffRole.MANAGER.value,
-            StaffRole.OPERATOR.value,
-        ):
-            raise HTTPException(status_code=400, detail="Некорректная роль")
-        u.role = role
+        u.role = _normalize_staff_write_role(body.role)
 
     if body.is_active is not None:
         u.is_active = bool(body.is_active)
@@ -667,19 +663,10 @@ async def update_staff(
     assigned_locs_val: list[int] | None = None
 
     if body.assigned_org_ids is not None:
-        if role_now != StaffRole.MANAGER.value:
-            clear_orgs = True
-        else:
-            allowed = await tenant_org_ids_for_staff_home(db, org_id)
-            assigned_orgs_val = [int(x) for x in body.assigned_org_ids if int(x) in allowed]
-            if not assigned_orgs_val:
-                raise HTTPException(
-                    status_code=400,
-                    detail="assigned_org_ids должны быть активными филиалами вашей сети",
-                )
+        clear_orgs = True
 
     if body.assigned_location_ids is not None:
-        if role_now not in (StaffRole.MANAGER.value, StaffRole.OPERATOR.value):
+        if role_now != StaffRole.OPERATOR.value:
             clear_locs = True
         else:
             assigned_locs_val = [int(x) for x in body.assigned_location_ids if int(x) in valid_locs]

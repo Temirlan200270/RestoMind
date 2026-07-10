@@ -324,8 +324,12 @@
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 3v18h18M7.5 14.25V18m4.5-6V18m4.5-9V18"/>
                                 </svg>
                             </div>
-                            <div class="text-sm font-semibold text-slate-900">Пока нет данных</div>
-                            <div class="text-sm text-slate-600 mt-1">Здесь появятся ваши лидеры продаж и пики заказов по времени.</div>
+                            <div class="text-sm font-semibold text-slate-900">Нужна синхронизация продаж</div>
+                            <div class="text-sm text-slate-600 mt-1">Запустите обновление iiko или дождитесь первых заказов — после этого появятся пики по часам.</div>
+                            <button type="button" class="mt-4 ds-btn ds-btn-primary ds-btn-sm"
+                                @click="executiveHubRunReadinessAction({ action_type: 'iiko_olap_sync', label: 'Синхронизировать продажи' })">
+                                Синхронизировать продажи
+                            </button>
                         </div>
                     </div>
                     <div class="inline-block min-w-[720px]">

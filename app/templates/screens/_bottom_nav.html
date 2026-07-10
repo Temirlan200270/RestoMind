@@ -32,7 +32,7 @@
                         x-text="inboxTotalOpen()"></span>
                 </button>
 
-                <!-- Дашборд — manager/admin -->
+                <!-- Дашборд — владелец -->
                 <button type="button" x-show="isTabVisibleForRole('dashboard')" x-cloak
                     @click="navigateToTab('dashboard')"
                     :class="currentTab === 'dashboard' ? 'text-brand-600' : 'text-gray-500 hover:text-gray-700'"
@@ -71,7 +71,7 @@
                         x-text="unreadChats"></span>
                 </button>
 
-                <!-- Меню (manager/admin) -->
+                <!-- Меню -->
                 <button type="button" x-show="isTabVisibleForRole('menu')" x-cloak
                     @click="navigateToTab('menu')"
                     :class="currentTab === 'menu' ? 'text-brand-600' : 'text-gray-500 hover:text-gray-700'"

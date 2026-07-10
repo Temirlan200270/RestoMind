@@ -17,9 +17,8 @@
                         <div>
                             <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Роль</label>
                             <select x-model="teamNewRole" class="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm bg-white">
-                                <option value="operator">Сотрудник</option>
-                                <option value="manager">Менеджер</option>
-                                <option value="admin">Администратор</option>
+                                <option value="operator">Оператор</option>
+                                <option value="admin">Владелец</option>
                             </select>
                         </div>
                         <div>
@@ -101,7 +100,7 @@
                             <span x-text="staffMindStartLoading ? 'Запуск…' : 'Запустить'"></span>
                         </button>
                     </div>
-                    <p x-show="staffRbacHint('manager')" x-cloak class="text-[11px] text-amber-700/90 mb-5" x-text="staffRbacHint('manager')"></p>
+                    <p x-show="staffRbacHint('admin')" x-cloak class="text-[11px] text-amber-700/90 mb-5" x-text="staffRbacHint('admin')"></p>
 
                     <div x-show="staffMindLoading && !(staffMindSessions || []).length" class="h-20 rounded-xl bg-gray-100 animate-pulse"></div>
                     <div class="space-y-3">
@@ -182,8 +181,8 @@
                                 <div class="flex items-start justify-between gap-2">
                                     <div class="font-semibold text-gray-900 text-sm break-all min-w-0" x-text="u.email"></div>
                                     <span class="shrink-0 text-[10px] font-bold uppercase px-2 py-0.5 rounded-full"
-                                        :class="u.role === 'admin' ? 'bg-violet-100 text-violet-800' : (u.role === 'manager' ? 'bg-amber-100 text-amber-800' : 'bg-slate-200 text-slate-700')"
-                                        x-text="u.role === 'admin' ? 'Админ' : (u.role === 'manager' ? 'Менеджер' : 'Сотрудник')"></span>
+                                        :class="u.role === 'admin' ? 'bg-violet-100 text-violet-800' : 'bg-slate-200 text-slate-700'"
+                                        x-text="u.role === 'admin' ? 'Владелец' : 'Оператор'"></span>
                                 </div>
                                 <div class="text-xs text-gray-600" x-show="u.role_metadata && (u.role_metadata.title || u.role_metadata.department)" x-cloak>
                                     <span x-text="[u.role_metadata?.title, u.role_metadata?.department].filter(Boolean).join(' · ')"></span>
@@ -198,13 +197,12 @@
                                 <div class="text-xs text-gray-400" x-text="u.created_at ? ('Создан: ' + fmt.date(u.created_at)) : ''"></div>
                                 <button type="button" @click="openTeamEdit(u)"
                                     class="self-start mt-1 px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-xs font-semibold text-gray-700 hover:bg-gray-50">
-                                    Метаданные / точки
+                                    Доступ / точки
                                 </button>
                                 <div x-show="teamEditId === u.id" x-cloak class="mt-2 pt-3 border-t border-gray-200 space-y-3">
                                     <select x-model="teamEditRole" class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm bg-white">
-                                        <option value="operator">Сотрудник</option>
-                                        <option value="manager">Менеджер</option>
-                                        <option value="admin">Администратор</option>
+                                        <option value="operator">Оператор</option>
+                                        <option value="admin">Владелец</option>
                                     </select>
                                     <input type="text" x-model="teamEditMetaTitle" placeholder="Должность"
                                         class="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm">
