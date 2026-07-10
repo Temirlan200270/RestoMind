@@ -140,7 +140,8 @@ async def run_send_blast_batch(*, blast_id: int) -> None:
     from app.core.config import settings
     from app.db.models import MarketingBlast, MarketingBlastRecipient
     from app.db.session import async_session_factory
-    from app.integrations.whatsapp import send_message, send_template
+    from app.integrations.whatsapp import send_template
+    from app.services.customer_reply import send_customer_text
 
     delay_between = 60.0 / max(1, settings.marketing_blast_rate_per_min)
 
@@ -178,7 +179,11 @@ async def run_send_blast_batch(*, blast_id: int) -> None:
                 if blast.template_name:
                     ok = await send_template(rec.phone, blast.template_name)
                 else:
-                    await send_message(rec.phone, blast.message_text)
+                    await send_customer_text(
+                        rec.phone,
+                        blast.message_text,
+                        organization_id=int(org_id),
+                    )
                     ok = True
                 rec.status = "sent" if ok else "failed"
                 rec.sent_at = datetime.now(timezone.utc)

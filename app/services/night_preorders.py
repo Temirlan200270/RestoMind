@@ -40,7 +40,7 @@ async def activate_night_preorders(db: AsyncSession, org_id: int) -> int:
     Возвращает количество активированных заказов.
     """
     from app.db.models import User
-    from app.integrations.whatsapp import send_interactive_buttons, send_message
+    from app.services.customer_reply import send_customer_text
 
     orders = await get_pending_night_preorders(db, org_id)
     count = 0
@@ -71,14 +71,11 @@ async def activate_night_preorders(db: AsyncSession, org_id: int) -> int:
                 f"💰 Итого: {total_price:,} ₸\n\n"
                 "Подтвердите или отмените заказ:"
             )
-            buttons = [
-                {"id": "confirm", "title": "✅ Подтвердить"},
-                {"id": "cancel", "title": "❌ Отменить"},
-            ]
-            try:
-                await send_interactive_buttons(phone, text, buttons)
-            except Exception:
-                await send_message(phone, text)
+            await send_customer_text(
+                phone,
+                f"{text}\n\nОтветьте «Да» для подтверждения или «Нет» для отмены.",
+                organization_id=int(org_id),
+            )
             count += 1
         except Exception as exc:
             logger.warning("activate_night_preorders: ошибка для order_id=%s: %s", order.id, exc)

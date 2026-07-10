@@ -15,6 +15,8 @@ const PORT = Number(process.env.PORT || 3107)
 const RESTOMIND_API_URL = (process.env.RESTOMIND_API_URL || 'http://localhost:8000').replace(/\/+$/, '')
 const RESTOMIND_GATEWAY_SECRET = process.env.RESTOMIND_GATEWAY_SECRET || ''
 const SESSION_ROOT = process.env.SESSION_ROOT || path.join(process.cwd(), 'sessions')
+const BAILEYS_FIRE_INIT_QUERIES = process.env.BAILEYS_FIRE_INIT_QUERIES === 'true'
+const BAILEYS_MARK_ONLINE = process.env.BAILEYS_MARK_ONLINE === 'true'
 const AUTO_START_CONNECTION_IDS = (process.env.AUTO_START_CONNECTION_IDS || '')
   .split(',')
   .map((x) => x.trim())
@@ -94,6 +96,16 @@ function getTextMessage(message) {
   )
 }
 
+function summarizeMessage(msg) {
+  const remoteJid = msg?.key?.remoteJid || ''
+  const participant = msg?.key?.participant || ''
+  const externalMessageId = msg?.key?.id || ''
+  const fromMe = Boolean(msg?.key?.fromMe)
+  const type = Object.keys(msg?.message || {})[0] || ''
+  const textLength = getTextMessage(msg).trim().length
+  return { remoteJid, participant, externalMessageId, fromMe, type, textLength }
+}
+
 function senderPhoneFromJid(jid = '') {
   return String(jid).split('@')[0].replace(/\D+/g, '')
 }
@@ -122,10 +134,20 @@ async function publishConnectionStatus(connectionId, status, extra = {}) {
 async function publishInbound(connectionId, msg) {
   const remoteJid = msg?.key?.remoteJid || ''
   const fromMe = Boolean(msg?.key?.fromMe)
-  if (!remoteJid || fromMe) return
+  if (!remoteJid) {
+    logger.info({ connectionId, message: summarizeMessage(msg), reason: 'missing_remote_jid' }, 'baileys inbound skipped')
+    return
+  }
+  if (fromMe) {
+    logger.info({ connectionId, message: summarizeMessage(msg), reason: 'from_me' }, 'baileys inbound skipped')
+    return
+  }
 
   const text = getTextMessage(msg)
-  if (!text.trim()) return
+  if (!text.trim()) {
+    logger.info({ connectionId, message: summarizeMessage(msg), reason: 'empty_text' }, 'baileys inbound skipped')
+    return
+  }
 
   const participant = msg?.key?.participant || remoteJid
   const phone = senderPhoneFromJid(participant)
@@ -199,8 +221,11 @@ async function startConnection(connectionId, sessionRef = '', options = {}) {
   const sock = makeWASocket({
     version,
     auth: state,
+    fireInitQueries: BAILEYS_FIRE_INIT_QUERIES,
+    markOnlineOnConnect: BAILEYS_MARK_ONLINE,
     printQRInTerminal: false,
-    markOnlineOnConnect: true,
+    shouldSyncHistoryMessage: () => false,
+    syncFullHistory: false,
     logger: logger.child({ connectionId })
   })
 
@@ -209,6 +234,16 @@ async function startConnection(connectionId, sessionRef = '', options = {}) {
 
   sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update
+    logger.info(
+      {
+        connectionId,
+        connection: connection || '',
+        hasQr: Boolean(qr),
+        receivedPendingNotifications: Boolean(update.receivedPendingNotifications),
+        isOnline: Boolean(update.isOnline)
+      },
+      'baileys connection update'
+    )
     if (qr) {
       if (process.env.LOG_QR_IN_TERMINAL === 'true') {
         qrcode.generate(qr, { small: true })
@@ -285,6 +320,14 @@ async function startConnection(connectionId, sessionRef = '', options = {}) {
   })
 
   sock.ev.on('messages.upsert', async ({ messages }) => {
+    logger.info(
+      {
+        connectionId,
+        count: Array.isArray(messages) ? messages.length : 0,
+        first: Array.isArray(messages) && messages.length ? summarizeMessage(messages[0]) : null
+      },
+      'baileys messages upsert'
+    )
     for (const msg of messages || []) {
       try {
         await publishInbound(connectionId, msg)

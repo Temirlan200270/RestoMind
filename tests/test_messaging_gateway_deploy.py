@@ -35,3 +35,13 @@ def test_render_blueprint_includes_messaging_gateway_service() -> None:
     gateway_env = {row.get("key") for row in gateway.get("envVars") or []}
     assert "RESTOMIND_API_URL" in gateway_env
     assert "RESTOMIND_GATEWAY_SECRET" in gateway_env
+
+
+def test_baileys_gateway_avoids_heavy_bootstrap_sync_by_default() -> None:
+    text = Path("services/messaging-gateway/src/server.js").read_text(encoding="utf-8")
+
+    assert "const BAILEYS_FIRE_INIT_QUERIES = process.env.BAILEYS_FIRE_INIT_QUERIES === 'true'" in text
+    assert "fireInitQueries: BAILEYS_FIRE_INIT_QUERIES" in text
+    assert "shouldSyncHistoryMessage: () => false" in text
+    assert "syncFullHistory: false" in text
+    assert "baileys messages upsert" in text

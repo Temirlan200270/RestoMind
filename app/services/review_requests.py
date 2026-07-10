@@ -19,7 +19,7 @@ async def run_send_review_request(*, org_id: int, order_id: int, phone: str) -> 
     """
     from app.db.session import async_session_factory
     from app.db.models import Order
-    from app.integrations.whatsapp import send_interactive_buttons, send_message
+    from app.services.customer_reply import send_customer_text
     from app.core.config import settings
 
     if not settings.review_requests_enabled:
@@ -34,18 +34,14 @@ async def run_send_review_request(*, org_id: int, order_id: int, phone: str) -> 
         # Загружаем org для review_url_2gis (не нужен здесь — нужен при ответе)
 
     text = "Спасибо за заказ! 😊 Как всё прошло?"
-    buttons = [
-        {"id": "review_pos", "title": "👍 Отлично!"},
-        {"id": "review_neg", "title": "👎 Есть замечание"},
-    ]
     try:
-        await send_interactive_buttons(phone, text, buttons)
+        await send_customer_text(
+            phone,
+            f"{text}\n\nОтветьте «Отлично» или «Есть замечание».",
+            organization_id=int(org_id),
+        )
     except Exception as exc:
-        logger.warning("send_review_request: send_interactive_buttons failed phone=%s: %s", phone, exc)
-        try:
-            await send_message(phone, text)
-        except Exception:
-            pass
+        logger.warning("send_review_request: send failed phone=%s: %s", phone, exc)
 
 
 async def save_customer_feedback(
@@ -82,7 +78,7 @@ async def send_review_positive_reply(phone: str, org_id: int) -> None:
     """👍 — благодарим и отправляем ссылку на 2GIS если задана."""
     from app.db.session import async_session_factory
     from app.db.models import Organization
-    from app.integrations.whatsapp import send_message
+    from app.services.customer_reply import send_customer_text
 
     async with async_session_factory() as db:
         org = await db.get(Organization, org_id)
@@ -96,7 +92,7 @@ async def send_review_positive_reply(phone: str, org_id: int) -> None:
     else:
         msg = "Спасибо за тёплые слова! 🙏 Ждём вас снова."
 
-    await send_message(phone, msg)
+    await send_customer_text(phone, msg, organization_id=int(org_id))
 
 
 async def send_review_negative_alert(phone: str, org_id: int) -> None:

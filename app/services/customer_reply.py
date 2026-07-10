@@ -77,8 +77,9 @@ async def _try_send_via_default_baileys(
     text: str,
     *,
     outbound_chat_log_id: int | None,
+    organization_id: int | None = None,
 ) -> bool:
-    if outbound_chat_log_id is None:
+    if outbound_chat_log_id is None and organization_id is None:
         return False
     from app.db.models import ChatLog
     from app.db.session import async_session_factory
@@ -89,12 +90,17 @@ async def _try_send_via_default_baileys(
     )
 
     async with async_session_factory() as db:
-        log = await db.get(ChatLog, int(outbound_chat_log_id))
-        if log is None:
+        org_id = int(organization_id or 0)
+        if outbound_chat_log_id is not None:
+            log = await db.get(ChatLog, int(outbound_chat_log_id))
+            if log is None:
+                return False
+            org_id = int(log.organization_id)
+        if not org_id:
             return False
         conn = await resolve_default_outbound_connection(
             db,
-            organization_id=int(log.organization_id),
+            organization_id=org_id,
             provider=BAILEYS_PROVIDER,
         )
         if conn is None:
@@ -118,6 +124,7 @@ async def send_customer_text(
     text: str,
     *,
     outbound_chat_log_id: int | None = None,
+    organization_id: int | None = None,
 ) -> None:
     """
     Если открыт контекст Twilio-звонка — озвучить через REST;
@@ -184,7 +191,12 @@ async def send_customer_text(
             )
         return
 
-    if await _try_send_via_default_baileys(phone, text, outbound_chat_log_id=outbound_chat_log_id):
+    if await _try_send_via_default_baileys(
+        phone,
+        text,
+        outbound_chat_log_id=outbound_chat_log_id,
+        organization_id=organization_id,
+    ):
         return
 
     wa = await send_message(phone, text)

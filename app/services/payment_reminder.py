@@ -31,7 +31,7 @@ async def send_payment_reminder(
 
     Возвращает True если ссылка успешно отправлена.
     """
-    from app.integrations.whatsapp import send_message
+    from app.services.customer_reply import send_customer_text
 
     order = await db.get(Order, expired_tx.order_id)
     if order is None:
@@ -82,18 +82,19 @@ async def send_payment_reminder(
         "После оплаты вы сможете подтвердить заказ ответом «Да»."
     )
 
-    result = await send_message(user.phone, text)
-    if result.ok:
+    try:
+        await send_customer_text(user.phone, text, organization_id=int(expired_tx.organization_id))
         logger.info(
             "payment_reminder: order=%s новая ссылка отправлена phone=%s tx=%s",
             order.id, user.phone, new_tx.id,
         )
-    else:
+        return True
+    except Exception as exc:
         logger.warning(
             "payment_reminder: WhatsApp send failed order=%s error=%s",
-            order.id, result.error,
+            order.id, exc,
         )
-    return result.ok
+    return False
 
 
 async def send_payment_reminders_for_expired(

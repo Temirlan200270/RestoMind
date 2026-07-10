@@ -97,7 +97,7 @@ async def send_draft_recovery_nudge(
     org_id: int,
 ) -> bool:
     """Отправляет WA-кнопки «Оформить?» / «Отменить»; dedupe 1 раз / 24ч на заказ."""
-    from app.integrations.whatsapp import send_interactive_buttons, send_message
+    from app.services.customer_reply import send_customer_text
 
     phone_s = (phone or "").strip()
     if not phone_s:
@@ -112,14 +112,12 @@ async def send_draft_recovery_nudge(
     await _restore_confirming_state(db, org_id=org_id, phone=phone_s, order_id=int(order.id))
 
     text = _build_nudge_text(order)
-    buttons = [
-        {"id": "confirm", "title": "✅ Оформить"},
-        {"id": "cancel", "title": "❌ Отменить"},
-    ]
     try:
-        result = await send_interactive_buttons(phone_s, text, buttons)
-        if not result.ok:
-            await send_message(phone_s, f"{text}\n\nОтветьте «Да» или «Нет».")
+        await send_customer_text(
+            phone_s,
+            f"{text}\n\nОтветьте «Да» или «Нет».",
+            organization_id=int(org_id),
+        )
     except Exception:
         logger.exception("draft_recovery send failed order=%s phone=%s", order.id, phone_s)
         try:
